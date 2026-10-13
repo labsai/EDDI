@@ -1034,6 +1034,9 @@ public class LifecycleManager implements ILifecycleManager {
         errorOutput.put("type", "errorDigest");
         errorOutput.put("taskId", task.getId().name());
         errorOutput.put("taskType", task.getType());
+        // The classification the streaming task_failed event and the error metric
+        // carry, so the non-streaming response can report the same thing.
+        errorOutput.put("errorType", classifyError(exception));
         errorOutput.put("text", digestText);
         // The machine-readable half, for the caller's `error` object. The message is
         // the same redacted digest the text carries, never the raw exception.

@@ -53,22 +53,7 @@ public record UserMemoryEntry(String id, String userId, String key, Object value
      */
     public static UserMemoryEntry fromProperty(Property property, String userId, String agentId, String conversationId, Visibility visibility,
                                                List<String> groupIds) {
-        Object value;
-        if (property.getValueString() != null) {
-            value = property.getValueString();
-        } else if (property.getValueObject() != null) {
-            value = property.getValueObject();
-        } else if (property.getValueList() != null) {
-            value = property.getValueList();
-        } else if (property.getValueInt() != null) {
-            value = property.getValueInt();
-        } else if (property.getValueFloat() != null) {
-            value = property.getValueFloat();
-        } else if (property.getValueBoolean() != null) {
-            value = property.getValueBoolean();
-        } else {
-            value = null;
-        }
+        Object value = PropertyValues.valueOf(property);
 
         Visibility vis = visibility != null ? visibility : Visibility.self;
 

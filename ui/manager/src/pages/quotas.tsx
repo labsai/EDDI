@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useId } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -20,17 +20,20 @@ import { toast } from "sonner";
 import { useQuota, useQuotaUsage, useUpdateQuota, useResetUsage } from "@/hooks/use-quotas";
 import { getErrorMessage } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
+import { parseQuotaLimit } from "@/lib/quota-limit";
 
 const DEFAULT_TENANT = "default";
 
 export function QuotasPage() {
   const { t } = useTranslation();
-  const { data: quota, isLoading: quotaLoading, isError: quotaError, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
+  const { data: quota, isLoading: quotaLoading, isError: quotaError, error: quotaErr, refetch: refetchQuota } = useQuota(DEFAULT_TENANT);
   const {
     data: usage,
     isLoading: usageLoading,
     isError: usageError,
+    error: usageErr,
     refetch: refetchUsage,
   } = useQuotaUsage(DEFAULT_TENANT);
   const updateMutation = useUpdateQuota();
@@ -40,6 +43,13 @@ export function QuotasPage() {
   const [form, setForm] = useState<TenantQuota | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  // Fields whose text is not a number yet (a lone "-", "1e"). Saving is blocked
+  // while any is set: Number("-") is NaN, which the PUT would send as null.
+  const [invalidFields, setInvalidFields] = useState<ReadonlySet<keyof TenantQuota>>(new Set());
+
+  // Closing the tab or navigating away with edits would silently discard them —
+  // the page already shows an "Unsaved changes" pill, so it must also guard.
+  useUnsavedChangesGuard(dirty);
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("quotas"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -59,20 +69,38 @@ export function QuotasPage() {
     [],
   );
 
+  /** A quota field's text changed: `null` means it does not parse yet. */
+  const handleLimitChange = useCallback(
+    (field: keyof TenantQuota, value: number | null) => {
+      setInvalidFields((prev) => {
+        if ((value === null) === prev.has(field)) return prev;
+        const next = new Set(prev);
+        if (value === null) next.add(field);
+        else next.delete(field);
+        return next;
+      });
+      if (value !== null) handleChange(field, value);
+      else setDirty(true);
+    },
+    [handleChange],
+  );
+  const hasInvalidField = invalidFields.size > 0;
+
   const handleSave = useCallback(() => {
-    if (!form) return;
+    if (!form || hasInvalidField) return;
     updateMutation.mutate(
       { tenantId: DEFAULT_TENANT, quota: form },
       {
         onSuccess: (data) => {
           setForm(data);
           setDirty(false);
+          setInvalidFields(new Set());
           toast.success(t("quotas.saveSuccess", "Quota saved"));
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
-  }, [form, updateMutation, t]);
+  }, [form, hasInvalidField, updateMutation, t]);
 
   const handleReset = useCallback(() => {
     resetMutation.mutate(DEFAULT_TENANT, {
@@ -112,7 +140,7 @@ export function QuotasPage() {
           <button
             data-testid="quotas-save"
             onClick={handleSave}
-            disabled={!dirty || updateMutation.isPending}
+            disabled={!dirty || hasInvalidField || updateMutation.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-sidebar-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-sidebar-accent/90 disabled:opacity-50"
           >
             <Save className="h-4 w-4" />
@@ -180,6 +208,7 @@ export function QuotasPage() {
               {quotaError && !quota ? (
                 <div data-testid="quotas-config-error">
                   <ErrorState
+                    error={quotaErr}
                     message={t("common.error")}
                     onRetry={() => refetchQuota()}
                     retryLabel={t("common.retry")}
@@ -191,8 +220,9 @@ export function QuotasPage() {
                     icon={<MessageSquare className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxConversationsPerDay", "Max Conversations / Day")}
                     value={form.maxConversationsPerDay}
-                    onChange={(v) => handleChange("maxConversationsPerDay", v)}
-                    hint={t("quotas.limitHint", "-1 = unlimited")}
+                    onChange={(v) => handleLimitChange("maxConversationsPerDay", v)}
+                    hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-conversations"
                     dimmed={!form.enabled}
                   />
@@ -200,8 +230,9 @@ export function QuotasPage() {
                     icon={<Bot className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxAgentsPerTenant", "Max Agents / Tenant")}
                     value={form.maxAgentsPerTenant}
-                    onChange={(v) => handleChange("maxAgentsPerTenant", v)}
-                    hint={t("quotas.limitHint", "-1 = unlimited")}
+                    onChange={(v) => handleLimitChange("maxAgentsPerTenant", v)}
+                    hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-agents"
                     dimmed={!form.enabled}
                   />
@@ -209,8 +240,9 @@ export function QuotasPage() {
                     icon={<Zap className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxApiCallsPerMinute", "Max API Calls / Minute")}
                     value={form.maxApiCallsPerMinute}
-                    onChange={(v) => handleChange("maxApiCallsPerMinute", v)}
-                    hint={t("quotas.limitHint", "-1 = unlimited")}
+                    onChange={(v) => handleLimitChange("maxApiCallsPerMinute", v)}
+                    hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
+                    invalidMessage={t("quotas.invalidInteger", "Enter a whole number (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-api-calls"
                     dimmed={!form.enabled}
                   />
@@ -218,10 +250,12 @@ export function QuotasPage() {
                     icon={<DollarSign className="h-4 w-4 text-muted-foreground" />}
                     label={t("quotas.maxMonthlyCostUsd", "Max Monthly Cost (USD)")}
                     value={form.maxMonthlyCostUsd}
-                    onChange={(v) => handleChange("maxMonthlyCostUsd", v)}
-                    hint={t("quotas.limitHint", "-1 = unlimited")}
+                    onChange={(v) => handleLimitChange("maxMonthlyCostUsd", v)}
+                    hint={t("quotas.limitHintEmpty", "Empty or -1 = unlimited, 0 = blocked")}
+                    invalidMessage={t("quotas.invalidAmount", "Enter an amount (0 or more), or leave empty for unlimited.")}
                     testId="quota-max-cost"
                     step={0.01}
+                    integer={false}
                     dimmed={!form.enabled}
                   />
                 </div>
@@ -257,6 +291,7 @@ export function QuotasPage() {
               {usageError && !usageLoading && !usage && (
                 <div data-testid="quotas-usage-error">
                   <ErrorState
+                    error={usageErr}
                     message={t("common.error")}
                     onRetry={() => refetchUsage()}
                     retryLabel={t("common.retry")}
@@ -351,36 +386,71 @@ function QuotaField({
   value,
   onChange,
   hint,
+  invalidMessage,
   testId,
   step = 1,
   dimmed = false,
+  integer = true,
 }: {
   icon: React.ReactNode;
   label: string;
   value: number;
-  onChange: (v: number) => void;
+  onChange: (v: number | null) => void;
   hint: string;
+  invalidMessage: string;
   testId: string;
   step?: number;
   dimmed?: boolean;
+  /** Counts must be whole numbers; the cost limit takes decimals. */
+  integer?: boolean;
 }) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  // The input edits its own text so an empty field stays empty and a lone "-"
+  // can be typed on the way to "-1"; the number is derived from it.
+  const [text, setText] = useState(() => String(value));
+  // Follow the server value (load, save) unless the text already means it.
+  useEffect(() => {
+    setText((prev) => (parseQuotaLimit(prev, { integer }) === value ? prev : String(value)));
+  }, [value, integer]);
+  // A number input reports half-typed text ("-", "1e") as "" with
+  // `validity.badInput` set. Read as text, that "" would mean "empty", i.e.
+  // unlimited, while the field still shows the "-" — so it is tracked apart.
+  // (Writing "-" back into `value` would not work: the browser drops it.)
+  const [badInput, setBadInput] = useState(false);
+  const invalid = badInput || parseQuotaLimit(text, { integer }) === null;
+
   return (
     <div className={dimmed ? "opacity-60 transition-opacity" : "transition-opacity"}>
-      <label className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
+      <label htmlFor={id} className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
         {icon}
         {label}
       </label>
       <div className="flex items-center gap-2">
         <input
+          id={id}
           data-testid={testId}
           type="number"
-          value={value}
+          value={text}
           step={step}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-sidebar-accent focus:outline-none focus:ring-1 focus:ring-sidebar-accent"
+          aria-invalid={invalid || undefined}
+          aria-describedby={hintId}
+          onChange={(e) => {
+            const bad = e.target.validity?.badInput === true;
+            setBadInput(bad);
+            setText(e.target.value);
+            onChange(bad ? null : parseQuotaLimit(e.target.value, { integer }));
+          }}
+          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm transition-colors focus:border-sidebar-accent focus:outline-none focus:ring-1 focus:ring-sidebar-accent aria-invalid:border-destructive"
         />
       </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+      {invalid ? (
+        <p id={hintId} className="mt-0.5 text-xs text-destructive" data-testid={`${testId}-invalid`}>
+          {invalidMessage}
+        </p>
+      ) : (
+        <p id={hintId} className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+      )}
     </div>
   );
 }

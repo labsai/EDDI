@@ -20,7 +20,9 @@ import {
   useRestrictProcessing,
   useUnrestrictProcessing,
   useIsProcessingRestricted,
+  gdprRestrictedKey,
 } from "@/hooks/use-gdpr";
+import { useDebounce } from "@/hooks/use-debounce";
 import type { GdprDeletionResult, UserDataExport } from "@/lib/api/gdpr";
 
 export function GdprPage() {
@@ -28,6 +30,11 @@ export function GdprPage() {
   const queryClient = useQueryClient();
   const [userId, setUserId] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
+  // The id erasure was requested for, frozen when the dialog opens: it is what
+  // the admin types back to confirm and what is deleted, whatever the lookup
+  // field says afterwards.
+  const [confirmUserId, setConfirmUserId] = useState("");
+  const [confirmTyped, setConfirmTyped] = useState("");
   const [result, setResult] = useState<GdprDeletionResult | null>(null);
   const [exportSummary, setExportSummary] = useState<UserDataExport | null>(null);
 
@@ -35,11 +42,18 @@ export function GdprPage() {
   const exportMutation = useExportUserData();
   const restrictMutation = useRestrictProcessing();
   const unrestrictMutation = useUnrestrictProcessing();
+  // The status is looked up once typing pauses, not on every keystroke: each
+  // character of an id used to fire its own GET for a user who does not exist.
+  const debouncedUserId = useDebounce(userId.trim(), 300);
+  const statusPending = userId.trim() !== debouncedUserId;
   const {
     data: isRestricted,
-    isLoading: restrictLoading,
+    isLoading: restrictQueryLoading,
     isError: restrictError,
-  } = useIsProcessingRestricted(userId.trim());
+  } = useIsProcessingRestricted(debouncedUserId);
+  // Until the debounced id catches up, the badge and the toggle would describe
+  // the previous id — show "Checking..." and keep the toggle disabled instead.
+  const restrictLoading = statusPending || restrictQueryLoading;
 
   const handleExport = useCallback(() => {
     if (!userId.trim()) return;
@@ -86,15 +100,22 @@ export function GdprPage() {
   }, [userId, exportMutation, t]);
 
   const handleDelete = useCallback(() => {
-    if (!userId.trim()) return;
-    deleteMutation.mutate(userId.trim(), {
+    if (!confirmUserId || confirmTyped !== confirmUserId) return;
+    deleteMutation.mutate(confirmUserId, {
       onSuccess: (data) => {
         setResult(data);
         setShowConfirm(false);
+        setConfirmTyped("");
         // A 207 is inside 2xx, so this runs for a partial erasure too — and a
         // green "deleted successfully" over a panel listing failed steps is
         // the message someone repeats to the data subject.
-        if (data.complete) {
+        if (data.complete && isNothingFound(data)) {
+          // A mistyped id "succeeds" with every counter at zero: say so rather
+          // than announcing an erasure that deleted nothing.
+          toast.info(
+            t("gdpr.noDataFoundToast", "No data found for this user id — nothing was deleted."),
+          );
+        } else if (data.complete) {
           toast.success(
             t("gdpr.deleteSuccess", "User data deleted successfully"),
           );
@@ -112,7 +133,7 @@ export function GdprPage() {
         toast.error(error.message);
       },
     });
-  }, [userId, deleteMutation, t]);
+  }, [confirmUserId, confirmTyped, deleteMutation, t]);
 
   const handleToggleRestriction = useCallback(() => {
     if (!userId.trim()) return;
@@ -120,7 +141,7 @@ export function GdprPage() {
     if (isRestricted) {
       unrestrictMutation.mutate(uid, {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          queryClient.invalidateQueries({ queryKey: gdprRestrictedKey(uid) });
           toast.success(t("gdpr.restrictionLifted", "Processing restriction removed"));
         },
         onError: (error) => toast.error(error.message),
@@ -128,7 +149,7 @@ export function GdprPage() {
     } else {
       restrictMutation.mutate(uid, {
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          queryClient.invalidateQueries({ queryKey: gdprRestrictedKey(uid) });
           toast.success(t("gdpr.restrictionApplied", "Processing restricted for user"));
         },
         onError: (error) => toast.error(error.message),
@@ -224,7 +245,11 @@ export function GdprPage() {
 
             <Button
               variant="destructive"
-              onClick={() => setShowConfirm(true)}
+              onClick={() => {
+                setConfirmUserId(userId.trim());
+                setConfirmTyped("");
+                setShowConfirm(true);
+              }}
               disabled={!userId.trim() || deleteMutation.isPending}
               className="gap-2"
               data-testid="gdpr-delete-btn"
@@ -364,7 +389,26 @@ export function GdprPage() {
       )}
 
       {/* Results */}
-      {result && (
+      {result && result.complete && isNothingFound(result) && (
+        <div
+          className="rounded-xl border border-border bg-muted/40 p-6"
+          data-testid="gdpr-no-data"
+        >
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <FileSearch className="h-4 w-4 text-muted-foreground" />
+            {t("gdpr.noDataFoundTitle", "No data found for this user id")}
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t(
+              "gdpr.noDataFoundBody",
+              'Nothing was deleted for "{{userId}}". Check the id for typos, then try again.',
+              { userId: result.userId || confirmUserId },
+            )}
+          </p>
+        </div>
+      )}
+
+      {result && !(result.complete && isNothingFound(result)) && (
         <div
           className={`rounded-xl border p-6 space-y-4 ${
             result.complete
@@ -401,13 +445,18 @@ export function GdprPage() {
                   "Some of this user's data may still exist. Do not report the erasure as fulfilled until these steps succeed.",
                 )}
               </p>
-              <ul className="list-disc space-y-0.5 ps-5 text-xs text-foreground">
+              <ul className="list-disc space-y-1 ps-5 text-xs text-foreground">
                 {result.failedSteps.map((step) => (
-                  <li key={step}>{step}</li>
+                  <li key={step} data-testid={`gdpr-failed-step-${step}`}>
+                    <code className="font-mono">{step}</code>
+                    <span className="text-muted-foreground"> — {failedStepExplanation(t, step)}</span>
+                  </li>
                 ))}
               </ul>
             </div>
           )}
+
+          <AuditErasureSummary result={result} />
 
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <ResultCard
@@ -422,6 +471,16 @@ export function GdprPage() {
               label={t("gdpr.conversationMappingsDeleted", "Mappings Deleted")}
               value={result.conversationMappingsDeleted}
             />
+            {/* Absent on an EDDI before 6.6, which never redacted audit
+                content — no tile then, rather than a "—" that reads as
+                "nothing to redact". */}
+            {typeof result.auditEntriesRedacted === "number" && (
+              <ResultCard
+                label={t("gdpr.auditRedacted", "Audit Entries Redacted")}
+                value={result.auditEntriesRedacted}
+                testId="gdpr-audit-redacted"
+              />
+            )}
             <ResultCard
               label={t("gdpr.auditPseudonymized", "Audit Pseudonymized")}
               value={result.auditEntriesPseudonymized}
@@ -463,20 +522,65 @@ export function GdprPage() {
       {/* Confirm Dialog */}
       <AlertDialog
         open={showConfirm}
-        onOpenChange={setShowConfirm}
+        onOpenChange={(open) => {
+          setShowConfirm(open);
+          if (!open) setConfirmTyped("");
+        }}
         title={t("gdpr.confirmTitle", "Confirm Data Deletion")}
         description={t(
           "gdpr.confirmDesc",
           'This will permanently delete ALL data for user "{{userId}}". This action cannot be undone.',
-          { userId: userId.trim() },
+          { userId: confirmUserId },
         )}
         confirmLabel={t("gdpr.confirmDelete", "Yes, Delete All Data")}
         variant="destructive"
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
-      />
+        confirmDisabled={confirmTyped !== confirmUserId}
+      >
+        <div className="space-y-2">
+          <label
+            htmlFor="gdpr-confirm-id"
+            className="block text-xs font-medium text-muted-foreground"
+          >
+            {t("gdpr.confirmTypeLabel", {
+              userId: confirmUserId,
+              defaultValue: `Type the user id "${confirmUserId}" to confirm`,
+            })}
+          </label>
+          <input
+            id="gdpr-confirm-id"
+            type="text"
+            value={confirmTyped}
+            onChange={(e) => setConfirmTyped(e.target.value)}
+            placeholder={confirmUserId}
+            autoComplete="off"
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-destructive/50"
+            data-testid="gdpr-confirm-input"
+          />
+        </div>
+      </AlertDialog>
     </div>
   );
+}
+
+/** True when the erasure cascade found nothing for the id — every counter it
+ *  reported is zero. Counters an older EDDI omits are ignored, not read as 0. */
+function isNothingFound(r: GdprDeletionResult): boolean {
+  const counters = [
+    r.memoriesDeleted,
+    r.conversationsDeleted,
+    r.conversationMappingsDeleted,
+    r.logsPseudonymized,
+    r.auditEntriesPseudonymized,
+    r.attachmentsDeleted,
+    r.journalEntriesDeleted,
+    r.checkpointsDeleted,
+    r.groupConversationsDeleted,
+    r.sharedArtifactsDeleted,
+    r.schedulesDeleted,
+  ].filter((v): v is number => typeof v === "number");
+  return counters.length > 0 && counters.every((v) => v === 0);
 }
 
 /**
@@ -489,13 +593,95 @@ export function GdprPage() {
  * shape the old `logEntriesPseudonymized` typo produced silently — a blank tile
  * nobody could distinguish from a real zero.
  */
-function ResultCard({ label, value }: { label: string; value?: number }) {
+function ResultCard({ label, value, testId }: { label: string; value?: number; testId?: string }) {
   return (
-    <div className="rounded-lg border border-border bg-background p-3 text-center">
+    <div className="rounded-lg border border-border bg-background p-3 text-center" data-testid={testId}>
       <p className="text-2xl font-bold text-foreground">
         {typeof value === "number" ? value : "—"}
       </p>
       <p className="mt-0.5 text-[10px] text-muted-foreground">{label}</p>
     </div>
   );
+}
+
+/**
+ * What the erasure did to the audit ledger, in words a DPO can repeat.
+ *
+ * Since EDDI 6.6 an erasure keeps the user's audit rows (record-keeping) but
+ * replaces their content with a redaction marker; under
+ * `eddi.audit.erasure-mode=pseudonymize` it keeps the content and replaces only
+ * the user id; an older EDDI did only the latter and says nothing about it.
+ * Three different answers to "is the user's text still in the ledger?", and the
+ * counters alone do not tell them apart.
+ */
+function AuditErasureSummary({ result }: { result: GdprDeletionResult }) {
+  const { t } = useTranslation();
+  const redacted = result.auditEntriesRedacted;
+  let text: string;
+  if (typeof redacted !== "number") {
+    text = t(
+      "gdpr.auditLegacy",
+      "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+    );
+  } else if (
+    redacted === 0 &&
+    result.auditEntriesPseudonymized > 0 &&
+    // A redaction that failed also leaves the content in place and the rows
+    // pseudonymised, but that is not the legal-hold mode: the failed step says why.
+    !result.failedSteps?.includes("auditRedaction")
+  ) {
+    text = t(
+      "gdpr.auditPseudonymizeMode",
+      "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
+    );
+  } else if (redacted === 0 && result.failedSteps?.includes("auditRedaction")) {
+    text = t(
+      "gdpr.auditRedactionFailed",
+      "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
+    );
+  } else {
+    text = t(
+      "gdpr.auditRedactedExplanation",
+      "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",
+    );
+  }
+  return (
+    <div className="space-y-1 rounded-lg border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground" data-testid="gdpr-audit-summary">
+      <p>{text}</p>
+      {result.complete && typeof redacted === "number" && (
+        <p data-testid="gdpr-complete-explanation">
+          {t(
+            "gdpr.completeExplanation",
+            "Complete means every step succeeded, including a final check that no audit row under this user's id still holds unredacted content.",
+          )}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A plain-language reading of one failed cascade step. */
+function failedStepExplanation(t: ReturnType<typeof useTranslation>["t"], step: string): string {
+  switch (step) {
+    case "auditRedaction":
+      return t(
+        "gdpr.failedStep.auditRedaction",
+        "Some audit rows still hold this user's prompts or responses. Run the erasure again — it is safe to repeat and only touches what is left. If it keeps failing, the server log names the cause under this erasure's pseudonym.",
+      );
+    case "auditLedger":
+      return t(
+        "gdpr.failedStep.auditLedger",
+        "The user id could not be replaced in every audit row. Run the erasure again once the database is reachable.",
+      );
+    case "databaseLogs":
+      return t(
+        "gdpr.failedStep.databaseLogs",
+        "Database log entries could not be pseudonymised. Run the erasure again; log retention also removes them in time.",
+      );
+    default:
+      return t(
+        "gdpr.failedStep.generic",
+        "This step did not finish. Run the erasure again once the cause in the server log is fixed — it is safe to repeat.",
+      );
+  }
 }

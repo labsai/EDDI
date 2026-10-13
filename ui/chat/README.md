@@ -4,7 +4,7 @@
 
 > Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-46-brightgreen)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-420%2B-brightgreen)
 
 EDDI Chat UI is a standalone, themeable React chat widget that connects to any EDDI agent. It ships **inside** the EDDI Docker image and can also be embedded as an `<iframe>` in any web page. Supports SSE streaming, rich Markdown, LaTeX math, code highlighting, quick replies, and full conversation control — all configurable via URL parameters or a typed config object.
 
@@ -41,6 +41,8 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 - 🔧 **Fully Configurable** — Every feature togglable via URL query parameters or typed `ChatConfig`
 - 📱 **Responsive** — Mobile-first design with adaptive breakpoints
 - 🎭 **Demo Mode** — Full showcase without a running backend (`/chat/demo/showcase`)
+- 🌍 **Translated** — English, German, French and Spanish widget text, chosen by `?lang=` or the browser language (see [Language](#language))
+- 📋 **Copy** — a copy button on every agent message and code block
 - 🏷️ **Agent Name Display** — Auto-fetches and shows the agent's display name from the backend
 
 ---
@@ -87,12 +89,15 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 
 | Parameter             | Example                     | Effect                             |
 | --------------------- | --------------------------- | ---------------------------------- |
-| `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
-| `title`               | `?title=My%20Agent`         | Override header title              |
+| `theme`               | `?theme=light`              | Set the theme (`dark`/`light`/`system`). The URL wins over a theme the visitor chose earlier; the header toggle cycles dark, light, system |
+| `title`               | `?title=My%20Agent`         | Header title text and browser tab title (replaces the agent name in the header) |
+| `lang`                | `?lang=de`                  | Widget language (`en`, `de`, `fr`, `es`); default: the browser language. Also sets `<html lang>` |
+| `accentColor`         | `?accentColor=%23cc3366`    | Accent colour — any CSS colour works (`%23hex`, `rgb(...)`, a name); the tints are derived with `color-mix()` |
+| `tokenOrigin`         | `?tokenOrigin=https://app.example.com` | Allow that origin to send the bearer token by `postMessage` (comma-separated list); see [Embedding the Chat UI](../../docs/chat-ui-embedding.md#2-hand-the-widget-a-token-authentication-on) |
 | `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
 | `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
-| `hideLogo`            | `?hideLogo=true`            | Show text title instead of logo    |
+| `hideLogo`            | `?hideLogo=true`            | Show the text title (default "EDDI") instead of the logo |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
 
 <details>
@@ -144,10 +149,16 @@ Only `/chat` takes this setting; the Manager and the API always refuse to be fra
 ></iframe>
 ```
 
+With authentication on, the host page hands the widget its user's access token by `postMessage` — add `?tokenOrigin=<host origin>` to the iframe URL and answer the widget's `eddi-chat-ready` / `eddi-chat-token-request` messages with `{ type: "eddi-chat-token", token }`. The protocol, its origin rules and a host-page example are in [docs/chat-ui-embedding.md](../../docs/chat-ui-embedding.md), together with `eddi.chat.img-sources`, which decides which hosts the images in an agent's output may come from.
+
+### Language
+
+The widget's own text (buttons, notices, hints, screen-reader labels) is available in English, German, French and Spanish. `?lang=de` picks one; without it the browser's language list is used, falling back to English. `<html lang>` follows. What an agent says is never translated. To add a language, add a table to `src/i18n.ts`: any key you leave out shows in English.
+
 Combine query parameters to create a minimal, focused chat experience:
 
 ```
-?hideUndo=true&hideRedo=true&hideNewConversation=true&hideLogo=true&title=Support%20Agent&theme=light
+?hideUndo=true&hideRedo=true&hideNewConversation=true&hideLogo=true&title=Support%20Agent&theme=light&lang=de
 ```
 
 ---
@@ -157,7 +168,7 @@ Combine query parameters to create a minimal, focused chat experience:
 ```bash
 npm run dev          # Dev server (port 5174) with proxy to EDDI backend
 npm run build        # Production build
-npm run test         # Run tests (46 Vitest unit/component tests)
+npm run test         # Run tests (Vitest unit/component tests)
 npm run typecheck    # TypeScript type checking (tsc -b --noEmit)
 ```
 

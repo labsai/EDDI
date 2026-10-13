@@ -7,7 +7,6 @@ import {
 import {
   getConversationDescriptors,
   getSimpleConversationLog,
-  getRawConversationLog,
   deleteConversation,
   getActiveConversations,
   endActiveConversations,
@@ -18,6 +17,8 @@ import {
 } from "@/lib/api/conversations";
 
 const CONVERSATIONS_KEY = ["conversations"] as const;
+
+const IN_PROGRESS_POLL_MS = 3000;
 
 export function useConversationDescriptors(
   limit = 20,
@@ -53,20 +54,21 @@ export function useConversationDescriptors(
 export function useSimpleConversation(
   id: string,
   returnDetailed = true,
-  returnCurrentStepOnly = false
+  returnCurrentStepOnly = false,
+  /** Re-fetch every few seconds while the conversation is IN_PROGRESS, so a
+   *  page left open follows a running turn instead of showing a stale snapshot. */
+  pollWhileInProgress = false
 ) {
   return useQuery({
     queryKey: [...CONVERSATIONS_KEY, "simple", id, { returnDetailed, returnCurrentStepOnly }],
     queryFn: () => getSimpleConversationLog(id, returnDetailed, returnCurrentStepOnly),
     enabled: !!id,
-  });
-}
-
-export function useRawConversation(id: string) {
-  return useQuery({
-    queryKey: [...CONVERSATIONS_KEY, "raw", id],
-    queryFn: () => getRawConversationLog(id),
-    enabled: !!id,
+    refetchInterval: pollWhileInProgress
+      ? (query) =>
+          query.state.data?.conversationState === "IN_PROGRESS"
+            ? IN_PROGRESS_POLL_MS
+            : false
+      : false,
   });
 }
 
@@ -132,21 +134,5 @@ export function usePurgeEndedConversations() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
     },
-  });
-}
-
-/**
- * Lazily fetch step count for a single conversation.
- * Uses returnDetailed=false to minimize data transfer.
- */
-export function useConversationStepCount(id: string) {
-  return useQuery({
-    queryKey: [...CONVERSATIONS_KEY, "stepCount", id],
-    queryFn: async () => {
-      const data = await getSimpleConversationLog(id, false, false);
-      return data.conversationSteps?.length ?? 0;
-    },
-    enabled: !!id,
-    staleTime: 60_000,
   });
 }

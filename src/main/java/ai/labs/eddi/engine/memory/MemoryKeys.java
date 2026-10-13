@@ -152,6 +152,16 @@ public final class MemoryKeys {
     public static final String AUDIT_TOKEN_USAGE = "audit:token_usage";
 
     /**
+     * Why the model stopped, when it stopped abnormally: {@code "length"} (cut off
+     * at the output-token limit) or {@code "content_filter"} (withheld by the
+     * provider). Written by LlmTask only in those two cases; read by the
+     * OpenAI-compatible adapter as the response's {@code finish_reason}. Not an
+     * {@code audit:} key on purpose — those are withheld from the detailed snapshot
+     * the adapter reads.
+     */
+    public static final String LLM_FINISH_REASON = "llm:finish_reason";
+
+    /**
      * Turn-total tool-execution evidence, shaped {@code {"calls": [ … ]}} where
      * each entry is a tool-trace record augmented with its originating
      * {@code llmTaskId}. Accumulated by LlmTask, read by LifecycleManager into

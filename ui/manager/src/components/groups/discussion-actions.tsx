@@ -20,7 +20,9 @@ interface DiscussionActionsProps {
   members: Pick<GroupMember, "agentId" | "displayName" | "memberType">[];
   /** True while a followup/close request is in flight. */
   isPending?: boolean;
-  onFollowup: (targetAgentId: string, question: string) => void;
+  /** May return a promise: the typed question is kept until it resolves, and
+   *  cleared only if it resolves to anything but `false`. */
+  onFollowup: (targetAgentId: string, question: string) => void | Promise<boolean | void>;
   onCloseDiscussion: () => void;
 }
 
@@ -47,12 +49,15 @@ export function DiscussionActions({
   const [closeOpen, setCloseOpen] = useState(false);
   const [followupQuestion, setFollowupQuestion] = useState("");
 
-  // Only real agents can receive a direct follow-up (a nested GROUP member is not
-  // an agent). Default the picker to the first eligible member.
+  // Only real agents can receive a direct follow-up: a nested GROUP is not an
+  // agent, and a HUMAN member has no agent to ask (the backend would refuse).
+  // A member without a type is an agent, the default. Default the picker to the
+  // first eligible member.
   const eligibleMembers = useMemo(
-    () => members.filter((m) => m.memberType !== "GROUP" && m.agentId),
+    () => members.filter((m) => (m.memberType ?? "AGENT") === "AGENT" && m.agentId),
     [members],
   );
+  const [submitting, setSubmitting] = useState(false);
   const [followupTarget, setFollowupTarget] = useState<string>(
     () => eligibleMembers[0]?.agentId ?? "",
   );
@@ -70,10 +75,25 @@ export function DiscussionActions({
   function submitFollowup() {
     const q = followupQuestion.trim();
     const target = followupTarget || eligibleMembers[0]?.agentId || "";
-    if (!q || !target || isPending) return;
-    onFollowup(target, q);
-    setFollowupQuestion("");
-    setMode("none");
+    if (!q || !target || isPending || submitting) return;
+    const result = onFollowup(target, q);
+    const done = () => {
+      setFollowupQuestion("");
+      setMode("none");
+    };
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      // Keep what was typed until the request lands: a failed follow-up used to
+      // have already emptied the box.
+      setSubmitting(true);
+      (result as Promise<boolean | void>)
+        .then((ok) => {
+          if (ok !== false) done();
+        })
+        .catch(() => {})
+        .finally(() => setSubmitting(false));
+    } else {
+      done();
+    }
   }
 
   return (
@@ -143,7 +163,7 @@ export function DiscussionActions({
             )}
             className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             rows={2}
-            disabled={isPending}
+            disabled={isPending || submitting}
             data-testid="group-followup-input"
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -166,10 +186,10 @@ export function DiscussionActions({
               type="button"
               size="sm"
               onClick={submitFollowup}
-              disabled={!followupQuestion.trim() || !followupTarget || isPending}
+              disabled={!followupQuestion.trim() || !followupTarget || isPending || submitting}
               data-testid="group-followup-submit"
             >
-              {isPending ? (
+              {isPending || submitting ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Send className="h-3.5 w-3.5" />

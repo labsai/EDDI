@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { ActionTags } from "./action-tags";
 import { NumberInput } from "./number-input";
 import {
   ChevronDown,
@@ -35,6 +36,7 @@ import { ConnectionReferenceButton } from "@/components/shared/connection-refere
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { isValidUrl } from "@/lib/utils";
 import { EditorSection } from "./editor-section";
+import { PropertyValueField } from "./property-value-field";
 import { parseHttpCodeList } from "./editor-value-utils";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
@@ -50,7 +52,11 @@ export interface PropertyInstruction {
   valueObject?: Record<string, unknown>;
   valueList?: unknown[];
   valueInt?: number;
+  /** A whole number beyond the `int` range (EDDI 6.6+). */
+  valueLong?: number;
   valueFloat?: number;
+  /** A decimal at full precision (EDDI 6.6+). */
+  valueDouble?: number;
   valueBoolean?: boolean;
   scope?: "step" | "conversation" | "longTerm" | "secret";
   fromObjectPath?: string;
@@ -151,83 +157,6 @@ export interface HttpCallsConfig {
 const HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"] as const;
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
-
-function ActionTags({
-  actions,
-  onChange,
-  readOnly,
-}: {
-  actions: string[];
-  onChange: (a: string[]) => void;
-  readOnly?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [input, setInput] = useState("");
-
-  const addAction = () => {
-    const trimmed = input.trim();
-    if (trimmed && !actions.includes(trimmed)) {
-      onChange([...actions, trimmed]);
-      setInput("");
-    }
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1.5">
-        {actions.map((a, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-          >
-            {a}
-            {!readOnly && (
-              <button
-                type="button"
-                onClick={() => onChange(actions.filter((_, j) => j !== i))}
-                className="rounded p-0.5 hover:bg-primary/20 transition-colors"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </span>
-        ))}
-        {actions.length === 0 && (
-          <span className="text-xs text-muted-foreground italic">
-            {t("apiCallsEditor.noActions", "No actions")}
-          </span>
-        )}
-      </div>
-      {!readOnly && (
-        <div className="flex gap-1.5">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addAction();
-              }
-            }}
-            placeholder={t(
-              "apiCallsEditor.actionPlaceholder",
-              "e.g. get_weather"
-            )}
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={addAction}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function KvEditor({
   entries,
@@ -425,7 +354,7 @@ function HttpCodeValidatorEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.runOnCodes", "Run on codes")}
           </label>
-          <input
+          <input aria-label={t("apiCallsEditor.runOnCodes", "Run on codes")}
             type="text"
             value={runCodes.join(", ")}
             onChange={(e) => onChange({ ...validator, runOnHttpCode: parseHttpCodeList(e.target.value) })}
@@ -439,7 +368,7 @@ function HttpCodeValidatorEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.skipOnCodes", "Skip on codes")}
           </label>
-          <input
+          <input aria-label={t("apiCallsEditor.skipOnCodes", "Skip on codes")}
             type="text"
             value={skipCodes.join(", ")}
             // Emptied means "skip nothing" ([]), not "back to the defaults".
@@ -536,7 +465,7 @@ function PropertyInstructionRow({
 
   return (
     <div className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2" data-testid="property-instruction-row">
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-start gap-1.5">
         <input
           type="text"
           value={instruction.name ?? ""}
@@ -546,19 +475,30 @@ function PropertyInstructionRow({
           className="h-7 w-32 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <span className="text-xs text-muted-foreground">=</span>
-        <input
-          type="text"
-          value={instruction.valueString ?? ""}
-          onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
+        <PropertyValueField
+          value={instruction}
+          onChange={onChange}
           readOnly={readOnly}
-          placeholder={t("apiCallsEditor.propValue", "Value or template")}
-          className="h-7 flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          testIdPrefix="instruction-value"
+          renderText={() => (
+            <input
+              type="text"
+              value={instruction.valueString ?? ""}
+              onChange={(e) => onChange({ ...instruction, valueString: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("apiCallsEditor.propValue", "Value or template")}
+              aria-label={t("apiCallsEditor.propValue", "Value or template")}
+              className="h-7 min-w-[90px] flex-1 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          )}
         />
         <select
           value={instruction.scope ?? "conversation"}
           onChange={(e) => onChange({ ...instruction, scope: e.target.value as PropertyInstruction["scope"] })}
           disabled={readOnly}
+          aria-label={t("apiCallsEditor.scope", "Scope")}
           className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          data-testid="instruction-scope"
         >
           {SCOPE_OPTIONS.map((s) => (
             <option key={s} value={s}>{s}</option>
@@ -616,7 +556,7 @@ function PropertyInstructionRow({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("apiCallsEditor.fromPath", "From Object Path")}
                 </label>
-                <input
+                <input aria-label={t("apiCallsEditor.fromPath", "From Object Path")}
                   type="text"
                   value={instruction.fromObjectPath ?? ""}
                   onChange={(e) => onChange({ ...instruction, fromObjectPath: e.target.value })}
@@ -629,7 +569,7 @@ function PropertyInstructionRow({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("apiCallsEditor.toPath", "To Object Path")}
                 </label>
-                <input
+                <input aria-label={t("apiCallsEditor.toPath", "To Object Path")}
                   type="text"
                   value={instruction.toObjectPath ?? ""}
                   onChange={(e) => onChange({ ...instruction, toObjectPath: e.target.value })}
@@ -745,7 +685,7 @@ function OutputBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
               type="text"
               value={instruction.pathToTargetArray ?? ""}
               onChange={(e) => onChange({ ...instruction, pathToTargetArray: e.target.value })}
@@ -758,7 +698,7 @@ function OutputBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.iterationObjName", "Iteration Object")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.iterationObjName", "Iteration Object")}
               type="text"
               value={instruction.iterationObjectName ?? "obj"}
               onChange={(e) => onChange({ ...instruction, iterationObjectName: e.target.value })}
@@ -771,7 +711,7 @@ function OutputBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.templateFilter", "Filter Expression")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.templateFilter", "Filter Expression")}
               type="text"
               value={instruction.templateFilterExpression ?? ""}
               onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
@@ -796,7 +736,7 @@ function OutputBuildInstructionRow({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.outputType", "Output Type")}
           </label>
-          <select
+          <select aria-label={t("apiCallsEditor.outputType", "Output Type")}
             value={instruction.outputType ?? "text"}
             onChange={(e) => onChange({ ...instruction, outputType: e.target.value })}
             disabled={readOnly}
@@ -811,7 +751,7 @@ function OutputBuildInstructionRow({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.outputValue", "Output Value")}
           </label>
-          <input
+          <input aria-label={t("apiCallsEditor.outputValue", "Output Value")}
             type="text"
             value={instruction.outputValue ?? ""}
             onChange={(e) => onChange({ ...instruction, outputValue: e.target.value })}
@@ -900,7 +840,7 @@ function QrBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
               type="text"
               value={instruction.pathToTargetArray ?? ""}
               onChange={(e) => onChange({ ...instruction, pathToTargetArray: e.target.value })}
@@ -913,7 +853,7 @@ function QrBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.iterationObjName", "Iteration Object")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.iterationObjName", "Iteration Object")}
               type="text"
               value={instruction.iterationObjectName ?? "obj"}
               onChange={(e) => onChange({ ...instruction, iterationObjectName: e.target.value })}
@@ -926,7 +866,7 @@ function QrBuildInstructionRow({
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.templateFilter", "Filter Expression")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.templateFilter", "Filter Expression")}
               type="text"
               value={instruction.templateFilterExpression ?? ""}
               onChange={(e) => onChange({ ...instruction, templateFilterExpression: e.target.value })}
@@ -951,7 +891,7 @@ function QrBuildInstructionRow({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.qrValue", "Quick Reply Value")}
           </label>
-          <input
+          <input aria-label={t("apiCallsEditor.qrValue", "Quick Reply Value")}
             type="text"
             value={instruction.quickReplyValue ?? ""}
             onChange={(e) => onChange({ ...instruction, quickReplyValue: e.target.value })}
@@ -964,7 +904,7 @@ function QrBuildInstructionRow({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.qrExpressions", "Quick Reply Expressions")}
           </label>
-          <input
+          <input aria-label={t("apiCallsEditor.qrExpressions", "Quick Reply Expressions")}
             type="text"
             value={instruction.quickReplyExpressions ?? ""}
             onChange={(e) => onChange({ ...instruction, quickReplyExpressions: e.target.value })}
@@ -1090,7 +1030,7 @@ export function RetryApiCallEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.maxRetries", "Max Retries")}
           </label>
-          <NumberInput placeholder="3" integer
+          <NumberInput aria-label={t("apiCallsEditor.maxRetries", "Max Retries")} placeholder="3" integer
             min={0}
             value={retry.maxRetries}
             onChange={(v) =>
@@ -1105,7 +1045,7 @@ export function RetryApiCallEditor({
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.backoffDelayMs", "Backoff Delay (ms)")}
           </label>
-          <NumberInput placeholder="1000" integer
+          <NumberInput aria-label={t("apiCallsEditor.backoffDelayMs", "Backoff Delay (ms)")} placeholder="1000" integer
             min={0}
             value={retry.exponentialBackoffDelayInMillis}
             onChange={(v) =>
@@ -1124,7 +1064,7 @@ export function RetryApiCallEditor({
         <label className="mb-0.5 block text-[10px] text-muted-foreground">
           {t("apiCallsEditor.retryOnHttpCodes", "Retry on HTTP Codes")}
         </label>
-        <input
+        <input aria-label={t("apiCallsEditor.retryOnHttpCodes", "Retry on HTTP Codes")}
           type="text"
           value={(retry.retryOnHttpCodes ?? []).join(", ")}
           onChange={(e) =>
@@ -1285,7 +1225,7 @@ function PreRequestEditor({
         <label className="text-xs text-muted-foreground whitespace-nowrap">
           {t("apiCallsEditor.delayMs", "Delay (ms)")}
         </label>
-        <NumberInput placeholder="0" integer
+        <NumberInput aria-label={t("apiCallsEditor.delayMs", "Delay (ms)")} placeholder="0" integer
           value={data.delayBeforeExecutingInMillis}
           onChange={(v) => onChange({ ...data, delayBeforeExecutingInMillis: v })}
           readOnly={readOnly}
@@ -1388,11 +1328,14 @@ function HttpCallEditor({
   onChange,
   onRemove,
   readOnly,
+  actionSuggestions,
 }: {
   call: HttpCall;
   onChange: (c: HttpCall) => void;
   onRemove: () => void;
   readOnly?: boolean;
+  /** Actions other calls in this config already listen for. */
+  actionSuggestions?: readonly string[];
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
@@ -1505,7 +1448,7 @@ function HttpCallEditor({
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("apiCallsEditor.callDescription", "Description")}
             </label>
-            <input
+            <input aria-label={t("apiCallsEditor.callDescription", "Description")}
               type="text"
               value={call.description ?? ""}
               onChange={(e) =>
@@ -1526,6 +1469,10 @@ function HttpCallEditor({
               actions={call.actions ?? []}
               onChange={(a) => onChange({ ...call, actions: a })}
               readOnly={readOnly}
+              suggestions={actionSuggestions}
+              placeholder={t("apiCallsEditor.actionPlaceholder", "e.g. get_weather")}
+              emptyLabel={t("apiCallsEditor.noActions", "No actions")}
+              ariaLabel={t("apiCallsEditor.actions", "Trigger Actions")}
             />
           </EditorSection>
 
@@ -1567,7 +1514,7 @@ function HttpCallEditor({
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 {t("apiCallsEditor.contentType", "Content Type")}
               </label>
-              <input
+              <input aria-label={t("apiCallsEditor.contentType", "Content Type")}
                 type="text"
                 value={request.contentType ?? ""}
                 onChange={(e) => updateRequest({ contentType: e.target.value })}
@@ -2058,7 +2005,7 @@ export function ApiCallsEditor({
           <Globe className="me-1.5 inline h-4 w-4 text-primary" />
           {t("apiCallsEditor.targetServerUrl", "Target Server URL")}
         </label>
-        <input
+        <input aria-label={t("apiCallsEditor.targetServerUrl", "Target Server URL")}
           type="text"
           value={data.targetServerUrl ?? ""}
           onChange={(e) =>
@@ -2315,6 +2262,7 @@ export function ApiCallsEditor({
           <HttpCallEditor
             key={ci}
             call={call}
+            actionSuggestions={[...new Set((data.httpCalls ?? []).flatMap((c) => c.actions ?? []))]}
             onChange={(updated) => {
               const calls = [...(data.httpCalls ?? [])];
               calls[ci] = updated;

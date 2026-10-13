@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, SPACE_HEADER } from "../api-client";
 
 // ==================== Export Types ====================
 
@@ -303,29 +303,6 @@ function mergedHeaders(sourceAuth?: string): Record<string, string> {
 // ==================== Existing Export Functions ==
 
 /**
- * Step 1: Trigger export — backend prepares a zip and returns a Location header.
- * POST /backup/export/{agentId}?agentVersion={version}
- */
-export async function exportAgent(
-  agentId: string,
-  version = 1
-): Promise<string> {
-  const res = await fetch(
-    `${api.getBaseUrl()}/backup/export/${agentId}?agentVersion=${version}`,
-    { method: "POST", headers: api.getAuthHeader() }
-  );
-  if (!res.ok) {
-    throw new Error(`Export failed: ${res.statusText}`);
-  }
-  // Location header contains the download path, e.g. /backup/export/myagent-abc-1.zip
-  const location = res.headers.get("Location");
-  if (!location) {
-    throw new Error("Export succeeded but no Location header returned");
-  }
-  return location;
-}
-
-/**
  * Step 2: Download the zip file at the given path.
  * GET /backup/export/{filename}
  */
@@ -352,18 +329,24 @@ export async function downloadAgentZip(downloadPath: string): Promise<void> {
   URL.revokeObjectURL(a.href);
 }
 
-/**
- * Combined: export + download in one call.
- */
-export async function exportAndDownloadAgent(
-  agentId: string,
-  version = 1
-): Promise<void> {
-  const location = await exportAgent(agentId, version);
-  await downloadAgentZip(location);
-}
-
 // ==================== Existing Import Functions ====================
+
+/**
+ * The space an import writes into — the one the user is looking at, as for
+ * every other create (`ApiClient` adds the same header to `…store/` POSTs).
+ *
+ * These calls bypass `ApiClient` for their zip body, so they never sent it, and
+ * an import always landed in the caller's default space whatever the switcher
+ * said. Since EDDI 6.6 that matters beyond placement: with workspaces enforced
+ * a merge (and its preview) only matches resources the importer may edit IN the
+ * space being imported into, so the space decides which copy a merge updates.
+ * Empty when no space is selected or workspaces are off — `useSpaces` only ever
+ * sets a space the server confirmed the caller is in.
+ */
+export function importSpaceHeader(): Record<string, string> {
+  const space = api.getCreateSpace();
+  return space ? { [SPACE_HEADER]: space } : {};
+}
 
 /**
  * Import a agent from a zip file (create new — default strategy).
@@ -373,7 +356,7 @@ export async function exportAndDownloadAgent(
 export async function importAgent(file: File): Promise<string> {
   const res = await fetch(`${api.getBaseUrl()}/backup/import`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -392,7 +375,7 @@ export async function importAgent(file: File): Promise<string> {
 export async function previewImport(file: File): Promise<ImportPreview> {
   const res = await fetch(`${api.getBaseUrl()}/backup/import/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -431,7 +414,7 @@ export async function importAgentMerge(
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
 
@@ -554,7 +537,7 @@ export async function importAgentUpgrade(
 
   const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
   if (!res.ok) throw await failureOf(res, "Upgrade import failed");

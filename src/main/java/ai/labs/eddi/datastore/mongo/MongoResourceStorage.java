@@ -478,7 +478,8 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
      * {@link IllegalArgumentException}, which turned "is there a local copy of
      * this?" during an import preview or merge into a 500 or a 400. An id that
      * cannot be an ObjectId names nothing here, so every lookup answers "not found"
-     * for it, as the PostgreSQL backend already does for a non-UUID.
+     * for it and every delete of it is a no-op — the same contract the PostgreSQL
+     * backend applies to a non-UUID ({@code PostgresIds}).
      */
     private static boolean isStorableId(String id) {
         return id != null && ObjectId.isValid(id);
@@ -510,7 +511,13 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // hazard. The version is re-checked below instead.
         List<ObjectId> objectIds = new ArrayList<>(ids.size());
         for (IResourceStore.IResourceId id : ids) {
-            objectIds.add(new ObjectId(id.getId()));
+            // Not an ObjectId: names nothing, and must not cost the others their answer.
+            if (isStorableId(id.getId())) {
+                objectIds.add(new ObjectId(id.getId()));
+            }
+        }
+        if (objectIds.isEmpty()) {
+            return List.of();
         }
 
         Map<String, Resource> byId = new HashMap<>();
@@ -529,6 +536,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public void remove(String id) {
+        if (!isStorableId(id)) {
+            return;
+        }
         currentCollection.deleteOne(new Document(ID_FIELD, new ObjectId(id)));
     }
 
@@ -712,6 +722,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
 
     @Override
     public void removeAllPermanently(String id) {
+        if (!isStorableId(id)) {
+            return;
+        }
         remove(id);
         historyCollection.deleteMany(historyRowsOf(id));
     }
@@ -852,7 +865,10 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             }
         }
 
-        Bson query = Filters.and(connectedFilters);
+        // No filter groups means "everything", as on PostgreSQL. $and of an empty list
+        // is
+        // a server-side error ("$and/$or/$nor must be a nonempty array").
+        Bson query = connectedFilters.isEmpty() ? new Document() : Filters.and(connectedFilters);
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 

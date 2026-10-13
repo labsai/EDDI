@@ -40,6 +40,20 @@ public class SimpleConversationMemorySnapshot {
      * assistant was updated" apart from any other end.
      */
     private String endReason;
+    /**
+     * Why the turn failed, when {@link #conversationState} is {@code ERROR} and the
+     * failing task reported a reason; {@code null} (and therefore absent from the
+     * JSON) otherwise. The same sanitized description the streaming endpoint sends
+     * as its {@code task_failed} event, so a plain REST caller no longer receives
+     * HTTP 200 with an ERROR state and nothing to say why. The full per-task digest
+     * stays in the turn's {@code conversationOutputs[…].taskErrors}.
+     * <p>
+     * It is the one {@link TurnError} object everywhere: the failing task
+     * ({@code taskId}, {@code taskType}, {@code errorType}) together with the
+     * machine-readable {@code code}, {@code retryable} and {@code retryAfterMs}.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private TurnError error;
     private Instant hitlPausedAt;
     /**
      * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
@@ -54,13 +68,6 @@ public class SimpleConversationMemorySnapshot {
      * {@code ConversationMemorySnapshot.hitlPendingToolCalls}.
      */
     private PendingToolCallBatch hitlPendingToolCalls;
-    /**
-     * Why the turn this snapshot answers failed; {@code null} (and omitted) when it
-     * did not. Set only on the response to a {@code say}, never on a read, and only
-     * when {@code conversationState} is {@code ERROR}.
-     */
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private TurnError error;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
@@ -146,14 +153,6 @@ public class SimpleConversationMemorySnapshot {
         }
     }
 
-    public TurnError getError() {
-        return error;
-    }
-
-    public void setError(TurnError error) {
-        this.error = error;
-    }
-
     public String getConversationId() {
         return conversationId;
     }
@@ -212,6 +211,14 @@ public class SimpleConversationMemorySnapshot {
 
     public String getEndReason() {
         return endReason;
+    }
+
+    public TurnError getError() {
+        return error;
+    }
+
+    public void setError(TurnError error) {
+        this.error = error;
     }
 
     public void setEndReason(String endReason) {

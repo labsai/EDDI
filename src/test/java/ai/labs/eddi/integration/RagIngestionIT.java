@@ -149,11 +149,27 @@ public class RagIngestionIT extends BaseIntegrationIT {
         Map<String, Object> started = given().contentType(ContentType.TEXT).body("Refunds within 47 days.")
                 .post(ROOT_PATH + kb.id() + "/ingest" + version() + "&documentName=policy.txt&replace=true")
                 .then().statusCode(202).extract().jsonPath().getMap("$");
-        assertEquals("ingestion-it-kb", started.get("kbId"));
+        // Documents always go into the knowledge base in the path, and the response
+        // names it by id, no longer by the configuration's name (docs/rag.md).
+        assertEquals(kb.id(), started.get("kbId"));
 
         // No embedding provider is reachable here, so the ingestion ends failed —
         // what matters is that it was accepted and can be followed.
         given().get(ROOT_PATH + kb.id() + "/ingestion/" + started.get("ingestionId") + "/status")
                 .then().statusCode(200).body("ingestionId", equalTo(started.get("ingestionId")));
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("a kbId naming another knowledge base is refused, not silently redirected")
+    void foreignKbIdRefused() {
+        given().contentType(ContentType.TEXT).body("Refunds within 47 days.")
+                .post(ROOT_PATH + kb.id() + "/ingest" + version() + "&documentName=policy.txt&kbId=someone-elses-kb")
+                .then().statusCode(400).body("error", containsString("different knowledge base"));
+
+        // Naming this knowledge base by its name is still accepted, for old clients.
+        given().contentType(ContentType.TEXT).body("Refunds within 47 days.")
+                .post(ROOT_PATH + kb.id() + "/ingest" + version() + "&documentName=policy.txt&kbId=ingestion-it-kb")
+                .then().statusCode(202).body("kbId", equalTo(kb.id()));
     }
 }

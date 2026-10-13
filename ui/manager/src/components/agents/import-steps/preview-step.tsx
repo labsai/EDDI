@@ -9,7 +9,9 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  Info,
 } from "lucide-react";
+import { useSpaces } from "@/hooks/use-spaces";
 import { Button } from "@/components/ui/button";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
@@ -68,6 +70,7 @@ export function PreviewStep({
       </div>
 
       <PreviewNotices preview={preview} />
+      {strategy === "merge" && <MergeScopeNotice />}
 
       {/* Resource table */}
       <div className="flex-1 overflow-auto rounded-lg border min-h-0">
@@ -158,7 +161,7 @@ export function PreviewStep({
         </span>
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive" role="alert" data-testid="preview-error">{error}</p>}
 
       <div className="flex justify-between pt-2">
         <Button
@@ -223,6 +226,37 @@ export function PreviewNotices({ preview }: { preview: ImportPreview }) {
   );
 }
 
+/**
+ * Which copy a merge can update (EDDI 6.6+). An archive's origin ids are the same
+ * in every workspace that imported it, so with workspaces enforced a merge only
+ * matches a resource the importer may edit in the space being imported into; a
+ * copy in another team's space is left alone and the merge creates the
+ * importer's own copy instead. Without this an editor previewing a merge could
+ * not tell why "update" became "create". Shown only where it applies — with
+ * workspaces off nothing about merging changed.
+ */
+export function MergeScopeNotice() {
+  const { t } = useTranslation();
+  const { enforcement, createSpace } = useSpaces();
+  if (enforcement !== true) return null;
+  const space = createSpace?.label ?? t("importDialog.mergeScopeDefaultSpace", "your default space");
+  return (
+    <p
+      className="flex items-start gap-1.5 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground"
+      data-testid="merge-scope-notice"
+    >
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+      <span>
+        {t("importDialog.mergeScope", {
+          defaultValue:
+            "This merge updates only resources you may edit in {{space}}. A copy of this agent in another workspace is never changed — the import creates your own copy instead. Switch space first to update the copy that lives there.",
+          space,
+        })}
+      </span>
+    </p>
+  );
+}
+
 function MatchBadge({ strategy }: { strategy: string | null }) {
   if (!strategy) return null;
   const labels: Record<string, string> = {
@@ -259,6 +293,7 @@ function PreviewRow({
   workflowOrder: string[];
   onMoveWorkflow: (id: string, dir: -1 | 1) => void;
 }) {
+  const { t } = useTranslation();
   // A conflict is the row whose diff matters most; a removal shows what goes.
   const hasDiff =
     (resource.action === "UPDATE" || resource.action === "CONFLICT" || resource.action === "REMOVE") &&
@@ -286,7 +321,8 @@ function PreviewRow({
                   onClick={() => onMoveWorkflow(resource.sourceId, -1)}
                   disabled={wfIdx === 0}
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move up"
+                  title={t("importDialog.moveUp", "Move up")}
+                  aria-label={t("importDialog.moveUp", "Move up")}
                 >
                   <ArrowUp className="h-3 w-3" />
                 </button>
@@ -294,7 +330,8 @@ function PreviewRow({
                   onClick={() => onMoveWorkflow(resource.sourceId, 1)}
                   disabled={wfIdx === workflowOrder.length - 1}
                   className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                  title="Move down"
+                  title={t("importDialog.moveDown", "Move down")}
+                  aria-label={t("importDialog.moveDown", "Move down")}
                 >
                   <ArrowDown className="h-3 w-3" />
                 </button>

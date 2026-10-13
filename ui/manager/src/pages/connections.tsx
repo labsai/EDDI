@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
@@ -111,17 +112,29 @@ export function ConnectionsPage() {
     [connections],
   );
 
+  const deleteTargetName =
+    connections?.find((c) => c.id === deleteTarget?.id)?.connectionName ?? "";
+  /** Hard delete — explicit opt-in; the store (and this dialog) default to soft. */
+  const [deletePermanently, setDeletePermanently] = useState(false);
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     try {
       await deleteMutation.mutateAsync({
         id: deleteTarget.id,
         version: deleteTarget.version,
+        permanent: deletePermanently,
       });
+      toast.success(
+        t("connections.deleted", "Connection \"{{name}}\" deleted", {
+          name: deleteTargetName,
+        }),
+      );
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
       setDeleteTarget(null);
+      setDeletePermanently(false);
     }
   };
 
@@ -254,6 +267,7 @@ export function ConnectionsPage() {
             </div>
           ) : loadFailed ? (
             <ErrorState
+              error={error}
               message={t("common.error", "Something went wrong")}
               onRetry={() => void refetch()}
               retryLabel={t("common.retry", "Retry")}
@@ -379,17 +393,32 @@ export function ConnectionsPage() {
 
       <AlertDialog
         open={deleteTarget !== null}
-        onOpenChange={() => setDeleteTarget(null)}
-        title={t("connections.confirmDelete", "Delete this connection?")}
+        onOpenChange={() => {
+          setDeleteTarget(null);
+          setDeletePermanently(false);
+        }}
+        title={
+          deleteTargetName
+            ? t("connections.confirmDeleteNamed", "Delete connection \"{{name}}\"?", {
+                name: deleteTargetName,
+              })
+            : t("connections.confirmDelete", "Delete this connection?")
+        }
         description={t(
           "connections.confirmDeleteDesc",
           "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",
         )}
         onConfirm={() => void confirmDelete()}
-        confirmLabel={t("common.delete", "Delete")}
+        confirmLabel={
+          deletePermanently
+            ? t("common.deletePermanently", "Delete permanently")
+            : t("common.delete", "Delete")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         isPending={deleteMutation.isPending}
-      />
+      >
+        <PermanentDeleteOption checked={deletePermanently} onChange={setDeletePermanently} />
+      </AlertDialog>
     </div>
   );
 }

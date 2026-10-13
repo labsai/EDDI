@@ -459,7 +459,11 @@ a:hover { opacity: 0.85; }
   color: var(--chat-qr-text);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
-  white-space: nowrap;
+  /* A long reply wraps inside the pill instead of being clipped on a phone. */
+  white-space: normal;
+  text-align: start;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .quick-replies__btn:hover {
@@ -1460,4 +1464,153 @@ a:hover { opacity: 0.85; }
 .recovery-banner__btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ─── System notices (the widget talking, not the agent) ─── */
+
+.message--notice {
+  align-self: center;
+  max-width: 92%;
+  justify-content: center;
+}
+
+.message__notice {
+  padding: 6px 12px;
+  border: 1px solid var(--chat-border);
+  border-left: 3px solid var(--chat-warning);
+  border-radius: 8px;
+  background: var(--chat-surface);
+  color: var(--chat-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Copy buttons ─── */
+
+.message__copy,
+.code-block__copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  opacity: 0.55;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.message__copy {
+  display: flex;
+  margin: 4px 0 -4px auto;
+}
+
+.message__copy:hover,
+.message__copy:focus-visible,
+.code-block__copy:hover,
+.code-block__copy:focus-visible {
+  opacity: 1;
+  background: var(--chat-accent-soft);
+}
+
+.code-block {
+  position: relative;
+}
+
+.code-block__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* ─── Header text title ─── */
+
+.chat-header__title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--chat-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── New-conversation confirmation ─── */
+
+.chat-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--chat-border);
+  border-left: 3px solid var(--chat-warning);
+  border-radius: 10px;
+  background: var(--chat-surface);
+  font-size: 0.85rem;
+}
+
+.chat-confirm__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-confirm__btn {
+  padding: 5px 14px;
+  font-family: var(--chat-font);
+  font-size: 0.82rem;
+  color: var(--chat-text);
+  background: transparent;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.chat-confirm__btn:hover {
+  background: var(--chat-accent-soft);
+}
+
+.chat-confirm__btn--danger {
+  border-color: var(--chat-warning);
+}
+
+/* ─── Leave an agent-requested field ─── */
+
+.secret-input__cancel {
+  margin-top: 8px;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  color: var(--chat-text-muted);
+  font-family: var(--chat-font);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.secret-input__cancel:hover {
+  color: var(--chat-text);
+}
+
+/* ─── Paused, status not known yet ─── */
+
+.paused-card--pending {
+  opacity: 0.85;
+}
+
+/* ─── iOS Safari zooms the page when a focused field is under 16px ─── */
+
+@media (max-width: 768px) {
+  .chat-input__textarea,
+  .chat-input__secret-field,
+  .secret-input__field {
+    font-size: 16px;
+  }
 }

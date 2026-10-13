@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { GroupConfigPanel } from "../group-config-panel";
@@ -97,20 +97,23 @@ describe("GroupConfigPanel", () => {
     const user = userEvent.setup();
 
     const deletedAgents: string[] = [];
+    const agentPermanentFlags: (string | null)[] = [];
     let groupDeleted = false;
+    let groupDeleteUrl: URL | null = null;
 
     server.use(
       http.get("*/agentstore/agents/:agentId/currentversion", () => {
         return HttpResponse.json(1);
       }),
-      http.delete("*/agentstore/agents/:agentId", ({ params }) => {
+      http.delete("*/agentstore/agents/:agentId", ({ params, request }) => {
+        agentPermanentFlags.push(new URL(request.url).searchParams.get("permanent"));
         deletedAgents.push(params.agentId as string);
         return new HttpResponse(null, { status: 204 });
       }),
       http.delete("*/groupstore/groups/:groupId", ({ request }) => {
-        const url = new URL(request.url);
-        expect(url.searchParams.get("permanent")).toBe("false");
-        expect(url.searchParams.get("version")).toBe("1");
+        // Recorded and asserted OUTSIDE the handler: an `expect` that throws in
+        // here only turns into a 500, which the test would read as "deleted".
+        groupDeleteUrl = new URL(request.url);
         groupDeleted = true;
         return new HttpResponse(null, { status: 204 });
       })
@@ -125,14 +128,15 @@ describe("GroupConfigPanel", () => {
 
     await user.click(deleteBtn);
 
-    // Warning should show up
-    expect(screen.getByText(/This will soft-delete the group/)).toBeInTheDocument();
+    // Warning should show up, with the hard-delete option unticked
+    expect(screen.getByTestId("group-delete-warning")).toBeInTheDocument();
+    expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
 
     // Cancel deletes
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     await user.click(cancelBtn);
 
-    expect(screen.queryByText(/This will soft-delete the group/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("group-delete-warning")).not.toBeInTheDocument();
 
     // Open again and confirm deletion
     const deleteBtnFresh = screen.getByRole("button", { name: "Delete Group + All Agents" });
@@ -146,6 +150,62 @@ describe("GroupConfigPanel", () => {
       expect(deletedAgents).toContain("agent-mod");
       expect(deletedAgents).toContain("agent-peer");
       expect(deletedAgents).not.toContain("agent-group-sub");
+    });
+    expect(groupDeleteUrl!.searchParams.get("permanent")).toBe("false");
+    expect(groupDeleteUrl!.searchParams.get("version")).toBe("1");
+    // Soft for the agents too — deleteAgent only sends the flag when it is true.
+    expect(agentPermanentFlags.every((f) => f === null)).toBe(true);
+  });
+
+  describe("Delete Group Only (review 2026-10-02 #7)", () => {
+    function captureGroupDelete() {
+      const urls: URL[] = [];
+      server.use(
+        http.delete("*/groupstore/groups/:groupId", ({ request }) => {
+          urls.push(new URL(request.url));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      return urls;
+    }
+
+    it("soft-deletes by default — it used to send permanent=true and take the workspace with it", async () => {
+      const user = userEvent.setup();
+      const urls = captureGroupDelete();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
+      await user.click(screen.getByTestId("group-delete-confirm-btn"));
+
+      await waitFor(() => expect(urls).toHaveLength(1));
+      expect(urls[0]!.searchParams.get("permanent")).toBe("false");
+      expect(urls[0]!.searchParams.get("version")).toBe("4");
+    });
+
+    it("hard-deletes only when 'Delete permanently' is ticked, and says so on the button", async () => {
+      const user = userEvent.setup();
+      const urls = captureGroupDelete();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      await user.click(screen.getByTestId("permanent-delete-checkbox"));
+      expect(screen.getByTestId("group-delete-confirm-btn")).toHaveTextContent("Delete permanently");
+      await user.click(screen.getByTestId("group-delete-confirm-btn"));
+
+      await waitFor(() => expect(urls).toHaveLength(1));
+      expect(urls[0]!.searchParams.get("permanent")).toBe("true");
+    });
+
+    it("forgets the permanent choice when the confirmation is cancelled", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="grp-1" groupVersion={4} />);
+
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      await user.click(screen.getByTestId("permanent-delete-checkbox"));
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await user.click(screen.getByTestId("group-delete-only-btn"));
+      expect(screen.getByTestId("permanent-delete-checkbox")).not.toBeChecked();
     });
   });
 
@@ -292,17 +352,48 @@ describe("GroupConfigPanel", () => {
       expect(screen.queryByText("Models")).not.toBeInTheDocument();
     });
 
-    /** Both inline editors write the whole config at the same version. */
-    it("closes the approval editor when the phase editor is opened", async () => {
+    /**
+     * The inline editors write the whole config at the same version, so only one
+     * may be open — but opening a second used to close the first and discard
+     * what was typed into it. The others' Edit buttons are disabled instead.
+     */
+    it("does not offer the phase editor while the approval editor is open, and keeps its draft", async () => {
       const user = userEvent.setup();
       renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
 
       await user.click(screen.getByTestId("group-hitl-edit"));
       expect(screen.getByTestId("group-hitl-editor")).toBeInTheDocument();
 
+      expect(screen.getByTestId("group-phase-edit")).toBeDisabled();
       await user.click(screen.getByTestId("group-phase-edit"));
-      expect(screen.getByTestId("group-phase-editor")).toBeInTheDocument();
-      expect(screen.queryByTestId("group-hitl-editor")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("group-phase-editor")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-hitl-editor")).toBeInTheDocument();
+    });
+
+    it("reports whether an editor is open, and clears the report on unmount", async () => {
+      const user = userEvent.setup();
+      const onEditingChange = vi.fn();
+      const { unmount } = renderWithProviders(
+        <GroupConfigPanel
+          config={mockConfig}
+          groupId="g1"
+          groupVersion={2}
+          onEditingChange={onEditingChange}
+        />,
+      );
+      expect(onEditingChange).toHaveBeenLastCalledWith(false);
+      await user.click(screen.getByTestId("group-hitl-edit"));
+      expect(onEditingChange).toHaveBeenLastCalledWith(true);
+      unmount();
+      expect(onEditingChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("points at the Workforce settings for name, members and the rest", () => {
+      renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
+      expect(screen.getByTestId("group-edit-basics")).toHaveAttribute(
+        "href",
+        "/workforce/g1/settings?version=2",
+      );
     });
 
     /**
@@ -333,15 +424,16 @@ describe("GroupConfigPanel", () => {
       expect(screen.getByText("Transcript window")).toBeInTheDocument();
     });
 
-    it("closes the advanced editor when another editor is opened", async () => {
+    it("keeps the advanced editor open when another editor is requested", async () => {
       const user = userEvent.setup();
       renderWithProviders(<GroupConfigPanel config={mockConfig} groupId="g1" groupVersion={2} />);
 
       await user.click(screen.getByTestId("group-advanced-edit"));
       expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
 
+      expect(screen.getByTestId("group-hitl-edit")).toBeDisabled();
       await user.click(screen.getByTestId("group-hitl-edit"));
-      expect(screen.queryByTestId("group-advanced-editor")).not.toBeInTheDocument();
+      expect(screen.getByTestId("group-advanced-editor")).toBeInTheDocument();
     });
   });
 });

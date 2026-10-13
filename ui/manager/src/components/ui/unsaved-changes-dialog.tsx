@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
 
@@ -10,6 +10,17 @@ interface UnsavedChangesDialogProps {
   message?: string;
   /** Title. Defaults to "Unsaved Changes" */
   title?: string;
+  /** Extra controls rendered under the message (e.g. an "also delete" checkbox). */
+  children?: ReactNode;
+  /**
+   * Offers a third choice, "Save", beside Cancel and Discard — for flows where
+   * leaving is fine as long as the work is kept.
+   */
+  onSave?: () => void;
+  /** Label of the cancel button. Defaults to "Cancel". */
+  cancelLabel?: string;
+  /** Label of the confirm (discard) button. Defaults to "Discard & Leave". */
+  confirmLabel?: string;
 }
 
 /**
@@ -22,6 +33,10 @@ export function UnsavedChangesDialog({
   onCancel,
   message,
   title,
+  children,
+  onSave,
+  cancelLabel,
+  confirmLabel,
 }: UnsavedChangesDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -41,14 +56,24 @@ export function UnsavedChangesDialog({
     }
   }, [open]);
 
-  // Esc key cancels
+  // Esc key cancels.
+  //
+  // Registered in the CAPTURE phase and stopped there. This dialog is routinely
+  // opened on top of another one (an editor sheet, a create dialog), and those
+  // listen for Escape on `window` too: a bubble-phase listener here, even with
+  // stopPropagation, still left the other window listeners firing, so one Escape
+  // closed both dialogs and the user lost the very edit this one was protecting.
+  // Capture runs before any of them, and stopPropagation then ends the event.
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      e.preventDefault();
+      onCancel();
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [open, onCancel]);
 
   // Focus trap
@@ -109,6 +134,7 @@ export function UnsavedChangesDialog({
                   "You have unsaved changes that will be lost. Are you sure you want to continue?"
                 )}
             </p>
+            {children}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-border p-4">
@@ -117,15 +143,24 @@ export function UnsavedChangesDialog({
               className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
               data-testid="unsaved-cancel"
             >
-              {t("common.cancel", "Cancel")}
+              {cancelLabel ?? t("common.cancel", "Cancel")}
             </button>
             <button
               onClick={onConfirm}
               className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
               data-testid="unsaved-confirm"
             >
-              {t("editor.discardAndLeave", "Discard & Leave")}
+              {confirmLabel ?? t("editor.discardAndLeave", "Discard & Leave")}
             </button>
+            {onSave && (
+              <button
+                onClick={onSave}
+                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                data-testid="unsaved-save"
+              >
+                {t("editor.save", "Save")}
+              </button>
+            )}
           </div>
         </div>
       </div>

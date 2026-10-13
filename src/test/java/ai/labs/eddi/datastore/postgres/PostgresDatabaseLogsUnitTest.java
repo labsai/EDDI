@@ -15,6 +15,8 @@ import org.mockito.MockitoAnnotations;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.List;
+import org.mockito.ArgumentCaptor;
+import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -195,10 +197,52 @@ class PostgresDatabaseLogsUnitTest {
         verify(preparedStatement).setString(2, "user-1");
     }
 
+    /**
+     * Returning 0 on a failed UPDATE made the GDPR cascade read "this user has no
+     * log entries" and report the erasure complete while the raw id stayed in the
+     * table.
+     */
     @Test
-    void pseudonymizeByUserId_sqlException_returnsZero() throws Exception {
+    void pseudonymizeByUserId_sqlException_throwsSoTheErasureIsReportedIncomplete() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
 
-        assertEquals(0, databaseLogs.pseudonymizeByUserId("user-1", "anon"));
+        assertThrows(IllegalStateException.class, () -> databaseLogs.pseudonymizeByUserId("user-1", "anon"));
+    }
+
+    // ─── Retention: deleteOlderThan ───
+
+    @Test
+    void deleteOlderThan_deletesBeforeTheCutoff() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(7);
+        long before = System.currentTimeMillis();
+
+        assertEquals(7, databaseLogs.deleteOlderThan(30));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(q -> q.startsWith("DELETE FROM database_logs WHERE ctid IN")), sql.getAllValues().toString());
+        var cutoff = ArgumentCaptor.forClass(Timestamp.class);
+        verify(preparedStatement).setTimestamp(eq(1), cutoff.capture());
+        long expected = before - Duration.ofDays(30).toMillis();
+        assertTrue(Math.abs(cutoff.getValue().getTime() - expected) < 60_000, "cutoff is now minus 30 days");
+    }
+
+    @Test
+    void deleteOlderThan_repeatsUntilABatchIsShort() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(PostgresDatabaseLogs.RETENTION_BATCH_SIZE, PostgresDatabaseLogs.RETENTION_BATCH_SIZE, 5);
+
+        assertEquals(2L * PostgresDatabaseLogs.RETENTION_BATCH_SIZE + 5, databaseLogs.deleteOlderThan(30));
+        verify(preparedStatement, times(3)).executeUpdate();
+    }
+
+    @Test
+    void deleteOlderThan_rejectsANonPositiveRetention() {
+        assertThrows(IllegalArgumentException.class, () -> databaseLogs.deleteOlderThan(0));
+    }
+
+    @Test
+    void deleteOlderThan_sqlException_throws() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
+        assertThrows(IllegalStateException.class, () -> databaseLogs.deleteOlderThan(5));
     }
 }

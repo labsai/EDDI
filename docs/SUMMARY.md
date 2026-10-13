@@ -8,10 +8,9 @@
 - [Developer Quickstart Guide](developer-quickstart.md)
 - [Agent Manager Dashboard](agent-manager-gui.md)
 - [Creating your first Agent](creating-your-first-agent/README.md)
-  - [Create a "Hello World" agent](creating-your-first-agent/creating-your-first-agent.md)
-  - [Create an agent that reacts to user inputs](creating-your-first-agent/creating-your-first-agent-1.md)
 - [Putting It All Together](putting-it-all-together.md)
 - [Import/Export an Agent](import-export-an-agent.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## Architecture & Concepts
 
@@ -42,6 +41,7 @@
 ## Conversations & Orchestration
 
 - [Conversations](conversations.md)
+- [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Managed Agents](managed-agents.md)
@@ -58,6 +58,7 @@
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
+- [Embedding the Chat UI](chat-ui-embedding.md)
 
 ## Security & Compliance
 
@@ -81,13 +82,15 @@
 - [Configuration Reference](configuration-reference.md)
 - [Upgrading from EDDI 5.x](upgrading-from-5x.md)
 - [Upgrading from EDDI 6.4](upgrading-from-6.4.md)
+- [Upgrading from EDDI 6.5](upgrading-from-6.5.md)
 - [Docker](docker.md)
 - [Kubernetes](kubernetes.md)
 - [RedHat OpenShift](redhat-openshift.md)
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [Release & Versioning Strategy](release-versioning.md)
 - [Release Signing & Verification](release-signing.md)
-- [Release Notes — 6.0.2](release-notes-6.0.2.md)
+- [Release Notes](release-notes.md)
+  - [Release Notes — 6.0.2](release-notes-6.0.2.md)
 - [Metrics & Monitoring](metrics.md)
 - [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)

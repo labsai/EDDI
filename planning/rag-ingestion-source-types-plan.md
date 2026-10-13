@@ -1,6 +1,6 @@
 # Implementation Plan — More Knowledge-Base Source Types
 
-**Status:** Planning
+**Status:** Partly implemented. The ingestion stack this builds on is on `main` (changelog 2026-09-17/18), and the upload source with the PDF, DOCX, XLSX, PPTX and CSV converters shipped on 2026-09-21. Not started: Phase F and the authenticated sources (SharePoint/OneDrive, Drive, mail) with cursors and ACLs. The "not on `main` yet" note and the §2 "today" table below predate that.
 **Created:** 2026-09-19
 **Scope:** Backend (EDDI repo) plus the Manager (`ui/manager`)
 **Builds on:** the RAG ingestion stack in labsai/EDDI #783–#787, #789 and #790

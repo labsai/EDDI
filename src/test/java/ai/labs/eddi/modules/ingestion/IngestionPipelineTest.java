@@ -88,7 +88,7 @@ class IngestionPipelineTest {
         modelFactory = mock(EmbeddingModelFactory.class);
         embeddingModel = mock(EmbeddingModel.class);
 
-        when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
+        when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
         when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
                 .thenReturn(embeddingModel);
         when(embeddingModel.embedAll(any())).thenAnswer(invocation -> {
@@ -180,9 +180,9 @@ class IngestionPipelineTest {
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
             ArgumentCaptor<String> kbId = ArgumentCaptor.forClass(String.class);
-            verify(storeFactory).getOrCreate(any(RagConfiguration.class), kbId.capture());
-            assertEquals(KB_NAME, kbId.getValue(),
-                    "the store must be keyed by the knowledge base, not by " + SOURCE_NAME);
+            verify(storeFactory).getOrCreate(kbId.capture(), any(RagConfiguration.class));
+            assertEquals(KB_RESOURCE_ID, kbId.getValue(),
+                    "the store must be keyed by the knowledge base's id, not by " + SOURCE_NAME + " nor by a name another knowledge base can share");
         }
 
         @Test
@@ -306,7 +306,7 @@ class IngestionPipelineTest {
         @DisplayName("a store that cannot delete is reported, not silently duplicated into")
         void unsupportedRemovalIsReported() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
-            when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
             FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
 
             IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
@@ -596,7 +596,7 @@ class IngestionPipelineTest {
             var site = new FakeSite().page(SITE + "/", pageWith("Here."));
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
-            when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString()))
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class)))
                     .thenReturn(new RecordingEmbeddingStore().withFailingRemoval());
 
             var gone = new FakeSite().status(SITE + "/", 404);
@@ -1597,7 +1597,7 @@ class IngestionPipelineTest {
         @DisplayName("a document forgotten while the store could not delete says so")
         void forgetDocumentReportsAnUndeletableStore() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
-            when(storeFactory.getOrCreate(any(RagConfiguration.class), anyString())).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
 
             var removed = uploadPipeline()
                     .forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), "secret.md");

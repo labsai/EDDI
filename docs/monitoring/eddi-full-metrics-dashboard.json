@@ -1173,7 +1173,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_processing_conversation_count`",
+          "description": "`eddi_processing_conversation_count`, and `eddi_conversation_abandoned_running` — turns the agent-timeout watchdog gave up on whose pipeline is still running (normally 0).",
           "gridPos": {
             "h": 7,
             "w": 6,
@@ -1184,6 +1184,17 @@
             {
               "refId": "A",
               "expr": "sum(eddi_processing_conversation_count{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum(eddi_conversation_abandoned_running{job=~\"$job\"})",
+              "legendFormat": "abandoned, still running",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -7543,6 +7554,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "skipped"
+            },
+            {
+              "refId": "E",
+              "expr": "sum(rate(eddi_schedule_fire_timedout_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "timed out"
             }
           ],
           "fieldConfig": {
@@ -7832,12 +7854,12 @@
         {
           "id": 158,
           "type": "timeseries",
-          "title": "Fire logs pruned",
+          "title": "Retention sweeps — rows removed",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_schedule_firelog_pruned_total` — rows the retention sweep removed from the fire log. Flat while the table keeps growing means retention is off (`eddi.schedule.fire-log-retention=0`) or the sweep is failing — the poller logs that at ERROR.",
+          "description": "`eddi_schedule_firelog_pruned_total` — rows the retention sweep removed from the schedule fire log; flat while the table keeps growing means retention is off (`eddi.schedule.fire-log-retention=0`) or the sweep is failing — the poller logs that at ERROR. `eddi_logs_db_retention_deleted_total` — persisted log entries the daily sweep deleted; flat means `eddi.logs.db-retention-days` is off (the default) or the sweep is failing (logged at ERROR).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7853,7 +7875,19 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "schedule fire logs"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_logs_db_retention_deleted_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "database log entries"
             }
           ],
           "fieldConfig": {
@@ -7893,9 +7927,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
@@ -7926,7 +7960,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_dream_*_total` — the DreamService consolidation pass.",
+          "description": "`eddi_dream_*_total` — the DreamService consolidation pass. `conflicts skipped` counts prunes, overwrites and deletes Dream did not make because the memory was written after the cycle read it.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -7966,6 +8000,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "entries pruned"
+            },
+            {
+              "refId": "D",
+              "expr": "sum(rate(eddi_dream_conflicts_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "conflicts skipped (newer write kept)"
             }
           ],
           "fieldConfig": {
@@ -9202,12 +9247,12 @@
         {
           "id": 96,
           "type": "timeseries",
-          "title": "Conversations created via /v1",
+          "title": "Conversations and chat keys via /v1",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_openai_conversations_created_total` — each new Open WebUI chat maps to a fresh EDDI conversation.",
+          "description": "`eddi_openai_conversations_created_total` — each new chat maps to a fresh EDDI conversation; `eddi_openai_conversations_rolled_over_total` — conversations ended at `max-conversation-steps`; `eddi_openai_chat_keys_total` by `source` — where each stateful request's chat key came from (`history` = derived from the opening messages, `shared` = the single per-user conversation).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -9223,12 +9268,260 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
+              "range": true,
+              "legendFormat": "created"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_openai_conversations_rolled_over_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rolled over (max-conversation-steps)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (source) (rate(eddi_openai_chat_keys_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "chat key: {{source}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 174,
+          "type": "timeseries",
+          "title": "A2A requests by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_a2a_requests_total` by `outcome` — `busy` is a refusal at `eddi.a2a.max-concurrent-requests`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 39
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_a2a_requests_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
               "range": true
             }
           ],
           "fieldConfig": {
             "defaults": {
               "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 175,
+          "type": "timeseries",
+          "title": "A2A tasks by state",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_a2a_tasks_total` by `state` — `failed` and `input_required` are turns that did not produce an answer.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 46
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (state) (rate(eddi_a2a_tasks_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 176,
+          "type": "timeseries",
+          "title": "A2A in-flight turns",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_a2a_in_flight` — A2A turns holding a slot; compare with `eddi.a2a.max-concurrent-requests`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(eddi_a2a_in_flight{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
               "color": {
                 "mode": "palette-classic"
               },
@@ -9322,6 +9615,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "errors"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (scope) (rate(eddi_attachments_quota_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "quota rejected: {{scope}}"
             }
           ],
           "fieldConfig": {
@@ -10718,7 +11022,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing.",
+          "description": "`eddi_vault_errors_count_total` (provider) and `eddi_vault_resolve_errors_total` (resolver). A resolve error means a `${vault:...}` reference did not resolve — the dependent HTTP call or model provider is now failing. `eddi_vault_reseal_failures_total` counts sealed rows (OAuth grants) a DEK rotation could not open and skipped — each is a linked account that may need reconnecting.",
           "gridPos": {
             "h": 6,
             "w": 10,
@@ -10747,6 +11051,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "resolve errors"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (participant) (rate(eddi_vault_reseal_failures_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rows a DEK rotation skipped/s ({{participant}})"
             }
           ],
           "fieldConfig": {
