@@ -70,13 +70,15 @@ class LlmParametersDocumentationTest {
 
             params.forEach((key, param) -> {
                 String where = id + "." + key;
-                if (!section.contains("| `" + key + "`")) {
+                String row = section.lines().filter(line -> line.startsWith("| `" + key + "`")).findFirst().orElse(null);
+                if (row == null) {
                     problems.add(where + " has no row in its section");
                     return;
                 }
+                // the description closes its own row, so one swapped between rows is caught too
                 String description = param.get("description").asText().replace("|", "\\|");
-                if (!section.contains(description)) {
-                    problems.add(where + " description is stale");
+                if (!row.endsWith("| " + description + " |")) {
+                    problems.add(where + " description is stale or on the wrong row");
                 }
                 if (!inheritedOnly.get(key) && param.has("rules")) {
                     for (JsonNode rule : param.get("rules")) {
