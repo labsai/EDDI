@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.memory.IData;
@@ -57,7 +58,8 @@ class InputParserTaskExpressionStorageTest {
         Map<String, Provider<INormalizerProvider>> normalizerProviders = new HashMap<>();
         Map<String, Provider<IDictionaryProvider>> dictionaryProviders = new HashMap<>();
         Map<String, Provider<ICorrectionProvider>> correctionProviders = new HashMap<>();
-        task = new InputParserTask(expressionProvider, normalizerProviders, dictionaryProviders, correctionProviders, new ObjectMapper());
+        task = new InputParserTask(expressionProvider, normalizerProviders, dictionaryProviders, correctionProviders, new ObjectMapper(),
+                mock(IResourceClientLibrary.class));
     }
 
     // ==================== E14: appendExpressions must not disable storage

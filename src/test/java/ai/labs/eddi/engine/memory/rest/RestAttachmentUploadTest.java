@@ -20,6 +20,7 @@ import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,7 @@ class RestAttachmentUploadTest {
                 .thenReturn(mock(ConversationDescriptor.class));
         managedExecutor = ManagedExecutor.builder().build();
         endpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard, conversationDescriptorStore,
-                managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES);
+                managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES, new SimpleMeterRegistry());
     }
 
     /**
@@ -111,7 +112,7 @@ class RestAttachmentUploadTest {
             var attachment = new Attachment(
                     "ref-123", "photo.png", "image/png", 42, "conv-1");
             when(attachmentStore.store(any(byte[].class), eq("image/png"),
-                    eq("photo.png"), eq("conv-1"), isNull()))
+                    eq("photo.png"), eq("conv-1"), isNull(), any()))
                     .thenReturn(attachment);
 
             Path tempFile = Files.createTempFile("test-upload", ".png");
@@ -144,7 +145,7 @@ class RestAttachmentUploadTest {
             var attachment = new Attachment(
                     "ref-big", "huge.png", "image/png", 11L * 1024 * 1024, "conv-1");
             when(attachmentStore.store(any(byte[].class), eq("image/png"),
-                    eq("huge.png"), eq("conv-1"), isNull()))
+                    eq("huge.png"), eq("conv-1"), isNull(), any()))
                     .thenReturn(attachment);
 
             Path tempFile = Files.createTempFile("test-upload", ".png");
@@ -172,7 +173,7 @@ class RestAttachmentUploadTest {
                     "application/octet-stream", 10, "conv-1");
             when(attachmentStore.store(any(byte[].class),
                     eq("application/octet-stream"), eq("data.bin"),
-                    eq("conv-1"), isNull()))
+                    eq("conv-1"), isNull(), any()))
                     .thenReturn(attachment);
 
             Path tempFile = Files.createTempFile("test-upload", ".bin");
@@ -188,7 +189,7 @@ class RestAttachmentUploadTest {
             assertEquals(201, response.getStatus());
             verify(attachmentStore).store(any(byte[].class),
                     eq("application/octet-stream"), eq("data.bin"),
-                    eq("conv-1"), isNull());
+                    eq("conv-1"), isNull(), any());
 
             Files.deleteIfExists(tempFile);
         }
@@ -196,7 +197,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn400WhenStoreRejects() throws Exception {
             when(attachmentStore.store(any(byte[].class), anyString(),
-                    anyString(), anyString(), any()))
+                    anyString(), anyString(), any(), any()))
                     .thenThrow(new AttachmentStoreException(
                             "File too large"));
 
@@ -225,7 +226,7 @@ class RestAttachmentUploadTest {
                     "application/pdf", 50, "conv-1");
             when(attachmentStore.store(any(byte[].class),
                     eq("application/pdf"), eq("doc.pdf"),
-                    eq("conv-1"), eq("tenant-42")))
+                    eq("conv-1"), eq("tenant-42"), any()))
                     .thenReturn(attachment);
 
             Path tempFile = Files.createTempFile("test-upload", ".pdf");
@@ -241,7 +242,7 @@ class RestAttachmentUploadTest {
             assertEquals(201, response.getStatus());
             verify(attachmentStore).store(any(byte[].class),
                     eq("application/pdf"), eq("doc.pdf"),
-                    eq("conv-1"), eq("tenant-42"));
+                    eq("conv-1"), eq("tenant-42"), any());
 
             Files.deleteIfExists(tempFile);
         }
@@ -254,7 +255,7 @@ class RestAttachmentUploadTest {
             // Expect null tenantId (sanitized away)
             when(attachmentStore.store(any(byte[].class),
                     eq("text/plain"), eq("file.txt"),
-                    eq("conv-1"), isNull()))
+                    eq("conv-1"), isNull(), any()))
                     .thenReturn(attachment);
 
             Path tempFile = Files.createTempFile("test-upload", ".txt");
@@ -273,7 +274,7 @@ class RestAttachmentUploadTest {
             // tenantId should have been sanitized to null
             verify(attachmentStore).store(any(byte[].class),
                     eq("text/plain"), eq("file.txt"),
-                    eq("conv-1"), isNull());
+                    eq("conv-1"), isNull(), any());
 
             Files.deleteIfExists(tempFile);
         }
@@ -299,7 +300,7 @@ class RestAttachmentUploadTest {
         void shouldReturn400WhenFileTooLarge() throws Exception {
             // Create endpoint with very small max size
             var smallEndpoint = new RestAttachmentUpload(attachmentStore, conversationAccessGuard,
-                    conversationDescriptorStore, managedExecutor, 100, MAX_FORWARD_BYTES);
+                    conversationDescriptorStore, managedExecutor, 100, MAX_FORWARD_BYTES, new SimpleMeterRegistry());
 
             Path tempFile = Files.createTempFile("test-large", ".bin");
             Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
@@ -717,6 +718,57 @@ class RestAttachmentUploadTest {
                     () -> endpoint.deleteAttachments("conv-gone", mock(AsyncResponse.class)));
 
             verifyNoInteractions(attachmentStore);
+        }
+    }
+
+    @Nested
+    class QuotaTests {
+
+        @Test
+        void theConversationOwner_isWhoTheBlobCountsAgainst() throws Exception {
+            ConversationDescriptor descriptor = mock(ConversationDescriptor.class);
+            when(descriptor.getUserId()).thenReturn("owner-7");
+            when(conversationDescriptorStore.readDescriptor(eq("conv-1"), any())).thenReturn(descriptor);
+            when(attachmentStore.store(any(byte[].class), any(), any(), any(), any(), any()))
+                    .thenReturn(new Attachment("ref", "a.txt", "text/plain", 5, "conv-1"));
+            Path tempFile = Files.createTempFile("test-upload", ".txt");
+            Files.write(tempFile, "hello".getBytes());
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("a.txt");
+            when(file.contentType()).thenReturn("text/plain");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(201, response.getStatus());
+            verify(attachmentStore).store(any(byte[].class), eq("text/plain"), eq("a.txt"), eq("conv-1"), isNull(),
+                    eq("owner-7"));
+            Files.deleteIfExists(tempFile);
+        }
+
+        @Test
+        void overQuota_namesTheQuota_andIsCounted() throws Exception {
+            var meters = new SimpleMeterRegistry();
+            var counted = new RestAttachmentUpload(attachmentStore, conversationAccessGuard, conversationDescriptorStore,
+                    managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES, meters);
+            when(attachmentStore.store(any(byte[].class), any(), any(), any(), any(), any()))
+                    .thenThrow(new IAttachmentStore.AttachmentQuotaExceededException("user", "Attachment quota exceeded for user"));
+            Path tempFile = Files.createTempFile("test-upload", ".txt");
+            Files.write(tempFile, "hello".getBytes());
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("a.txt");
+            when(file.contentType()).thenReturn("text/plain");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> counted.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(400, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_REJECTED", body.get("code"));
+            assertEquals("user", body.get("quota"));
+            assertEquals(1.0, meters.counter("eddi.attachments.quota.rejected", "scope", "user").count());
+            Files.deleteIfExists(tempFile);
         }
     }
 }

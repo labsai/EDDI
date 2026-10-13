@@ -1,5 +1,7 @@
 # Documentation & AGENTS.md Updates Plan
 
+> **Status: DONE.** The updates this lists (AGENTS.md coverage of `SafeHttpClient`, `UrlValidationUtils`, `VaultSaltManager` and the v6.0.2 hardening) are in AGENTS.md §4.2 and the docs. Kept as a record only.
+
 > **Context:** After the v6.0.2 security hardening, several documentation artifacts need updating to reflect new infrastructure, patterns, and operational requirements. This is non-code work that can be done in a single focused session.
 
 ## Prerequisite Reading

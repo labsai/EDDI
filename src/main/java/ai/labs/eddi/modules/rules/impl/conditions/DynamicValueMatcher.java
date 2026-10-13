@@ -66,7 +66,7 @@ public class DynamicValueMatcher implements IRuleCondition {
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         ExecutionState state;
         if (!isNullOrEmpty(valuePath)) {
-            var conversationValues = memoryItemConverter.convert(memory);
+            var conversationValues = TemplateDataScope.templateData(memory, memoryItemConverter);
             boolean success = executeValuePath(conversationValues, valuePath, equals, contains);
             state = success ? ExecutionState.SUCCESS : ExecutionState.FAIL;
         } else {

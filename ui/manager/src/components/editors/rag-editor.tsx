@@ -63,6 +63,9 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
   openai: [
     { key: "model", placeholder: "text-embedding-3-small" },
     { key: "apiKey", placeholder: "${vault:openai-key}" },
+    // Any OpenAI-compatible server. Honoured since 6.6 — before, it was ignored
+    // and documents went to api.openai.com.
+    { key: "baseUrl", placeholder: "https://api.openai.com/v1" },
   ],
   "azure-openai": [
     { key: "endpoint", placeholder: "https://my.openai.azure.com/" },

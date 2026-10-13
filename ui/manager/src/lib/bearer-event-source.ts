@@ -12,6 +12,18 @@ import { createReconnectScheduler } from "./sse-reconnect";
 
 type EventHandler = (event: MessageEvent) => void;
 
+/**
+ * The headers for one connection attempt — a fixed map, or a function asked
+ * again on EVERY (re)connect.
+ *
+ * Pass a function for anything carrying a bearer token. A map is read once, at
+ * construction, so a stream opened with a token that has since been refreshed
+ * reconnects with the expired one, gets a 401 on every attempt, spends its retry
+ * budget and stops: the live log and coordinator streams went dead roughly one
+ * token lifetime after the page was opened.
+ */
+export type HeaderSource = Record<string, string> | (() => Record<string, string>);
+
 export class BearerEventSource {
   private abortController: AbortController | null = null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34,9 +46,13 @@ export class BearerEventSource {
 
   constructor(
     private readonly url: string,
-    private readonly headers: Record<string, string> = {}
+    private readonly headers: HeaderSource = {}
   ) {
     this.connect();
+  }
+
+  private currentHeaders(): Record<string, string> {
+    return typeof this.headers === "function" ? this.headers() : this.headers;
   }
 
   addEventListener(type: string, listener: EventHandler): void {
@@ -77,7 +93,7 @@ export class BearerEventSource {
     this.abortController = new AbortController();
     try {
       const response = await fetch(this.url, {
-        headers: { Accept: "text/event-stream", ...this.headers },
+        headers: { Accept: "text/event-stream", ...this.currentHeaders() },
         signal: this.abortController.signal,
       });
 
