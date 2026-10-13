@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -52,6 +55,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -71,6 +75,7 @@ import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -416,6 +421,10 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             IAgent latestAgent = agentFactory.getLatestReadyAgent(environment, agentId);
             if (latestAgent == null) {
+                final String requestedAgent = agentId;
+                latestAgent = awaitClusterDeployment(environment, agentId, () -> agentFactory.getLatestReadyAgent(environment, requestedAgent));
+            }
+            if (latestAgent == null) {
                 String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, agentId, environment);
                 throw new AgentNotReadyException(message);
@@ -538,6 +547,113 @@ public class ConversationService implements IConversationService, UserErasurePar
         return "inFlightConversations";
     }
 
+    // ─── Cluster control (eddi.messaging.type=nats) ───
+
+    /**
+     * Cluster mode: the lease manager (who runs a conversation's turn) and the node
+     * RPC that reaches that node. Field-injected so the many tests that build this
+     * service with {@code new} keep the single-node behaviour (both null).
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    @Inject
+    IClusterRpc clusterRpc;
+
+    @Inject
+    Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /** How long a request waits for an agent another node has just deployed. */
+    static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
+
+    /** A resolution step that may throw, for {@link #awaitClusterDeployment}. */
+    @FunctionalInterface
+    interface AgentLookup<T> {
+        T find() throws Exception;
+    }
+
+    /**
+     * Cluster mode: the agent is not deployed on THIS node yet, though another node
+     * has just deployed it — this node's sweep has not caught up. Deploys it here
+     * on demand and waits (bounded) instead of answering 404. Single node: null at
+     * once.
+     */
+    <T> T awaitClusterDeployment(Environment environment, String agentId, AgentLookup<T> lookup) {
+        if (deploymentManagement == null || !deploymentManagement.isResolvable() || leaseManager == null || !leaseManager.isClustered()) {
+            return null;
+        }
+        try {
+            return deploymentManagement.get().awaitClusterDeployment(environment, agentId, () -> {
+                try {
+                    return lookup.find();
+                } catch (Exception e) {
+                    return null;
+                }
+            }, CLUSTER_DEPLOY_WAIT);
+        } catch (RuntimeException e) {
+            // The deployment store could not be read (or the deploy failed): the caller's
+            // own not-ready handling answers, as it does when nothing is deployed.
+            LOGGER.warnf("On-demand deployment of agent %s failed: %s", sanitize(agentId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Signals the turn of {@code conversationId} running on THIS node, if any — the
+     * cooperative flag the pipeline checks at task boundaries.
+     *
+     * @return true when a running turn was signalled
+     */
+    public boolean signalLocalInFlight(String conversationId) {
+        var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
+        if (inFlightMemory == null) {
+            return false;
+        }
+        inFlightMemory.setCancelled(true);
+        return true;
+    }
+
+    /**
+     * Cluster mode: when the conversation's turn runs on ANOTHER node (it holds the
+     * lease), asks that node to signal it. Single node: always false.
+     *
+     * @return true when the executing node confirmed it signalled a running turn
+     */
+    boolean signalRemoteInFlight(String conversationId) {
+        if (leaseManager == null || clusterRpc == null || !leaseManager.isClustered() || !clusterRpc.isClustered()) {
+            return false;
+        }
+        var holder = leaseManager.peek(conversationId);
+        if (holder.isEmpty()) {
+            return false;
+        }
+        var reply = clusterRpc.call(holder.get().node(), IClusterRpc.CONVERSATION_CANCEL, Map.of("conversationId", conversationId));
+        boolean signalled = reply.map(r -> Boolean.TRUE.equals(r.get("signalled"))).orElse(false);
+        if (signalled) {
+            LOGGER.infof("Signalled the turn of conversation %s running on node %s", sanitize(conversationId), holder.get().node());
+        }
+        return signalled;
+    }
+
+    /**
+     * GDPR stop on behalf of another node: the erased user arrives as a hash, so
+     * the user id never travels between nodes.
+     */
+    @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        if (userIdHash == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (IConversationMemory memory : inFlightConversations.values()) {
+            if (memory.getUserId() != null && userIdHash.equals(KvKeys.sha256(memory.getUserId()))) {
+                memory.setCancelled(true);
+                signalled++;
+            }
+        }
+        return signalled;
+    }
+
     /**
      * GDPR erasure: signals every turn running on this node for {@code userId} to
      * stop, through the same cooperative flag {@link #cancelConversation} sets. A
@@ -589,6 +705,9 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (inFlightMemory != null) {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight resume to abort — conversation %s is being ended", conversationId);
+        } else {
+            // Cluster mode: the turn may be running on the node that holds the lease.
+            signalRemoteInFlight(conversationId);
         }
         // Ending a PAUSED conversation terminally resolves its pending approval:
         // disarm the timeout schedule (a stale fire would log spurious errors and
@@ -735,7 +854,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
+            if (resolvedAgent == null) {
+                final IConversationMemory memoryToResolve = conversationMemory;
+                resolvedAgent = awaitClusterDeployment(environment, conversationMemory.getAgentId(),
+                        () -> resolveConversationAgent(environment, memoryToResolve));
+            }
+            IAgent agent = resolvedAgent;
             if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
                 // The turn runs on another, compatible version: log it as that one.
                 loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
@@ -932,7 +1057,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
+            if (resolvedAgent == null) {
+                final IConversationMemory memoryToResolve = conversationMemory;
+                resolvedAgent = awaitClusterDeployment(environment, conversationMemory.getAgentId(),
+                        () -> resolveConversationAgent(environment, memoryToResolve));
+            }
+            IAgent agent = resolvedAgent;
             if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
                 // The turn runs on another, compatible version: log it as that one.
                 loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));

@@ -160,13 +160,23 @@ and both hand out the positions after it. Neither backend indexes
 `(conversationId, sequence)` uniquely, so the duplicate is stored, and
 `/auditstore/verify` grades a duplicate exactly like a deletion — `BROKEN`.
 
-> **Known limitation — operational requirement:** a multi-replica deployment needs
-> **conversation affinity** (route every turn of one conversation to the same node) for chain
-> integrity. Without it, duplicate sequences are produced and `/auditstore/verify` grades the
-> affected conversations `BROKEN`. HMAC verification of individual entries still holds — only
-> the chain-continuity check is affected.
+**Cluster mode removes the problem.** With `eddi.messaging.type=nats` (see
+[Clustering](clustering.md)) each position comes from one compare-and-set counter per
+conversation in the NATS JetStream KV bucket `<prefix>_AUDIT_SEQ`, seeded from the store's
+`MAX(sequence)` the first time a conversation is seen, so no two replicas hand out the same
+position. `eddi_cluster_audit_sequence_total{outcome}` counts the allocations (`allocated`),
+the entries whose compare-and-set kept losing (`conflict`) and the entries written while NATS was
+unreachable (`unsequenced`). Both of the latter are stored **without** a chain position rather
+than with one another node might already have handed out.
 
-**Deferred fix, and why it is deferred.** Removing that requirement needs storage-level
+> **Known limitation — operational requirement:** a multi-replica deployment **without cluster
+> mode** needs **conversation affinity** (route every turn of one conversation to the same node)
+> for chain integrity — and EDDI does not support several in-memory replicas in the first place.
+> Without it, duplicate sequences are produced and `/auditstore/verify` grades the affected
+> conversations `BROKEN`. HMAC verification of individual entries still holds — only the
+> chain-continuity check is affected.
+
+**Why the store does not allocate.** Allocating in the database would need storage-level
 atomic allocation — PostgreSQL `UPDATE … RETURNING` on a per-conversation counter row,
 MongoDB `findOneAndUpdate` with `$inc` — plus a unique `(conversationId, sequence)`
 constraint and a retry on collision. It is tracked as follow-up work rather than shipped here
@@ -185,7 +195,8 @@ conversation: the ledger logs a WARN naming the conversation, increments
 operator running without affinity therefore sees the problem in metrics instead of
 discovering it at verify time.
 
-- Any non-zero value means "multi-replica without conversation affinity" — fix the routing.
+- Any non-zero value means two nodes allocated for one conversation — several replicas without
+  cluster mode. In cluster mode it stays at zero.
 - It is a **partial** detector: two nodes that hand out exactly the same range leave a stored
   maximum consistent with both counters, and only `/auditstore/verify` sees that duplicate.
 - Cost is one indexed `MAX(sequence)` read per conversation per flush, on the ledger's writer

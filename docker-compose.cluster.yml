@@ -1,0 +1,136 @@
+# EDDI cluster: three EDDI replicas behind a round-robin load balancer,
+# coordinated through a three-node NATS JetStream cluster, sharing one MongoDB.
+#
+# A WHOLE stack, not an overlay — run it on its own:
+#
+#   EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) \
+#   NATS_PASSWORD=$(openssl rand -base64 24) \
+#     docker compose -f docker-compose.cluster.yml up -d
+#
+# then open http://localhost:7070 (the load balancer). Every replica serves every
+# conversation; see docs/clustering.md for what that guarantees and how it
+# degrades when NATS is unreachable.
+#
+# The published image selects cluster mode at runtime (EDDI_MESSAGING_TYPE=nats);
+# no special build is needed. Scale with `--scale eddi=N` — the load balancer
+# resolves the service name through Docker's DNS and spreads requests over every
+# replica. Authentication is OFF here, as in the quick start: the load balancer
+# binds to loopback only (the default); enable OIDC before exposing it.
+#
+# NATS runs with a password (NATS_PASSWORD, required) and publishes no host
+# port; EDDI reaches it container-to-container. MongoDB publishes no host port
+# either. This file is a whole stack (it declares its own MongoDB), so do not
+# combine it with docker-compose.yml.
+
+x-nats: &nats
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz?js-enabled-only=true"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+
+services:
+  mongodb:
+    image: mongo:7.0.14
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: eddi
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-changeme}
+    volumes:
+      - cluster-mongodb:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nats-1:
+    <<: *nats
+    image: nats:2.11-alpine
+    command: ["--name", "nats-1", "--jetstream", "--store_dir=/data", "-m", "8222",
+              "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
+              "--routes", "nats://nats-2:6222,nats://nats-3:6222"]
+    volumes:
+      - cluster-nats-1:/data
+
+  nats-2:
+    <<: *nats
+    image: nats:2.11-alpine
+    command: ["--name", "nats-2", "--jetstream", "--store_dir=/data", "-m", "8222",
+              "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
+              "--routes", "nats://nats-1:6222,nats://nats-3:6222"]
+    volumes:
+      - cluster-nats-2:/data
+
+  nats-3:
+    <<: *nats
+    image: nats:2.11-alpine
+    command: ["--name", "nats-3", "--jetstream", "--store_dir=/data", "-m", "8222",
+              "--user", "eddi", "--pass", "${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222",
+              "--routes", "nats://nats-1:6222,nats://nats-2:6222"]
+    volumes:
+      - cluster-nats-3:/data
+
+  eddi:
+    image: labsai/eddi:${EDDI_VERSION:-latest}
+    restart: unless-stopped
+    deploy:
+      replicas: 3
+    environment:
+      EDDI_VAULT_MASTER_KEY: ${EDDI_VAULT_MASTER_KEY:?set EDDI_VAULT_MASTER_KEY (openssl rand -base64 24)}
+      MONGODB_CONNECTIONSTRING: mongodb://eddi:${MONGO_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin
+      # Authentication is off, as in the quick start (docker-compose.yml explains
+      # the escape hatches); the load balancer binds to loopback by default.
+      QUARKUS_OIDC_TENANT_ENABLED: ${QUARKUS_OIDC_TENANT_ENABLED:-false}
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: ${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}
+      EDDI_MCP_ALLOW_UNAUTHENTICATED: ${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}
+      EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: ${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}
+      # Cluster mode. EDDI_CLUSTER_NODE_ID is left unset: each replica uses its
+      # container host name, which is unique.
+      EDDI_MESSAGING_TYPE: nats
+      EDDI_NATS_URL: nats://nats-1:4222,nats://nats-2:4222,nats://nats-3:4222
+      EDDI_NATS_USERNAME: eddi
+      EDDI_NATS_PASSWORD: ${NATS_PASSWORD:?set NATS_PASSWORD (openssl rand -base64 24)}
+      EDDI_NATS_REPLICAS: "3"
+      # `docker compose stop` / a rolling `up -d` gives a replica 45 s: it stops
+      # taking turns, lets running ones finish (up to 35 s) and leaves.
+      EDDI_SHUTDOWN_DRAIN_TIMEOUT_SECONDS: "35"
+    stop_grace_period: 45s
+    # No published ports: clients go through the load balancer.
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      nats-1:
+        condition: service_healthy
+      nats-2:
+        condition: service_healthy
+      nats-3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  lb:
+    # 1.27.3 or later: older open-source nginx refuses `server ... resolve` in an upstream.
+    image: nginx:1.27.3-alpine
+    restart: unless-stopped
+    volumes:
+      - ./docker/cluster/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+    depends_on:
+      eddi:
+        condition: service_healthy
+
+volumes:
+  cluster-mongodb:
+  cluster-nats-1:
+  cluster-nats-2:
+  cluster-nats-3:

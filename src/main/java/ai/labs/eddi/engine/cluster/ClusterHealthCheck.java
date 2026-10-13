@@ -11,6 +11,7 @@ import org.eclipse.microprofile.health.HealthCheck;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.eclipse.microprofile.health.HealthCheckResponseBuilder;
 import org.eclipse.microprofile.health.Readiness;
+import ai.labs.eddi.engine.cluster.lease.NatsLeaseManager;
 
 /**
  * Cluster readiness, present in both modes.
@@ -32,12 +33,15 @@ public class ClusterHealthCheck implements HealthCheck {
     private final ClusterConfig config;
     private final Instance<NatsConnectionManager> connections;
     private final Instance<ClusterPresence> presence;
+    private final Instance<NatsLeaseManager> leases;
 
     @Inject
-    public ClusterHealthCheck(ClusterConfig config, Instance<NatsConnectionManager> connections, Instance<ClusterPresence> presence) {
+    public ClusterHealthCheck(ClusterConfig config, Instance<NatsConnectionManager> connections, Instance<ClusterPresence> presence,
+            Instance<NatsLeaseManager> leases) {
         this.config = config;
         this.connections = connections;
         this.presence = presence;
+        this.leases = leases;
     }
 
     @Override
@@ -59,7 +63,11 @@ public class ClusterHealthCheck implements HealthCheck {
         if (manager.isConnected()) {
             builder.withData("members", presence.get().members().size());
         }
-        boolean down = degraded && config.readinessRequireNats();
+        // An administrator drained this node to restart it: out of the load balancer,
+        // whatever NATS says. Undrained (or restarted), it is ready again.
+        boolean draining = leases.isResolvable() && leases.get().isDraining();
+        builder.withData("draining", draining);
+        boolean down = (degraded && config.readinessRequireNats()) || draining;
         return (down ? builder.down() : builder.up()).build();
     }
 }

@@ -404,7 +404,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 ### ConversationCoordinator
 
-**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `NatsConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (which one is active depends on deployment configuration)
+**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `ClusterConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (both extend `AbstractQueuedConversationCoordinator`). `eddi.messaging.type` selects one at runtime: `in-memory` (the default, one replica) or `nats` (cluster mode — the queue additionally holds a cluster-wide lease per conversation from NATS JetStream; see [Clustering](clustering.md))
 
 **Purpose**: Ensures proper message ordering and concurrency control
 
@@ -660,8 +660,8 @@ The attachment subsystem handles binary file storage for multimodal conversation
 ### Scalability
 
 - **Vertical**: Handles thousands of concurrent conversations per instance
-- **Horizontal**: Stateless design allows infinite horizontal scaling
-- **Bottleneck**: MongoDB becomes the bottleneck; use replica sets and sharding
+- **Horizontal**: with `eddi.messaging.type=nats`, any number of replicas behind a round-robin load balancer, coordinated through NATS JetStream (conversation leases with fencing, shared KV state, cache-invalidation events). With the default `in-memory` messaging EDDI runs one replica. See [Clustering](clustering.md)
+- **Bottleneck**: the database becomes the bottleneck; use MongoDB replica sets and sharding, or a replicated PostgreSQL
 
 ---
 
@@ -740,7 +740,7 @@ EDDI's architecture is built on principles of **modularity**, **composability**,
 - Orchestrate multiple APIs and LLMs
 - Apply complex business logic through configurable rules
 - Maintain stateful, context-aware conversations
-- Scale horizontally in cloud environments
+- Scale horizontally in cloud environments (cluster mode on NATS JetStream)
 - Be assembled from reusable, version-controlled components
 
 The **Lifecycle Pipeline** is the heart of this architecture, providing a flexible, pluggable system where agent behavior is configuration, not code.

@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import jakarta.enterprise.inject.Instance;
+import ai.labs.eddi.engine.cluster.SharedBucket;
+import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
+import ai.labs.eddi.engine.cluster.ClusterPresence;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
@@ -139,6 +144,88 @@ public class ToolRateLimiter {
     @Inject
     @ConfigProperty(name = "eddi.tools.ratelimit.global.limit", defaultValue = "1000")
     int globalLimit = 1000;
+
+    // ---- cluster mode (eddi.messaging.type=nats) ----
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ClusterConfig clusterConfig;
+
+    @Inject
+    Instance<NatsSharedStateFactory> natsSharedState;
+
+    @Inject
+    Instance<ClusterPresence> presence;
+
+    private volatile KvRateLimitBackend kvBackend;
+
+    private boolean clustered() {
+        return clusterConfig != null && clusterConfig.isNats();
+    }
+
+    private KvRateLimitBackend kvBackend() {
+        KvRateLimitBackend backend = kvBackend;
+        if (backend == null) {
+            backend = new KvRateLimitBackend(
+                    natsSharedState.get().bucket(new SharedBucket("RATELIMIT", Duration.ofMillis(2 * WINDOW_MS), 256)), meterRegistry,
+                    System::currentTimeMillis);
+            kvBackend = backend;
+        }
+        return backend;
+    }
+
+    /**
+     * Cluster mode: one bucket per scope and tool for the whole cluster, in the
+     * {@code RATELIMIT} KV bucket — a limit of N per minute is N per minute across
+     * all replicas, not N per replica. NATS unreachable:
+     * {@code eddi.cluster.degraded.rate-limits=local-share} enforces this node's
+     * share (the global limit divided by the members last seen, the
+     * per-conversation limit in full — never looser than configured);
+     * {@code reject} refuses.
+     */
+    private boolean tryAcquireClustered(String scope, String toolName, int limit) {
+        KvRateLimitBackend backend = kvBackend();
+        String scopeKey = KvRateLimitBackend.key(scope, toolName);
+        KvRateLimitBackend.Decision decision = backend.take(scopeKey, limit);
+        boolean degraded = decision == KvRateLimitBackend.Decision.UNAVAILABLE;
+        boolean acquired;
+        if (degraded) {
+            acquired = degradedAcquire(scope, toolName, limit, false);
+        } else {
+            acquired = decision == KvRateLimitBackend.Decision.ALLOWED;
+        }
+        if (acquired && globalLimitEnabled) {
+            boolean globalAcquired;
+            KvRateLimitBackend.Decision global = degraded
+                    ? KvRateLimitBackend.Decision.UNAVAILABLE
+                    : backend.take(KvRateLimitBackend.key(SCOPE_GLOBAL, toolName), globalLimit);
+            if (global == KvRateLimitBackend.Decision.UNAVAILABLE) {
+                globalAcquired = degradedAcquire(SCOPE_GLOBAL, toolName, globalLimit, true);
+            } else {
+                globalAcquired = global == KvRateLimitBackend.Decision.ALLOWED;
+            }
+            if (!globalAcquired) {
+                if (!degraded) {
+                    backend.giveBack(scopeKey);
+                }
+                acquired = false;
+            }
+        }
+        meterRegistry.counter("eddi.cluster.ratelimit.decisions", "scope", globalLimitEnabled ? "global" : "scoped", "outcome",
+                degraded ? "degraded" : acquired ? "allowed" : "denied").increment();
+        return acquired;
+    }
+
+    private boolean degradedAcquire(String scope, String toolName, int limit, boolean globalScope) {
+        if (ClusterConfig.REJECT.equals(clusterConfig.degradedRateLimits())) {
+            meterRegistry.counter("eddi.cluster.degraded.decisions", "area", "rate-limits", "action", "reject").increment();
+            return false;
+        }
+        meterRegistry.counter("eddi.cluster.degraded.decisions", "area", "rate-limits", "action", "local-share").increment();
+        int members = presence.isResolvable() ? Math.max(1, presence.get().lastKnownMembers()) : 1;
+        int share = globalScope ? Math.max(0, limit / members) : limit;
+        return bucketFor(scope, toolName, share).tryAcquire();
+    }
 
     @PostConstruct
     public void init() {
@@ -306,6 +393,16 @@ public class ToolRateLimiter {
      */
     public boolean tryAcquire(String conversationId, String toolName, int limit) {
         String scope = (conversationId == null || conversationId.isBlank()) ? SCOPE_UNSCOPED : conversationId;
+        if (clustered()) {
+            boolean acquired = tryAcquireClustered(scope, toolName, limit);
+            meterRegistry.counter(acquired ? "eddi.tool.ratelimit.allowed" : "eddi.tool.ratelimit.denied", "tool", toolName).increment();
+            if (!acquired) {
+                LOGGER.warn(String.format("Rate limit exceeded for tool '%s' (scope '%s', cluster-wide).", sanitize(toolName),
+                        sanitize(scope)));
+            }
+            registerRemainingGauge(toolName);
+            return acquired;
+        }
         RateLimitBucket bucket = bucketFor(scope, toolName, limit);
 
         boolean acquired = bucket.tryAcquire();

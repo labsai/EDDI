@@ -4,17 +4,150 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
+import ai.labs.eddi.engine.cluster.SharedBucket;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
+import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @ApplicationScoped
-public class CacheFactory implements ICacheFactory {
+public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Announcer {
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
+
+    // ---- cluster mode (eddi.messaging.type=nats) ----
+    //
+    // Field-injected so the many tests that build this factory with `new` keep the
+    // node-local behaviour: with clusterConfig null — or in-memory mode — every
+    // cache is exactly what it always was.
+
+    /**
+     * Caches that hold state rather than copies, and are therefore shared by every
+     * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
+     * paginated tool responses, Slack event de-duplication, channel thread locks.
+     */
+    static final Map<String, String> SHARED_BUCKETS = Map.of(
+            "nonce-replay-protection", "NONCES",
+            "a2aTaskMapping", "A2A_TASKS",
+            "a2aTaskMapping:context", "A2A_CONTEXTS",
+            "a2aTaskMapping:state", "A2A_STATES",
+            "paginated-tool-responses", "TOOL_PAGES",
+            "slack-event-dedup", "DEDUP",
+            "channel-thread-locks", "CHANNEL");
+
+    /**
+     * Node-local copies of database state that the other nodes must drop when this
+     * node changes them (eviction events), with a TTL backstop for the two that had
+     * none.
+     */
+    static final Set<String> INVALIDATED = Set.of("agentTriggers", "userConversations", "conversationState",
+            "gdprProcessingRestrictions");
+
+    @Inject
+    ClusterConfig clusterConfig;
+
+    @Inject
+    Instance<NatsSharedStateFactory> natsSharedState;
+
+    @Inject
+    Instance<IClusterEventBus> clusterEvents;
+
+    private final AtomicBoolean subscribed = new AtomicBoolean();
+
+    /**
+     * Cluster mode: the shared wrapper of each local cache, by the same key as the
+     * local cache. One wrapper per cache, because its record of the keys that live
+     * on this node only must be seen by every caller of that cache.
+     */
+    private final Map<String, ICache<?, ?>> sharedWrappers = new ConcurrentHashMap<>();
+
+    private boolean clustered() {
+        return clusterConfig != null && clusterConfig.isNats();
+    }
+
+    @SuppressWarnings("unchecked")
+    private <K, V> ICache<K, V> clusterAware(String name, String localKey, Duration ttl, ICache<K, V> local) {
+        if (!clustered()) {
+            return local;
+        }
+        String bucket = SHARED_BUCKETS.get(name);
+        if (bucket != null) {
+            Duration bucketTtl = ttl != null ? ttl : defaultSharedTtl(name);
+            boolean failClosed = "nonce-replay-protection".equals(name)
+                    && ClusterConfig.REJECT.equals(clusterConfig.degradedNonces());
+            return (ICache<K, V>) sharedWrappers.computeIfAbsent(localKey,
+                    k -> new SharedKvCache<>(local, natsSharedState.get().bucket(new SharedBucket(bucket, bucketTtl, -1)), failClosed));
+        }
+        if (INVALIDATED.contains(name)) {
+            subscribeOnce();
+            return new ClusterInvalidatingCache<>(local, this);
+        }
+        return local;
+    }
+
+    private Duration defaultSharedTtl(String name) {
+        if (name.startsWith("a2aTaskMapping")) {
+            return clusterConfig.a2aTaskTtl();
+        }
+        if ("paginated-tool-responses".equals(name)) {
+            return Duration.ofMinutes(15);
+        }
+        return Duration.ofHours(1);
+    }
+
+    private void subscribeOnce() {
+        if (!subscribed.compareAndSet(false, true)) {
+            return;
+        }
+        IClusterEventBus events = clusterEvents.get();
+        events.subscribe(ClusterEvent.CACHE_EVICT, e -> evictLocal(e.getString("cache"), e.getString("key")));
+        events.subscribe(ClusterEvent.CACHE_CLEAR, e -> clearLocal(e.getString("cache")));
+        events.onResync(() -> INVALIDATED.forEach(this::clearLocal));
+    }
+
+    @Override
+    public void evicted(String cacheName, Object key) {
+        clusterEvents.get().publish(ClusterEvent.CACHE_EVICT, Map.of("cache", cacheName, "key", KvKeys.hashed(String.valueOf(key))));
+    }
+
+    @Override
+    public void cleared(String cacheName) {
+        clusterEvents.get().publish(ClusterEvent.CACHE_CLEAR, Map.of("cache", cacheName));
+    }
+
+    /** Drops a key another node changed — matched by hash, never sent in clear. */
+    void evictLocal(String cacheName, String keyHash) {
+        if (cacheName == null || keyHash == null) {
+            return;
+        }
+        caches.forEach((registered, cache) -> {
+            if (registered.equals(cacheName) || registered.startsWith(cacheName + ":ttl=")) {
+                cache.asMap().keySet().removeIf(k -> KvKeys.hashed(String.valueOf(k)).equals(keyHash));
+            }
+        });
+    }
+
+    void clearLocal(String cacheName) {
+        if (cacheName == null) {
+            return;
+        }
+        caches.forEach((registered, cache) -> {
+            if (registered.equals(cacheName) || registered.startsWith(cacheName + ":ttl=")) {
+                cache.invalidateAll();
+            }
+        });
+    }
 
     // Cache size configs (previously in infinispan-embedded.xml).
     //
@@ -144,6 +277,10 @@ public class CacheFactory implements ICacheFactory {
     @SuppressWarnings("unchecked")
     public <K, V> ICache<K, V> getCache(String cacheName) {
         String name = cacheName != null ? cacheName : "local";
+        if (clustered() && INVALIDATED.contains(name)) {
+            // In a cluster a lost eviction must not pin a stale entry forever.
+            return getCache(name, clusterConfig.localCacheTtl());
+        }
         // expireAfter (rather than no expiry policy at all) is what exposes
         // Caffeine's variable-expiry view, which CacheImpl needs to honour the
         // per-entry TTLs of ICache.put(key, value, lifespan, unit). Entries written
@@ -154,7 +291,7 @@ public class CacheFactory implements ICacheFactory {
                         .expireAfter(WriteExpiry.<Object, Object>never())
                         .recordStats()
                         .build());
-        return new CacheImpl<>(name, cache);
+        return clusterAware(name, name, null, new CacheImpl<>(name, cache));
     }
 
     @Override
@@ -187,6 +324,6 @@ public class CacheFactory implements ICacheFactory {
                         .expireAfter(WriteExpiry.<Object, Object>of(ttl))
                         .recordStats()
                         .build());
-        return new CacheImpl<>(name, cache);
+        return clusterAware(name, cacheKey, ttl, new CacheImpl<>(name, cache));
     }
 }

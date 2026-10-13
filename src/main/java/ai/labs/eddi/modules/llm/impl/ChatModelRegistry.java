@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import java.util.concurrent.ConcurrentHashMap;
+import io.quarkus.scheduler.Scheduled;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
@@ -144,6 +147,20 @@ public class ChatModelRegistry {
      */
     private final Object publishLock = new Object();
 
+    /**
+     * Cluster mode only: when each cached model was built. A model is otherwise
+     * kept for as long as it is used ({@code expireAfterAccess}), so a busy model
+     * built with a since-rotated key lived for ever on a node that missed the
+     * rotation event. {@link #expireOldModels} rebuilds every model older than
+     * {@code eddi.cluster.model-cache.max-age} (15 min) — the bound on how long a
+     * lost event can matter. Empty, and never consulted, on a single node.
+     */
+    private final Map<ModelCacheKey, Long> builtAtMillis = new ConcurrentHashMap<>();
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ClusterConfig clusterConfig;
+
     @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -152,6 +169,38 @@ public class ChatModelRegistry {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.telemetryListener = telemetryListener;
+    }
+
+    /**
+     * Cluster mode: evicts models built longer ago than
+     * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
+     * reaches every node within that bound even if its event was lost.
+     */
+    @Scheduled(every = "60s", delayed = "60s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void expireOldModels() {
+        if (clusterConfig == null || !clusterConfig.isNats() || builtAtMillis.isEmpty()) {
+            return;
+        }
+        long cutoff = System.currentTimeMillis() - clusterConfig.modelCacheMaxAge().toMillis();
+        int evicted = 0;
+        synchronized (publishLock) {
+            for (var entry : builtAtMillis.entrySet()) {
+                ModelCacheKey key = entry.getKey();
+                boolean cached = modelCache.containsKey(key) || streamingModelCache.containsKey(key);
+                if (!cached) {
+                    builtAtMillis.remove(key, entry.getValue());
+                } else if (entry.getValue() < cutoff) {
+                    modelCache.remove(key);
+                    streamingModelCache.remove(key);
+                    builtAtMillis.remove(key, entry.getValue());
+                    evicted++;
+                }
+            }
+        }
+        if (evicted > 0) {
+            LOGGER.infof("Rebuilding %d cached model(s) older than %s (eddi.cluster.model-cache.max-age)", evicted,
+                    clusterConfig.modelCacheMaxAge());
+        }
     }
 
     /**
@@ -319,6 +368,9 @@ public class ChatModelRegistry {
         synchronized (publishLock) {
             if (invalidationGeneration.get() == generationAtBuildStart) {
                 cache.put(cacheKey, model);
+                if (clusterConfig != null && clusterConfig.isNats()) {
+                    builtAtMillis.put(cacheKey, System.currentTimeMillis());
+                }
             } else {
                 LOGGER.debugf("Model built while an invalidation landed — not caching it; the next use rebuilds");
             }

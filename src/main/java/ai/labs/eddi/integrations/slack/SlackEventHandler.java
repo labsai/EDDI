@@ -272,12 +272,15 @@ public class SlackEventHandler {
      */
     public void handleEventAsync(String eventId, Map<String, Object> event, String botUserId, EventOrigin origin) {
         EventOrigin effectiveOrigin = origin != null ? origin : EventOrigin.UNKNOWN;
-        // De-duplicate: Slack retries events up to 3 times
-        if (eventDedup.get(eventId) != null) {
+        // De-duplicate: Slack retries events up to 3 times. putIfAbsent, not
+        // get-then-put:
+        // two deliveries racing through the gap were both processed (a double reply).
+        // In cluster mode the cache is shared by every node, so a retry that the load
+        // balancer sends to another replica is caught too.
+        if (eventDedup.putIfAbsent(eventId, Boolean.TRUE) != null) {
             LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
             return;
         }
-        eventDedup.put(eventId, Boolean.TRUE);
 
         executorService.submit(() -> {
             try {

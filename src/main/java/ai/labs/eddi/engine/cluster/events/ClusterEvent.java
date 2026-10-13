@@ -40,6 +40,10 @@ public record ClusterEvent(int v, String id, String type, String originNode, Str
     public static final String GDPR_USER_ERASED = "gdpr.user-erased";
     /** A connection changed: {@code {tenantId, name}}. */
     public static final String CONNECTION_CHANGED = "connection.changed";
+    /** A node changed a cached entry: {@code {cache, key}} (key hashed). */
+    public static final String CACHE_EVICT = "cache.evict";
+    /** A node cleared a cache: {@code {cache}}. */
+    public static final String CACHE_CLEAR = "cache.clear";
     /** Flush every invalidatable cache: {@code {}}. */
     public static final String RESYNC_ALL = "cache.resync-all";
 

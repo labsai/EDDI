@@ -91,8 +91,13 @@
     Database:      {{ if .Values.mongodb.enabled }}MongoDB (in-chart){{ else if .Values.postgres.enabled }}PostgreSQL (in-chart){{ else if .Values.eddi.datastore.externalConnectionString }}MongoDB (external){{ else }}PostgreSQL (external){{ end }}
     Messaging:     {{ include "eddi.messagingType" . }}
     Auth (OIDC):   {{ if .Values.eddi.oidc.enabled }}Enabled{{ else }}Disabled{{ end }}
-    Replicas:      {{ .Values.eddi.replicas }} (fixed — EDDI is single-writer per
-                   conversation; see eddi.replicas in values.yaml)
+    Replicas:      {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }} (autoscaled){{ else }}{{ .Values.eddi.replicas }}{{ end }}{{ if eq (include "eddi.messagingType" .) "nats" }} (cluster mode — see docs/clustering.md){{ end }}
+    Updates:       {{ include "eddi.updateStrategy" . }}
     NetworkPolicy: {{ if .Values.networkPolicy.enabled }}Enabled{{ else }}Disabled{{ end }}
 
   📖 Full docs: https://github.com/labsai/EDDI/blob/main/docs/kubernetes.md
+{{- if .Values.nats.buildProfileImage }}
+
+  ⚠️  nats.buildProfileImage is deprecated and ignored: since chart 2.5.0 the
+     published image selects cluster mode at runtime (eddi.messagingType=nats).
+{{- end }}

@@ -1,10 +1,16 @@
-# NATS JetStream overlay for EDDI.
+# NATS JetStream overlay for EDDI: cluster mode with ONE replica.
 #
 # Usage — it is an OVERLAY and does not stand alone:
 #   docker compose -f docker-compose.yml -f docker-compose.nats.yml up
 #
-# It adds durable, scalable conversation message ordering (Phase 5) by pointing
-# the base file's `eddi` service at a JetStream server on the same network.
+# It switches the base file's `eddi` service to cluster mode
+# (EDDI_MESSAGING_TYPE=nats, read at runtime by the published image) against a
+# single JetStream server on the same network. That is the way to try cluster
+# mode on a laptop — leases, fencing, shared state and the cluster dashboard —
+# but it is still one EDDI replica: the base file publishes EDDI's host port, so
+# it cannot be scaled. For several replicas behind a load balancer and a
+# three-node NATS cluster, run docker-compose.cluster.yml instead (a whole
+# stack). See docs/clustering.md.
 #
 # It deliberately declares NOTHING the base file already provides. It used to
 # redefine `mongodb` and four keys on `eddi`, which silently broke the very
@@ -25,7 +31,7 @@
 
 services:
   nats:
-    image: nats:2.10-alpine
+    image: nats:2.11-alpine
     command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
     # Loopback-only host bindings: NATS runs here with no auth, and the monitoring
     # endpoint (8222) exposes server/connection state. EDDI reaches the broker
@@ -37,7 +43,7 @@ services:
       - nats-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz?js-enabled-only=true"]
       interval: 10s
       timeout: 5s
       retries: 3

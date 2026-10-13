@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
+import io.nats.client.api.StreamConfiguration;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -53,6 +55,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import java.nio.charset.StandardCharsets;
+import ai.labs.eddi.engine.cluster.lease.KvLeaseManager;
 
 /**
  * Three in-JVM "nodes" — each with its own NATS connection, presence, lease
@@ -431,6 +435,106 @@ class ClusterCoordinatorIT {
         assertTrue(second.fence() > first.fence(), "after recreation " + second.fence() + " must exceed " + first.fence());
         a.leases.release(second);
     }
+
+    @Test
+    @Order(8)
+    @DisplayName("admin: a lease listed with its renewal time on another node, force-released there, re-acquired above the old fence")
+    void adminForceReleaseAcrossNodes() throws Exception {
+        Node a = nodes.get(0);
+        Node b = nodes.get(1);
+        Node c = nodes.get(2);
+        LeaseHandle held = a.leases.acquire("conv-admin", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        AtomicReference<Boolean> lost = new AtomicReference<>(false);
+        held.onLost(() -> lost.set(true));
+
+        // The listing is one KV watch; its renewal time is the server's write time.
+        List<KvLeaseManager.LeaseSnapshot> listed = c.leases.snapshot("c.", 100);
+        KvLeaseManager.LeaseSnapshot snapshot = listed.stream().filter(s -> s.key().equals("c.conv-admin")).findFirst().orElseThrow();
+        assertEquals("n1", snapshot.holder().node());
+        assertTrue(Math.abs(System.currentTimeMillis() - snapshot.renewedAt()) < 10_000, "renewedAt from the server: " + snapshot.renewedAt());
+
+        // A stale expected revision is refused while the holder renews (heartbeat 1 s).
+        long seen = snapshot.holder().revision();
+        Thread.sleep(1_500);
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.RENEWED, c.leases.forceRelease("c.conv-admin", seen).outcome());
+
+        KvLeaseManager.ForceRelease released = c.leases.forceRelease("c.conv-admin", null);
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.RELEASED, released.outcome());
+        assertTrue(c.leases.peekSnapshot("c.conv-admin").isEmpty(), "gone from the bucket");
+        assertEquals(KvLeaseManager.ForceReleaseOutcome.ALREADY_RELEASED, c.leases.forceRelease("c.conv-admin", null).outcome());
+
+        LeaseHandle next = b.leases.acquire("conv-admin", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(next.fence() > held.fence(), "the next holder's token is above the released one");
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (!lost.get() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertTrue(lost.get(), "the former holder's heartbeat finds its lease gone");
+        b.leases.release(next);
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("admin: a dead letter keeps its reason, node and fence; it is counted and found by conversation on another node")
+    void deadLetterReasonRoundTrip() throws Exception {
+        Thread.sleep(500);
+        String id = nodes.get(0).deadLetters.append("conv-reason", "fenced", 3L, Map.of("input", "hi", "agentId", "a"), "fenced",
+                Map.of("token", 5, "storedFence", 9));
+        nodes.get(0).deadLetters.appendAudit("{}".getBytes(StandardCharsets.UTF_8));
+        DeadLetterEntry read = nodes.get(2).deadLetters.listConversation("conv-reason", 10).get(0);
+        assertEquals(id, read.id());
+        assertEquals("fenced", read.reason());
+        assertEquals("n1", read.nodeId());
+        assertEquals(9, ((Number) read.fence().get("storedFence")).intValue());
+        assertEquals(1, nodes.get(2).deadLetters.countTurns(), "audit entries parked in the same stream are not counted as turns");
+    }
+
+    @Test
+    @Order(12)
+    @DisplayName("a bucket an older build left with direct get is switched to leader reads in place; open handles recover on their next call")
+    void directGetIsSwitchedOffInPlace() throws Exception {
+        Node a = nodes.get(0);
+        Node b = nodes.get(1);
+        String bucket = prefix + "_LEASES";
+        String stream = "KV_" + bucket;
+        LeaseHandle before = a.leases.acquire("conv-direct", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        a.leases.release(before);
+
+        var jsm = a.connections.jetStreamManagement();
+        List<String> buckets = jsm.getStreamNames().stream().filter(n -> n.startsWith("KV_" + prefix + "_")).toList();
+        assertFalse(buckets.isEmpty());
+        for (String name : buckets) {
+            assertFalse(jsm.getStreamInfo(name).getConfiguration().getAllowDirect(), name + " was created with direct get on");
+        }
+
+        // What a build without leader reads leaves behind: the same bucket, direct get
+        // on.
+        StreamConfiguration created = jsm.getStreamInfo(stream).getConfiguration();
+        jsm.updateStream(StreamConfiguration.builder(created).allowDirect(true).build());
+        // A handle opened now reads with direct get, as an older node's would.
+        NatsSharedKv older = new NatsSharedKv(b.connections, bucket, null);
+        older.put("probe", "1".getBytes());
+        assertTrue(older.get("probe").isPresent());
+
+        a.shared.provisionAll();
+
+        StreamConfiguration switched = jsm.getStreamInfo(stream).getConfiguration();
+        assertFalse(switched.getAllowDirect(), "reads must be answered by the stream leader only");
+        assertEquals(created.getFirstSequence(), switched.getFirstSequence(), "the fenced bucket keeps its first sequence");
+        Optional<ISharedKv.Versioned> read = Optional.empty();
+        for (int attempt = 0; attempt < 2 && read.isEmpty(); attempt++) {
+            try {
+                read = older.get("probe");
+            } catch (ClusterUnavailableException expectedOnce) {
+                // the direct-get handle gets no answer once; the next call reopens it
+            }
+        }
+        assertTrue(read.isPresent(), "a handle opened before the switch must recover on its next call, not at the next reconnect");
+        LeaseHandle after = a.leases.acquire("conv-direct", Duration.ofSeconds(5)).toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertTrue(after.fence() > before.fence(), "leases keep working and fences keep rising");
+        a.leases.release(after);
+    }
+
     @Test
     @Order(9)
     @DisplayName("concurrent creates of one lease key from three nodes: exactly one wins, every loser sees a conflict, none an outage")

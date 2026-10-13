@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -120,6 +123,16 @@ public class GdprComplianceService {
      */
     @Inject
     Instance<IGdprParticipant> participantInstances;
+
+    /**
+     * Cluster mode: stops the user's work on the other nodes and purges dead
+     * letters. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    IClusterRpc clusterRpc;
+
+    @Inject
+    IConversationCoordinator conversationCoordinator;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -421,6 +434,29 @@ public class GdprComplianceService {
                 recordFailure(failedSteps, participant.erasureStepName(), e, pseudonym);
             }
         }
+        // 0b. Cluster mode: the same stop on every other node, where the user's turns
+        // and discussions may be running. The user travels as a hash. A node that does
+        // not answer is named in the log (its running work still cannot recreate what
+        // is deleted below: the stores refuse to resurrect a deleted conversation).
+        if (clusterRpc != null && clusterRpc.isClustered()) {
+            try {
+                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, Map.of("userIdHash", KvKeys.sha256(userId)));
+                for (var reply : replies.entrySet()) {
+                    if (reply.getValue().get("stopped") instanceof Number stopped) {
+                        inFlightWorkStopped += stopped.intValue();
+                    }
+                    if (reply.getValue().get("error") != null) {
+                        // A node could not stop all of the user's work: the cascade still runs,
+                        // but reports the step incomplete rather than a clean erasure.
+                        recordFailure(failedSteps, "clusterStop",
+                                new IllegalStateException("node " + reply.getKey() + ": " + reply.getValue().get("error")), pseudonym);
+                    }
+                }
+                LOGGER.infof("[GDPR] Cluster stop answered by node(s) %s [%s]", replies.keySet(), pseudonym);
+            } catch (RuntimeException e) {
+                recordFailure(failedSteps, "clusterStop", e, pseudonym);
+            }
+        }
         if (inFlightWorkStopped > 0) {
             LOGGER.infof("[GDPR] Signalled %d in-flight turns/discussions to stop [%s]", inFlightWorkStopped, pseudonym);
         }
@@ -491,6 +527,23 @@ public class GdprComplianceService {
             }
         } catch (Exception e) {
             recordFailure(failedSteps, "attachments", e, pseudonym);
+        }
+
+        // 2b. Remove the dead letters of the user's conversations: a dead letter
+        // carries the failed turn's input (in cluster mode on the shared stream every
+        // node reads).
+        if (conversationCoordinator != null) {
+            int deadLettersPurged = 0;
+            for (String convId : conversationIds) {
+                try {
+                    deadLettersPurged += conversationCoordinator.purgeDeadLetters(convId);
+                } catch (Exception e) {
+                    recordFailure(failedSteps, "deadLetters", e, pseudonym);
+                }
+            }
+            if (deadLettersPurged > 0) {
+                LOGGER.infof("[GDPR] Purged %d dead letter(s) [%s]", deadLettersPurged, pseudonym);
+            }
         }
 
         // 3. Delete HITL tool execution journal entries for user conversations.

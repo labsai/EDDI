@@ -10,12 +10,19 @@ import io.nats.client.JetStreamApiException;
 import io.nats.client.KeyValue;
 import io.nats.client.api.KeyValueEntry;
 import io.nats.client.api.KeyValueOperation;
+import io.nats.client.api.KeyValueWatchOption;
+import io.nats.client.api.KeyValueWatcher;
+import io.nats.client.impl.NatsKeyValueWatchSubscription;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import io.nats.client.api.MessageInfo;
+import io.nats.client.impl.Headers;
 
 /**
  * {@link ISharedKv} on a NATS JetStream KV bucket.
@@ -75,6 +82,17 @@ public class NatsSharedKv implements ISharedKv {
         return handle;
     }
 
+    /**
+     * A failed call drops the cached handle. jnats decides at open time whether a
+     * handle reads with direct get; a handle opened before another node turned
+     * direct get off (see {@code NatsSharedStateFactory.leaderReads}) gets no
+     * answer to its reads from then on. Reopening on the next call makes that one
+     * failed call the whole cost, not every call until the connection drops.
+     */
+    private void forgetHandle() {
+        kv = null;
+    }
+
     @FunctionalInterface
     private interface KvCall<T> {
         T call(KeyValue kv) throws IOException, JetStreamApiException, InterruptedException;
@@ -86,9 +104,11 @@ public class NatsSharedKv implements ISharedKv {
         try {
             return call.call(kv());
         } catch (JetStreamApiException e) {
+            forgetHandle();
             outcome = "error";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (IOException e) {
+            forgetHandle();
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (InterruptedException e) {
@@ -100,6 +120,7 @@ public class NatsSharedKv implements ISharedKv {
             throw e;
         } catch (RuntimeException e) {
             // jnats raises IllegalStateException on a closed connection.
+            forgetHandle();
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } finally {
@@ -138,8 +159,43 @@ public class NatsSharedKv implements ISharedKv {
             if (entry == null || entry.getOperation() != KeyValueOperation.PUT || entry.getValue() == null) {
                 return Optional.empty();
             }
-            return Optional.of(new Versioned(entry.getValue(), entry.getRevision()));
+            return Optional.of(versioned(entry));
         });
+    }
+
+    /**
+     * The stream's last message for the key through the JetStream API's message
+     * get, which the stream leader answers — unlike the KV direct get, which any
+     * replica may answer. A delete or purge marker reads as absent.
+     */
+    @Override
+    public Optional<Versioned> getConsistent(String key) {
+        return run("get-consistent", kv -> {
+            MessageInfo info;
+            try {
+                info = connections.jetStreamManagement().getLastMessage("KV_" + bucket, "$KV." + bucket + "." + key);
+            } catch (JetStreamApiException e) {
+                if (JetStreamDeadLetterStore.notFound(e)) {
+                    return Optional.empty();
+                }
+                throw e;
+            }
+            if (info == null || !info.isMessage() || info.getData() == null || info.getData().length == 0) {
+                return Optional.empty();
+            }
+            Headers headers = info.getHeaders();
+            String operation = headers == null ? null : headers.getFirst("KV-Operation");
+            if (operation != null && !"PUT".equals(operation)) {
+                return Optional.empty();
+            }
+            return Optional.of(new Versioned(info.getData(), info.getSeq(),
+                    info.getTime() == null ? 0L : info.getTime().toInstant().toEpochMilli()));
+        });
+    }
+
+    private static Versioned versioned(KeyValueEntry entry) {
+        return new Versioned(entry.getValue(), entry.getRevision(),
+                entry.getCreated() == null ? 0L : entry.getCreated().toInstant().toEpochMilli());
     }
 
     @Override
@@ -189,5 +245,47 @@ public class NatsSharedKv implements ISharedKv {
     @Override
     public List<String> keys() {
         return run("keys", KeyValue::keys);
+    }
+
+    /**
+     * One ordered watch over the bucket's current values instead of a request per
+     * key: the server delivers every live entry, then signals the end of the
+     * initial data. Bounded by {@code max} entries and twice the request timeout.
+     */
+    @Override
+    public List<Entry> entries(String prefix, int max) {
+        return run("entries", kv -> {
+            List<Entry> entries = new ArrayList<>();
+            CountDownLatch done = new CountDownLatch(1);
+            KeyValueWatcher watcher = new KeyValueWatcher() {
+                @Override
+                public void watch(KeyValueEntry entry) {
+                    if (entry.getOperation() == KeyValueOperation.PUT && entry.getValue() != null
+                            && (prefix == null || prefix.isEmpty() || entry.getKey().startsWith(prefix))) {
+                        synchronized (entries) {
+                            if (entries.size() < max) {
+                                entries.add(new Entry(entry.getKey(), versioned(entry)));
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void endOfData() {
+                    done.countDown();
+                }
+            };
+            NatsKeyValueWatchSubscription subscription = kv.watchAll(watcher, KeyValueWatchOption.IGNORE_DELETE);
+            try {
+                if (!done.await(connections.config().natsRequestTimeout().toMillis() * 2, TimeUnit.MILLISECONDS)) {
+                    throw new IOException("listing " + bucket + " did not complete in time");
+                }
+            } finally {
+                subscription.unsubscribe();
+            }
+            synchronized (entries) {
+                return List.copyOf(entries);
+            }
+        });
     }
 }

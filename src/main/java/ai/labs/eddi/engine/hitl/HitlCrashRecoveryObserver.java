@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.hitl;
 
+import java.util.function.Predicate;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -120,10 +122,26 @@ public class HitlCrashRecoveryObserver {
 
     // 'event' is the required CDI observer trigger — the method fires on
     // StartupEvent regardless of whether the payload is read.
+    /**
+     * Cluster mode: no recovery at startup. Every rolling update starts a node, and
+     * recovering on boot parked the LIVE turns other nodes were running (their
+     * conversations are IN_PROGRESS too). The leader-elected periodic sweep in
+     * {@code ClusterHitlRecovery} recovers instead, and only conversations that
+     * hold no lease and stayed unchanged for
+     * {@code eddi.cluster.hitl-recovery.min-age}. Field-injected; null in tests
+     * built with {@code new}.
+     */
+    @Inject
+    ClusterConfig clusterConfig;
+
     @SuppressWarnings("unused")
     void onStartup(@Observes StartupEvent event) {
         if (!enabled) {
             LOGGER.info("HITL crash recovery disabled via config.");
+            return;
+        }
+        if (clusterConfig != null && clusterConfig.isNats()) {
+            LOGGER.info("HITL crash recovery: cluster mode — no startup pass; the elected leader sweeps periodically.");
             return;
         }
         // Run OFF the boot path: a deployment with many paused conversations must
@@ -280,6 +298,29 @@ public class HitlCrashRecoveryObserver {
     }
 
     private int recoverRegularInProgress() {
+        return recoverRegularInProgress(id -> true);
+    }
+
+    /**
+     * Cluster mode: one pass of the leader's sweep — re-arm lost timeout schedules
+     * and recover the stuck IN_PROGRESS conversations {@code eligible} accepts.
+     *
+     * @return the number of conversations repaired or recovered
+     */
+    public int runClusterRecovery(Predicate<String> eligible) {
+        if (!enabled) {
+            return 0;
+        }
+        int repaired = repairRegularPaused() + repairGroupPaused() + repairGroupHumanPaused();
+        int recovered = recoverRegularInProgress(eligible);
+        if (repaired > 0 || recovered > 0) {
+            LOGGER.warnf("HITL cluster recovery: re-armed %d schedule(s), recovered %d stuck IN_PROGRESS conversation(s).", repaired,
+                    recovered);
+        }
+        return repaired + recovered;
+    }
+
+    private int recoverRegularInProgress(Predicate<String> eligible) {
         if (!recoverInProgress) {
             return 0;
         }
@@ -288,6 +329,9 @@ public class HitlCrashRecoveryObserver {
                     .findConversationIdsByState(ConversationState.IN_PROGRESS);
             int count = 0;
             for (String conversationId : inProgressIds) {
+                if (!eligible.test(conversationId)) {
+                    continue;
+                }
                 try {
                     var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
                     if (snapshot == null)
