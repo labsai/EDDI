@@ -76,7 +76,11 @@
     "monitoring": "Monitorização de conversas",
     "analytics": "Análises",
     "connections": "Conexões",
-    "workspaces": "Espaços de trabalho"
+    "workspaces": "Espaços de trabalho",
+    "breadcrumb": "Trilha de navegação",
+    "checkingVersion": "Verificando a versão...",
+    "expandSidebar": "Expandir a barra lateral",
+    "collapseSidebar": "Recolher a barra lateral"
   },
   "theme": {
     "light": "Claro",
@@ -921,6 +925,7 @@
     "savedNotLiveDescription": "O agente em execução continua a servir a versão implementada. Implemente para aplicar esta alteração.",
     "deployNow": "Implementar",
     "deployStarted": "Implementação iniciada",
+    "stay": "Ficar",
     "invalidJsonNotSaved": "Não salvo — o JSON é inválido: {{reason}}"
   },
   "rulesEditor": {
@@ -2483,7 +2488,8 @@
       "title": "Ajuda e Tour",
       "platformTour": "Tour da Plataforma",
       "resetAll": "Redefinir Todos os Tours",
-      "resetConfirm": "Deseja redefinir todo o progresso dos tours?"
+      "resetConfirm": "Deseja redefinir todo o progresso dos tours?",
+      "completed": "Concluído"
     },
     "offer": {
       "message": "Novo por aqui? Inicie o {{page}}",
@@ -2517,7 +2523,8 @@
     "quickCreateTitle": "Criação Rápida de {{type}}",
     "quickCreateDesc": "Defina nome e descrição. Configure os detalhes de pipeline mais tarde.",
     "guidedSetup": "Configuração Guiada",
-    "guidedSetupDesc": "Assistente passo a passo integrado com modelo LLM e regras básicas."
+    "guidedSetupDesc": "Assistente passo a passo integrado com modelo LLM e regras básicas.",
+    "guidedSetupDescGroup": "Assistente passo a passo para a equipe, o estilo de discussão e as aprovações opcionais; ele também pode criar os agentes membros."
   },
   "groups": {
     "actionConflict": "Outra operação ainda está em andamento, ou esta discussão não aceita mais essa ação. Tente novamente.",
@@ -3461,14 +3468,61 @@
     "humanPrincipalIdPlaceholder": "ID de login/principal do utilizador",
     "humanTurnSettingsHint": "A discussão pausa e aguarda quando chega a vez de um membro humano falar. Escolha o que acontece se não responderem a tempo.",
     "humanTurnSettingsTitle": "Definições da vez do membro humano",
-    "humanTurnTimeoutInvalid": "Não é uma duração ISO-8601 válida, por exemplo PT24H ou P1D.",
-    "humanTurnTimeoutLabel": "Tempo limite da vez (duração ISO-8601)",
-    "humanTurnTimeoutPlaceholder": "por ex. PT24H — em branco espera indefinidamente",
+    "humanTurnTimeoutInvalid": "Informe um número maior que zero.",
+    "humanTurnTimeoutLabel": "Tempo limite do turno",
+    "humanTurnTimeoutPlaceholder": "Deixe vazio para esperar indefinidamente.",
     "memberTypeHuman": "Humano",
-    "memberPromptPlaceholder": "Você é {{name}}. Forneça análises perspicazes a partir da perspectiva da sua área.",
-    "memberPromptPlaceholderRole": "Você é {{name}}, especialista em {{role}}. Forneça análises perspicazes a partir da perspectiva da sua área.",
-    "moderatorPromptPlaceholder": "Você é um moderador experiente. Sintetize a discussão do grupo em um resumo claro e equilibrado…",
-    "modelPlaceholder": "ex.: {{model}}"
+    "modelPlaceholder": "ex.: {{model}}",
+    "stepTemplate": "Modelo",
+    "stepConfig": "Configuração",
+    "stepMembers": "Membros",
+    "stepReview": "Revisão",
+    "stepsLabel": "Progresso do assistente",
+    "stepAria": "Passo {{n}}: {{title}}",
+    "blockersTitle": "Para continuar:",
+    "blockerName": "Informe um nome para o grupo.",
+    "blockerHitlPhases": "Selecione pelo menos uma fase para pausar ou desative a aprovação humana.",
+    "blockerHitlTimeout": "Informe um tempo limite de aprovação válido (por exemplo, PT15M) ou escolha outra política de tempo limite.",
+    "blockerStyle": "Escolha um estilo de discussão compatível com este servidor.",
+    "blockerMemberName": "{{member}}: adicione um nome de exibição.",
+    "blockerMemberPrincipal": "{{member}}: informe o ID principal da pessoa.",
+    "blockerMemberGroup": "{{member}}: escolha o grupo aninhado.",
+    "blockerMemberAgent": "{{member}}: escolha um agente existente ou mude para Criar novo.",
+    "blockerMemberKey": "{{member}}: adicione uma chave de API para {{provider}} ou escolha um provedor que não precise de uma (por exemplo, Ollama).",
+    "blockerModeratorKey": "Moderador: adicione uma chave de API para {{provider}} ou escolha um provedor que não precise de uma (por exemplo, Ollama).",
+    "blockerTurnTimeout": "Defina o tempo limite do turno humano como um número maior que zero ou limpe o campo.",
+    "memberFallbackName": "Membro {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Brainstorming aberto: todas as perspectivas sobre uma questão.",
+      "PEER_REVIEW": "Revisar um rascunho ou proposta sob vários ângulos.",
+      "DEVIL_ADVOCATE": "Testar um plano ao limite antes de se comprometer com ele.",
+      "DELPHI": "Previsões e estimativas em que opiniões independentes devem convergir.",
+      "DEBATE": "Ponderar uma decisão com dois lados opostos.",
+      "TASK_FORCE": "Planejar e executar trabalho em várias etapas com tarefas atribuídas.",
+      "NEGOTIATION": "Chegar a um acordo entre partes com interesses diferentes."
+    },
+    "howItRuns": "Como funciona",
+    "roundsExplain": "Uma rodada é cada membro falando uma vez. Mais rodadas permitem que os membros respondam uns aos outros, mas cada rodada extra acrescenta chamadas ao LLM e custo.",
+    "roundsEstimate": "Estimativa: cerca de {{calls}} chamadas ao LLM por discussão ({{members}} membros × {{rounds}} rodadas).",
+    "roundsEstimateModerator": "Estimativa: cerca de {{calls}} chamadas ao LLM por discussão ({{members}} membros × {{rounds}} rodadas + 1 moderador).",
+    "unitMinutes": "minutos",
+    "unitHours": "horas",
+    "unitDays": "dias",
+    "durationNoLimit": "Sem limite",
+    "durationUnit": "Unidade",
+    "defaultMemberPrompt": "Você é {{name}}. Forneça insights claros e acionáveis a partir da sua perspectiva de especialista.",
+    "defaultMemberPromptRole": "Você é {{name}}, especialista em {{role}}. Forneça insights claros e acionáveis a partir da sua perspectiva de especialista.",
+    "defaultMemberPromptNoName": "Você é membro deste grupo. Forneça insights claros e acionáveis a partir da sua perspectiva de especialista.",
+    "defaultModeratorPrompt": "Você é um moderador experiente. Sintetize a discussão do grupo em um resumo claro e equilibrado que reúna os principais insights, os pontos de acordo e os desacordos restantes.",
+    "memberNameLabel": "Nome de exibição",
+    "memberRoleLabel": "Função",
+    "memberTypeLabel": "Tipo de membro",
+    "bulkTitle": "Mesmo provedor e chave para todos os agentes novos",
+    "bulkHint": "Cada agente novo precisa de um provedor de LLM e, na maioria dos casos, de uma chave de API. Preencha uma vez aqui e aplique a todos; depois você ainda pode alterar um agente individualmente.",
+    "bulkApply": "Aplicar a todos os agentes novos",
+    "apiKeyRequired": "{{provider}} precisa de uma chave de API antes que este agente possa ser criado.",
+    "presetsNote": "São modelos iniciais que preenchem este assistente. Para usar uma discussão pré-ajustada e atribuir seus agentes existentes às funções dela, veja",
+    "presetsLink": "Modelos de grupo"
   },
   "groupTemplates": {
     "advisoryBoard": "Conselho consultivo",
@@ -3525,7 +3579,9 @@
     "roleCount_one": "{{count}} função a atribuir",
     "roleCount_other": "{{count}} funçãoões a atribuir",
     "empty": "Nenhum modelo disponível",
-    "emptyDescription": "Este servidor não inclui modelos de grupo. Ainda pode criar um grupo de raiz com o assistente."
+    "emptyDescription": "Este servidor não inclui modelos de grupo. Ainda pode criar um grupo de raiz com o assistente.",
+    "wizardNote": "Prefere criar agentes ao longo do caminho ou começar do zero? O assistente de grupo oferece modelos iniciais mais leves.",
+    "wizardLink": "Abrir o assistente de grupo"
   },
   "channels": {
     "agentIdPlaceholder": "ID do agente para processar mensagens",
@@ -4807,7 +4863,13 @@
     "inputTemplateTooLong": "O modelo de prompt está limitado a {{max}} caracteres.",
     "cronInvalid": "Essa expressão cron não é válida.",
     "scheduleUnknown": "Agendamento indisponível",
-    "nextRun": "próxima {{when}}"
+    "nextRun": "próxima {{when}}",
+    "taskSubjectLabel": "Assunto",
+    "taskDescriptionLabel": "Descrição",
+    "inputTemplateLabel": "Modelo de prompt",
+    "priorityTitle": "Prioridade {{n}}: números mais altos são escolhidos primeiro",
+    "backlogNote": "Cada execução de cadência escolhe primeiro as tarefas de maior prioridade (P5 antes de P1). Uma tarefa não pode ser editada nem removida depois de adicionada; uma execução a conclui.",
+    "priorityHint": "Números mais altos são escolhidos primeiro por uma execução de cadência. 0 é o padrão."
   },
   "workforceWizard": {
     "title": "Nova equipa"
@@ -5417,10 +5479,21 @@
     "impactReasonBreaking": "alteração incompatível",
     "switchNotice": "O agente passou da v{{from}} para a v{{to}}"
   },
+  "notFound": {
+    "title": "Página não encontrada",
+    "description": "Não há nada neste endereço. Ele pode ter sido movido ou o link pode estar digitado incorretamente.",
+    "backToDashboard": "Voltar ao painel",
+    "backToWorkforce": "Voltar ao Workforce",
+    "chooseWorkspace": "Escolher um espaço de trabalho"
+  },
   "actionTags": {
     "remove": "Remover {{action}}",
     "none": "Sem ações",
     "inputLabel": "Nova ação",
     "add": "Adicionar ação"
+  },
+  "wizardLeave": {
+    "title": "Sair sem criar?",
+    "message": "A configuração da sua equipe, incluindo os prompts e as chaves de API informados, ainda não foi criada e será perdida."
   }
 }
