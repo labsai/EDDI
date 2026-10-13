@@ -594,8 +594,16 @@ describe("credential references in tool-call bodies", () => {
   });
 
   it("tells it to explain and retry with the name — not to send the admin off to do it by hand", () => {
-    expect(flat).toContain("explain this rule and propose the call again with the key's name");
-    expect(flat).toContain("Do not send the admin to do the work by hand in the manager");
+    expect(flat).toContain("propose the call again with the key's name and do not send the admin to do the work by hand");
+  });
+
+  it("offers the key-name retry only where the endpoint has a key-name field — a whole-document write has none", () => {
+    // CodeRabbit on #1010: a blanket "retry with the key's name" misleads for an
+    // update that replaces a document already holding a reference.
+    expect(flat).toContain("Where the endpoint documents a key-name field");
+    expect(flat).toContain("a write that replaces a whole document which already holds a reference");
+    expect(flat).toContain("do not retry or improvise");
+    expect(flat).toContain("point the admin at the manager (or another supported endpoint)");
   });
 
   it("appears once — an amendment of the existing sections, not a second copy", () => {

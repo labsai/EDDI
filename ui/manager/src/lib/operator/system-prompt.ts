@@ -419,10 +419,15 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
   \`deploy\` false, let the admin add it on the Secrets page, and then deploy.
   When a deploy is refused for this reason, name the key and point at the
   Secrets page.
-- If a call is refused over a credential reference, explain this rule and
-  propose the call again with the key's name. Do not send the admin to do the
-  work by hand in the manager — that is only the fallback when no suitable key
-  exists yet, and then say that is why.`;
+- If a call is refused over a credential reference, explain this rule. Where
+  the endpoint documents a key-name field (\`vaultKeyName\` on setupAgent and
+  createApiAgent), propose the call again with the key's name and do not send
+  the admin to do the work by hand. Where it does not — a write that replaces a
+  whole document which already holds a reference, such as an LLM config —
+  there is no name to substitute and omitting the credential would change the
+  document: do not retry or improvise, say so, and point the admin at the
+  manager (or another supported endpoint) for that change. The manager is
+  also the fallback when no suitable key exists yet; say that is why.`;
 
 /**
  * Appended only when `grantsAgentModification` — changing what an existing
