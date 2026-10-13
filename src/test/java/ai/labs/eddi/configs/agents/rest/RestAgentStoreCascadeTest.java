@@ -39,6 +39,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -125,6 +126,8 @@ class RestAgentStoreCascadeTest {
 
         assertTrue(ex.getMessage().contains("Not referenced"));
         assertEquals(400, ex.getResponse().getStatus());
+        // The JSON client-error body every other 400 uses, not a bare status line.
+        assertEquals(Map.of("error", "bad_request", "message", "Not referenced by agent"), ex.getResponse().getEntity());
     }
 
     @Test

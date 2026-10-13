@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -233,13 +234,24 @@ public class RestAgentStore implements IRestAgentStore {
         }
     }
 
+    /**
+     * A 400 in the JSON shape the other client-error mappers use
+     * ({@code {"error":"bad_request","message":…}}), so the operator and the
+     * Manager read a cascade refusal the same way as any other malformed request.
+     * Carrying an entity, it passes through {@code ClientErrorExceptionMapper}
+     * untouched.
+     */
+    private static BadRequestException cascadeBadRequest(String message) {
+        return new BadRequestException(message, ErrorResponses.badRequest(message));
+    }
+
     @Override
     public AgentCascadeResult cascadeAgentChanges(String id, Integer version, AgentCascadeRequest request) {
         if (request == null) {
-            throw new BadRequestException("A request body with resourceMappings is required");
+            throw cascadeBadRequest("A request body with resourceMappings is required");
         }
         if (version == null) {
-            throw new BadRequestException("version is required");
+            throw cascadeBadRequest("version is required");
         }
         // The agent's own EDIT check first, for the reason updateAgent gives: what
         // follows answers "exists / does not exist" for the agent and its workflows.
@@ -248,7 +260,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             environment = Deployment.Environment.parseStrict(request.environment());
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException(e.getMessage());
+            throw cascadeBadRequest(e.getMessage());
         }
         try {
             return agentCascadeService.cascade(id, version, request.resourceMappings(), Boolean.TRUE.equals(request.redeploy()), environment,
@@ -262,7 +274,7 @@ public class RestAgentStore implements IRestAgentStore {
                 case FAILED :
                     throw new InternalServerErrorException(e.getMessage(), e);
                 default :
-                    throw new BadRequestException(e.getMessage());
+                    throw cascadeBadRequest(e.getMessage());
             }
         }
     }
