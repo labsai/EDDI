@@ -252,7 +252,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
                 className="break-all font-mono text-[11px] text-foreground"
                 data-testid={`request-preview-patch-op-${callId}-${index}`}
               >
-                <span className="font-semibold uppercase">{op.op}</span> <span>{op.path === "" ? "(whole document)" : op.path}</span>
+                <span className="font-semibold uppercase">{op.op}</span> <span>{op.path === "" ? t("operator.approval.patchWholeDocument", "(whole document)") : op.path}</span>
                 {op.from !== undefined && (
                   <>
                     {" ← "}

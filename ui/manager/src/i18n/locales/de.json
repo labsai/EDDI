@@ -4761,7 +4761,8 @@
       "patchHeading": "Patch für {{type}} {{id}} — angewendet auf Version {{version}}, gespeichert als Version {{next}}",
       "patchHeadingBare": "Patch-Operationen",
       "showRawPatch": "Rohen Patch anzeigen",
-      "hideRawPatch": "Rohen Patch ausblenden"
+      "hideRawPatch": "Rohen Patch ausblenden",
+      "patchWholeDocument": "(gesamtes Dokument)"
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",

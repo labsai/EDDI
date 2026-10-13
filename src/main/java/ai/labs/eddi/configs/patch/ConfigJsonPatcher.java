@@ -138,8 +138,6 @@ public class ConfigJsonPatcher {
         } catch (JsonProcessingException e) {
             throw badRequest("The patch body is not unambiguous JSON (a duplicate key, text after the patch, or invalid syntax): "
                     + e.getOriginalMessage());
-        } catch (IOException e) {
-            throw badRequest("The patch body could not be read: " + e.getMessage());
         }
         try (JsonReader reader = Json.createReader(new StringReader(patchBody))) {
             JsonStructure body = reader.read();

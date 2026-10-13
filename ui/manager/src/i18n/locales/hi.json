@@ -4761,7 +4761,8 @@
       "patchHeading": "{{type}} {{id}} के लिए पैच — संस्करण {{version}} पर लागू, संस्करण {{next}} के रूप में सहेजा जाएगा",
       "patchHeadingBare": "पैच ऑपरेशन",
       "showRawPatch": "कच्चा पैच दिखाएँ",
-      "hideRawPatch": "कच्चा पैच छिपाएँ"
+      "hideRawPatch": "कच्चा पैच छिपाएँ",
+      "patchWholeDocument": "(पूरा दस्तावेज़)"
     },
     "starters": {
       "whatsDeployed": "अभी क्या-क्या परिनियोजित है?",

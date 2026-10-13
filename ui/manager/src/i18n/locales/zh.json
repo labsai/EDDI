@@ -4761,7 +4761,8 @@
       "patchHeading": "对 {{type}} {{id}} 的补丁——应用于版本 {{version}}，保存为版本 {{next}}",
       "patchHeadingBare": "补丁操作",
       "showRawPatch": "显示原始补丁",
-      "hideRawPatch": "隐藏原始补丁"
+      "hideRawPatch": "隐藏原始补丁",
+      "patchWholeDocument": "(整个文档)"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

@@ -4949,7 +4949,8 @@
       "patchHeading": "تصحيح لـ {{type}} {{id}} — يُطبَّق على الإصدار {{version}} ويُخزَّن كالإصدار {{next}}",
       "patchHeadingBare": "عمليات التصحيح",
       "showRawPatch": "عرض التصحيح الخام",
-      "hideRawPatch": "إخفاء التصحيح الخام"
+      "hideRawPatch": "إخفاء التصحيح الخام",
+      "patchWholeDocument": "(المستند بالكامل)"
     },
     "starters": {
       "whatsDeployed": "ما المنشور حاليًا؟",

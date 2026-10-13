@@ -4808,7 +4808,8 @@
       "patchHeading": "Patch para {{type}} {{id}} — aplicado à versão {{version}}, salvo como versão {{next}}",
       "patchHeadingBare": "Operações do patch",
       "showRawPatch": "Mostrar o patch bruto",
-      "hideRawPatch": "Ocultar o patch bruto"
+      "hideRawPatch": "Ocultar o patch bruto",
+      "patchWholeDocument": "(documento inteiro)"
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",

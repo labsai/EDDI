@@ -4808,7 +4808,8 @@
       "patchHeading": "Correctif pour {{type}} {{id}} — appliqué à la version {{version}}, enregistré comme version {{next}}",
       "patchHeadingBare": "Opérations du correctif",
       "showRawPatch": "Afficher le correctif brut",
-      "hideRawPatch": "Masquer le correctif brut"
+      "hideRawPatch": "Masquer le correctif brut",
+      "patchWholeDocument": "(document entier)"
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

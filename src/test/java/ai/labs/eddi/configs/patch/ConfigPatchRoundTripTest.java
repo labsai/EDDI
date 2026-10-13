@@ -139,10 +139,10 @@ class ConfigPatchRoundTripTest {
         if (depth > 6) {
             return null;
         }
-        return populateObject(type, name, depth);
+        return populateObject(type, depth);
     }
 
-    private static Object populateObject(Class<?> type, String name, int depth) throws Exception {
+    private static Object populateObject(Class<?> type, int depth) throws Exception {
         if (type.isRecord()) {
             var components = type.getRecordComponents();
             Class<?>[] types = new Class<?>[components.length];

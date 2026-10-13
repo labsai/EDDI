@@ -4761,7 +4761,8 @@
       "patchHeading": "{{type}} {{id}}에 대한 패치 — 버전 {{version}}에 적용하여 버전 {{next}}(으)로 저장",
       "patchHeadingBare": "패치 작업",
       "showRawPatch": "원본 패치 표시",
-      "hideRawPatch": "원본 패치 숨기기"
+      "hideRawPatch": "원본 패치 숨기기",
+      "patchWholeDocument": "(문서 전체)"
     },
     "starters": {
       "whatsDeployed": "지금 무엇이 배포되어 있나요?",

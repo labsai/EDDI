@@ -10,7 +10,7 @@ The operator's `llmstore` write grant was unusable for any LLM configuration wit
 - **Gate guard.** `gate-guard.ts` reads patch operations. An operation whose `path` or `from` names `toolApprovals`, or whose `value` carries it at any depth (which covers replacing a whole task, `/tasks` or the root), is refused as `carries-gate`. `copy` and `move` are refused outright (`unsupported-patch-op`) — they can carry a stored gate override, or a stored credential reference, somewhere the body does not name. A body that is not a well-formed patch, is truncated, or is unpinned is refused like a `PUT` body. The `llmstore` grant is valid only together with this guard, as before.
 - **Approval card.** A patch is listed operation by operation (op, path, value), with the document, the version it applies to and the version it will store; the raw body sits behind a toggle.
 - **Prompt.** One delimited section tells the operator to edit with PATCH, never to send back a document it read, which operations exist, that copy/move, a written `${vault:…}` reference and `toolApprovals` are refused, and that a 409 means re-read. It is derived from the granted endpoints.
-- **Revision.** `operator-revision.json` is bumped to 3.
+- **Revision.** `operator-revision.json` is bumped one past main's value (7 when this was written).
 - **Snapshot.** `openapi-operations.json` gains the three operations.
 
 ### Design decisions

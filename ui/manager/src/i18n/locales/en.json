@@ -4761,7 +4761,8 @@
       "patchHeading": "Patch to {{type}} {{id}} — applied to version {{version}}, stored as version {{next}}",
       "patchHeadingBare": "Patch operations",
       "showRawPatch": "Show the raw patch",
-      "hideRawPatch": "Hide the raw patch"
+      "hideRawPatch": "Hide the raw patch",
+      "patchWholeDocument": "(whole document)"
     },
     "starters": {
       "whatsDeployed": "What's deployed right now?",

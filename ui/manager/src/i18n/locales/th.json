@@ -4761,7 +4761,8 @@
       "patchHeading": "แพตช์สำหรับ {{type}} {{id}} — ใช้กับเวอร์ชัน {{version}} และบันทึกเป็นเวอร์ชัน {{next}}",
       "patchHeadingBare": "การดำเนินการของแพตช์",
       "showRawPatch": "แสดงแพตช์ดิบ",
-      "hideRawPatch": "ซ่อนแพตช์ดิบ"
+      "hideRawPatch": "ซ่อนแพตช์ดิบ",
+      "patchWholeDocument": "(ทั้งเอกสาร)"
     },
     "starters": {
       "whatsDeployed": "ตอนนี้มีอะไรถูกดีพลอยอยู่บ้าง",

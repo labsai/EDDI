@@ -4761,7 +4761,8 @@
       "patchHeading": "{{type}} {{id}} へのパッチ — バージョン {{version}} に適用し、バージョン {{next}} として保存",
       "patchHeadingBare": "パッチの操作",
       "showRawPatch": "生のパッチを表示",
-      "hideRawPatch": "生のパッチを隠す"
+      "hideRawPatch": "生のパッチを隠す",
+      "patchWholeDocument": "(ドキュメント全体)"
     },
     "starters": {
       "whatsDeployed": "今は何がデプロイされていますか？",

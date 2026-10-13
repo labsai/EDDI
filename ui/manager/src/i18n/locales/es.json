@@ -4808,7 +4808,8 @@
       "patchHeading": "Parche para {{type}} {{id}} — aplicado a la versión {{version}}, guardado como versión {{next}}",
       "patchHeadingBare": "Operaciones del parche",
       "showRawPatch": "Mostrar el parche sin procesar",
-      "hideRawPatch": "Ocultar el parche sin procesar"
+      "hideRawPatch": "Ocultar el parche sin procesar",
+      "patchWholeDocument": "(documento completo)"
     },
     "starters": {
       "whatsDeployed": "¿Qué hay desplegado ahora mismo?",
