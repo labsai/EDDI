@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import java.time.Instant;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Properties;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
@@ -962,5 +963,40 @@ class PostgresUserMemoryStoreUnitTest {
         Timestamp ts = new Timestamp(System.currentTimeMillis());
         when(rs.getTimestamp("created_at")).thenReturn(ts);
         when(rs.getTimestamp("updated_at")).thenReturn(ts);
+    }
+
+    // === Compare-and-set writes (Dream must not lose a concurrent update) ===
+
+    @Test
+    void deleteEntryIfUnchanged_isOneConditionalDelete() throws Exception {
+        Instant readAt = Instant.parse("2026-10-01T10:00:00.123456Z");
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(sut.deleteEntryIfUnchanged("id-1", readAt), "a row written since is not deleted");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().contains("DELETE FROM usermemories WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?"),
+                sql.getAllValues().toString());
+        verify(preparedStatement).setString(1, "id-1");
+        verify(preparedStatement).setTimestamp(2, Timestamp.from(readAt));
+    }
+
+    @Test
+    void replaceIfUnchanged_isOneConditionalUpdate() throws Exception {
+        Instant readAt = Instant.parse("2026-10-01T10:00:00Z");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        var entry = new UserMemoryEntry(null, "user-1", "coffee", "black", "preference", Visibility.self, "agent-1", List.of(), null, false, 0,
+                Instant.now(), Instant.now());
+
+        assertTrue(sut.replaceIfUnchanged("id-1", entry, readAt));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String update = sql.getAllValues().getLast();
+        assertTrue(update.startsWith("UPDATE usermemories SET value = ?::jsonb"), update);
+        assertTrue(update.endsWith("WHERE id = ? AND updated_at IS NOT DISTINCT FROM ?"), update);
+        verify(preparedStatement).setString(7, "id-1");
+        verify(preparedStatement).setTimestamp(8, Timestamp.from(readAt));
     }
 }
