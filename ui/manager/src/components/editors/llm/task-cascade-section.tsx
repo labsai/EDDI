@@ -244,6 +244,7 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
                     index={si}
                     totalSteps={steps.length}
                     taskType={task.type}
+                    taskParameters={task.parameters}
                     issues={cascadeIssuesForStep(issues, si)}
                     onChange={(patch) => updateStep(si, patch)}
                     onMoveUp={() => moveStep(si, -1)}

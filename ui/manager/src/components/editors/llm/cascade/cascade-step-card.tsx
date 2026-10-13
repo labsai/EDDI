@@ -15,6 +15,8 @@ import { type CascadeStep } from "../types";
 import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
 import { parseNum as num, nextParamKey } from "./cascade-utils";
+import { ModelSettingsSection } from "../model-settings-section";
+import { PARAMETER_CATALOG, catalogKeys } from "@/lib/llm-parameter-catalog";
 
 /**
  * Params owned by the dedicated controls (model input + API key picker), hidden
@@ -36,6 +38,7 @@ export function CascadeStepCard({
   index,
   totalSteps,
   taskType,
+  taskParameters,
   issues,
   onChange,
   onMoveUp,
@@ -47,6 +50,8 @@ export function CascadeStepCard({
   index: number;
   totalSteps: number;
   taskType?: string;
+  /** The task's parameters: the backend runs a step with them under the step's own. */
+  taskParameters?: Record<string, string>;
   issues: CascadeIssue[];
   onChange: (patch: Partial<CascadeStep>) => void;
   onMoveUp: () => void;
@@ -66,8 +71,11 @@ export function CascadeStepCard({
     onChange({ parameters: next });
   };
 
+  // Keys the catalog lists for the step's provider are edited in the Model
+  // settings panel below; the grid keeps everything else.
+  const panelKeys = catalogKeys(PARAMETER_CATALOG, step.type ?? "openai");
   const extraParamEntries = Object.entries(params).filter(
-    ([k]) => !STEP_HIDDEN_PARAM_KEYS.has(k),
+    ([k]) => !STEP_HIDDEN_PARAM_KEYS.has(k) && !panelKeys.has(k),
   );
   const isCrossProvider = !!step.type && step.type !== taskType;
 
@@ -234,7 +242,24 @@ export function CascadeStepCard({
               </div>
             </div>
 
-            {/* Extra parameters (baseUrl, temperature, …) */}
+            {/* Typed, model-aware settings for this step's provider. The step
+                runs with the task's parameters under its own, so they are the
+                inherited values. */}
+            <div>
+              <label className="mb-1 block text-[10px] text-muted-foreground">
+                {t("llmEditor.modelSettings.title", "Model settings")}
+              </label>
+              <ModelSettingsSection
+                type={step.type ?? "openai"}
+                parameters={params}
+                onChange={(parameters) => onChange({ parameters })}
+                inheritedParameters={taskParameters}
+                readOnly={readOnly}
+                testIdPrefix={`cascade-step-${index}-settings`}
+              />
+            </div>
+
+            {/* Extra parameters (baseUrl, timeout, …) */}
             <div>
               <label className="mb-1 block text-[10px] text-muted-foreground">
                 {t("llmEditor.cascadeStepParams", "Extra parameters")}
