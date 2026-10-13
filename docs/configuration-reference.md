@@ -222,6 +222,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.api-docs.http-policy` | `eddi-api-docs-reader` | Quarkus HTTP policy for the API description — `/openapi`, `/q/openapi`, `/q/swagger-ui`. The default admits a token carrying one of `eddi.api-docs.roles-allowed`; `authenticated` admits any token, `permit` anyone. See [security.md → Deny by default](security.md#deny-by-default-and-what-a-role-less-token-reaches) |
 | `eddi.api-docs.roles-allowed` | `eddi-admin,eddi-editor,eddi-user,eddi-approver,eddi-viewer` | The realm roles the default API-description policy admits — any EDDI role. The Manager reads `/openapi` for the backend version, and the Platform Operator for its tool list |
 | `eddi.chat.frame-ancestors` | `'none'` | CSP `frame-ancestors` for the Chat UI at `/chat` — the origins allowed to embed it in an `<iframe>`, space-separated (`https://www.example.com https://*.example.org`). The default refuses every embedder; the rest of EDDI always sends `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
+| `eddi.chat.img-sources` | `https:` | Sources appended to the Chat UI's CSP `img-src` (after `'self' data: blob:`), so the image output items an agent designer configures can be shown from wherever they are hosted. Markdown images in model-written text are never rendered as `<img>`, whatever this says. `https:` allows any https host, which also lets markup injected by some other flaw send data to any host through an `<img>`; list your image hosts (`https://cdn.example.com`) to keep that narrow, or set `'self'` to allow none beyond EDDI (an empty value falls back to the default). See [the Chat UI embedding contract](chat-ui-embedding.md) |
 | `eddi.csp.extra-connect-sources` | *(empty)* | Sources appended to the Manager's CSP `connect-src`. Needed only for the agent wizard's "fetch the OpenAPI spec from a URL", the one browser request to a host nobody chose in advance — list the spec hosts you use. `https:` allows any host, and with it lets any injected script send data anywhere |
 
 ### Workspaces & resource sharing
@@ -351,6 +352,8 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
+| `eddi.attachments.max-per-user` | `0` (off) | Attachments per user across all of their conversations, counted against the conversation's owner. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
+| `eddi.attachments.max-total-bytes-per-user` | `0` (off) | Aggregate bytes per user across all of their conversations |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
@@ -449,7 +452,9 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
-| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |
+| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout. A stream that runs out of it ends with an OpenAI error event (`code: timeout`) and one `[DONE]` |
+| `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat (`X-OpenWebUI-Chat-Id`, `X-EDDI-Chat-Id`, `metadata.chat_id` or `user`) is mapped: `history` keys it by a hash of its first system and first user message, so each client-side chat gets its own conversation; `shared` keeps one conversation per user and agent, as earlier releases did. See [open-webui-integration.md](open-webui-integration.md#session-mapping) |
+| `eddi.openai-compat.max-conversation-steps` | `0` (off) | Steps after which an idle mapped conversation is ended and the chat continues in a fresh one, bounding the size of one conversation document. The agent no longer sees the earlier history; the ended conversation stays readable |
 
 ### Connections
 

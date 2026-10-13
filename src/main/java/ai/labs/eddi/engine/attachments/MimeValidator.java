@@ -40,20 +40,129 @@ public final class MimeValidator {
     private static final byte[] PDF_HEADER = {0x25, 0x50, 0x44, 0x46, 0x2D};
     private static final int PDF_HEADER_SEARCH_WINDOW = 1024;
 
-    /** Whether {@code needle} starts within the first {@code window} bytes. */
-    private static boolean containsWithinFirst(byte[] bytes, byte[] needle, int window) {
-        int lastStart = Math.min(window, bytes.length) - needle.length;
+    /**
+     * Whether a PDF header ({@code %PDF-} plus a version digit) starts within the
+     * first {@link #PDF_HEADER_SEARCH_WINDOW} bytes <em>where a PDF header can
+     * stand</em>: at offset 0, after nothing but a byte-order mark and whitespace,
+     * or at the start of a line (a print-job prefix ends in a newline). Anywhere
+     * else it is text that mentions a PDF — a Markdown note reading "files start
+     * with %PDF-1.7" was refused as a mislabelled PDF.
+     */
+    private static boolean hasPdfHeader(byte[] bytes) {
+        int lastStart = Math.min(PDF_HEADER_SEARCH_WINDOW, bytes.length) - PDF_HEADER.length - 1;
         for (int start = 0; start <= lastStart; start++) {
-            int matched = 0;
-            while (matched < needle.length && bytes[start + matched] == needle[matched]) {
-                matched++;
-            }
-            if (matched == needle.length) {
+            if (matchesAt(bytes, start, PDF_HEADER) && isAsciiDigit(bytes[start + PDF_HEADER.length])
+                    && pdfHeaderMayStartAt(bytes, start)) {
                 return true;
             }
         }
         return false;
     }
+
+    private static boolean pdfHeaderMayStartAt(byte[] bytes, int start) {
+        if (start == 0) {
+            return true;
+        }
+        byte previous = bytes[start - 1];
+        if (previous == '\n' || previous == '\r') {
+            return true;
+        }
+        // Only a BOM and/or whitespace before it.
+        int index = startsWith(bytes, 0xEF, 0xBB, 0xBF) ? 3 : 0;
+        while (index < start && (bytes[index] == ' ' || bytes[index] == '\t')) {
+            index++;
+        }
+        return index == start;
+    }
+
+    private static boolean matchesAt(byte[] bytes, int offset, byte[] needle) {
+        if (offset + needle.length > bytes.length) {
+            return false;
+        }
+        for (int i = 0; i < needle.length; i++) {
+            if (bytes[offset + i] != needle[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isAsciiDigit(byte value) {
+        return value >= '0' && value <= '9';
+    }
+
+    /**
+     * A BMP is "BM", a 4-byte file size, four reserved bytes that are always zero,
+     * a 4-byte pixel offset, then a DIB header whose size field names one of the
+     * known header versions. Matching "BM" alone refused every CSV whose first
+     * column was {@code BMI} as a mislabelled bitmap.
+     */
+    private static boolean isBmp(byte[] bytes) {
+        if (bytes.length < 18 || !startsWith(bytes, 0x42, 0x4D)) {
+            return false;
+        }
+        if (bytes[6] != 0 || bytes[7] != 0 || bytes[8] != 0 || bytes[9] != 0) {
+            return false;
+        }
+        int dibHeaderSize = (bytes[14] & 0xFF) | (bytes[15] & 0xFF) << 8 | (bytes[16] & 0xFF) << 16 | (bytes[17] & 0xFF) << 24;
+        return BMP_DIB_HEADER_SIZES.contains(dibHeaderSize);
+    }
+
+    /** BITMAPCOREHEADER, OS/2 v2, BITMAPINFOHEADER, v2, v3, v4 and v5. */
+    private static final Set<Integer> BMP_DIB_HEADER_SIZES = Set.of(12, 16, 40, 52, 56, 64, 108, 124);
+
+    /** Bytes inspected by {@link #looksLikeText}. */
+    static final int TEXT_SNIFF_WINDOW = 8192;
+
+    /**
+     * Whether the content reads as text: no NUL byte and almost no other control
+     * characters in the first {@link #TEXT_SNIFF_WINDOW} bytes (a UTF-16 byte-order
+     * mark counts as text). Every binary format this class recognises carries NUL
+     * bytes or dense control bytes in its header, so real images, archives and
+     * audio never qualify.
+     */
+    public static boolean looksLikeText(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return false;
+        }
+        if (startsWith(bytes, 0xFE, 0xFF) || startsWith(bytes, 0xFF, 0xFE)) {
+            return true;
+        }
+        int window = Math.min(bytes.length, TEXT_SNIFF_WINDOW);
+        int controls = 0;
+        for (int i = 0; i < window; i++) {
+            int value = bytes[i] & 0xFF;
+            if (value == 0) {
+                return false;
+            }
+            if (value < 0x20 && value != '\t' && value != '\n' && value != '\r' && value != '\f' && value != 0x1B) {
+                controls++;
+            }
+        }
+        // A stray control byte in a hand-edited file is tolerated; a binary header is
+        // not.
+        return controls * 100 <= window;
+    }
+
+    /**
+     * Whether a declared type is a text format: {@code text/*}, a JSON or XML type
+     * (including {@code +json}/{@code +xml} suffixes), YAML, CSV or JavaScript.
+     */
+    public static boolean isTextual(String declaredMime) {
+        String mime = normalize(declaredMime);
+        return mime.startsWith("text/") || mime.endsWith("+json") || mime.endsWith("+xml") || TEXTUAL_APPLICATION_TYPES.contains(mime);
+    }
+
+    private static final Set<String> TEXTUAL_APPLICATION_TYPES = Set.of(
+            "application/json",
+            "application/x-ndjson",
+            "application/xml",
+            "application/yaml",
+            "application/x-yaml",
+            "application/csv",
+            "application/javascript",
+            "application/x-javascript",
+            "application/sql");
 
     public static String detectMime(byte[] bytes) {
         if (bytes == null || bytes.length < 4) {
@@ -72,8 +181,8 @@ public final class MimeValidator {
         if (startsWith(bytes, 0x47, 0x49, 0x46, 0x38)) {
             return "image/gif";
         }
-        // BMP: 42 4D
-        if (startsWith(bytes, 0x42, 0x4D)) {
+        // BMP: 42 4D plus a plausible header (see isBmp)
+        if (isBmp(bytes)) {
             return "image/bmp";
         }
         // WebP: RIFF....WEBP
@@ -88,7 +197,7 @@ public final class MimeValidator {
         // PDF: %PDF- — readers accept the header anywhere in the first 1024 bytes, and
         // real generators emit leading bytes (BOM, print-job prefixes). Offset 0 only
         // would refuse those as "mislabelled" now that PDFs require a signature.
-        if (containsWithinFirst(bytes, PDF_HEADER, PDF_HEADER_SEARCH_WINDOW)) {
+        if (hasPdfHeader(bytes)) {
             return "application/pdf";
         }
         // ZIP/DOCX/XLSX: 50 4B 03 04
@@ -135,6 +244,31 @@ public final class MimeValidator {
             return "application/octet-stream";
         }
         return mime.split(";")[0].trim().toLowerCase();
+    }
+
+    /**
+     * Validate an upload: the declared type must be compatible with the content.
+     * <p>
+     * Text declared as text is always compatible. Signatures are short prefixes, so
+     * a text file can begin with one by accident — a CSV whose first column is
+     * {@code BMI}, notes that open with {@code ID3} or {@code GIF8}, Markdown with
+     * a line reading {@code %PDF-1.7} — and refusing it as a "mislabelled image" is
+     * a false positive. Content that reads as text and is declared as text is
+     * stored as text and never forwarded to a model as an image or PDF, so
+     * accepting it widens nothing. Everything else falls through to
+     * {@link #isCompatible(String, String)}.
+     *
+     * @param declaredMime
+     *            the MIME type declared by the client
+     * @param bytes
+     *            the content
+     * @return true if compatible
+     */
+    public static boolean isCompatibleContent(String declaredMime, byte[] bytes) {
+        if (declaredMime != null && isTextual(declaredMime) && looksLikeText(bytes)) {
+            return true;
+        }
+        return isCompatible(declaredMime, detectMime(bytes));
     }
 
     /**

@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
-import { QueryClient } from "@tanstack/react-query";
+import { queryClient } from "@/lib/query-client";
 import { createAppRouter } from "@/app-router";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
@@ -27,15 +27,6 @@ import "@fontsource-variable/noto-sans-tc";
 // components need it, so it lives in `@/lib/monaco-setup`, which those
 // components import for its side effect — see that file for why the
 // configuration cannot simply be deferred behind a function call.
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-    },
-  },
-});
 
 /**
  * Force the mock API on regardless of whether a backend answers.
