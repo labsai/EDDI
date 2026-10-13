@@ -25,7 +25,13 @@
     "profile": "Perfil",
     "guest": "Visitante",
     "userMenu": "Menu do utilizador",
-    "signedIn": "Sessão iniciada"
+    "signedIn": "Sessão iniciada",
+    "authenticating": "Autenticando…",
+    "initFailedTitle": "Falha ao entrar",
+    "initFailedBody": "O Manager não conseguiu concluir o login. O serviço de login pode estar inacessível ou sua sessão foi rejeitada.",
+    "signInAgain": "Entrar novamente",
+    "sessionExpiredTitle": "Sua sessão expirou.",
+    "sessionExpiredBody": "As alterações não salvas continuam nesta página — copie o que precisar antes de entrar novamente."
   },
   "nav": {
     "dashboard": "Painel",
@@ -224,7 +230,13 @@
     "versionShort": "v{{version}}",
     "resizePanel": "Redimensionar {{panel}}",
     "deletePermanently": "Excluir permanentemente",
-    "deletePermanentlyHint": "Não pode ser desfeito. Sem esta opção, o item é apenas marcado como excluído e continua recuperável até ser expurgado."
+    "deletePermanentlyHint": "Não pode ser desfeito. Sem esta opção, o item é apenas marcado como excluído e continua recuperável até ser expurgado.",
+    "errors": {
+      "network": "Não foi possível alcançar o EDDI. Verifique sua conexão e tente novamente.",
+      "unauthorized": "Sua sessão expirou. Entre novamente.",
+      "forbidden": "Você não tem permissão para ver isto.",
+      "notFound": "Não encontrado — pode ter sido excluído."
+    }
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -708,7 +720,13 @@
     "purgeSuccess_one": "{{count}} conversa encerrada removida",
     "purgeSuccess_other": "{{count}} conversas encerradas removidas",
     "endStateUnavailable": "Não foi possível voltar a verificar o estado atual das conversas, por isso nada foi terminado. Tente novamente.",
-    "endStateChanged": "Uma conversa selecionada está agora a aguardar aprovação. Reveja a seleção e confirme novamente."
+    "endStateChanged": "Uma conversa selecionada está agora a aguardar aprovação. Reveja a seleção e confirme novamente.",
+    "noMoreResults": "Não há mais resultados",
+    "backToPreviousPage": "Voltar à página anterior",
+    "purgeTitleAll": "Limpar conversas encerradas – todos os agentes",
+    "purgeScopeNote": "Isto não se limita ao agente selecionado acima: exclui as conversas encerradas de todos os agentes.",
+    "confirmPurgeScope": "Aplica-se a TODOS os agentes, não apenas ao selecionado acima.",
+    "purgeDaysInvalid": "Informe um número inteiro de dias, 1 ou mais."
   },
   "conversationDetail": {
     "backToConversations": "Voltar às conversas",
@@ -726,7 +744,9 @@
     "totalCost": "Custo total",
     "cacheHitRate": "Taxa de acerto de cache",
     "endReasonRetired": "Encerrada: a versão do agente foi desativada",
-    "stepAgentVersion": "Respondido pela versão {{version}} do agente"
+    "stepAgentVersion": "Respondido pela versão {{version}} do agente",
+    "searchTranscriptLabel": "Pesquisar na transcrição",
+    "matchCount": "Etapas correspondentes: {{matches}}"
   },
   "chat": {
     "hide": "Ocultar",
@@ -809,7 +829,10 @@
     "sendWhileLoading": "A sua mensagem não foi enviada: a conversa ainda está a carregar. Tente novamente dentro de momentos.",
     "turnFailed": "O agente não conseguiu responder a esta mensagem. Consulte o log do servidor ou a trilha de auditoria da conversa para ver o motivo.",
     "errorWithReason": "Erro: {{reason}}",
-    "endConversationFailed": "Não foi possível encerrar a conversa: {{reason}}"
+    "endConversationFailed": "Não foi possível encerrar a conversa: {{reason}}",
+    "searchAgents": "Pesquisar agentes",
+    "noAgentMatches": "Nenhum agente corresponde à sua pesquisa",
+    "transcript": "Conversa"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -1663,7 +1686,7 @@
     "stepsCount": "{{count}} passos",
     "noConversationsFound": "Nenhuma conversa encontrada",
     "useConversationId": "Usar ID: {{id}}",
-    "searchLogs": "Pesquisar logs…",
+    "searchLogs": "Pesquisar nas entradas carregadas…",
     "errors": "erros",
     "warnings": "avisos",
     "infos": "info",
@@ -1675,7 +1698,19 @@
     "stateActive": "Ativo",
     "stateError": "Erro",
     "stateEnded": "Encerrado",
-    "loadOlder": "Carregar entradas mais antigas"
+    "loadOlder": "Carregar entradas mais antigas",
+    "reconnect": "Reconectar",
+    "streamDisconnected": "Desconectado do fluxo de logs.",
+    "errorCount_one": "{{count}} erro",
+    "errorCount_many": "{{count}} de erros",
+    "errorCount_other": "{{count}} erros",
+    "warnCount_one": "{{count}} aviso",
+    "warnCount_many": "{{count}} de avisos",
+    "warnCount_other": "{{count}} avisos",
+    "copied": "Entrada de log copiada",
+    "noMatches": "Nenhuma entrada carregada corresponde à sua pesquisa.",
+    "noMatchesHint": "A pesquisa abrange apenas as entradas já carregadas aqui. Carregue entradas mais antigas ou ajuste os filtros para olhar mais atrás.",
+    "searchLogsLabel": "Pesquisar nas entradas de log carregadas"
   },
   "secrets": {
     "loadError": "Não foi possível carregar os secrets",
@@ -1866,7 +1901,9 @@
       "reasonUncovered": "{{count}} entrada(s) carregada(s) mais antiga(s) que o intervalo verificado",
       "unverifiedTitle": "Não totalmente verificado",
       "unverifiedDesc": "Nenhuma assinatura foi refutada, mas nem tudo pôde ser verificado: {{reasons}}."
-    }
+    },
+    "agentsDeployed": "Implantados",
+    "agentsNotDeployed": "Não implantados"
   },
   "schedules": {
     "cronHelp": "Formato de 5 campos: minuto hora dia-do-mês mês dia-da-semana",
@@ -1997,7 +2034,8 @@
     "systemManaged": "Sistema",
     "systemManagedHint": "Gerido pelo EDDI (ingestão da base de conhecimento, consolidação de memória ou cadência da equipa). Altere-o onde está definido, não aqui.",
     "persistentConversationIdLocked": "Definido quando o agendamento é criado. O servidor mantém a conversa à qual as execuções têm sido acrescentadas.",
-    "failedScheduleGone": "O agendamento já não existe"
+    "failedScheduleGone": "O agendamento já não existe",
+    "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo)."
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -2090,7 +2128,10 @@
     "connected": "Conectado",
     "disconnected": "Desconectado",
     "logOutput": "Saída do log",
-    "noMatch": "Nenhum log corresponde ao seu filtro"
+    "noMatch": "Nenhum log corresponde ao seu filtro",
+    "errorsAnnounce_one": "{{count}} erro no log",
+    "errorsAnnounce_many": "{{count}} de erros no log",
+    "errorsAnnounce_other": "{{count}} erros no log"
   },
   "promptViewer": {
     "error": "Falha ao carregar os dados do prompt",
@@ -2494,7 +2535,8 @@
   },
   "stream": {
     "live": "Ao vivo",
-    "reconnecting": "Reconectando…"
+    "reconnecting": "Reconectando…",
+    "disconnected": "Desconectado"
   },
   "createOrWizard": {
     "title": "Novo {{type}}",
@@ -3100,7 +3142,24 @@
     "deletePermanentlyHint": "Não pode ser desfeito: o grupo e seu espaço de trabalho (lista de pendências, cadências e seus agendamentos) são removidos definitivamente. Sem esta opção, o grupo é apenas marcado como excluído e continua recuperável até ser expurgado.",
     "deletePermanentlyWithMembersHint": "Não pode ser desfeito: o grupo, seu espaço de trabalho e todos os agentes membros são removidos definitivamente. Sem esta opção, eles são apenas marcados como excluídos e continuam recuperáveis até serem expurgados.",
     "deleteMembersFailedAfterGroup": "O grupo foi excluído, mas estes agentes membros não: {{ids}}. Exclua-os na página Agentes.",
-    "deleteMembersFailedGroupKept": "O grupo foi mantido: estes agentes membros não puderam ser excluídos: {{ids}}. Tente novamente para concluir."
+    "deleteMembersFailedGroupKept": "O grupo foi mantido: estes agentes membros não puderam ser excluídos: {{ids}}. Tente novamente para concluir.",
+    "transcriptLabel": "Transcrição da discussão",
+    "announceAwaitingApproval": "A discussão está em pausa e aguarda a sua aprovação.",
+    "announceAwaitingHuman": "A discussão está a aguardar a resposta de um membro.",
+    "newMessages": "Novas mensagens",
+    "finishEditingFirst": "Guarde ou cancele primeiro a secção que está a editar",
+    "editBasics": "Editar nome, membros e definições",
+    "humanTurnResuming": "A sua resposta foi registada. A discussão está a ser retomada — esta página acompanha-a e atualiza-se a cada poucos segundos.",
+    "composerMode": "O que fazer com a sua mensagem",
+    "composerModeNew": "Nova discussão",
+    "composerModeContinue": "Continuar esta discussão",
+    "loadMoreDiscussions": "Carregar discussões mais antigas",
+    "confirmDeleteLiveDiscussionDescription": "Esta discussão ainda está a decorrer. Será interrompida e a transcrição, com todo o seu conteúdo, é removida permanentemente. Não é possível anular.",
+    "discardEditsTitle": "Descartar alterações não guardadas?",
+    "discardEditsDescription": "Uma secção da configuração ainda está a ser editada. Fechar o painel descarta as alterações feitas nela.",
+    "discardEditsConfirm": "Descartar",
+    "keepEditing": "Continuar a editar",
+    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -3153,7 +3212,10 @@
     "sourceConversation": "Conversa de origem",
     "conflicted": "Em conflito",
     "deleteEntryTitle": "Eliminar esta memória?",
-    "deleteEntryDesc": "\"{{key}}\" é removido permanentemente para este utilizador. Os agentes deixam de o recordar. Esta ação não pode ser anulada."
+    "deleteEntryDesc": "\"{{key}}\" é removido permanentemente para este utilizador. Os agentes deixam de o recordar. Esta ação não pode ser anulada.",
+    "deleteAllDescUser": "Isto exclui permanentemente todas as {{total}} entradas de memória do usuário \"{{userId}}\". Não é possível desfazer.",
+    "toggleDetails": "Mostrar ou ocultar os detalhes de {{key}}",
+    "deleteEntryLabel": "Excluir a entrada de memória {{key}}"
   },
   "properties": {
     "title": "Propriedades do utilizador",
@@ -3189,7 +3251,9 @@
     "deleted": "Gatilho eliminado",
     "deleteTitle": "Eliminar gatilho",
     "deleteDesc": "Eliminar permanentemente o gatilho para o intent «{{intent}}»?",
-    "searchPlaceholder": "Filtrar por intent ou ID do agente…"
+    "searchPlaceholder": "Filtrar por intent ou ID do agente…",
+    "needIntent": "Digite uma intenção para salvar.",
+    "needAgent": "Escolha pelo menos um agente para salvar."
   },
   "capabilities": {
     "agentCount": "Agentes",
@@ -3206,7 +3270,11 @@
     "registeredSkills": "Competências registadas",
     "noSkills": "Nenhuma competência encontrada",
     "matchingAgents": "Agentes correspondentes",
-    "noMatches": "Nenhum agente encontrado para esta competência"
+    "noMatches": "Nenhum agente encontrado para esta competência",
+    "searchLabel": "Pesquisar habilidades",
+    "strategyLabel": "Estratégia de correspondência",
+    "emptyTitle": "Nenhuma capacidade registrada ainda",
+    "emptyDesc": "Os agentes aparecem aqui quando declaram capacidades (habilidades) na configuração. Adicione uma capacidade a um agente e ela aparecerá neste registro."
   },
   "exportDialog": {
     "title": "Exportar agente",
@@ -3733,7 +3801,10 @@
     "confirmApproveGroupDescription": "Aprovar toda a fase em pausa e retomar a discussão. Cada tarefa pendente é aprovada com ela — abra o grupo para as decidir individualmente.",
     "confirmRejectGroupDescription": "Rejeitar toda a fase em pausa. Cada tarefa pendente é rejeitada com ela e a discussão não avança para além dela — abra o grupo para as decidir individualmente.",
     "pauseChanged": "Este pedido mudou desde que o abriu — nada foi decidido. Reveja-o novamente.",
-    "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes."
+    "regularTruncated": "A mostrar as primeiras {{limit}} aprovações de conversas — há mais pendentes. Decida algumas para ver as restantes.",
+    "conversationColumn": "Conversa",
+    "groupReviewLoadError": "Não foi possível carregar a discussão.",
+    "groupReviewNoEntries": "Ainda não foi dito nada."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
@@ -3765,7 +3836,18 @@
     "vaultUp": "Cofre pronto",
     "viewLogs": "Ver logs",
     "coordAdminOnly": "Coordenador: requer admin",
-    "vaultAdminOnly": "Cofre: requer admin"
+    "vaultAdminOnly": "Cofre: requer admin",
+    "vaultChecking": "Verificando o cofre…",
+    "statsPartial": "Algumas contagens não puderam ser carregadas — aparecem como indisponíveis, não como zero.",
+    "countUnavailable": "Não foi possível carregar",
+    "convState": {
+      "READY": "Pronta",
+      "IN_PROGRESS": "Em andamento",
+      "ENDED": "Encerrada",
+      "EXECUTION_INTERRUPTED": "Interrompida",
+      "ERROR": "Erro",
+      "AWAITING_HUMAN": "Aguardando uma pessoa"
+    }
   },
   "errorBoundary": {
     "retry": "Tentar novamente",
@@ -3825,7 +3907,11 @@
     "failedConversations_other": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
     "conversationsTruncated_many": "As conversas foram limitadas — o utilizador tem {{count}} no total.",
     "failedConversations_many": "{{count}} conversas não puderam ser lidas e estão ausentes do pacote.",
-    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida."
+    "deleteIncomplete": "Eliminação incompleta — alguns dados deste utilizador podem ainda existir. Não a comunique como cumprida.",
+    "noDataFoundToast": "Nenhum dado encontrado para este ID de usuário – nada foi excluído.",
+    "noDataFoundTitle": "Nenhum dado encontrado para este ID de usuário",
+    "noDataFoundBody": "Nada foi excluído para \"{{userId}}\". Verifique se há erros de digitação no ID e tente novamente.",
+    "confirmTypeLabel": "Digite o ID de usuário \"{{userId}}\" para confirmar"
   },
   "mockBanner": {
     "message": "Modo de demonstração — Exibindo dados de exemplo. Conecte um backend EDDI para dados reais."
@@ -3852,7 +3938,9 @@
     "confirmPurge": "Eliminar permanentemente todos os {{count}} recursos órfãos? Esta ação não pode ser anulada.",
     "purgeIncompleteScan": "Nada foi eliminado: o EDDI não conseguiu terminar de verificar que recursos ainda estão em uso. Volte a analisar e tente novamente.",
     "purgeFailed": "A limpeza falhou",
-    "scanFailed": "A análise falhou: {{reason}}"
+    "scanFailed": "A análise falhou: {{reason}}",
+    "reviewHint": "Abra um recurso da lista para inspecioná-lo antes; todos os órfãos da lista são excluídos.",
+    "typeToConfirm": "Digite {{count}} para confirmar"
   },
   "quotas": {
     "apiCallsMinute": "Chamadas de API / minuto",
@@ -3879,7 +3967,8 @@
     "tenantId": "ID do locatário",
     "title": "Cotas do locatário",
     "limitHintEmpty": "Vazio ou -1 = ilimitado, 0 = bloqueado",
-    "invalidNumber": "Introduza um número ou deixe o campo vazio para ilimitado."
+    "invalidInteger": "Digite um número inteiro (0 ou mais) ou deixe em branco para ilimitado.",
+    "invalidAmount": "Digite um valor (0 ou mais) ou deixe em branco para ilimitado."
   },
   "secretPicker": {
     "clearVault": "Limpar referência do cofre",
@@ -5193,7 +5282,9 @@
     "bindingCallerSuppliedBody": "O sistema chamador entrega a credencial de cada utilizador com o pedido e o EDDI não armazena nada. O agente só pode fazer o que esse utilizador pode fazer no destino, e esta ligação é excluída da descoberta MCP e A2A.",
     "confirmAuthChange": "Alterar a forma como esta ligação se autentica?",
     "confirmAuthChangeDesc": "As contas ligadas através desta ligação deixarão de se resolver — uma concessão pertence ao fluxo que a produziu. O EDDI recusa a alteração enquanto alguma conta continuar ligada e diz quantas; desligue-as primeiro, ou crie uma nova ligação e deixe as pessoas ligarem essa.",
-    "confirmAuthChangeAccept": "Alterar"
+    "confirmAuthChangeAccept": "Alterar",
+    "deleted": "Conexão \"{{name}}\" excluída",
+    "confirmDeleteNamed": "Excluir a conexão \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Analisador de entrada",

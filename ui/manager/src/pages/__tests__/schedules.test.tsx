@@ -559,7 +559,7 @@ describe("SchedulesPage", () => {
     await user.type(nameInput, "My Test Schedule");
 
     const agentInput = within(dialog).getByPlaceholderText(/agent ID/i);
-    await user.type(agentInput, "agent-123");
+    await user.type(agentInput, "agent-123{Enter}");
 
     // Create button should now be enabled (name + agentId filled, cron has default)
     const createBtn = within(dialog).getByText("Create");

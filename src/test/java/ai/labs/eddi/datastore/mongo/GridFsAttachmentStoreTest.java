@@ -72,6 +72,9 @@ class GridFsAttachmentStoreTest {
         Field filesField = GridFsAttachmentStore.class.getDeclaredField("filesCollection");
         filesField.setAccessible(true);
         filesField.set(store, files);
+        Field locksField = GridFsAttachmentStore.class.getDeclaredField("locksCollection");
+        locksField.setAccessible(true);
+        locksField.set(store, mock(MongoCollection.class));
         return store;
     }
 
@@ -495,6 +498,7 @@ class GridFsAttachmentStoreTest {
         verify(files).createIndex(Indexes.ascending("metadata.storageRef"));
         verify(files).createIndex(Indexes.ascending("metadata.conversationId"));
         verify(files).createIndex(Indexes.ascending("metadata.grants"));
+        verify(files).createIndex(Indexes.ascending("metadata.userId"));
     }
 
     @Test
@@ -508,7 +512,7 @@ class GridFsAttachmentStoreTest {
         verify(bounded).createIndex(Indexes.ascending("metadata.storageRef"));
         verify(filesCollection, never()).createIndex(any(Bson.class));
         ArgumentCaptor<Long> budget = ArgumentCaptor.forClass(Long.class);
-        verify(filesCollection, times(3)).withTimeout(budget.capture(), eq(TimeUnit.MILLISECONDS));
+        verify(filesCollection, times(4)).withTimeout(budget.capture(), eq(TimeUnit.MILLISECONDS));
         assertTrue(
                 budget.getAllValues().stream().allMatch(ms -> ms > 0 && ms <= TimeUnit.SECONDS.toMillis(GridFsAttachmentStore.INDEX_TIMEOUT_SECONDS)),
                 "every call must get at most the pass budget: " + budget.getAllValues());

@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
+
+function LocationProbe() {
+  return <span data-testid="loc">{useLocation().search}</span>;
+}
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { LogsPage } from "@/pages/logs";
 import { useLogStream } from "@/hooks/use-logs";
@@ -17,6 +21,8 @@ vi.mock("@/hooks/use-logs", () => ({
       { timestamp: 1700000002000, level: "WARNING", message: "Low memory", loggerName: "sys" },
     ],
     sseConnected: true,
+    exhausted: false,
+    reconnect: vi.fn(),
     seeded: true,
     paused: false,
     setPaused: vi.fn(),
@@ -242,21 +248,85 @@ describe("LogsPage", () => {
   });
 
   it("shows loading state when not yet seeded", () => {
-    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: false, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: false, exhausted: false, reconnect: vi.fn(), paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("Loading recent logs…")).toBeInTheDocument();
   });
 
   it("shows no-activity state when seeded but empty", () => {
-    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: true, seeded: true, exhausted: false, reconnect: vi.fn(), paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("No recent log activity.")).toBeInTheDocument();
   });
 
   it("shows connecting state when not connected", () => {
-    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: false, seeded: true, paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
+    vi.mocked(useLogStream).mockReturnValueOnce({ entries: [], sseConnected: false, seeded: true, exhausted: false, reconnect: vi.fn(), paused: false, setPaused: vi.fn(), clearEntries: vi.fn() });
     renderLogs();
     expect(screen.getByText("Connecting to stream...")).toBeInTheDocument();
+  });
+
+  it("shows a terminal Disconnected state with a Reconnect button once retries are spent", async () => {
+    const reconnect = vi.fn();
+    const base = vi.mocked(useLogStream)();
+    vi.mocked(useLogStream).mockReturnValue({
+      ...base,
+      entries: [],
+      sseConnected: false,
+      exhausted: true,
+      reconnect,
+    });
+    try {
+      renderLogs();
+      expect(screen.queryByText("Connecting to stream...")).not.toBeInTheDocument();
+      expect(screen.getByText("Disconnected from the log stream.")).toBeInTheDocument();
+      expect(screen.getByTestId("stream-badge")).toHaveTextContent("Disconnected");
+      await userEvent.setup().click(screen.getByTestId("reconnect-button"));
+      expect(reconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.mocked(useLogStream).mockReturnValue(base);
+    }
+  });
+
+  it("says no loaded entries match when a text search finds nothing", async () => {
+    renderLogs();
+    await userEvent.setup().type(screen.getByTestId("text-search"), "zzz-nothing");
+    expect(screen.getByTestId("live-no-matches")).toBeInTheDocument();
+  });
+
+  it("keeps History filters in the URL when switching tabs", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/manage/logs?tab=history&level=ERROR&agent=agent1"]}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <LogsPage />
+            <LocationProbe />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByTestId("tab-live"));
+    expect(screen.getByTestId("loc").textContent).toBe("?level=ERROR&agent=agent1");
+    await user.click(screen.getByTestId("tab-history"));
+    expect(screen.getByTestId("loc").textContent).toContain("tab=history");
+    expect(screen.getByTestId("loc").textContent).toContain("level=ERROR");
+  });
+
+  it("counts errors and warnings with proper plurals", () => {
+    renderLogs();
+    // fixture: one ERROR, one WARNING
+    const stats = screen.getByTestId("level-stats");
+    expect(within(stats).getByText("1 error")).toBeInTheDocument();
+    expect(within(stats).getByText("1 warning")).toBeInTheDocument();
+  });
+
+  it("history rows carry the date and an ISO timestamp title", async () => {
+    renderLogs();
+    await userEvent.setup().click(screen.getByTestId("tab-history"));
+    const row = (await screen.findByText("History log entry")).closest(".group")!;
+    const stamp = row.querySelector("span[title]")!;
+    expect(stamp.getAttribute("title")).toMatch(/^2024-01-15T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/);
+    expect(stamp.textContent).toMatch(/2024/);
   });
 
   // Rows used to be keyed by timestamp + list index. Every new line shifts

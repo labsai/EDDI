@@ -19,8 +19,13 @@ interface DiscussionInputProps {
    * `attachments` is only ever non-empty in `mode: "new"` — the backend rejects a
    * continuation that carries any, because files are shared with member agents
    * when the discussion first starts.
+   *
+   * May return a promise: the draft (text and files) is then kept, and the
+   * composer locked, until it resolves, and is cleared only if it resolves to
+   * anything but `false`. A request that fails before the server accepts it
+   * therefore leaves the user's question where they typed it.
    */
-  onSubmit: (question: string, attachments?: GroupAttachmentRef[]) => void;
+  onSubmit: (question: string, attachments?: GroupAttachmentRef[]) => void | Promise<boolean | void>;
   isLoading?: boolean;
   disabled?: boolean;
   /** Controls placeholder text, button label, and icon.
@@ -39,6 +44,15 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
   const { t } = useTranslation();
   const [question, setQuestion] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  // A submit whose acceptance is still being awaited — see `onSubmit`.
+  const [sending, setSending] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dialogTextareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,16 +127,32 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
       );
       return;
     }
-    if (question.trim() && !isLoading && !disabled) {
+    if (question.trim() && !isLoading && !disabled && !sending) {
       const files = attachmentRefs();
       // Called with one argument when there is nothing to attach, rather than
       // with an explicit `undefined` — the question-only call is the overwhelming
       // case and its shape should not change just because the signature grew.
-      if (files) onSubmit(question.trim(), files);
-      else onSubmit(question.trim());
-      setQuestion("");
-      clearAttachments();
-      setDialogOpen(false);
+      const result = files ? onSubmit(question.trim(), files) : onSubmit(question.trim());
+      const clearDraft = () => {
+        setQuestion("");
+        clearAttachments();
+        setDialogOpen(false);
+      };
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        setSending(true);
+        (result as Promise<boolean | void>)
+          .then((ok) => {
+            if (ok !== false && mountedRef.current) clearDraft();
+          })
+          .catch(() => {
+            // Rejected: the draft stays for another try.
+          })
+          .finally(() => {
+            if (mountedRef.current) setSending(false);
+          });
+      } else {
+        clearDraft();
+      }
     }
   }
 
@@ -216,7 +246,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             className="w-full resize-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}
             rows={1}
-            disabled={disabled || isLoading}
+            disabled={disabled || isLoading || sending}
             onKeyDown={(e) => {
               // The Enter that confirms an IME composition is not a send.
               if (isImeComposing(e)) return;
@@ -243,11 +273,11 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
         </div>
         <Button
           type="submit"
-          disabled={!question.trim() || isLoading || disabled || questionTooLong}
+          disabled={!question.trim() || isLoading || disabled || sending || questionTooLong}
           className="shrink-0"
           data-testid="start-discussion-btn"
         >
-          {isLoading ? (
+          {isLoading || sending ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : mode === "continue" ? (
             <RotateCw className="h-4 w-4" />
@@ -287,7 +317,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             }
             className="w-full resize-y rounded-lg border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow min-h-[200px]"
             rows={8}
-            disabled={isLoading || disabled}
+            disabled={isLoading || disabled || sending}
             onKeyDown={(e) => {
               if (isImeComposing(e)) return;
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -327,7 +357,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled, mode = "new", d
             </Button>
             <Button
               onClick={() => handleSubmit()}
-              disabled={!question.trim() || isLoading || disabled || questionTooLong}
+              disabled={!question.trim() || isLoading || disabled || sending || questionTooLong}
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin me-1" />
