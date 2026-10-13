@@ -46,7 +46,7 @@ describe("SchedulesPage — one-time schedules", () => {
     expect(dt).toBeInTheDocument();
 
     await user.type(within(dialog).getByTestId("schedule-name-input"), "One shot");
-    await user.type(within(dialog).getByTestId("agent-id-input"), "agent-x");
+    await user.type(within(dialog).getByPlaceholderText("Enter agent ID..."), "agent-x{Enter}");
     fireEvent.change(dt, { target: { value: "2026-12-25T09:30" } });
 
     await user.click(within(dialog).getByTestId("schedule-submit-btn"));
@@ -58,6 +58,48 @@ describe("SchedulesPage — one-time schedules", () => {
     // Exactly-one-of: neither cron nor heartbeat is sent.
     expect(body!.cronExpression).toBeUndefined();
     expect(body!.heartbeatIntervalSeconds).toBeUndefined();
+  });
+
+  it("reads the one-time wall clock in the selected Time Zone, not the browser's", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.post("*/schedulestore/schedules", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/schedulestore/schedules/one-time-2" },
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderSchedules();
+    const dialog = await openCreateDialog(user);
+    await user.click(within(dialog).getByTestId("trigger-oneTime"));
+    await user.type(within(dialog).getByTestId("schedule-name-input"), "Zoned");
+    await user.type(within(dialog).getByPlaceholderText("Enter agent ID..."), "agent-z{Enter}");
+    fireEvent.change(within(dialog).getByTestId("timezone-select"), {
+      target: { value: "America/New_York" },
+    });
+    fireEvent.change(within(dialog).getByTestId("onetime-input"), {
+      target: { value: "2026-12-25T09:30" },
+    });
+    // The help names the zone the input is read in.
+    expect(within(dialog).getByText(/America\/New_York time/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByTestId("schedule-submit-btn"));
+    await waitFor(() => expect(body).not.toBeNull());
+    // 09:30 in New York (UTC-5 in December) is 14:30 UTC.
+    expect(body!.oneTimeAt).toBe("2026-12-25T14:30:00.000Z");
+    expect(body!.timeZone).toBe("America/New_York");
+  });
+
+  it("ties every form label to its control", async () => {
+    const user = userEvent.setup();
+    renderSchedules();
+    const dialog = await openCreateDialog(user);
+    for (const name of ["Name", "Cron Expression", "Time Zone", "Agent ID", "Version", "Environment", "Message", "User ID", "Max cost per fire", "Conversation Strategy"]) {
+      expect(within(dialog).getByLabelText(name, { exact: false })).toBeInTheDocument();
+    }
   });
 });
 
@@ -202,7 +244,7 @@ describe("SchedulesPage — timezone", () => {
       within(dialog).getByTestId("schedule-name-input"),
       "Vienna job"
     );
-    await user.type(within(dialog).getByTestId("agent-id-input"), "agent-tz");
+    await user.type(within(dialog).getByPlaceholderText("Enter agent ID..."), "agent-tz{Enter}");
     fireEvent.change(within(dialog).getByTestId("timezone-select"), {
       target: { value: "Europe/Vienna" },
     });

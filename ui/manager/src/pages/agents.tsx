@@ -58,6 +58,7 @@ export function AgentsPage() {
     data,
     isLoading,
     isError,
+    error,
     refetch,
     fetchNextPage,
     hasNextPage,
@@ -199,6 +200,7 @@ export function AgentsPage() {
 
       {isError && (
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}

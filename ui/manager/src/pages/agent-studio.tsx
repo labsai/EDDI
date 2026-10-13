@@ -118,6 +118,7 @@ export function AgentStudioPage() {
   const {
     data: descriptors,
     isError: descriptorsError,
+    error: descriptorsErr,
     refetch: refetchDescriptors,
   } = useQuery({
     queryKey: ["studio", "descriptors", agentId],
@@ -182,6 +183,7 @@ export function AgentStudioPage() {
     data: agentConfig,
     isLoading: agentLoading,
     isError: agentError,
+    error: agentErr,
     refetch: refetchAgent,
   } = useQuery({
     queryKey: ["studio", "agent", agentId, agentVersion],
@@ -229,6 +231,7 @@ export function AgentStudioPage() {
   const {
     data: workflowConfig,
     isError: workflowError,
+    error: workflowErr,
     refetch: refetchWorkflow,
   } = useQuery({
     // The version is part of the key: keyed by id alone, the pipeline kept
@@ -345,9 +348,11 @@ export function AgentStudioPage() {
       : agentBlocked
         ? refetchAgent
         : refetchWorkflow;
+    const retryError = descriptorsBlocked ? descriptorsErr : agentBlocked ? agentErr : workflowErr;
     return (
       <div className="flex h-full items-center justify-center p-6">
         <ErrorState
+          error={retryError}
           message={t("common.error", "Something went wrong")}
           onRetry={() => retryFailed()}
           retryLabel={t("common.retry", "Retry")}

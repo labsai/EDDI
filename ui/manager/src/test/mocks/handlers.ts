@@ -872,6 +872,18 @@ function defaultShareInfo(id: string) {
   };
 }
 
+/**
+ * The next "0 9 * * MON-FRI" fire in UTC, so the Schedules fixture agrees with
+ * its own cron expression (it used to be `now + 12h`, which on a Sunday evening
+ * showed a weekday-only job firing in the small hours).
+ */
+function nextWeekday9amUtc(from: number = Date.now()): number {
+  const d = new Date(from);
+  let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 9, 0, 0);
+  while (t <= from || [0, 6].includes(new Date(t).getUTCDay())) t += 86_400_000;
+  return t;
+}
+
 export const handlers = [
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
@@ -3150,7 +3162,7 @@ export const handlers = [
         message: "Run daily health check",
         conversationStrategy: "new",
         enabled: true,
-        nextFire: Date.now() + 43200000,
+        nextFire: nextWeekday9amUtc(),
         lastFired: Date.now() - 43200000,
         fireStatus: "COMPLETED",
         failCount: 0,
@@ -3231,7 +3243,7 @@ export const handlers = [
       message: "Run daily health check",
       conversationStrategy: "new",
       enabled: true,
-      nextFire: Date.now() + 43200000,
+      nextFire: nextWeekday9amUtc(),
       lastFired: Date.now() - 43200000,
       fireStatus: "COMPLETED",
       failCount: 0,

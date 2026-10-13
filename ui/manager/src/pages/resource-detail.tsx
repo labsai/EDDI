@@ -730,6 +730,7 @@ export function ResourceDetailPage() {
 
       {(isError || isVersionsError) && !isForbidden(resourceError) && !isLoading && !isVersionsLoading && (
         <ErrorState
+          error={resourceError}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
