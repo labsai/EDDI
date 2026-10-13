@@ -539,7 +539,7 @@ public class A2ATaskHandler {
             return;
         }
 
-        conversationService.sayStreaming(Environment.production, prepared.agentId(), conversationId, DETAILED, true, null, inputData,
+        conversationService.sayStreaming(conversationId, DETAILED, true, null, inputData,
                 new StreamingResponseHandler() {
                     private boolean firstChunk = true;
 
