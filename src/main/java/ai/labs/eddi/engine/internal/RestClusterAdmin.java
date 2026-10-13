@@ -125,7 +125,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
                 .data(ActivityEvent.class, forCaller(event, admin)).build());
         if (!activity.addListener(listener, admin)) {
             sink.send(sse.newEventBuilder().name("busy").data("too many subscribers on this node").build())
-                    .whenComplete((v, t) -> sink.close());
+                    .whenComplete((_, _) -> sink.close());
             return;
         }
         streams.put(sink, listener);
@@ -184,7 +184,7 @@ public class RestClusterAdmin implements IRestClusterAdmin {
     private void expire(SseEventSink sink) {
         drop(sink);
         if (!sink.isClosed()) {
-            sink.send(pingSse.newEventBuilder().name("expired").data("token expired").build()).whenComplete((v, t) -> sink.close());
+            sink.send(pingSse.newEventBuilder().name("expired").data("token expired").build()).whenComplete((_, _) -> sink.close());
         }
     }
 

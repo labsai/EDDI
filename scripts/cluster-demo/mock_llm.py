@@ -30,7 +30,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-LOG = open(sys.argv[1], "a", encoding="utf-8")
+LOG = None  # the JSON-lines log file, opened by main() for the life of the server
 LOCK = threading.Lock()
 
 
@@ -54,7 +54,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.endswith("/models"):
-            return self._send(200, {"object": "list", "data": [{"id": "mock-1", "object": "model"}]})
+            self._send(200, {"object": "list", "data": [{"id": "mock-1", "object": "model"}]})
+            return
         self._send(404, {"error": "nope"})
 
     def do_POST(self):
@@ -101,7 +102,8 @@ class Handler(BaseHTTPRequestHandler):
              "role": last.get("role"), "auth": auth_hash, "status": code,
              "tool_result": content[:4000] if last.get("role") == "tool" else None})
         if code != 200:
-            return self._send(code, {"error": {"message": "mock upstream failure"}})
+            self._send(code, {"error": {"message": "mock upstream failure"}})
+            return
         usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         self._send(200, {"id": "c1", "object": "chat.completion", "created": 1, "model": body.get("model"),
                          "choices": [{"index": 0, "message": msg, "finish_reason": finish}], "usage": usage})
@@ -114,4 +116,11 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
-Server(("0.0.0.0", int(sys.argv[2])), Handler).serve_forever()
+def main():
+    global LOG
+    with open(sys.argv[1], "a", encoding="utf-8") as LOG:
+        Server(("0.0.0.0", int(sys.argv[2])), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

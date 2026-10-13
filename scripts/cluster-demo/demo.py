@@ -91,7 +91,7 @@ def wait_until(fn, timeout, interval=0.5):
             v = fn()
             if v:
                 return v
-        except Exception:
+        except Exception:  # a probe that throws is "not yet": keep polling until the timeout
             pass
         time.sleep(interval)
     return None
@@ -101,13 +101,14 @@ def mock_entries(tag=None, since=0.0):
     out = []
     if not os.path.exists(MOCK_LOG):
         return out
-    for line in open(MOCK_LOG, encoding="utf-8"):
-        try:
-            e = json.loads(line)
-        except Exception:
-            continue
-        if e["start"] >= since and (tag is None or e.get("tag") == tag):
-            out.append(e)
+    with open(MOCK_LOG, encoding="utf-8") as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+            except Exception:  # a line the mock is still writing: skip it
+                continue
+            if e["start"] >= since and (tag is None or e.get("tag") == tag):
+                out.append(e)
     return out
 
 
@@ -120,7 +121,7 @@ def metric(base, name, label_filter=""):
             try:
                 # OpenMetrics exemplars follow the value: "<series> <value> # {...} 1.0 <ts>"
                 total += float(line.split(" # ")[0].rsplit(" ", 1)[1])
-            except ValueError:
+            except ValueError:  # a series line without a numeric value: not part of the total
                 pass
     return total
 
@@ -353,7 +354,6 @@ def s1_ordering(infra, ctx):
         res2 = list(ex.map(lambda j: (j[1], say(j[0], conv2, j[1], timeout=180)), jobs2))
     entries2 = sorted(mock_entries(tag2, since=t0), key=lambda e: e["start"])
     overlaps2 = sum(1 for a, b in zip(entries2, entries2[1:]) if b["start"] < a["end"] - 0.01)
-    counts2 = [e["messages"] for e in entries2]
     stored2 = stored_after(conv2, [t for t, r in res2 if r[0] == 200])
     ok2 = [t for t, r in res2 if r[0] == 200]
     chained2 = all(b.get("prev_user") == a["user"] for a, b in zip(entries2, entries2[1:]))
@@ -386,7 +386,6 @@ def s2_kill(infra, ctx):
     took = time.time() - t0
     th.join(5)
     state = conv_state(conv, NODES[1])
-    stored = stored_inputs(conv, NODES[1])
     takeover = metric(NODES[1], "eddi_cluster_lease_takeover_total")
     infra.start_node(0)
     infra.node_ready(0)
@@ -524,7 +523,7 @@ def s6_undeploy(infra, ctx):
     """Undeploy on node A: B and C stop serving within seconds; a new version deployed on A propagates."""
     agent = setup_llm_agent(NODES[0], f"p11-undeploy-{int(time.time())}", "sk-undeploy-0123456789")
     wait_ready_everywhere(agent)
-    conv = start_conv(NODES[1], agent)
+    start_conv(NODES[1], agent)  # an open conversation on B, for endAllActiveConversations to end
     s, _, _, _ = http(NODES[0], "POST", f"/administration/production/undeploy/{agent}?version=1&endAllActiveConversations=true")
     t0 = time.time()
     gone = wait_until(lambda: all(jl(http(n, "GET", f"/administration/production/deploymentstatus/{agent}?version=1")[2]).get("status")
@@ -835,7 +834,8 @@ def main():
                 except Exception as e:  # a crashed scenario is a failed one, and the rest still run
                     record(sid, SCENARIOS[sid].__doc__.strip().splitlines()[0], False, error=repr(e))
     finally:
-        json.dump(RESULTS, open(out, "w"), indent=2)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(RESULTS, f, indent=2)
         print(f"\n{sum(1 for r in RESULTS.values() if r['pass'])}/{len(RESULTS)} scenarios passed, "
               f"{sum(1 for r in RESULTS.values() if r['pass'] is None)} not applicable -> {out}")
         logdir = os.path.join(HERE, f"logs-{args.db}{suffix}")

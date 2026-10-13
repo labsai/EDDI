@@ -236,7 +236,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                 return null;
             }
         } catch (RuntimeException | IResourceStore.ResourceStoreException e) {
-            LOGGER.debugf("On-demand deployment check of %s failed: %s", agentId, e.getMessage());
+            LOGGER.debugf("On-demand deployment check of %s failed: %s", sanitize(agentId), e.getMessage());
             return null;
         }
         checkDeployments();
@@ -244,7 +244,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
         while (true) {
             T found = resolve.get();
             if (found != null) {
-                LOGGER.debugf("Agent %s deployed on demand on this node", agentId);
+                LOGGER.debugf("Agent %s deployed on demand on this node", sanitize(agentId));
                 return found;
             }
             if (System.nanoTime() >= deadline) {

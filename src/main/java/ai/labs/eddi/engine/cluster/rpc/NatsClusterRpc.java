@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.cluster.ClusterStartable;
 import ai.labs.eddi.engine.cluster.ClusterSubjects;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.NatsConnectionManager;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -157,7 +158,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
             return Optional.empty();
         } catch (IOException | RuntimeException e) {
             outcome = "unavailable";
-            LOGGER.debugf("RPC %s to %s failed: %s", op, nodeId, e.getMessage());
+            LOGGER.debugf("RPC %s to %s failed: %s", LogSanitizer.sanitize(op), LogSanitizer.sanitize(nodeId), e.getMessage());
             return Optional.empty();
         } finally {
             record(op, outcome, start);

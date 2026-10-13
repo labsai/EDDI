@@ -2590,7 +2590,8 @@ public class GroupConversationService implements IGroupConversationService, User
                 // Held elsewhere — most likely a stale lease of a node that died, which
                 // expires with its TTL. The discussion still runs; a cancel forwarded to
                 // that holder is answered "not here" and falls back to the database path.
-                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)", groupConversationId);
+                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)",
+                        LogSanitizer.sanitize(groupConversationId));
             }
         }
     }
