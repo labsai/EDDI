@@ -431,7 +431,7 @@ describe("UserMemoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Delete All Memories")).toBeInTheDocument();
       expect(
-        screen.getByText(/permanently delete ALL memory entries/)
+        screen.getByText(/permanently deletes all 3 memory entries for user "user-123"/)
       ).toBeInTheDocument();
     });
   });
@@ -496,12 +496,46 @@ describe("UserMemoryPage", () => {
     const user = await enterUserIdAndLoad();
 
     await user.click(screen.getByTestId("delete-memory-mem-1"));
-    // A single entry is confirmed first, like "Delete All".
-    await user.click(await screen.findByTestId("alert-dialog-confirm"));
+
+    // Deleting is permanent, so a single entry is confirmed first, like "Delete All".
+    expect(await screen.findByText("Delete this memory?")).toBeInTheDocument();
+    expect(deleteCalled).toBe(false);
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
 
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
     });
+  });
+
+  it("cancelling the entry confirmation deletes nothing", async () => {
+    let deleteCalled = false;
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+        deleteCalled = true;
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-cancel"));
+    expect(deleteCalled).toBe(false);
+    expect(screen.queryByText("Delete this memory?")).not.toBeInTheDocument();
+  });
+
+  it("only the row being deleted is disabled while its delete is pending", async () => {
+    server.use(
+      http.delete("*/usermemorystore/memories/entry/:entryId", async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    const user = await enterUserIdAndLoad();
+    await user.click(screen.getByTestId("delete-memory-mem-1"));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+    await waitFor(() => {
+      expect(screen.getByTestId("delete-memory-mem-1")).toBeDisabled();
+    });
+    expect(screen.getByTestId("delete-memory-mem-2")).not.toBeDisabled();
   });
 
   // ─── Confirm delete all flow ───────────────────────────────────────────
