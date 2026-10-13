@@ -57,6 +57,15 @@ final class MonitoringSeries {
      * match, so the guard that exists to make an unwatched meter impossible could
      * not see them.
      */
+    /**
+     * A local {@code count("eddi....", ...)} helper forwarding to
+     * {@code counter(...)} (LlmCircuitBreakers). Only {@code eddi.}-prefixed names:
+     * elsewhere {@code count("auth_required")}-style calls pass a TAG value to one
+     * shared meter, and are not meters of their own.
+     */
+    private static final Pattern COUNT_HELPER = Pattern.compile(
+            "(?:^|[^\\w])(count)\\s*\\(\\s*\"(eddi\\.[\\w.]*)\"");
+
     private static final Pattern REGISTRATION = Pattern.compile(
             "(?:^|[^\\w])(counter|timer|gauge|summary|increment)\\s*\\(\\s*\"([a-z][\\w.]*)\"");
 
@@ -156,6 +165,7 @@ final class MonitoringSeries {
             String body = read(file);
             String relative = root.relativize(file).toString().replace('\\', '/');
             record(REGISTRATION.matcher(body), found, relative, null);
+            record(COUNT_HELPER.matcher(body), found, relative, null);
             record(BUILDER.matcher(body), found, relative, null);
             Map<String, String> constants = new HashMap<>();
             Matcher constant = STRING_CONSTANT.matcher(body);
@@ -212,10 +222,11 @@ final class MonitoringSeries {
             if (name == null) {
                 continue;
             }
-            // increment(...) is a local helper that forwards to counter(...);
-            // FunctionCounter and DistributionSummary expose as counter/summary.
+            // increment(...) and count(...) are local helpers that forward to
+            // counter(...) (LlmCircuitBreakers uses count); FunctionCounter and
+            // DistributionSummary expose as counter/summary.
             String normalised = switch (type) {
-                case "increment", "functioncounter" -> "counter";
+                case "increment", "count", "functioncounter" -> "counter";
                 case "distributionsummary" -> "summary";
                 default -> type;
             };
