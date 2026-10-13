@@ -428,7 +428,7 @@ For the sake of simplicity we will use a free weather API to fetch weather of ci
 
 ### 1 - Create regularDictionnary
 
-> More about regular dictionaries: [Creating a Regular Dictionary inside Parser](creating-your-first-agent/creating-your-first-agent-1.md#1-creating-a-regular-dictionary-inside-parser).
+> More about regular dictionaries: [Create a dictionary](creating-your-first-agent/README.md#6-create-a-dictionary).
 
 _Request URL_
 
@@ -638,7 +638,7 @@ _Response Code_
 
 ### 5 - Creating the workflow
 
-> More about workflows: [Creating the Workflow](creating-your-first-agent/creating-your-first-agent-1.md#4-creating-the-workflow).
+> More about workflows: [Create the workflow](creating-your-first-agent/README.md#2-create-the-workflow).
 >
 > Important Workflow note
 >
