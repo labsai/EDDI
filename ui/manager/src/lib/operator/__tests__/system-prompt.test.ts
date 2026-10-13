@@ -602,8 +602,12 @@ describe("credential references in tool-call bodies", () => {
     // update that replaces a document already holding a reference.
     expect(flat).toContain("Where the endpoint documents a key-name field");
     expect(flat).toContain("a write that replaces a whole document which already holds a reference");
-    expect(flat).toContain("do not retry or improvise");
-    expect(flat).toContain("point the admin at the manager (or another supported endpoint)");
+    // Generic, so it is right with or without a PATCH tool: use a partial update
+    // when the store offers one, and only otherwise send the admin to the manager.
+    expect(flat).toContain("If the store offers a partial update (a JSON Patch), edit with that and leave the credential out of it");
+    expect(flat).toContain("Only when neither a key-name field nor a partial update exists, do not retry or improvise");
+    expect(flat).toContain("point the admin at the manager for that change");
+    expect(flat).not.toMatch(/patch[A-Z]\w+|operationId/);
   });
 
   it("appears once — an amendment of the existing sections, not a second copy", () => {

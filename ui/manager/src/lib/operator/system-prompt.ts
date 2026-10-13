@@ -424,9 +424,11 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
   createApiAgent), propose the call again with the key's name and do not send
   the admin to do the work by hand. Where it does not — a write that replaces a
   whole document which already holds a reference, such as an LLM config —
-  there is no name to substitute and omitting the credential would change the
-  document: do not retry or improvise, say so, and point the admin at the
-  manager (or another supported endpoint) for that change. The manager is
+  there is no name to substitute, and sending the document without the
+  credential would change it. If the store offers a partial update (a JSON
+  Patch), edit with that and leave the credential out of it. Only when neither
+  a key-name field nor a partial update exists, do not retry or improvise:
+  say so and point the admin at the manager for that change. The manager is
   also the fallback when no suitable key exists yet; say that is why.`;
 
 /**
