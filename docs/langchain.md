@@ -119,7 +119,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `includeFirstAgentMessage` | boolean | **Deprecated — do not use in new configs.** Include the opening **agent** message in context. `false` drops it — and only it: a first message from the *user* is always kept. Setting it logs a WARN; see [Deprecated parameters](#deprecated-parameters) | true              |
 | **Output Control**         |         |                                                       |                   |
 | `convertToObject`          | boolean | Parse response as JSON. Enables three-layer enforcement: system prompt reinforcement, native API JSON mode (see the [provider matrix](#native-json-mode--provider-matrix)), and pre-parse validation | false             |
-| `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format | ""                |
+| `responseSchema`           | string  | JSON schema for structured output. When set with `convertToObject=true`, the exact schema is injected into the system prompt so the LLM knows the expected format. If it is a JSON Schema it is also validated against the parsed reply and sent natively to OpenAI, Azure OpenAI, Mistral and Gemini — see [Structured Output](#shape-validation-responseschema-and-nonblankfields) | ""                |
 | `addToOutput`              | boolean | Add response to conversation output                   | false             |
 | **Logging**                |         |                                                       |                   |
 | `logRequests`              | boolean | Log API requests (sync and streaming)                 | false             |
@@ -829,6 +829,9 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `tools`                    | string[] | Custom HTTP call tool URIs to enable             | (none)                 |
 | **Context Control**        |          |                                                  |                        |
 | `conversationHistoryLimit` | int      | Max conversation turns in context                | 10                     |
+| `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
+| `maxToolCallsPerIteration` | int      | Most tool calls executed from a **single model response**. Calls past the cap are not run: each gets a `NOT_EXECUTED` result naming the limit, so the model can answer with what it has. `-1`/`0` disables. See [Tool-call caps](#tool-call-caps) | 20 |
+| `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
@@ -844,7 +847,8 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
-| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout` | (none) |
+| `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | (none) |
+| `onError`                  | object   | `{"action": "fallback" \| "error"}`. With `fallback`, a failed model phase serves the configured fallback and the turn completes normally instead of failing — see [Fallback answers and `onError`](#fallback-answers-and-onerror) | `error` |
 | **Retrieval (RAG)**        |          | Requires the agent's workflow to bind the knowledge base with an `eddi://ai.labs.rag` step — see [RAG](rag.md#configuration) | |
 | `knowledgeBases`           | object[] | Knowledge bases this task retrieves from, by `name`, each optionally overriding `maxResults` / `minScore`. The name must match a KB the workflow binds; an unmatched name is skipped silently | (none) |
 | `enableWorkflowRag`        | boolean  | Retrieve from **every** knowledge base the workflow binds, instead of listing them. Ignored when `knowledgeBases` contains at least one reference; an empty `knowledgeBases` array does **not** suppress it | false |
@@ -948,7 +952,7 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Date/Time**       | Get current date, time, timezone info           | `datetime`       |
 | **Web Search**      | Search the web (includes Wikipedia & News)      | `websearch`      |
 | **Data Formatter**  | Format JSON, CSV, XML data                      | `dataformatter`  |
-| **Web Scraper**     | Extract content from web pages (SSRF-protected) | `webscraper`     |
+| **Web Scraper**     | Extract content from web pages (SSRF-protected). CSS selectors only — regex selectors are refused, see below | `webscraper`     |
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
@@ -956,6 +960,18 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
+
+Every built-in parameter carries a description in the tool schema the model receives (for example
+`calculate.expression`: *"Arithmetic expression to evaluate, e.g. 'sqrt(16) + 2^3 * PI'"*), and
+optional parameters — `searchWeb.maxResults`, `getCurrentWeather.units`,
+`getWeatherForecast.days`, `extractLinks.maxLinks`, `summarizeText.numSentences`, … — are not
+marked required. They used to be described by their own names and all marked required.
+
+**Failures.** A built-in that cannot reach its upstream (web search, scraper, weather, PDF
+download) reports the failure to the model as `Error: …` and the result is not cached. Any other
+unexpected exception inside a tool reaches the model only as
+`Error: tool '<name>' failed with an internal error (reference <id>)`; the full exception is in
+the server log under that reference, never in the transcript.
 
 ### Tool Configuration (Server-Side)
 
@@ -979,6 +995,29 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 - `EDDI_TOOLS_WEBSEARCH_PROVIDER=google`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_API_KEY=...`
 - `EDDI_TOOLS_WEBSEARCH_GOOGLE_CX=...`
+
+#### Web Scraper Tool
+
+`extractWithSelector` evaluates a model-written CSS selector against a page of up to
+`eddi.tools.web-scraper.max-response-bytes`. Two defences keep that from pinning the server:
+
+- **Regex selectors are refused** before the page is fetched: `:matches`, `:matchesOwn`,
+  `:matchText`, `:matchesWholeText`, `:matchesWholeOwnText` and the `[attr~=regex]` operator. jsoup
+  evaluates them as Java regular expressions, and a catastrophic pattern there never finishes.
+  Selectors are also capped at 256 characters. Use `:contains(text)` / `:containsOwn(text)`.
+- **Parsing is contained.** Parsing the page and evaluating the selector run on a small pool of
+  platform threads with a hard deadline, instead of on the virtual thread the tool call arrived
+  on (where CPU-bound work holds a carrier thread, and there are only as many carriers as cores).
+  A call that finds every worker busy is refused at once; a parse past the deadline is abandoned
+  and reported as a failure.
+
+```properties
+eddi.tools.web-scraper.parse-threads=2          # concurrent parses
+eddi.tools.web-scraper.parse-timeout-ms=10000   # deadline per parse
+```
+
+A worker past its deadline cannot be killed (Java has no safe way to), so it keeps running until it
+finishes; the pool size is what bounds that cost to at most `parse-threads` cores.
 
 #### Weather Tool
 
@@ -1206,8 +1245,14 @@ This agent:
 
 #### Token Counting
 
-- **OpenAI / Azure OpenAI**: Uses tiktoken-based tokenizer (accurate, model-specific)
+- **OpenAI / Azure OpenAI**: Uses tiktoken-based tokenizer (accurate, model-specific) when the
+  model name is one jtokkit knows
 - **All other providers**: Uses an approximate tokenizer (characters ÷ 4)
+
+An OpenAI-family model name the tokenizer does not know — every Azure **deployment** name
+(`my-gpt4-prod`), a non-OpenAI model behind an OpenAI-compatible endpoint, a model newer than the
+bundled tokenizer — is counted with the approximate tokenizer as well, and an INFO line says so
+once per model. (It used to fail every turn of such an agent as soon as `maxContextTokens` was set.)
 
 When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit` step-count behavior applies. **Full backward compatibility is guaranteed.**
 
@@ -1277,6 +1322,29 @@ code and the body, not the headers.
 Anthropic, Gemini, Vertex AI Gemini, Mistral, Ollama, Azure OpenAI, Bedrock), so `maxAttempts: 3`
 means three provider calls, not up to nine. The Hugging Face and OCI GenAI clients expose no such
 setting and the streaming clients have none; streaming retries are EDDI's own loop. Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
+
+If a helper call still fails after the default policy, the tool-response summarizer and the judge fall
+back, and the shared summarizer throws to its caller.
+
+**When the call still fails**, the turn ends with `conversationState: "ERROR"`. The non-streaming
+response (`POST /agents/{conversationId}`) then carries a top-level `error` object with the same
+information the streaming endpoint sends as its `task_failed` event — the field is absent on every
+successful turn, so existing clients are unaffected:
+
+```json
+{
+  "conversationState": "ERROR",
+  "error": {
+    "taskId": "eddi://ai.labs.llm",
+    "taskType": "langchain",
+    "errorType": "LifecycleException",
+    "message": "Task 'eddi://ai.labs.llm' failed: Agent execution failed after 3 attempts: mock upstream failure"
+  }
+}
+```
+
+The message is sanitized before it leaves the server (URLs, stack frames and credentials are
+removed). The full per-task digest stays in the turn's `conversationOutputs[…].taskErrors`.
 
 **In a tool loop, the unit of retry is one model request.** A failure on the fifth model call of
 a tool-calling turn resends that one request — with every tool result gathered so far — rather
@@ -1472,6 +1540,29 @@ difference between a rule that binds and one that is silently ignored:
 > `searchWikipedia` 30 calls/minute **each**, not 30 between them. Pin a single
 > operation by using its dispatch name: `{"searchNews": 5}`.
 
+#### Tool-call caps
+
+`maxToolIterations` bounds **rounds**, and one model response can ask for any number of tool
+calls. Two caps bound the calls themselves:
+
+- `maxToolCallsPerIteration` (default 20) — calls executed from one model response. A response
+  that asks for 50 has its first 20 executed, in order.
+- `maxToolCallsPerTurn` (default 100) — calls executed across the whole turn, counted from the
+  turn's trace so a HITL resume continues the count.
+
+Every call past a cap still gets its own tool result, because providers reject a response whose
+tool calls are not all answered:
+
+```json
+{"status":"NOT_EXECUTED","reason":"at most 20 tool calls are executed per response (maxToolCallsPerIteration); this call was not run. Do not repeat it in this turn — answer with the results you have."}
+```
+
+A refused call never reaches the approval gate, so it cannot pause a turn for a call that was not
+going to run. Refused calls are always the tail of the response and are answered after the executed
+ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
+`maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
+runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
 #### Execution timeouts
 
 Every tool call — built-in, http, MCP, A2A, dynamic, memory and recall alike —
@@ -1558,8 +1649,17 @@ Negative `toolPricing` values are clamped to 0.0.
 
 #### Tool cache scoping
 
-**What is cached.** Built-in tools, except the stateful ones (artifacts, group
-tasks, dynamic agents, memory, recall), which are never cached. **HTTP-call, MCP and
+**What is cached.** Built-in tools, except those bound to one conversation, which
+are never cached: any tool object built per turn with that conversation's state
+rather than shared as one bean — attachments (`listAttachments`, `readAttachment`),
+artifacts, group tasks, dynamic agents, user memory, recall, `discover_tools`. The
+rule is derived from the tool class, not from a list, so a new per-conversation
+tool is covered without anyone remembering to add it. (`listAttachments` was the one
+nobody had added: under the default `user` scope, conversation B of the same user was
+answered with conversation A's files for five minutes.) **A failed call is never
+cached either** — a built-in that cannot reach its upstream reports a failure, not a
+result, so the next call runs again instead of replaying the error for the tool's
+TTL (up to an hour for the web scraper). **HTTP-call, MCP and
 A2A tools are not cached unless the task names the tool in `toolCacheScopes`.**
 Those tools reach systems EDDI does not control and can have side effects — a POST,
 an MCP write, a request to another agent — and a cache hit does not execute the
@@ -1760,8 +1860,8 @@ EDDI uses three complementary mechanisms to ensure reliable JSON output:
 | Layer | Mechanism | Coverage |
 |---|---|---|
 | **1. System Prompt** | Appends `## RESPONSE FORMAT (MANDATORY)` section with schema to every request | All providers |
-| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` | See the matrix below |
-| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn | All providers |
+| **2. Native API** | Sets `ResponseFormatType.JSON` on the outgoing `ChatRequest` — with your `responseSchema` attached as a JSON schema where the provider enforces one (see [Native schema enforcement](#native-schema-enforcement)) | See the matrix below |
+| **3. Validation** | A response starting with `{` becomes an object (a map), one starting with `[` a list; plain text, or JSON the model truncated or malformed, is kept as the raw string with a WARN rather than failing the turn. A parsed object is then checked against `responseSchema` / `nonBlankFields` ([Shape validation](#shape-validation-responseschema-and-nonblankfields)) | All providers |
 
 If a provider doesn't support native JSON mode (e.g. Anthropic), EDDI gracefully falls back to prompt-only enforcement.
 
@@ -1779,6 +1879,23 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
 | `minimax`, `openrouter` | ❌ | ❌ |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
+
+#### Native schema enforcement
+
+When the task has a `responseSchema` that is a **JSON Schema** with an `object` root and at least one property, the request carries it as a `JSON_SCHEMA` response format instead of schemaless JSON — for the providers whose langchain4j binding enforces a schema **per request**:
+
+| Provider | Native schema | Notes |
+|---|---|---|
+| `openai`, `azure-openai` | ✅ | Sent as `response_format: json_schema` (non-strict, see below) |
+| `mistral` | ✅ | |
+| `gemini` | ✅ | Same no-tools rule as JSON mode: with tools in the request nothing is sent |
+| `gemini-vertex` | ❌ | The Vertex binding only takes a schema on the model builder, which would bake it into a cached model. Schemaless JSON is sent |
+| everything else | ❌ | Schemaless JSON where the matrix above allows it; the prompt block carries the schema |
+
+- **Strictness.** langchain4j's `strict: true` is a *model*-builder flag (`strictJsonSchema`), not part of the request, and EDDI never bakes a response format into a cached model. So the schema is sent **non-strict**: a strong hint the provider honours in practice, not a guarantee. The guarantee is EDDI's own validation below. (Strict mode also demands `additionalProperties: false` and every property in `required`; most hand-written schemas are not strict-compatible, which is why non-strict is the safe default.)
+- **All or nothing.** A schema EDDI cannot express faithfully — type arrays such as `["string","null"]`, a property without `type`, `anyOf`/`oneOf`/`$ref`, an array without `items`, a non-object root — is not sent natively; the request falls back to schemaless JSON plus the prompt block. Convertible: `object` / `string` (with an all-string `enum`) / `integer` / `number` / `boolean` / `array` + `items`, `required`, `description`, boolean `additionalProperties`. `minLength` has no native counterpart and is enforced by EDDI after the reply arrives.
+- **Safety net.** If a provider rejects the request, the no-tools path retries once without any response format, exactly as it did for schemaless JSON mode.
+- A `responseSchema` written as an *example object* (`{"answer": "string — ..."}`, as in the example below) is not a JSON Schema: it is used only for the prompt block, and neither validated nor sent natively.
 
 #### Overriding the matrix per task
 
@@ -1830,6 +1947,38 @@ For maximum reliability, specify the exact JSON structure you expect:
 
 The schema is injected into the system prompt as a JSON code block so the LLM sees the exact expected format.
 
+### Shape validation: `responseSchema` and `nonBlankFields`
+
+A reply can be perfectly valid JSON and still unusable: the field the output template reads is missing, has the wrong type, or is `""` (which renders as an empty bubble, because `?:` does not fall back on an empty string). After the reply parsed, EDDI checks its **shape** against two optional settings:
+
+- **`responseSchema`**, when it is a JSON Schema. Supported subset: `type` (`object`, `array`, `string`, `number`, `integer`, `boolean`, `null`, or an array of those), `required`, `properties` (recursive), `items`, `enum`, `minLength`, and optionally `additionalProperties: false`. Every other keyword (`pattern`, `$ref`, `oneOf`, `format`, ...) is **ignored** — validation is in-house and never evaluates a regex or fetches a reference against model output. An unparseable or malformed schema (`{"type": "strng"}`, `{"required": "a"}`) logs one `WARN` and **skips validation**; it never fails the turn.
+- **`nonBlankFields`** (a task field next to `jsonResponseFormat`, not a parameter): a list of top-level or dotted names (`"htmlResponseText"`, `"answer.text"`) that must hold a non-blank string. The shortcut for "an empty answer is a failure" without writing a schema. Independent of `responseValidation.enabled`.
+
+```json
+{
+  "id": "answerer",
+  "type": "openai",
+  "nonBlankFields": ["htmlResponseText"],
+  "parameters": {
+    "convertToObject": "true",
+    "responseSchema": "{\"type\":\"object\",\"required\":[\"htmlResponseText\"],\"properties\":{\"htmlResponseText\":{\"type\":\"string\",\"minLength\":1},\"mood\":{\"type\":\"string\",\"enum\":[\"happy\",\"sad\"]}}}"
+  }
+}
+```
+
+A violation is outcome **`schema_mismatch`** (see the table below). Unlike `invalid`, the reply *did* parse, so the **parsed object is still stored** under `responseObjectName` — templates that worked on a partially valid object keep working, and nothing changes for an agent that does not set either option beyond the extra outcome/metric. The EDDI-generated reason is recorded under `llm:output:reason:<taskId>`:
+
+| Reason | Meaning |
+|---|---|
+| `schema: $.htmlResponseText required` | A `required` property is absent |
+| `schema: $.count type` | Wrong JSON type (an integer-valued `2.0` counts as an integer) |
+| `schema: $.mood enum` | Value not in the `enum` |
+| `schema: $.htmlResponseText minLength` | String shorter than `minLength` |
+| `schema: $ additionalProperties` | An undeclared key with `additionalProperties: false` |
+| `nonBlank: $.htmlResponseText` | Missing, not a string, or blank |
+
+Up to three violations are listed, joined by `; `. Reasons contain only the keyword and the path from your schema — **never a model value or a key taken from the reply** — so they are safe to quote back to the model in a corrective re-ask. What to *do* about a mismatch (ignore, retry, escalate, fall back) is the response-validation policy's job, not the parser's.
+
 ### Using with Output Configuration
 
 When `convertToObject=true`, the LLM's JSON response is stored in conversation memory as a parsed object. You can then reference its fields in the Output Configuration:
@@ -1869,8 +2018,42 @@ Every `convertToObject` reply gets an outcome, recorded on the step under `llm:o
 | `repaired` | Parsed only after fence stripping or extraction |
 | `invalid` | Not parseable; the raw string is stored |
 | `empty` | Null or blank reply; the raw value is stored |
+| `schema_mismatch` | Parsed, but violates `responseSchema` / `nonBlankFields`; the **parsed** object is stored and the reason is under `llm:output:reason:<taskId>` |
 
-A rising `invalid` rate for one agent usually points at a prompt, schema or model-version problem. The key is not part of the public conversation snapshot.
+A rising `invalid` or `schema_mismatch` rate for one agent usually points at a prompt, schema or model-version problem. Neither key is part of the public conversation snapshot.
+
+### Fallback answers and `onError`
+
+Two things can leave a turn without a model answer: a `responseValidation` policy set to `fallback` (empty, truncated or filtered reply), and a model phase that fails outright (provider error after its retries and any cascade, an unusable model configuration, a validation policy of `error`). Both serve the same configurable fallback.
+
+```json
+{
+  "convertToObject": "true",
+  "onError": { "action": "fallback" },
+  "responseValidation": {
+    "enabled": true,
+    "onEmpty": "fallback",
+    "fallbackMessage": "{#if properties.language == 'de'}Entschuldigung, das hat gerade nicht geklappt. Bitte versuche es noch einmal.{#else}Sorry, I could not answer that just now. Please try again.{/if}",
+    "fallbackField": "htmlResponseText",
+    "fallbackQuickReplies": [ { "value": "Try again", "expressions": "retry_last" } ]
+  }
+}
+```
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `onError.action` | `fallback` absorbs a failure of the task's model phase: the task serves the fallback and returns normally, so the turn completes with HTTP 200 and the conversation is **not** set to `ERROR`. `error` lets it fail the turn. Only that failure is absorbed: a human-in-the-loop tool pause, a conversation cancel, a graceful-shutdown interrupt and a thread interrupt always propagate | `error` |
+| `responseValidation.fallbackMessage` | The text served. It is a template (Qute, like every author-written config field) rendered with the task's template data, so `{properties.x}`, `{snippets.x}` and `{#if}` all work. A template that fails to render, or renders blank, falls back to the default sentence | `I'm sorry, I wasn't able to generate a complete response. Please try again.` |
+| `responseValidation.fallbackField` | Under `convertToObject`, the fallback is stored under `responseObjectName` as the object `{"<fallbackField>": "<message>"}`, so a `postResponse` output template such as `{properties.aiOutputObject.htmlResponseText}` renders it unchanged. Unset, the fallback stays a plain string | (none) |
+| `responseValidation.fallbackQuickReplies` | Quick replies (`value`, `expressions`, both templates) added to the step next to the fallback, exactly as an output set adds them | (none) |
+
+`onError` works without a `responseValidation` block (the defaults above apply), and the fallback fields work without `onError` (they shape the validation `fallback` action).
+
+**What is recorded.** The step gets `llm:fallback:<taskId>` = `true` for any fallback, and, for an absorbed failure, `llm:error:<taskId>` = `{class, message}`: the simple class name of the root cause and its message, with secrets redacted, URLs replaced by `[url]` and the text cut at 200 characters (never a request body or stack trace). Data the failed phase had already written to the step is marked uncommitted (see [Memory Policy](memory-policy.md)), and the audit ledger's model-response field is left empty rather than recording the fallback as something the model said. The Micrometer counter `eddi.llm.recovery` counts each one (`action=fallback`, `outcome=served`, `trigger=onError|validation`).
+
+**The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
+
+**Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
 
 ### Debugging
 

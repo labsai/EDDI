@@ -129,7 +129,7 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             chatMessages = generateMessagesFromOutputs(memory, skipSteps, logSizeLimit, includeFirstAgentMessage);
         } else {
-            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage, true)
+            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage, true, true)
                     .getMessages().stream().map(this::convertMessage).toList());
         }
 
@@ -227,7 +227,7 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             allMessages = generateMessagesFromOutputs(memory, skipSteps, -1, includeFirstAgentMessage);
         } else {
-            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage, true).getMessages()
+            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage, true, true).getMessages()
                     .stream().map(this::convertMessage).toList());
         }
 
@@ -403,11 +403,30 @@ class ConversationHistoryBuilder {
 
         var allSteps = memory.getAllSteps();
         var result = new ArrayList<ChatMessage>();
+        boolean mergeNextUser = false;
         for (int i = startIndex; i < outputs.size(); i++) {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
             if (input != null) {
-                result.add(UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input)));
+                var user = UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
+                if (mergeNextUser && !result.isEmpty() && result.getLast() instanceof UserMessage previous) {
+                    // The assistant turn between them was a fallback and is gone: fold
+                    // the inputs together so roles keep alternating.
+                    var contents = new ArrayList<>(previous.contents());
+                    contents.addAll(user.contents());
+                    result.set(result.size() - 1, UserMessage.from(contents));
+                } else {
+                    result.add(user);
+                }
+                mergeNextUser = false;
+            }
+
+            // A turn answered by an LLM task's fallback ("Sorry, I could not answer")
+            // keeps the user's question but not the apology: the model must not learn
+            // from text it never wrote.
+            if (ConversationLogGenerator.isFallbackStep(allSteps, i)) {
+                mergeNextUser = true;
+                continue;
             }
 
             // No pre-check on the shape of "output": deciding here that a turn is only

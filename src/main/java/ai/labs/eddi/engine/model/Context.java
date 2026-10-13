@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * @author ginccc
  */
@@ -23,6 +25,15 @@ public class Context {
      * nullable so ordinary context entries serialize unchanged.
      */
     private Boolean secret;
+
+    /**
+     * {@code true} on a context entry the engine itself wrote during the turn — the
+     * output and quick replies a {@code postResponse} built — as opposed to one a
+     * client sent with its input. Never serialized and never read from JSON, so a
+     * client cannot set it; it lives only as long as the turn's memory.
+     */
+    @JsonIgnore
+    private transient boolean serverGenerated;
 
     public Context() {
     }
@@ -46,6 +57,16 @@ public class Context {
 
     public void setValue(Object value) {
         this.value = value;
+    }
+
+    @JsonIgnore
+    public boolean isServerGenerated() {
+        return serverGenerated;
+    }
+
+    @JsonIgnore
+    public void setServerGenerated(boolean serverGenerated) {
+        this.serverGenerated = serverGenerated;
     }
 
     public Boolean getSecret() {
