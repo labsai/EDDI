@@ -31,18 +31,34 @@ eddi:
     digest: ""
     pullPolicy: IfNotPresent
 
-  # ⚠️  MUST stay 1 — the chart refuses to render anything higher.
-  #
-  # EDDI serialises the turns of a single conversation with a JVM-LOCAL lock
-  # (InMemoryConversationCoordinator: one BlockingQueue per conversation guarded
-  # by synchronized(queue)). The NATS coordinator is not an escape: JetStream is
-  # only an ordering primitive and the Callable still runs in the JVM that
-  # published it. Two replicas without sticky sessions means two turns of one
-  # conversation run concurrently, both replaceOne() the whole conversation
-  # document, and one turn is SILENTLY LOST. Replay-protection nonces are
-  # in-memory too, so a replayed signed envelope that lands on another pod goes
-  # undetected. Scale vertically via eddi.resources instead.
+  # Replicas. More than 1 requires eddi.messagingType=nats (the chart refuses
+  # otherwise): in cluster mode every replica takes a cluster-wide lease per
+  # conversation from NATS JetStream, so turns of one conversation never overlap
+  # and a node that lost its lease cannot overwrite the next turn (fencing). A
+  # plain round-robin Service is all the load balancing it needs. With
+  # in-memory messaging the conversation lock is JVM-local, so a second replica
+  # would let two turns of one conversation run at once. See docs/clustering.md.
   replicas: 1
+
+  # Deployment update strategy: "", "Recreate" or "RollingUpdate" — or the
+  # Deployment's own strategy object ({type: RollingUpdate, rollingUpdate:
+  # {maxSurge: 1, maxUnavailable: 0}}); both shapes are accepted.
+  # Empty (the default) picks per messaging type: Recreate for in-memory — a
+  # rollout must not run two single-node JVMs against one database — and
+  # RollingUpdate (maxSurge 1, maxUnavailable 0) for nats, where a rolling update
+  # is safe: the old and the new pod coordinate through NATS like any two
+  # replicas. RollingUpdate with in-memory messaging is refused.
+  updateStrategy: ""
+
+  # Pod termination grace. Empty picks 75 s in cluster mode (it must exceed
+  # the drain timeout plus the readiness grace, which the chart checks) and
+  # 30 s otherwise.
+  terminationGracePeriodSeconds: ""
+
+  # Graceful-shutdown drain (EDDI_SHUTDOWN_DRAIN_TIMEOUT_SECONDS): how long a
+  # terminating pod lets running turns finish. Empty: 65 s in cluster mode, the
+  # application default (20 s) otherwise.
+  shutdownDrainTimeoutSeconds: ""
 
   # Vault master key — encrypts API keys and secrets. REQUIRED.
   # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
@@ -79,13 +95,10 @@ eddi:
     externalJdbcUsername: ""
     externalJdbcPassword: ""
 
-  # Messaging. Only "in-memory" works with the published image.
-  #
-  # Anything else needs an EDDI image BUILT with -Dquarkus.profile=nats: the
-  # NATS coordinator is gated on @IfBuildProfile("nats") and no Java code reads
-  # eddi.messaging.type at runtime. The chart refuses to render otherwise —
-  # see nats.buildProfileImage. Neither value changes the replica count; EDDI is
-  # fixed at one replica regardless (see eddi.replicas).
+  # Messaging, read by EDDI at RUNTIME (the published image serves both):
+  #   in-memory — a single replica, no dependencies.
+  #   nats      — cluster mode: N replicas coordinated through NATS JetStream.
+  #               Needs nats.enabled=true (in-chart cluster) or nats.externalUrl.
   messagingType: in-memory
 
   # CORS origins
@@ -292,31 +305,55 @@ postgres:
 
 # ── NATS JetStream ─────────────────────────────────────────
 #
-# ⚠️  Inert with the published image. NatsConversationCoordinator is gated on
-# @IfBuildProfile("nats") — a BUILD-time switch — and labsai/eddi is published
-# without it, while `eddi.messaging.type` is read by no Java code at runtime.
-# Enabling this against a stock image provisions a JetStream StatefulSet and a
-# PVC that EDDI never connects to.
+# Cluster mode (eddi.messagingType=nats): conversation leases and fencing
+# tokens, cache-invalidation events, shared security/tool state and durable dead
+# letters. See docs/clustering.md. `nats.buildProfileImage` from chart < 2.5 is
+# no longer read: the published image selects cluster mode at runtime.
 
 nats:
+  # Deploy a JetStream cluster in this release. Alternatively leave false and
+  # point externalUrl at your own NATS (a comma-separated list of servers).
   enabled: false
-  # Set true ONLY if eddi.image points at an image you built with
-  # -Dquarkus.profile=nats. It is what unlocks eddi.messagingType != in-memory;
-  # the chart refuses to render otherwise rather than shipping a setting that
-  # nothing reads.
-  buildProfileImage: false
+  externalUrl: ""
+  # JetStream nodes. 3 gives R3 buckets and streams that survive the loss of one
+  # node; 1 is a development setup.
+  replicas: 3
+  cluster:
+    # Route the NATS nodes into one cluster (needed for replicas > 1).
+    enabled: true
+    # Route authentication, separate from the client user below: a route is a
+    # server-to-server connection that client permissions do not restrict, so
+    # without it anything that reaches port 6222 can join the cluster.
+    routeUsername: route
+    # REQUIRED when the in-chart NATS runs more than one node (replicas > 1 and
+    # cluster.enabled) — no default is shipped. Generate: openssl rand -hex 24
+    routePassword: ""
   image:
     repository: nats
-    tag: "2.10-alpine"
+    # 2.11+: KV limit markers; 2.10 works with poll-only lease takeover.
+    tag: "2.11-alpine"
+  auth:
+    # User/password authentication for EDDI. The user may publish and subscribe
+    # only to eddi.>, $JS.*, $KV.*, $O.* (the archive object store) and _INBOX.>.
+    enabled: true
+    username: eddi
+    # REQUIRED when nats.enabled=true and auth.enabled=true — no default is
+    # shipped. Generate: openssl rand -base64 24
+    password: ""
+  tls:
+    # TLS for clients and routes from a kubernetes.io/tls Secret (tls.crt,
+    # tls.key, ca.crt) you provide, e.g. from cert-manager.
+    enabled: false
+    secretName: ""
   storage:
     size: 5Gi
   resources:
     requests:
       cpu: 50m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 512Mi
 
 # ── Keycloak ───────────────────────────────────────────────
 
@@ -383,26 +420,29 @@ ingress:
 
 # ── Autoscaling ────────────────────────────────────────────
 #
-# ⚠️  NOT SUPPORTED. Setting enabled=true makes the chart FAIL to render, with
-# an explanation — see eddi.replicas above for why EDDI cannot run more than one
-# replica today. The knobs stay here so the shape is ready for the distributed
-# conversation coordinator; min/max are pinned to 1 in the meantime.
+# Cluster mode only (eddi.messagingType=nats); refused with in-memory messaging,
+# where EDDI cannot run more than one replica. While enabled the HPA owns the
+# replica count and eddi.replicas is not rendered.
 
 autoscaling:
   enabled: false
-  minReplicas: 1
-  maxReplicas: 1
+  minReplicas: 2
+  maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
 # ── Pod Disruption Budget ──────────────────────────────────
 #
-# maxUnavailable, not minAvailable: at exactly 1 replica, `minAvailable: 1`
+# maxUnavailable at a single replica: `minAvailable: 1` against one replica
 # means the eviction API can never succeed and `kubectl drain` hangs forever.
+# When the release never runs fewer than two replicas (eddi.replicas > 1, or
+# autoscaling with minReplicas > 1) minAvailable is used instead, so a drain
+# never takes the last serving pod.
 
 podDisruptionBudget:
   enabled: false
   maxUnavailable: 1
+  minAvailable: 1
 
 # ── Network Policy ─────────────────────────────────────────
 #
@@ -419,6 +459,12 @@ networkPolicy:
   # Extra destination ports opened for egress (DNS/443 and the in-chart
   # datastores are handled automatically).
   extraEgressPorts: []
+  # Where an external NATS (nats.externalUrl) lives, as NetworkPolicyPeers, e.g.
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: nats}}
+  #   - ipBlock: {cidr: 10.20.0.0/24}
+  # Empty allows the URL's port to any destination. The chart opens egress to an
+  # external NATS automatically; without it the replicas could not reach NATS.
+  natsEgressTo: []
 
 # ── Monitoring ─────────────────────────────────────────────
 #

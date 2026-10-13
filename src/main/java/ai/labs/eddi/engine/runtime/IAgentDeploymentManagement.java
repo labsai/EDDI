@@ -41,6 +41,15 @@ public interface IAgentDeploymentManagement {
     default void noteUnrecordedDeployment(Environment environment, String agentId, Integer agentVersion) {
     }
 
+    /**
+     * Runs the deployment sweep now instead of at its next tick — deploys what the
+     * database lists as deployed and, in cluster mode, undeploys what it no longer
+     * lists. Exactly the work of the periodic sweep, so running it again is
+     * harmless.
+     */
+    default void reconcileNow() {
+    }
+
     class AutoDeploymentException extends Exception {
         public AutoDeploymentException(String message, Throwable cause) {
             super(message, cause);

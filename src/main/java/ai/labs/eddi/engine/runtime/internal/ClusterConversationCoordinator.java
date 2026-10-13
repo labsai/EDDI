@@ -40,6 +40,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+import ai.labs.eddi.engine.cluster.NodeIdentity;
 
 /**
  * The cluster-mode coordinator ({@code eddi.messaging.type=nats}).
@@ -76,6 +79,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
 
     private static final Logger LOGGER = Logger.getLogger(ClusterConversationCoordinator.class);
     private static final long DEAD_LETTER_COUNT_CACHE_MILLIS = 5_000;
+    static final long LOCAL_FORWARD_SECONDS = 30;
 
     private final IConversationLeaseManager leases;
     private final IDeadLetterStore deadLetterStore;
@@ -83,7 +87,10 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     private final ClusterPresence presence;
     private final Duration acquireTimeout;
     private final ExecutorService continuations = Executors.newVirtualThreadPerTaskExecutor();
+    private final List<Consumer<DeadLetterEntry>> deadLetterListeners = new CopyOnWriteArrayList<>();
     private volatile long cachedDeadLetterCount;
+    private volatile long cachedTurnDeadLetters;
+    private volatile long turnDeadLettersAt;
     private volatile long deadLetterCountAt;
 
     @Inject
@@ -95,6 +102,16 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                 connections.config().leaseAcquireTimeout());
         presence.contribute(this::presenceNumbers);
         connections.onConnected(this::forwardLocalDeadLetters);
+        // Not only on reconnect: a dead letter can fall back locally while NATS is up
+        // (a
+        // stream that is still electing its leader), and would otherwise wait for the
+        // next
+        // disconnection to be shared.
+        connections.scheduler().scheduleWithFixedDelay(() -> {
+            if (connections.isConnected() && localDeadLetterCount() > 0) {
+                forwardLocalDeadLetters();
+            }
+        }, LOCAL_FORWARD_SECONDS, LOCAL_FORWARD_SECONDS, TimeUnit.SECONDS);
     }
 
     /** For tests and the in-JVM cluster ITs. */
@@ -114,6 +131,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         numbers.put("activeConversations", activeConversationCount());
         numbers.put("leasesHeld", leases.heldCount());
         numbers.put("queueDepthTotal", getQueueDepths().values().stream().mapToInt(Integer::intValue).sum());
+        numbers.put("localDeadLetters", localDeadLetterCount());
         return numbers;
     }
 
@@ -199,15 +217,30 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     @Override
     protected void routeToDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
         String error = failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName();
+        long timestamp = System.currentTimeMillis();
+        Map<String, Object> turn = describe(task);
+        DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure, turn);
+        String id;
         try {
-            deadLetterStore.append(conversationId, error, System.currentTimeMillis(), describe(task));
+            id = deadLetterStore.append(conversationId, error, timestamp, turn, classification.reason(), classification.fence());
             totalDeadLettered.incrementAndGet();
             deadLetterCountAt = 0;
         } catch (ClusterUnavailableException e) {
             LOGGER.warnf("Dead letter of conversation %s kept node-locally: NATS unavailable (%s)", sanitize(conversationId),
                     e.getMessage());
-            recordLocalDeadLetter(conversationId, failure, task);
+            // The id this call recorded: reading the ring's last entry back could name
+            // another failure's entry under concurrent dead letters.
+            id = recordLocalDeadLetter(conversationId, failure, task);
             scheduleForward();
+        }
+        DeadLetterEntry created = new DeadLetterEntry(id, conversationId, error, timestamp, null, turn, classification.reason(),
+                localNodeId(), classification.fence());
+        for (Consumer<DeadLetterEntry> listener : deadLetterListeners) {
+            try {
+                listener.accept(created);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Dead-letter listener failed: %s", e.getMessage());
+            }
         }
     }
 
@@ -236,6 +269,17 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         }
     }
 
+    /** Called after every dead letter this node records (shared or local). */
+    public void onDeadLetter(Consumer<DeadLetterEntry> listener) {
+        deadLetterListeners.add(listener);
+    }
+
+    @Override
+    protected String localNodeId() {
+        NodeIdentity node = connections.node();
+        return node == null ? null : node.nodeId();
+    }
+
     /**
      * Moves the dead letters this node had to keep locally while NATS was
      * unreachable into the shared stream, so every node lists them and they survive
@@ -244,11 +288,12 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      *
      * @return how many entries were forwarded
      */
-    int forwardLocalDeadLetters() {
+    public synchronized int forwardLocalDeadLetters() {
         int forwarded = 0;
         for (DeadLetterEntry local : super.getDeadLetters()) {
             try {
-                deadLetterStore.append(local.conversationId(), local.error(), local.timestamp(), local.turn());
+                deadLetterStore.append(local.conversationId(), local.error(), local.timestamp(), local.turn(), local.reason(),
+                        local.fence());
             } catch (ClusterUnavailableException e) {
                 LOGGER.debugf("Forwarding local dead letters paused: %s", e.getMessage());
                 break;
@@ -286,6 +331,23 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         return cachedDeadLetterCount + super.retainedDeadLetterCount();
     }
 
+    /**
+     * Turn dead letters waiting in the shared stream (cached for a few seconds; the
+     * last value while NATS is unreachable).
+     */
+    public long sharedDeadLetterCount() {
+        long now = System.currentTimeMillis();
+        if (now - turnDeadLettersAt > DEAD_LETTER_COUNT_CACHE_MILLIS || deadLetterCountAt == 0) {
+            try {
+                cachedTurnDeadLetters = deadLetterStore.countTurns();
+                turnDeadLettersAt = now;
+            } catch (ClusterUnavailableException e) {
+                // keep the last value
+            }
+        }
+        return cachedTurnDeadLetters;
+    }
+
     @Override
     public List<DeadLetterEntry> getDeadLetters() {
         return getDeadLetters(1000, null);
@@ -313,6 +375,25 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
                 continue;
             }
             entries.add(local);
+        }
+        return entries;
+    }
+
+    /**
+     * The dead letters of one conversation, shared and node-local, oldest first.
+     * The shared ones are read through the conversation's own subject.
+     */
+    public List<DeadLetterEntry> getDeadLettersOf(String conversationId, int limit) {
+        List<DeadLetterEntry> entries = new ArrayList<>();
+        try {
+            entries.addAll(deadLetterStore.listConversation(conversationId, limit));
+        } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Dead-letter stream unavailable: %s", e.getMessage());
+        }
+        for (DeadLetterEntry local : super.getDeadLetters()) {
+            if (entries.size() < limit && conversationId.equals(local.conversationId())) {
+                entries.add(local);
+            }
         }
         return entries;
     }

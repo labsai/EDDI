@@ -70,7 +70,7 @@ public class InMemorySharedKv implements ISharedKv {
     @Override
     public synchronized Optional<Versioned> get(String key) {
         Entry e = live(key);
-        return e == null ? Optional.empty() : Optional.of(new Versioned(e.value().clone(), e.revision()));
+        return e == null ? Optional.empty() : Optional.of(new Versioned(e.value().clone(), e.revision(), e.writtenAtMillis()));
     }
 
     @Override

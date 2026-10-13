@@ -105,43 +105,28 @@
 {{- fail "Two PostgreSQL datastores are configured: postgres.enabled=true deploys an in-chart PostgreSQL, and eddi.datastore.externalJdbcUrl points at another one. The in-chart URL wins and the external one is silently inert — including its credentials, which are then never rendered. Set postgres.enabled=false to use the external database, or clear eddi.datastore.externalJdbcUrl to use the in-chart one." }}
 {{- end }}
 {{- /*
-  Messaging guard. eddi.messaging.type is read by NO Java code:
-  NatsConversationCoordinator is gated on @IfBuildProfile("nats"), a BUILD-time
-  switch, and the published labsai/eddi image is built without it. Setting this
-  to "nats" used to provision a JetStream StatefulSet with a PVC that EDDI could
-  never connect to, print "Messaging: nats" in the install notes, and quietly go
-  on using in-memory queues.
+  Messaging guard. eddi.messaging.type is read by EDDI at runtime; the published
+  image serves both modes. In cluster mode something has to provide NATS — the
+  in-chart cluster or an external one — or every replica would run degraded
+  forever, connecting to nats://localhost:4222 inside its own pod.
 
-  Coalesced to the values.yaml default before comparing, for the same reason the
-  datastore guard above is: `toString nil` is "<nil>", which is not "in-memory",
-  so a values file with a bare `messagingType:` was refused with a message about
-  a NATS broker it had never asked for.
-
-  Coalesced ONCE, in the eddi.messagingType helper, because the guard and the
-  two places that print the value disagreed about what a null means: the guard
-  read it as "in-memory" while EDDI_MESSAGING_TYPE below and NOTES.txt rendered
-  the raw nil, which Sprig's `quote` skips — `--set eddi.messagingType=null`
-  produced a valueless `EDDI_MESSAGING_TYPE:` under an install note reading
-  "Messaging: ".
+  Coalesced ONCE, in the eddi.messagingType helper, so the guard and the two
+  places that print the value agree about what a null means (`toString nil` is
+  "<nil>", and Sprig's `quote` skips a nil).
 */}}
-{{- if ne (include "eddi.messagingType" .) "in-memory" }}
-{{- if not .Values.nats.buildProfileImage }}
-{{- fail "eddi.messagingType is not \"in-memory\": the NATS coordinator is gated on @IfBuildProfile(\"nats\"), so it exists only in an image BUILT with -Dquarkus.profile=nats. The published labsai/eddi image is not, and no Java code reads eddi.messaging.type at runtime — the setting would be inert while still provisioning a NATS StatefulSet and PVC. Build your own image with -Dquarkus.profile=nats and set nats.buildProfileImage=true to confirm, or leave eddi.messagingType at \"in-memory\". NATS is a durability/ordering primitive either way: it does not permit a second replica (see eddi.replicas)." }}
+{{- if eq (include "eddi.messagingType" .) "nats" }}
+{{- if and (not .Values.nats.enabled) (not .Values.nats.externalUrl) }}
+{{- fail "eddi.messagingType is \"nats\" but nats.enabled=false and nats.externalUrl is empty: nothing provides the JetStream cluster, so every replica would run degraded, connecting to nats://localhost:4222 inside its own pod. Set nats.enabled=true (in-chart cluster) or nats.externalUrl, or leave eddi.messagingType at \"in-memory\"." }}
 {{- end }}
-{{- /*
-  buildProfileImage says the IMAGE can speak NATS; nats.enabled is what actually
-  deploys the broker. They were checked independently, so
-  `messagingType=nats,nats.buildProfileImage=true` rendered a NATS-profile EDDI
-  with no StatefulSet, no Service and no EDDI_NATS_URL — the coordinator then
-  falls back to nats://localhost:4222 and nothing is listening on it.
-*/}}
-{{- if not .Values.nats.enabled }}
-{{- fail "eddi.messagingType is not \"in-memory\" but nats.enabled=false: nothing deploys the JetStream broker, no EDDI_NATS_URL is rendered, and the NATS coordinator falls back to nats://localhost:4222 inside the EDDI pod, where nothing listens. Set nats.enabled=true, or leave eddi.messagingType at \"in-memory\"." }}
+{{- if and .Values.nats.enabled .Values.nats.externalUrl }}
+{{- fail "nats.enabled=true and nats.externalUrl are both set: EDDI would connect to the in-chart cluster and the external URL would be silently inert. Choose one." }}
 {{- end }}
+{{- else if ne (include "eddi.messagingType" .) "in-memory" }}
+{{- fail "eddi.messagingType must be \"in-memory\" or \"nats\"; any other value fails EDDI's boot." }}
 {{- else }}
 {{- /* And the inverse: a broker with nothing to publish to it. */}}
 {{- if .Values.nats.enabled }}
-{{- fail "nats.enabled=true while eddi.messagingType is \"in-memory\": this provisions a JetStream StatefulSet and a PVC that EDDI never connects to, because the coordinator is selected by eddi.messagingType. Set eddi.messagingType=nats (which also needs nats.buildProfileImage=true and an image built with -Dquarkus.profile=nats), or leave nats.enabled=false." }}
+{{- fail "nats.enabled=true while eddi.messagingType is \"in-memory\": this provisions a JetStream cluster and PVCs that EDDI never connects to, because cluster mode is selected by eddi.messagingType. Set eddi.messagingType=nats, or leave nats.enabled=false." }}
 {{- end }}
 {{- end }}
 apiVersion: v1
@@ -180,8 +165,17 @@ data:
   QUARKUS_DATASOURCE_JDBC_URL: {{ $externalJdbc | quote }}
   {{- end }}
   EDDI_MESSAGING_TYPE: {{ include "eddi.messagingType" . | quote }}
+  {{- if eq (include "eddi.messagingType" .) "nats" }}
+  EDDI_NATS_URL: {{ include "eddi.natsUrl" . | quote }}
   {{- if .Values.nats.enabled }}
-  EDDI_NATS_URL: "nats://{{ include "eddi.fullname" . }}-nats:4222"
+  EDDI_NATS_REPLICAS: {{ if and .Values.nats.cluster.enabled (ge (int .Values.nats.replicas) 3) }}"3"{{ else }}"1"{{ end }}
+  {{- if .Values.nats.tls.enabled }}
+  EDDI_NATS_TLS_ENABLED: "true"
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- with include "eddi.shutdownDrainTimeoutSeconds" . }}
+  EDDI_SHUTDOWN_DRAIN_TIMEOUT_SECONDS: {{ . | quote }}
   {{- end }}
   QUARKUS_HTTP_CORS_ORIGINS: {{ .Values.eddi.corsOrigins | quote }}
   {{- with (.Values.eddi.metrics | default dict).httpPolicy }}

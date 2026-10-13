@@ -13,6 +13,11 @@ import io.nats.client.PublishOptions;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
+import java.util.ArrayList;
+import io.nats.client.api.Subject;
+import io.nats.client.api.StreamState;
+import io.nats.client.api.StreamInfoOptions;
+import io.nats.client.api.StreamInfo;
 import io.nats.client.support.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,7 +25,10 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
+import ai.labs.eddi.engine.model.DeadLetterEntry;
+
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -89,6 +97,34 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @Test
+    void theTurnCountIncludesSubjectsFromLaterPages() throws Exception {
+        // jnats appends the subjects of later stream-info pages to getSubjects() only;
+        // getSubjectMap() keeps the first page.
+        StreamState state = mock(StreamState.class);
+        when(state.getSubjects())
+                .thenReturn(new ArrayList<>(List.of(new Subject("eddi.EDDI.dlq.turn.a", 2), new Subject("eddi.EDDI.dlq.turn.b", 3))));
+        when(state.getSubjectMap()).thenReturn(Map.of("eddi.EDDI.dlq.turn.a", 2L));
+        StreamInfo info = mock(StreamInfo.class);
+        when(info.getStreamState()).thenReturn(state);
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(jsm.getStreamInfo(anyString(), any(StreamInfoOptions.class))).thenReturn(info);
+        assertEquals(5, store(jsm).countTurns());
+    }
+
+    @Test
+    void aReasonRecordedOnlyInTheTurnIsReadBack() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        MessageInfo entry = message("eddi.EDDI.dlq.turn.abc");
+        when(entry.getSeq()).thenReturn(7L);
+        when(entry.getData()).thenReturn(("{\"conversationId\":\"c1\",\"error\":\"lost\",\"timestamp\":1,"
+                + "\"turn\":{\"input\":\"hi\",\"reason\":\"lease-lost\",\"fence\":41}}").getBytes(StandardCharsets.UTF_8));
+        when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenReturn(entry);
+        DeadLetterEntry read = store(jsm).get("7").orElseThrow();
+        assertEquals("lease-lost", read.reason());
+        assertEquals(Map.of("token", 41), read.fence());
+    }
+
+    @Test
     void discardingTwiceIsNotFoundTheSecondTime() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
         when(jsm.getMessage("EDDI_DEAD_LETTERS", 7L)).thenThrow(error(10043));
@@ -119,6 +155,7 @@ class JetStreamDeadLetterStoreTest {
     void classifiesNotFound(int code, boolean expected) throws Exception {
         assertEquals(expected, JetStreamDeadLetterStore.notFound(error(code)));
     }
+
     @Test
     void theFirstDeadLetterWaitsForTheStreamItCreatedToElectItsLeader() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
