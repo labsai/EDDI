@@ -28,6 +28,7 @@
 - [Behavior Rules](behavior-rules.md)
 - [HTTP Calls / API Calls](httpcalls.md)
 - [LLM Integration](langchain.md)
+  - [LLM Parameters Reference](llm-parameters.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
 - [LLM Turn Resilience](llm-resilience.md)

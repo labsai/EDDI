@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -278,6 +280,30 @@ class ModelParameterValuesTest {
             assertTrue(booleanValue(Map.of("flag", "yes"), "flag", true));
             assertTrue(booleanValue(Map.of("flag", "1"), "flag", true));
             assertFalse(booleanValue(Map.of("flag", "nope"), "flag", false));
+        }
+    }
+
+    @Nested
+    @DisplayName("deepMerge")
+    class DeepMerge {
+
+        @Test
+        @DisplayName("nested objects merge key by key; scalars and lists in the overlay win; the inputs are not modified")
+        void mergesNestedObjects() {
+            Map<String, Object> base = new LinkedHashMap<>();
+            base.put("provider", new LinkedHashMap<>(Map.of("order", List.of("a"), "sort", "price")));
+            base.put("top", "base");
+            Map<String, Object> overlay = Map.of("provider", Map.of("zdr", true, "sort", "latency"), "top", "user");
+
+            Map<String, Object> merged = ModelParameterValues.deepMerge(base, overlay);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> provider = (Map<String, Object>) merged.get("provider");
+            assertEquals(List.of("a"), provider.get("order"), "a sibling the overlay does not mention survives");
+            assertEquals(true, provider.get("zdr"));
+            assertEquals("latency", provider.get("sort"), "the overlay wins on a clash");
+            assertEquals("user", merged.get("top"));
+            assertEquals("price", ((Map<?, ?>) base.get("provider")).get("sort"), "the base is untouched");
         }
     }
 }
