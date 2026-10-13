@@ -93,7 +93,7 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 | `title`               | `?title=My%20Agent`         | Header title text and browser tab title (replaces the agent name in the header) |
 | `lang`                | `?lang=de`                  | Widget language (`en`, `de`, `fr`, `es`); default: the browser language. Also sets `<html lang>` |
 | `accentColor`         | `?accentColor=%23cc3366`    | Accent colour — any CSS colour works (`%23hex`, `rgb(...)`, a name); the tints are derived with `color-mix()` |
-| `tokenOrigin`         | `?tokenOrigin=https://app.example.com` | Allow that origin to send the bearer token by `postMessage` (comma-separated list); see [Passing a token](#passing-a-token-from-the-embedding-page) |
+| `tokenOrigin`         | `?tokenOrigin=https://app.example.com` | Allow that origin to send the bearer token by `postMessage` (comma-separated list); see [Embedding the Chat UI](../../docs/chat-ui-embedding.md#2-hand-the-widget-a-token-authentication-on) |
 | `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
 | `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
@@ -149,30 +149,7 @@ Only `/chat` takes this setting; the Manager and the API always refuse to be fra
 ></iframe>
 ```
 
-### Passing a token from the embedding page
-
-A page that signs the user in itself hands the widget its bearer token with `postMessage`, so it never appears in the address bar, history or `Referer`. Name the embedding origin in `?tokenOrigin=` (exact `scheme://host[:port]`, comma-separated for several); with no value no token is accepted.
-
-The iframe loads **before** the host can know it is ready, so there is a handshake, and the widget waits for it before it starts the conversation:
-
-1. The widget posts `{ "type": "eddi-chat-ready" }` to its parent, once to **each** allowed origin (the `targetOrigin` is that origin, never `*`), and repeats it every second while it waits.
-2. The host answers with `{ "type": "eddi-chat-token", "token": "<jwt>" }` sent to the iframe's own origin. The widget only accepts it from its own parent window and from an allowed origin.
-3. The widget then starts the conversation. If no token arrives within **5 seconds** it starts anyway, without one, so a parent that never answers cannot leave the widget blank; an agent that needs a login then shows its "Please sign in" message.
-
-```js
-const frame = document.getElementById("chat");
-window.addEventListener("message", (event) => {
-  if (event.origin !== "https://your-eddi-server") return;
-  if (event.source === frame.contentWindow && event.data?.type === "eddi-chat-ready") {
-    frame.contentWindow.postMessage(
-      { type: "eddi-chat-token", token: currentAccessToken() },
-      "https://your-eddi-server",
-    );
-  }
-});
-```
-
-Register the `message` listener **before** the iframe is added to the page. Send a fresh token the same way whenever yours is refreshed.
+With authentication on, the host page hands the widget its user's access token by `postMessage` — add `?tokenOrigin=<host origin>` to the iframe URL and answer the widget's `eddi-chat-ready` / `eddi-chat-token-request` messages with `{ type: "eddi-chat-token", token }`. The protocol, its origin rules and a host-page example are in [docs/chat-ui-embedding.md](../../docs/chat-ui-embedding.md), together with `eddi.chat.img-sources`, which decides which hosts the images in an agent's output may come from.
 
 ### Language
 

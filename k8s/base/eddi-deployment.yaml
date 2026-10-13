@@ -24,11 +24,12 @@ spec:
   #
   # Scale vertically (resources) until a distributed coordinator ships.
   replicas: 1
+  # Recreate, not RollingUpdate: a surge pod would run a second EDDI JVM against
+  # the same database for the length of every rollout, and everything EDDI keeps
+  # node-local (turn locks, replay nonces, rate limits, caches, HITL crash
+  # recovery) would diverge between the two. Each upgrade costs a boot instead.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: eddi

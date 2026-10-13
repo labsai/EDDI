@@ -545,4 +545,20 @@ class LlmTaskAuditLedgerTest {
         assertTrue(stored.keySet().stream().noneMatch(k -> k.startsWith("audit:")),
                 "audit evidence must stay behind the collector gate: " + stored.keySet());
     }
+
+    @Test
+    @DisplayName("no audit collector → the token counts are still recorded (the /v1 usage block), nothing else")
+    void noAuditCollectorStillRecordsTokenUsage() throws Exception {
+        when(memory.getAuditCollector()).thenReturn(null);
+        agentReturns("done", List.of(Map.of("type", "tool_call")),
+                Map.of("tokenUsage", Map.of("inputTokens", 10, "outputTokens", 5, "totalTokens", 15), "toolCostUsd", 0.01));
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
+
+        var tokenUsage = auditMap(MemoryKeys.AUDIT_TOKEN_USAGE);
+        assertNotNull(tokenUsage, "the caller's usage must not depend on the audit ledger: " + stored.keySet());
+        assertEquals(15L, tokenUsage.get("totalTokens"));
+        assertTrue(stored.keySet().stream().filter(k -> k.startsWith("audit:")).allMatch(MemoryKeys.AUDIT_TOKEN_USAGE::equals),
+                "only the token counts may bypass the collector gate: " + stored.keySet());
+    }
 }

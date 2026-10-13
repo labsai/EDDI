@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
@@ -91,6 +92,14 @@ public class RemoteApiResourceSource implements IResourceSource {
     private static final long MAX_ARCHIVE_BYTES = 256L * 1024 * 1024;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
+    /**
+     * Cap on every JSON document a live sync reads from the source (descriptor
+     * listings, agent/workflow/extension configs). See
+     * {@link CappedStringBodyHandler}.
+     */
+    static final String MAX_RESPONSE_BYTES_PROPERTY = "eddi.backup.sync.max-response-bytes";
+    static final long DEFAULT_MAX_RESPONSE_BYTES = 16L * 1024 * 1024;
+
     /** The {@code "resource": "eddi://…"} field of a descriptor listing entry. */
     private static final Pattern RESOURCE_FIELD = Pattern.compile("\"resource\"\s*:\s*\"([^\"]+)\"");
 
@@ -142,6 +151,54 @@ public class RemoteApiResourceSource implements IResourceSource {
         this.secretScrubber = Objects.requireNonNull(secretScrubber, "secretScrubber");
         this.httpClient = configure(HttpClient.newBuilder()).build();
         this.ownsHttpClient = true;
+    }
+
+    /**
+     * Re-throws a size-cap refusal from a catch block that otherwise tolerates a
+     * failed read. Those blocks skip what they cannot read — a workflow, an
+     * extension, a snippet, a display name — and the upgrade then works from
+     * incomplete source data, where a missing workflow reads as one the source
+     * removed. A response this instance refused for its size is not "unreadable",
+     * it is a source this instance will not sync from: the whole sync fails (502).
+     */
+    static void rethrowIfTooLarge(Exception e) {
+        if (isTooLarge(e)) {
+            throw e instanceof RemoteReadException remote ? remote : new RemoteReadException(e.getMessage(), e);
+        }
+    }
+
+    /** Whether a failed read was the response-size cap, wherever in the chain. */
+    static boolean isTooLarge(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof CappedStringBodyHandler.ResponseTooLargeException) {
+                return true;
+            }
+            if (cause.getCause() == cause) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** The body handler for every JSON document read from the source. */
+    static HttpResponse.BodyHandler<String> jsonBodyHandler() {
+        return new CappedStringBodyHandler(maxResponseBytes());
+    }
+
+    /**
+     * {@value #MAX_RESPONSE_BYTES_PROPERTY}, read per sync: this class is
+     * constructed per request, not injected. Falls back to the default outside a
+     * configured runtime (plain unit tests) or on a value that is not a positive
+     * number.
+     */
+    static long maxResponseBytes() {
+        try {
+            long configured = ConfigProvider.getConfig().getOptionalValue(MAX_RESPONSE_BYTES_PROPERTY, Long.class)
+                    .orElse(DEFAULT_MAX_RESPONSE_BYTES);
+            return configured > 0 ? configured : DEFAULT_MAX_RESPONSE_BYTES;
+        } catch (RuntimeException e) {
+            return DEFAULT_MAX_RESPONSE_BYTES;
+        }
     }
 
     /**
@@ -270,6 +327,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
+                rethrowIfTooLarge(e);
                 LOGGER.warnf(e, "Failed to read workflow %d from remote %s", i, LogSanitizer.sanitize(baseUrl));
             }
         }
@@ -337,6 +395,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                         sharing.merge(snippet.getName(), 1, Integer::sum);
                     }
                 } catch (Exception e) {
+                    rethrowIfTooLarge(e);
                     LOGGER.debugf("Could not read remote snippet %s: %s",
                             LogSanitizer.sanitize(desc.getName()), LogSanitizer.sanitize(e.getMessage()));
                 }
@@ -349,6 +408,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             });
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.warnf("Failed to read snippets from remote %s: %s",
                     LogSanitizer.sanitize(baseUrl), LogSanitizer.sanitize(e.getMessage()));
         }
@@ -374,6 +434,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             // A source that cannot be read at all fails loudly elsewhere; here it just
             // means no snippet can be attributed to this agent.
             LOGGER.warnf("Could not scan agent %s for snippet references: %s",
@@ -430,7 +491,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
             HttpRequest request = builder.GET().build();
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = client.send(request, jsonBodyHandler());
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Remote instance returned status " + response.statusCode());
             }
@@ -572,7 +633,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                             .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
                             .timeout(REQUEST_TIMEOUT)
                             .header("Accept", "application/json"), authToken).GET().build(),
-                    HttpResponse.BodyHandlers.ofString());
+                    jsonBodyHandler());
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Could not list agents on " + baseUri
                         + " to find the latest version of " + agentId + " (status " + response.statusCode() + ")");
@@ -741,6 +802,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     }
                 }
             } catch (Exception e) {
+                rethrowIfTooLarge(e);
                 LOGGER.debugf("Could not scan remote parser %s for its dictionaries: %s",
                         LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
             }
@@ -759,6 +821,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             into.put(ref.key(), new ExtensionSourceData(
                     extId, name, ref.fileExtension(), ref.stepType(), contentJson));
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.debugf("Could not read remote extension %s: %s",
                     LogSanitizer.sanitize(String.valueOf(ref.extensionUri())), LogSanitizer.sanitize(e.getMessage()));
         }
@@ -821,6 +884,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
+            rethrowIfTooLarge(e);
             LOGGER.debugf("Could not read remote descriptors from %s: %s",
                     LogSanitizer.sanitize(descriptorsPath), LogSanitizer.sanitize(e.getMessage()));
         }
@@ -864,7 +928,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
 
             HttpRequest request = builder.GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(request, jsonBodyHandler());
 
             if (response.statusCode() != 200) {
                 throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.statusCode());
@@ -878,6 +942,9 @@ public class RemoteApiResourceSource implements IResourceSource {
             Thread.currentThread().interrupt();
             throw new RemoteReadException("Interrupted while reading " + baseUrl + path, e);
         } catch (IOException e) {
+            if (isTooLarge(e)) {
+                throw new RemoteReadException("Remote " + baseUrl + path + " was refused: " + e.getMessage(), e);
+            }
             throw new RemoteReadException("Failed to connect to remote " + baseUrl + path + ": " + e.getMessage(), e);
         }
     }
