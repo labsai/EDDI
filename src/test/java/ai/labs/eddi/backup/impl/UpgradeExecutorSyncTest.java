@@ -24,7 +24,9 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import io.quarkus.security.ForbiddenException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
@@ -45,8 +47,10 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -88,6 +92,7 @@ class UpgradeExecutorSyncTest {
     private IRestLlmStore llmStore;
     private UpgradeExecutor executor;
     private AgentConfiguration targetAgent;
+    private ResourceAccessGuard accessGuard;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -98,7 +103,7 @@ class UpgradeExecutorSyncTest {
         outputDocuments = mock(IOutputStore.class);
         workflowDocuments = mock(IWorkflowStore.class);
         llmStore = mock(IRestLlmStore.class);
-        var accessGuard = mock(ResourceAccessGuard.class);
+        accessGuard = mock(ResourceAccessGuard.class);
         lenient().when(accessGuard.stampNewDescriptor(any())).thenAnswer(inv -> inv.getArgument(0));
 
         executor = new UpgradeExecutor(agentStore, workflowStore, mock(IRestPromptSnippetStore.class),
@@ -116,6 +121,23 @@ class UpgradeExecutorSyncTest {
         lenient().when(outputDocuments.create(any())).thenReturn(resourceId(CREATED_OUT, 1));
         lenient().when(workflowDocuments.create(any())).thenReturn(resourceId(CREATED_WF, 1));
         lenient().when(llmStore.updateLlm(anyString(), anyInt(), any())).thenReturn(Response.ok().build());
+    }
+
+    @Test
+    @DisplayName("a caller who cannot EDIT the target is refused before anything is read or written")
+    void callerWithoutEditOnTheTargetIsRefusedUpFront() throws Exception {
+        // Review finding: the guarded agent write is the LAST step, so a caller with
+        // only VIEW/USE on the target got snippets, extensions and workflows written
+        // first and then a 403 on the agent — a half-applied upgrade, reported as 500.
+        when(accessGuard.requireAccess(AGENT, AccessLevel.EDIT, "agent"))
+                .thenThrow(new ForbiddenException("Access denied: you do not have edit access to this agent"));
+        var source = source(workflowData(SRC_WF, 0, llmAndOutput(), llmAndOutputExtensions()));
+
+        assertThrows(ForbiddenException.class, () -> inCdi(() -> executor.executeUpgrade(source, AGENT, null, null)));
+
+        verify(matcher, never()).buildPreview(any(), any(), anyBoolean());
+        verify(outputDocuments, never()).create(any());
+        verify(agentStore, never()).updateAgent(any(), any(), any(), any());
     }
 
     @Test

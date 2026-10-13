@@ -1,11 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { AuthProvider } from "@/components/auth/auth-provider";
-import { App } from "@/app";
+import { RouterProvider } from "react-router-dom";
+import { QueryClient } from "@tanstack/react-query";
+import { createAppRouter } from "@/app-router";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
@@ -108,23 +105,14 @@ async function startApp() {
   // to English inside i18next.
   await i18nReady;
 
-  // A DATA router, so `useBlocker` works: with <BrowserRouter> an editor could
-  // only guard against a tab close (`beforeunload`), and any in-app link —
-  // the sidebar, a breadcrumb, the browser's Back button — dropped unsaved edits
-  // without a word. The route table itself stays the declarative <Routes> in
-  // <App />, mounted under one catch-all route.
-  const router = createBrowserRouter([{ path: "*", element: <App /> }]);
-
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
-            <RouterProvider router={router} />
-            <Toaster position="bottom-right" richColors closeButton />
-          </ThemeProvider>
-        </QueryClientProvider>
-      </AuthProvider>
+      {/* useTransitions={false}: a data router wraps navigation in a React
+          transition by default, which keeps the OLD page on screen until a
+          lazy route's chunk has loaded — no skeleton, no sign the click did
+          anything. The app's Suspense boundary at the outlet is the loading
+          state, so navigation must render synchronously and let it show. */}
+      <RouterProvider router={createAppRouter(queryClient)} useTransitions={false} />
     </StrictMode>
   );
 }

@@ -7,8 +7,11 @@ import { cn } from "@/lib/utils";
  * Always-visible platform status pill for the top bar.
  * Shows EDDI backend connectivity with a click-to-expand popover
  * for instance details (mobile-friendly — no hover-only info).
+ *
+ * `compact` drops the word and keeps the dot, for phones where the top bar has no
+ * room for the full pill; the state is still announced through the button's label.
  */
-export function PlatformStatus() {
+export function PlatformStatus({ compact = false }: { compact?: boolean } = {}) {
   const { t } = useTranslation();
   const { status, instanceId, latencyMs, lastCheckedAt } = usePlatformStatus();
   const [open, setOpen] = useState(false);
@@ -52,7 +55,11 @@ export function PlatformStatus() {
   const isChecking = status === "checking";
 
   return (
-    <div ref={ref} className="relative" data-testid="platform-status">
+    <div
+      ref={ref}
+      className="relative"
+      data-testid={compact ? "platform-status-compact" : "platform-status"}
+    >
       {/* Pill button */}
       <button
         onClick={() => setOpen((p) => !p)}
@@ -83,7 +90,7 @@ export function PlatformStatus() {
           aria-hidden="true"
         />
         {/* Label */}
-        <span>
+        <span className={cn(compact && "sr-only")}>
           {isChecking
             ? "…"
             : isOnline

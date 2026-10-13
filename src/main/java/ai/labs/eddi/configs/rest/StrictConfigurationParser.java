@@ -199,7 +199,7 @@ public class StrictConfigurationParser {
      * cannot see, in a syntax that does not match the document they are holding,
      * and it publishes the internal package layout to every API client.
      */
-    private static String jsonPath(JsonMappingException e) {
+    public static String jsonPath(JsonMappingException e) {
         return jsonPath(e, e.getPath().size());
     }
 
@@ -224,7 +224,7 @@ public class StrictConfigurationParser {
         return path.toString();
     }
 
-    private static String expected(Class<?> target) {
+    public static String expected(Class<?> target) {
         if (target == null) {
             // Jackson reports no target type for a polymorphic property whose value is
             // a scalar — which is exactly the OutputItem case, the most likely one to

@@ -140,6 +140,8 @@ class OutputGenerationTaskContextBranchTest {
 
             Context qrContext = new Context(Context.ContextType.object,
                     List.of(Map.of("value", "Yes", "expressions", "yes()")));
+            // Built by a postResponse: the agent's own quick replies, stored as data.
+            qrContext.setServerGenerated(true);
 
             IData<Context> contextData = new Data<>("context:quickReplies:greet", qrContext);
             doReturn(List.of(contextData)).when(ctx.currentStep()).getAllData("context");
@@ -157,13 +159,15 @@ class OutputGenerationTaskContextBranchTest {
             Context qrContext = new Context(Context.ContextType.object,
                     List.of(Map.of("value", "Maybe", "expressions", "maybe()")));
 
-            // Key is "context:quickReplies" without a sub-key after it
+            // Key is "context:quickReplies" without a sub-key after it; sent by a client
             IData<Context> contextData = new Data<>("context:quickReplies", qrContext);
             doReturn(List.of(contextData)).when(ctx.currentStep()).getAllData("context");
 
             task.execute(ctx.memory(), null);
 
-            verify(ctx.currentStep(), atLeastOnce()).storeData(any());
+            // Displayed, without expressions, and never stored as quickReplies:* data
+            verify(ctx.currentStep()).addConversationOutputList(eq("quickReplies"), eq(List.of(new QuickReply("Maybe", null, false))));
+            verify(ctx.currentStep(), never()).storeData(any());
         }
     }
 

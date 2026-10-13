@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
@@ -1023,7 +1024,7 @@ class AgentOrchestratorCoverageTest {
     private List<ToolSpecification> restoreActiveSpecs(AgentOrchestrator.ToolSetup setup, boolean isLazy,
                                                        List<String> activated)
             throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("restoreActiveSpecs",
+        Method m = ToolLoopResumer.class.getDeclaredMethod("restoreActiveSpecs",
                 AgentOrchestrator.ToolSetup.class, boolean.class, List.class);
         m.setAccessible(true);
         return (List<ToolSpecification>) m.invoke(null, setup, isLazy, activated);
@@ -1092,7 +1093,7 @@ class AgentOrchestratorCoverageTest {
     // ═══════════════════════════════════════════════════════════════════
 
     private AiMessage normalizeToolCallIds(AiMessage msg, ToolApprovalsConfig cfg) throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("normalizeToolCallIds", AiMessage.class, ToolApprovalsConfig.class);
+        Method m = ToolApprovalGateSupport.class.getDeclaredMethod("normalizeToolCallIds", AiMessage.class, ToolApprovalsConfig.class);
         m.setAccessible(true);
         return (AiMessage) m.invoke(null, msg, cfg);
     }
@@ -1175,7 +1176,7 @@ class AgentOrchestratorCoverageTest {
     private String buildPauseReason(ToolApprovalsConfig cfg, ToolApprovalGate.GateResult gr,
                                     ToolApprovalsConfig.ApprovalRule rule)
             throws Exception {
-        Method m = AgentOrchestrator.class.getDeclaredMethod("buildPauseReason",
+        Method m = ToolApprovalGateSupport.class.getDeclaredMethod("buildPauseReason",
                 ToolApprovalsConfig.class, ToolApprovalGate.GateResult.class, ToolApprovalsConfig.ApprovalRule.class);
         m.setAccessible(true);
         return (String) m.invoke(null, cfg, gr, rule);
