@@ -844,8 +844,8 @@ def main():
             try:
                 with open(os.path.join(logdir, f"eddi-{i + 1}.log"), "w", encoding="utf-8") as f:
                     f.write(infra.logs(i))
-            except Exception:
-                pass
+            except Exception as e:  # best effort: a node that is gone has no log to save
+                print(f"could not save the log of eddi-{i + 1}: {e!r}", file=sys.stderr)
         if not args.keep and not args.reuse:
             infra.down()
 

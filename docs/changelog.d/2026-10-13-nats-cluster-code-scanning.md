@@ -15,7 +15,8 @@
 - **Cluster demo scripts.** `scripts/cluster-demo/demo.py` and `mock_llm.py` open their
   files in `with` blocks, drop three unused locals (keeping the `start_conv` call whose
   side effect the undeploy scenario needs), comment their deliberate `except: pass`
-  blocks, and no longer mix value returns with fall-through returns. `mock_llm.py` gains
+  blocks (the log export reports a failed save on stderr), and no longer mix value
+  returns with fall-through returns. `mock_llm.py` gains
   a `main()` that holds the request log open for the life of the server.
 
 No behaviour changes.
