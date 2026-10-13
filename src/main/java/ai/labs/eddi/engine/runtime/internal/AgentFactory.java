@@ -340,14 +340,14 @@ public class AgentFactory implements IAgentFactory {
             lintCompatibility((Agent) agent, agentId, version);
         } catch (ServiceException e) {
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
         } catch (IllegalAccessException e) {
             // The placeholder is still published; mark it ERROR so a retry is not
             // mistaken for a deployment still in flight.
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             throw new RuntimeException(e);
@@ -357,7 +357,7 @@ public class AgentFactory implements IAgentFactory {
             // this version answered "already in progress" and returned, and the only
             // way out was a restart.
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + sanitize(e.getMessage()), e);
-            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version, e)));
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -366,24 +366,16 @@ public class AgentFactory implements IAgentFactory {
     }
 
     /**
-     * The message a {@link DeploymentFailure#DEPLOYMENT_FAILED} carries: the
-     * cause's own message, which is what the server log already shows an operator.
-     * Bounded, so a cause that dumps a whole document cannot bloat every status
-     * response.
+     * The message a {@link DeploymentFailure#DEPLOYMENT_FAILED} carries. Fixed on
+     * purpose: it reaches the waited deploy response, the detailed status and the
+     * MCP deploy result, and a cause's own message can hold a credential, a
+     * connection string or an internal path. The cause itself is in the server log,
+     * which is where this message sends the reader — as the waited deploy always
+     * has ("Check server logs for details").
      */
-    static String failureMessage(String agentId, Integer version, Throwable e) {
-        Throwable cause = e;
-        while (cause.getCause() != null && cause.getCause() != cause && (cause.getMessage() == null || cause.getMessage().isBlank())) {
-            cause = cause.getCause();
-        }
-        String detail = cause.getMessage() != null && !cause.getMessage().isBlank() ? cause.getMessage() : cause.getClass().getSimpleName();
-        if (detail.length() > MAX_FAILURE_DETAIL) {
-            detail = detail.substring(0, MAX_FAILURE_DETAIL) + "…";
-        }
-        return String.format("Agent '%s' v%s could not be deployed: %s", agentId, version, detail);
+    static String failureMessage(String agentId, Integer version) {
+        return String.format("Agent '%s' v%s could not be deployed. Check the server log for details.", agentId, version);
     }
-
-    private static final int MAX_FAILURE_DETAIL = 500;
 
     private void lintCompatibility(Agent agent, String agentId, Integer version) {
         if (compatibilityLint == null) {

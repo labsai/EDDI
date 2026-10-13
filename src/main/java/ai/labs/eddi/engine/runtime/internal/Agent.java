@@ -30,7 +30,11 @@ public class Agent implements IAgent {
     private final List<IExecutableWorkflow> executableWorkflows;
 
     private Deployment.Status deploymentStatus;
-    private DeploymentFailure deploymentFailure;
+    /**
+     * Volatile: a failed deploy writes it onto a placeholder that is already
+     * published, and a concurrent status read must see the reason with the ERROR.
+     */
+    private volatile DeploymentFailure deploymentFailure;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private Long turnDeadlineMs;
     private Long turnDeadlineReserveMs;

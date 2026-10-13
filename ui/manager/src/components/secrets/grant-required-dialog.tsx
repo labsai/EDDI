@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Copy, KeyRound, Loader2, Lock } from "lucide-react";
@@ -66,10 +66,18 @@ export function GrantRequiredDialog({ request, onDecision }: GrantRequiredDialog
       : request?.agents
         ? t("grantRequired.titleMany", "These agents are not granted their vault keys")
         : t("grantRequired.title", "This agent is not granted its vault keys");
+  /**
+   * Set while the body is writing a grant. Escape and the backdrop must not
+   * cancel then: the flow would end "cancelled" while the writes still landed.
+   */
+  const busyRef = useRef(false);
   return (
     <AccessibleDialog
       open={request !== null}
-      onClose={() => onDecision("cancel")}
+      onClose={() => {
+        if (busyRef.current) return;
+        onDecision("cancel");
+      }}
       title={title}
       maxWidth="max-w-lg"
       testId="grant-required-dialog"
@@ -79,13 +87,22 @@ export function GrantRequiredDialog({ request, onDecision }: GrantRequiredDialog
           key={`${request.agents?.map((a) => a.agentId).join(",") ?? request.agentId}/${request.version}/${request.source}`}
           request={request}
           onDecision={onDecision}
+          busyRef={busyRef}
         />
       )}
     </AccessibleDialog>
   );
 }
 
-function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onDecision: (d: GrantDecision) => void }) {
+function GrantRequiredBody({
+  request,
+  onDecision,
+  busyRef,
+}: {
+  request: GrantRequest;
+  onDecision: (d: GrantDecision) => void;
+  busyRef: MutableRefObject<boolean>;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const isAdmin = useHasRole("eddi-admin");
@@ -135,10 +152,14 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
 
   const finish = (decision: GrantDecision) => {
     void queryClient.invalidateQueries({ queryKey: ["secrets"] });
+    // Only answer the request this body was opened for: answering resolves
+    // whatever is pending NOW, and a newer request must not inherit "granted".
+    if (useGrantDialogStore.getState().pending !== request) return;
     onDecision(decision);
   };
 
   const handleAdd = async () => {
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -179,6 +200,7 @@ function GrantRequiredBody({ request, onDecision }: { request: GrantRequest; onD
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };

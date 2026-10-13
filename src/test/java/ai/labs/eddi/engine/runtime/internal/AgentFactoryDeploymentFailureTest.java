@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -80,7 +81,7 @@ class AgentFactoryDeploymentFailureTest {
     }
 
     @Test
-    @DisplayName("any other failure is recorded as DEPLOYMENT_FAILED with the cause's message")
+    @DisplayName("any other failure is recorded as DEPLOYMENT_FAILED, without the cause's message")
     void otherFailureRecorded() throws Exception {
         when(library.getAgent(AGENT_ID, 1)).thenThrow(new ServiceException("workflow 42 could not be read"));
 
@@ -89,7 +90,9 @@ class AgentFactoryDeploymentFailureTest {
         IAgent agent = factory.getAgent(ENV, AGENT_ID, 1);
         assertEquals(Deployment.Status.ERROR, agent.getDeploymentStatus());
         assertEquals(DeploymentFailure.DEPLOYMENT_FAILED, agent.getDeploymentFailure().code());
-        assertTrue(agent.getDeploymentFailure().message().contains("workflow 42 could not be read"));
+        // The cause can carry a secret or an internal path; it belongs in the log.
+        assertFalse(agent.getDeploymentFailure().message().contains("workflow 42"));
+        assertTrue(agent.getDeploymentFailure().message().contains("server log"));
     }
 
     @Test
@@ -101,13 +104,6 @@ class AgentFactoryDeploymentFailureTest {
 
         IAgent agent = factory.getAgent(ENV, AGENT_ID, 1);
         assertEquals(Deployment.Status.ERROR, agent.getDeploymentStatus());
-        assertTrue(agent.getDeploymentFailure().message().contains("boom"));
-    }
-
-    @Test
-    @DisplayName("a very long cause is bounded")
-    void longCauseBounded() {
-        String message = AgentFactory.failureMessage(AGENT_ID, 1, new RuntimeException("x".repeat(5_000)));
-        assertTrue(message.length() < 700, String.valueOf(message.length()));
+        assertFalse(agent.getDeploymentFailure().message().contains("boom"));
     }
 }

@@ -246,7 +246,7 @@ A deploy refused by the grant check used to answer only `{"status":"ERROR"}`. Th
 }
 ```
 
-Only names and references are returned, never a value. Any other cause of an ERROR is reported as `code: "DEPLOYMENT_FAILED"` with the cause's message. The failure is kept in memory with the deployment status, so it does not survive a restart — a redeploy recomputes it — and the next successful deploy clears it. MCP `deploy_agent` returns the same code, secret names and fix, with a note that an administrator has to apply it. The server log line says the same thing as `message`.
+Only names and references are returned, never a value. Any other cause of an ERROR is reported as `code: "DEPLOYMENT_FAILED"` with a fixed message that points to the server log. The cause itself goes only to the log, because an exception message can carry a credential, a connection string or an internal path. The failure is kept in memory with the deployment status, so it does not survive a restart — a redeploy recomputes it — and the next successful deploy clears it. MCP `deploy_agent` returns the same code, secret names and fix, with a note that an administrator has to apply it. For a grant refusal, the server log line says the same thing as `message`.
 
 ### Preflight before deploying
 

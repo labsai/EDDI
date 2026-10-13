@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import type { DeploymentFailure } from "@/lib/api/agents";
+import { getErrorMessage } from "@/lib/api-client";
 import {
   isGrantFailure,
   runDeployWithGrants,
@@ -37,6 +38,22 @@ export async function fixGrantAndRedeploy(
     const outcome = await runDeployWithGrants(options);
     reportDeployOutcome(outcome, options, t, undefined, onSettled);
     return outcome;
+  } catch (err) {
+    // A transport error (network, 403, 5xx): the callers discard the promise,
+    // so an uncaught rejection would leave Fix with no feedback at all.
+    const message = getErrorMessage(err);
+    toast.error(message);
+    return {
+      kind: "failed",
+      result: {
+        status: "ERROR",
+        agentId: options.agentId,
+        version: options.version,
+        environment: options.environment ?? "production",
+        error: message,
+      },
+      message,
+    };
   } finally {
     onSettled?.();
   }

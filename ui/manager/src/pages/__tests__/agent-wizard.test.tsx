@@ -285,6 +285,44 @@ describe("AgentWizardPage", () => {
     expect(await screen.findByText(/Deployed/)).toBeInTheDocument();
   });
 
+  it("a deploy request that errors still shows the created agent, so Create is not pressed twice", async () => {
+    let setups = 0;
+    server.use(
+      http.post("*/administration/agents/setup", () => {
+        setups += 1;
+        return HttpResponse.json({
+          agentId: "new-agent-3",
+          agentName: "My Agent",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          deployed: false,
+          resources: { agentLocation: "/agentstore/agents/new-agent-3?version=1" },
+        });
+      }),
+      http.get("*/administration/:env/deploy/:agentId/preflight", ({ params }) =>
+        HttpResponse.json({ agentId: params.agentId, version: 1, enforcement: "ENFORCE", checked: true, ready: true, grantIssues: [] }),
+      ),
+      http.post("*/administration/:env/deploy/:agentId", () => HttpResponse.json({ message: "boom" }, { status: 500 })),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AgentWizardPage />, { initialRoute: "/manage/agents/wizard" });
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "My Agent");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Be helpful");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-model"), "claude-sonnet-4-6");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "sk-test-key");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-deploy"));
+
+    expect(await screen.findByText("View Agent")).toBeInTheDocument();
+    expect(screen.queryByTestId("wizard-create-deploy")).not.toBeInTheDocument();
+    expect(setups).toBe(1);
+  });
+
   it("a restricted key is granted to the NEW agent before its first deploy — no failed deploy in between", async () => {
     const calls: string[] = [];
     server.use(

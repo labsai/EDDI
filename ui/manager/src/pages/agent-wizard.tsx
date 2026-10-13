@@ -33,8 +33,9 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
-import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
-import { deployFailureMessage, fixGrantAndRedeploy } from "@/lib/deploy-outcome";
+import { useDeployWithGrants, isGrantFailure, type DeployWithGrantsOutcome } from "@/hooks/use-deploy-with-grants";
+import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
+import { getErrorMessage } from "@/lib/api-client";
 import { type DeploymentFailure } from "@/lib/api/agents";
 import {
   getProviderConfig,
@@ -309,12 +310,19 @@ export function AgentWizardPage() {
   async function deployCreatedAgent(res: SetupResult): Promise<SetupResult> {
     const version = await resolveSetupVersion(res);
     setCreatedVersion(version);
-    const outcome = await deployWithGrants({
-      agentId: res.agentId,
-      agentName: res.agentName || state.name,
-      version,
-      environment: state.environment,
-    });
+    let outcome: DeployWithGrantsOutcome;
+    try {
+      outcome = await deployWithGrants({
+        agentId: res.agentId,
+        agentName: res.agentName || state.name,
+        version,
+        environment: state.environment,
+      });
+    } catch (err) {
+      // The agent exists: show it with the reason rather than leaving the person
+      // on Review, where pressing Create again would make a second one.
+      return { ...res, deployed: false, deploymentStatus: getErrorMessage(err) };
+    }
     if (outcome.kind === "deployed") {
       return { ...res, deployed: true, deploymentStatus: outcome.result.status };
     }
@@ -332,16 +340,22 @@ export function AgentWizardPage() {
 
   async function handleFixDeploy() {
     if (!result || !isGrantFailure(deployFailure)) return;
-    const outcome = await fixGrantAndRedeploy(
-      {
-        agentId: result.agentId,
-        agentName: result.agentName,
-        version: createdVersion,
-        environment: state.environment,
-        failure: deployFailure,
-      },
-      t,
-    );
+    const options = {
+      agentId: result.agentId,
+      agentName: result.agentName,
+      version: createdVersion,
+      environment: state.environment,
+    };
+    // Through the hook, not fixGrantAndRedeploy: isDeploying then disables Fix
+    // while it runs, and the agent queries refresh afterwards.
+    let outcome: DeployWithGrantsOutcome;
+    try {
+      outcome = await deployWithGrants({ ...options, failure: deployFailure });
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+      return;
+    }
+    reportDeployOutcome(outcome, options, t);
     if (outcome.kind === "deployed") {
       setDeployFailure(null);
       setResult({ ...result, deployed: true, deploymentStatus: outcome.result.status });

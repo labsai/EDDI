@@ -132,6 +132,43 @@ describe("useDeployWithGrants", () => {
     expect(screen.queryByTestId("grant-required-dialog")).not.toBeInTheDocument();
   });
 
+  it("Escape while the grant is being written does not cancel it", async () => {
+    serve();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post("*/secretstore/secrets/:tenantId/:keyName/grant/agents/:agentId", async ({ request, params }) => {
+        const dryRun = new URL(request.url).searchParams.get("dryRun") === "true";
+        calls.push(`grant ${params.keyName} ${params.agentId}${dryRun ? " dry" : ""}`);
+        if (!dryRun) await gate;
+        return HttpResponse.json({
+          reference: `\${vault:${params.keyName}}`,
+          tenantId: params.tenantId,
+          keyName: params.keyName,
+          dryRun,
+          changed: true,
+          allowedAgents: ["agent5", "agent7", params.agentId],
+          previousAllowedAgents: ["agent5", "agent7"],
+          grantsAllAgents: false,
+          agentsLosingAccess: [],
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />);
+    await user.click(screen.getByTestId("go"));
+    await screen.findByTestId("grant-required-dialog");
+    await user.click(screen.getByTestId("grant-required-confirm"));
+    await waitFor(() => expect(calls).toContain(`grant ${KEY} ${AGENT}`));
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("outcome")).toHaveTextContent("pending");
+
+    release();
+    // The write landed, so the flow ends granted and deployed - not "cancelled".
+    await waitFor(() => expect(screen.getByTestId("outcome")).toHaveTextContent("deployed"));
+  });
+
   it("deploys without asking when the preflight finds nothing", async () => {
     serve({ preflight: preflight({ ready: true, grantIssues: [] }) });
     const user = userEvent.setup();

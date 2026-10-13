@@ -117,8 +117,9 @@ only read `error` (MCP `update_agent`, `apply_agent_changes`) now show the reaso
 }
 ```
 
-`code` is `VAULT_GRANT_MISSING` or `DEPLOYMENT_FAILED` (any other cause; `message` then carries the
-exception's message). A reference the checker reports that is not a plain vault reference (an
+`code` is `VAULT_GRANT_MISSING` or `DEPLOYMENT_FAILED` (any other cause; `message` is then a fixed
+sentence pointing to the server log, never the exception's message, which can carry a credential or an
+internal path). A reference the checker reports that is not a plain vault reference (an
 unreadable `${connection:…}`, a reference assembled from global variables) is listed in `secrets` with
 only `reference` set and has no fix endpoint.
 
