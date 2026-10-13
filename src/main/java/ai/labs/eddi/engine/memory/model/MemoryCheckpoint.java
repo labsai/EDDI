@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.PropertyValues;
 
 import java.time.Instant;
 import java.util.Collections;
@@ -96,16 +97,12 @@ public record MemoryCheckpoint(
         Map<String, Property> copy = new LinkedHashMap<>(original.size());
         for (Map.Entry<String, Property> entry : original.entrySet()) {
             Property p = entry.getValue();
-            Property cloned = new Property(
-                    p.getName(), p.getValueString(), p.getValueObject(),
-                    p.getValueList(), p.getValueInt(), p.getValueFloat(),
-                    p.getValueBoolean(), p.getScope(), p.getVisibility());
-            // Not in the all-args constructor, and dropping it is not cosmetic: the
-            // auto-vault provenance marker is what ConfigReferenceGuard requires before
-            // it resolves a credential reference read through {properties.x}. A clone
-            // that loses it turns a rollback into a refused API call.
-            cloned.setAutoVaulted(p.getAutoVaulted());
-            copy.put(entry.getKey(), cloned);
+            // copyOf carries what the all-args constructor does not, and dropping it is
+            // not cosmetic: the auto-vault provenance marker is what ConfigReferenceGuard
+            // requires before it resolves a credential reference read through
+            // {properties.x} (a clone that loses it turns a rollback into a refused API
+            // call), and the long/double slots hold numbers the others cannot.
+            copy.put(entry.getKey(), p == null ? null : PropertyValues.copyOf(p));
         }
         return Collections.unmodifiableMap(copy);
     }

@@ -435,9 +435,33 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         /**
          * Maximum number of tool-calling loop iterations before forcing a final answer
-         * (default 10).
+         * (default 10, engine ceiling 100 — a larger value is clamped and logged).
+         * <p>
+         * Bounds <em>rounds</em> only: one model response can request any number of
+         * calls. {@link #maxToolCallsPerIteration} and {@link #maxToolCallsPerTurn}
+         * bound the calls themselves.
          */
         private Integer maxToolIterations;
+
+        /**
+         * Most tool calls executed from a single model response (default 20). Calls
+         * beyond the cap are not executed: each is answered with a {@code NOT_EXECUTED}
+         * result telling the model the limit was reached, so the provider's
+         * one-result-per-call rule still holds and the model can answer with what it
+         * has. {@code -1} (or {@code 0}) removes the cap.
+         * <p>
+         * Without it, {@code maxToolIterations} was the only bound and a model that
+         * answered with fifty parallel calls in one response had all fifty executed.
+         */
+        private Integer maxToolCallsPerIteration;
+
+        /**
+         * Most tool calls executed across a whole turn — every iteration of the tool
+         * loop, including the iterations a HITL resume continues (default 100). Refused
+         * calls are answered as for {@link #maxToolCallsPerIteration}. {@code -1} (or
+         * {@code 0}) removes the cap.
+         */
+        private Integer maxToolCallsPerTurn;
 
         /**
          * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
@@ -488,6 +512,19 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.1.0
          */
         private String jsonResponseFormat;
+
+        /**
+         * Fields of the parsed {@code convertToObject} reply that must hold a non-blank
+         * string — top-level ({@code htmlResponseText}) or dotted
+         * ({@code answer.text}). A missing, non-string or blank ({@code ""}) value is a
+         * shape violation (outcome {@code schema_mismatch}), the shortcut for "an empty
+         * bubble is not an answer" without writing a {@code responseSchema}. Null or
+         * empty (default) checks nothing; it is independent of
+         * {@code responseValidation.enabled}.
+         *
+         * @since 6.6.0
+         */
+        private List<String> nonBlankFields;
 
         // === Multi-Model Cascade ===
 
@@ -976,6 +1013,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.maxToolIterations = maxToolIterations;
         }
 
+        public Integer getMaxToolCallsPerIteration() {
+            return maxToolCallsPerIteration;
+        }
+
+        public void setMaxToolCallsPerIteration(Integer maxToolCallsPerIteration) {
+            this.maxToolCallsPerIteration = maxToolCallsPerIteration;
+        }
+
+        public Integer getMaxToolCallsPerTurn() {
+            return maxToolCallsPerTurn;
+        }
+
+        public void setMaxToolCallsPerTurn(Integer maxToolCallsPerTurn) {
+            this.maxToolCallsPerTurn = maxToolCallsPerTurn;
+        }
+
         public Integer getMaxToolContextTokens() {
             return maxToolContextTokens;
         }
@@ -990,6 +1043,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJsonResponseFormat(String jsonResponseFormat) {
             this.jsonResponseFormat = jsonResponseFormat;
+        }
+
+        public List<String> getNonBlankFields() {
+            return nonBlankFields;
+        }
+
+        public void setNonBlankFields(List<String> nonBlankFields) {
+            this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
         }
 
         public ModelCascadeConfig getModelCascade() {

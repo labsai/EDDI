@@ -150,6 +150,7 @@ eddi_conversation_redo_count_total          # Redo operations
 eddi_conversation_agent_version_switch_count_total  # Conversations moved to another compatible version of their agent
 eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
 eddi_processing_conversation_count          # Currently active (gauge)
+eddi_conversation_abandoned_running         # Turns the agent-timeout watchdog gave up on that are still running (gauge, normally 0)
 
 eddi_conversation_start_duration_seconds    # Start latency (timer)
 eddi_conversation_end_duration_seconds      # End latency (timer)
@@ -456,7 +457,7 @@ expensive one.
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
-eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty)
+eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
 eddi_llm_recovery_total                     # Turns answered with the configured fallback; tags: action (fallback), outcome (served), trigger (onError|validation)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
@@ -561,6 +562,7 @@ eddi_vault_rotate_count_total               # Key rotations
 eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver
@@ -580,6 +582,9 @@ eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
 eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
+eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
+eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
+eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
 ```
