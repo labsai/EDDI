@@ -5000,6 +5000,82 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 176,
+          "type": "timeseries",
+          "title": "LLM same-model re-asks and escalations (responseValidation retry)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_recovery_total` with `action=retry` or `action=escalate` — what the `retry` actions of `responseValidation` did. `retry` outcomes: `recovered` (the re-ask fixed the reply), `still_invalid`, `failed` (the re-ask itself errored), or why a re-ask was skipped (`skipped_budget`, `skipped_no_time`, `skipped_cost`, `skipped_breaker`). `escalate` / `invalid_output` is a cascade step that handed over to the next model after its re-asks. Many `still_invalid` or `escalate` per `trigger` means a prompt, schema or model problem, not noise: every re-ask is a billed call.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 61
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (action, outcome, trigger) (rate(eddi_llm_recovery_total{job=~\"$job\",action=~\"retry|escalate\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{action}} {{outcome}} ({{trigger}})"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -8833,12 +8909,12 @@
         {
           "id": 96,
           "type": "timeseries",
-          "title": "Conversations created via /v1",
+          "title": "Conversations and chat keys via /v1",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_openai_conversations_created_total` — each new Open WebUI chat maps to a fresh EDDI conversation.",
+          "description": "`eddi_openai_conversations_created_total` — each new chat maps to a fresh EDDI conversation; `eddi_openai_conversations_rolled_over_total` — conversations ended at `max-conversation-steps`; `eddi_openai_chat_keys_total` by `source` — where each stateful request's chat key came from (`history` = derived from the opening messages, `shared` = the single per-user conversation).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -8854,7 +8930,30 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "created"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_openai_conversations_rolled_over_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "rolled over (max-conversation-steps)"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (source) (rate(eddi_openai_chat_keys_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "chat key: {{source}}"
             }
           ],
           "fieldConfig": {
@@ -8894,9 +8993,9 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
@@ -9178,6 +9277,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "errors"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (scope) (rate(eddi_attachments_quota_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "quota rejected: {{scope}}"
             }
           ],
           "fieldConfig": {

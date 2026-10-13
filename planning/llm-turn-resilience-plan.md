@@ -3,6 +3,7 @@
 ## Status
 
 - **R3 + R14 implemented** (PR for branch `feat/llm-output-parsing-never-throws`): fence stripping and prose recovery of **objects** (a non-empty object extracted from surrounding text), arrays accepted **only as the whole reply**; parsing never throws; outcome recorded under `llm:output:outcome:<taskId>` and `eddi.llm.output{outcome}`. `FaultInjectingChatModel` is test scope only.
+- **R2, R4, R5, R6, R7 implemented** on the stacked branches (see `docs/changelog.d/2026-10-06-*.md`). Where the implementation differs from the text below: a corrective message is sent only for invalid JSON and schema mismatches (empty, truncated and filtered replies are re-asked with the original request; context-too-long re-sends with the history window halved); fallback exclusion from the LLM history is driven by the step flag `llm:fallback:<taskId>`, because a `postResponse` fallback has no task-created `OutputItem`.
 - **R4 implemented** (PR for branch `feat/llm-response-schema-validation`): shape validation and native schema. Where it differs from the R4 text below: a shape violation is outcome `schema_mismatch` (not `INVALID`) and keeps the parsed object; reason under `llm:output:reason:<taskId>`; the native schema is sent per request, **non-strict** (langchain4j's `strict` is a model-builder flag), for openai, azure-openai, mistral and gemini (not gemini-vertex); `nonBlankFields` is a task field next to `jsonResponseFormat`. See `docs/langchain.md` Structured Output.
 - Everything else below is still to do.
 

@@ -57,8 +57,7 @@ class MimeValidatorTest {
         @Test
         @DisplayName("Should detect BMP")
         void testDetectBmp() {
-            byte[] bmp = new byte[]{0x42, 0x4D, 0x00, 0x00, 0x00, 0x00};
-            assertEquals("image/bmp", MimeValidator.detectMime(bmp));
+            assertEquals("image/bmp", MimeValidator.detectMime(bmpHeader()));
         }
 
         @Test
@@ -351,6 +350,122 @@ class MimeValidatorTest {
         @DisplayName("Should pass through canonical MIME unchanged")
         void testPassthrough() {
             assertEquals("application/json", MimeValidator.normalize("application/json"));
+        }
+    }
+
+    /**
+     * A real 1x1 24-bit BMP header: "BM", size, zero reserved, offset 54, DIB size
+     * 40.
+     */
+    static byte[] bmpHeader() {
+        byte[] bmp = new byte[58];
+        bmp[0] = 0x42;
+        bmp[1] = 0x4D;
+        bmp[2] = 58;
+        bmp[10] = 54;
+        bmp[14] = 40;
+        bmp[18] = 1;
+        bmp[22] = 1;
+        bmp[26] = 1;
+        bmp[28] = 24;
+        return bmp;
+    }
+
+    @Nested
+    @DisplayName("Text that starts like a signature (false positives)")
+    class FalsePositiveTests {
+
+        private byte[] utf8(String text) {
+            return text.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Test
+        @DisplayName("a CSV whose first column is BMI is not a bitmap")
+        void csvStartingWithBmi() {
+            byte[] csv = utf8("BMI,weight,height\n22.5,70,176\n");
+
+            assertEquals("application/octet-stream", MimeValidator.detectMime(csv));
+            assertTrue(MimeValidator.isCompatibleContent("text/csv", csv));
+        }
+
+        @Test
+        @DisplayName("Markdown that mentions %PDF- mid-line is not a PDF")
+        void markdownMentioningPdfHeader() {
+            byte[] markdown = utf8("# Notes\n\nEvery PDF file starts with `%PDF-1.7` followed by a binary comment.\n");
+
+            assertEquals("application/octet-stream", MimeValidator.detectMime(markdown));
+            assertTrue(MimeValidator.isCompatibleContent("text/markdown", markdown));
+        }
+
+        @Test
+        @DisplayName("text declared as text is accepted even when a line looks like a header")
+        void textWithAHeaderLikeLine() {
+            byte[] markdown = utf8("Example:\n%PDF-1.7\n");
+
+            // Detection may say PDF (a header at a line start is where print jobs put it)
+            // ...
+            assertEquals("application/pdf", MimeValidator.detectMime(markdown));
+            // ... but readable text declared as text is text.
+            assertTrue(MimeValidator.isCompatibleContent("text/markdown", markdown));
+            assertTrue(MimeValidator.isCompatibleContent("text/plain; charset=utf-8", markdown));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"ID3 tags explained\n", "GIF89a is a format\n", "II*\001 not tiff", "OggS is a container\n"})
+        @DisplayName("notes that open with another format's magic are accepted as text")
+        void otherMagicPrefixes(String text) {
+            assertTrue(MimeValidator.isCompatibleContent("text/plain", utf8(text)));
+        }
+
+        @Test
+        @DisplayName("a real bitmap declared as CSV is still refused")
+        void realBinaryDeclaredAsTextIsRefused() {
+            assertFalse(MimeValidator.isCompatibleContent("text/csv", bmpHeader()));
+        }
+
+        @Test
+        @DisplayName("text declared as an image is still refused")
+        void textDeclaredAsImageIsRefused() {
+            assertFalse(MimeValidator.isCompatibleContent("image/png", utf8("not a png at all")));
+        }
+
+        @Test
+        @DisplayName("a real PDF with a print-job prefix is still a PDF")
+        void pdfAfterPrintJobPrefix() {
+            byte[] pjl = utf8("\033%-12345X@PJL ENTER LANGUAGE=PDF\r\n%PDF-1.4\n");
+
+            assertEquals("application/pdf", MimeValidator.detectMime(pjl));
+        }
+
+        @Test
+        @DisplayName("a PDF after a byte-order mark is still a PDF")
+        void pdfAfterBom() {
+            byte[] bom = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF, '%', 'P', 'D', 'F', '-', '1', '.', '7'};
+
+            assertEquals("application/pdf", MimeValidator.detectMime(bom));
+        }
+
+        @Test
+        @DisplayName("looksLikeText: NUL bytes make content binary")
+        void nulIsBinary() {
+            assertFalse(MimeValidator.looksLikeText(new byte[]{'a', 0, 'b'}));
+            assertTrue(MimeValidator.looksLikeText(utf8("plain, text; with ümlauts\tand tabs\r\n")));
+            assertFalse(MimeValidator.looksLikeText(new byte[0]));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"text/csv", "text/markdown", "application/json", "application/ld+json", "application/x-yaml",
+                "image/svg+xml"})
+        @DisplayName("textual declared types")
+        void textualTypes(String mime) {
+            assertTrue(MimeValidator.isTextual(mime));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"image/png", "application/pdf", "application/octet-stream", "application/zip"})
+        @DisplayName("binary declared types")
+        void binaryTypes(String mime) {
+            assertFalse(MimeValidator.isTextual(mime));
         }
     }
 }
