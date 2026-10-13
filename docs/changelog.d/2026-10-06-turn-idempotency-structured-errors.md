@@ -24,6 +24,12 @@ failed turn gave the caller no machine-readable reason.
 
 ### Design decisions
 
+- **One `error` object.** Main's #946 already put a `{taskId, taskType, errorType, message}` object under
+  `error` on every snapshot in the `ERROR` state; R9 adds `{code, retryable, retryAfterMs, message}` on the say
+  response. They are one top-level `ai.labs.eddi.engine.model.TurnError` carrying the union (`taskId`,
+  `taskType`, `errorType` are omitted from the JSON when unknown; `retryAfterMs: null` is always emitted),
+  built from the same `taskErrors` entry by `TurnError.fromTaskError` on both paths. `message` is #946's digest
+  text (`Task 'x' failed: ...`). No field was removed or renamed.
 - **The status is unchanged.** A failed turn was already `200` with `conversationState: "ERROR"` (not a bare
   500), so `error` is added to that body rather than replacing it; clients that parse the snapshot keep
   working. The `/v1` adapter and the existing `409/429/503` bodies are untouched. The endpoints produce JSON

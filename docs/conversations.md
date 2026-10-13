@@ -23,11 +23,15 @@ applies, up to 10 minutes. See [Turn Deadline](langchain.md#turn-deadline).
 ### Failed turns: the `error` object
 
 When a turn fails (`conversationState: "ERROR"`), the response to the `say` keeps the status and the
-snapshot shape it always had, and gains a top-level `error`:
+snapshot shape it always had, and carries a top-level `error`. It is one object everywhere: the same `error`
+is on every snapshot in the `ERROR` state, a plain read of the conversation as well as the response to a
+`say`:
 
 ```json
 { "conversationState": "ERROR",
-  "error": { "code": "RATE_LIMITED", "retryable": true, "retryAfterMs": 13000, "message": "Task 'llm' failed: ..." } }
+  "error": { "code": "RATE_LIMITED", "retryable": true, "retryAfterMs": 13000,
+             "message": "Task 'eddi://ai.labs.llm' failed: ...",
+             "taskId": "eddi://ai.labs.llm", "taskType": "langchain", "errorType": "LifecycleException" } }
 ```
 
 - `code` is a failure class (`TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`,
@@ -36,7 +40,13 @@ snapshot shape it always had, and gains a top-level `error`:
   `{"error": {"code": "INTERNAL_ERROR", ...}}`.
 - `retryable` says whether sending the same request again can succeed; `retryAfterMs` is the provider's own
   hint (`null` when it gave none) and is also sent as a `Retry-After` header (whole seconds).
-- `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body.
+- `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body. It is the
+  same sentence the streaming `task_failed` event carries.
+- `taskId`, `taskType` and `errorType` say which lifecycle task failed and how it was classified for metrics
+  and audit (for example `LifecycleException`), as the `task_failed` event does. They are omitted when the
+  error did not come from a task, such as a rejected idempotency key. A failed turn whose entry predates
+  `code`/`retryable` reports `code: "TURN_FAILED"`, `retryable: false`. The full per-task digest stays in
+  `conversationOutputs[…].taskErrors`.
 - The same object is on the final `done` event of a streaming `say`. The `/v1` OpenAI-compatible API keeps
   its own error format, and the older refusals (`409`, `429`, `503`, ...) keep their existing bodies.
 - The endpoints produce JSON only, so there is no plain-text variant of the body.

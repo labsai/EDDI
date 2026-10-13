@@ -742,12 +742,10 @@ public class ConversationService implements IConversationService, UserErasurePar
     static TurnError turnErrorOf(IConversationMemory memory) {
         var step = memory.getCurrentStep();
         Object entries = step == null || step.getConversationOutput() == null ? null : step.getConversationOutput().get(MemoryKeys.TASK_ERRORS);
-        if (entries instanceof List<?> list) {
-            for (int i = list.size() - 1; i >= 0; i--) {
-                TurnError found = TurnError.fromTaskError(list.get(i));
-                if (found != null) {
-                    return found;
-                }
+        if (entries instanceof List<?> list && !list.isEmpty()) {
+            TurnError found = TurnError.fromTaskError(list.getLast());
+            if (found != null) {
+                return found;
             }
         }
         return new TurnError(TurnError.TURN_FAILED, false, null, "The turn failed");
