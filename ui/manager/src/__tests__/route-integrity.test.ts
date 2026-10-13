@@ -314,7 +314,8 @@ describe("route integrity", () => {
 
     const literalChildren = (workforce!.children ?? [])
       .map((c) => c.path)
-      .filter((p): p is string => !!p && !p.includes(":"))
+      // "*" is the not-found catch-all, not a page.
+      .filter((p): p is string => !!p && !p.includes(":") && p !== "*")
       .sort();
 
     expect(literalChildren.length).toBeGreaterThan(0);

@@ -12,6 +12,7 @@ import {
   X,
   GitBranch,
 } from "lucide-react";
+import { RenamableKeyInput } from "./renamable-key-input";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { nextFreeKey } from "./editor-value-utils";
 
@@ -240,6 +241,7 @@ function KeyValueRow({
   configKey,
   value,
   onKeyChange,
+  isKeyAvailable,
   onValueChange,
   onRemove,
   readOnly,
@@ -250,6 +252,8 @@ function KeyValueRow({
   configKey: string;
   value: string;
   onKeyChange: (k: string) => void;
+  /** Whether `k` may be used as this row's new key (not already another row's). */
+  isKeyAvailable: (k: string) => boolean;
   onValueChange: (v: string) => void;
   onRemove: () => void;
   readOnly?: boolean;
@@ -263,12 +267,17 @@ function KeyValueRow({
   return (
     <div>
     <div className="flex items-center gap-1.5">
-      <input
-        type="text"
+      {/* Committed on blur/Enter and refused when taken: renaming on every
+          keystroke re-keyed the map mid-word, and a spelling that matched
+          another key (typing "occurrence" over "o…") silently merged the two
+          rows into one, losing a value. */}
+      <RenamableKeyInput
         value={configKey}
-        onChange={(e) => onKeyChange(e.target.value)}
+        onRename={onKeyChange}
+        isAvailable={isKeyAvailable}
         readOnly={readOnly}
         placeholder={t("rulesEditor.configKey", "Key")}
+        data-testid={`rule-config-key-${configKey}`}
         aria-label={t("rulesEditor.configKey", "Key")}
         className="h-7 w-28 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
       />
@@ -486,9 +495,9 @@ function ConditionEditor({
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
           {/* Config key-value pairs */}
-          {configEntries.map(([k, v], i) => (
+          {configEntries.map(([k, v]) => (
             <KeyValueRow
-              key={i}
+              key={k}
               configKey={k}
               value={isSizeBound(k) && v === NO_SIZE_BOUND ? "" : v}
               valuePlaceholder={isSizeBound(k) ? t("rulesEditor.sizeNoBound", "no limit") : undefined}
@@ -499,6 +508,7 @@ function ConditionEditor({
               }
               options={CONFIG_OPTIONS[condition.type]?.[k]}
               onKeyChange={(nk) => renameConfigKey(k, nk)}
+              isKeyAvailable={(nk) => nk === k || !Object.prototype.hasOwnProperty.call(condition.configs ?? {}, nk)}
               onValueChange={(nv) => updateConfig(k, nv)}
               onRemove={() => removeConfigEntry(k)}
               readOnly={readOnly}
