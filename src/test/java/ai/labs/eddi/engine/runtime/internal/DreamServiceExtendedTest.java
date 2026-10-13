@@ -55,6 +55,20 @@ class DreamServiceExtendedTest {
         meterRegistry = new SimpleMeterRegistry();
         dreamService = new DreamService(store, agentStore, summarizationService, meterRegistry, new ObjectMapper());
         dreamService.initMetrics();
+        try {
+            // Unchanged entries by default: the conditional write succeeds and is
+            // observable as the plain write these tests verify.
+            lenient().when(store.deleteEntryIfUnchanged(anyString(), any())).thenAnswer(invocation -> {
+                store.deleteEntry(invocation.getArgument(0));
+                return true;
+            });
+            lenient().when(store.replaceIfUnchanged(anyString(), any(UserMemoryEntry.class), any())).thenAnswer(invocation -> {
+                store.upsert(invocation.getArgument(1));
+                return true;
+            });
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
 
         dreamConfig = new AgentConfiguration.DreamConfig();
         dreamConfig.setPruneStaleAfterDays(30);
@@ -73,21 +87,41 @@ class DreamServiceExtendedTest {
     class EstimateCostTests {
 
         @Test
-        @DisplayName("uses totalTokens when > 0")
+        @DisplayName("prices input and output tokens separately, at the upper-bound rates when unpriced")
         void usesTotalTokens() {
             var result = new SummarizationResult("summary", 100, 50);
             double cost = DreamService.estimateCost(result, 400);
-            assertEquals(150 * 0.01 / 1000.0, cost, 1e-10);
+            assertEquals(100 * 15.0 / 1_000_000 + 50 * 75.0 / 1_000_000, cost, 1e-12);
         }
 
         @Test
-        @DisplayName("uses character fallback when totalTokens = 0")
+        @DisplayName("uses the configured model prices when the dream config names them")
+        void usesConfiguredPrices() {
+            var result = new SummarizationResult("summary", 2_000, 300);
+            double cost = DreamService.estimateCost(result, 0, 3.0, 15.0);
+            assertEquals(2_000 * 3.0 / 1_000_000 + 300 * 15.0 / 1_000_000, cost, 1e-12);
+        }
+
+        @Test
+        @DisplayName("an unpriced estimate is never below a premium model's real price — the budget stops early, not late")
+        void unpricedEstimateIsAnUpperBound() {
+            var result = new SummarizationResult("summary", 2_000, 300);
+            double unpriced = DreamService.estimateCost(result, 0);
+            double defaultModel = DreamService.estimateCost(result, 0, 3.0, 15.0); // claude-sonnet list price
+            double premiumModel = DreamService.estimateCost(result, 0, 15.0, 75.0); // claude-opus list price
+            double previousFlatRate = 2_300 * 0.01 / 1000.0;
+            assertTrue(unpriced >= defaultModel, unpriced + " < " + defaultModel);
+            assertTrue(unpriced >= premiumModel, unpriced + " < " + premiumModel);
+            assertTrue(premiumModel > 2 * previousFlatRate, "the old 'conservative' flat rate undercounted a premium model more than 2x");
+        }
+
+        @Test
+        @DisplayName("uses a 3-chars-per-token fallback when totalTokens = 0")
         void usesCharacterFallback() {
             var result = new SummarizationResult("short", 0, 0);
             double cost = DreamService.estimateCost(result, 200);
-            // (200 + 5) / 4 = 51 tokens → 51 * 0.01 / 1000
-            double expected = 51 * 0.01 / 1000.0;
-            assertEquals(expected, cost, 1e-10);
+            // ceil(200 / 3) = 67 input tokens, ceil(5 / 3) = 2 output tokens
+            assertEquals(67 * 15.0 / 1_000_000 + 2 * 75.0 / 1_000_000, cost, 1e-12);
         }
 
         @Test
@@ -95,9 +129,14 @@ class DreamServiceExtendedTest {
         void handleNullSummary() {
             var result = new SummarizationResult(null, 0, 0);
             double cost = DreamService.estimateCost(result, 200);
-            // outputLength = 0 → (200 + 0) / 4 = 50 tokens
-            double expected = 50 * 0.01 / 1000.0;
-            assertEquals(expected, cost, 1e-10);
+            assertEquals(67 * 15.0 / 1_000_000, cost, 1e-12);
+        }
+
+        @Test
+        @DisplayName("a negative configured price falls back to the upper bound")
+        void negativePriceFallsBack() {
+            var result = new SummarizationResult("summary", 100, 50);
+            assertEquals(DreamService.estimateCost(result, 0), DreamService.estimateCost(result, 0, -1.0, -1.0), 1e-12);
         }
     }
 

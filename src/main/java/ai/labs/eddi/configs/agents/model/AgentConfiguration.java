@@ -798,6 +798,18 @@ public class AgentConfiguration {
         private String llmProvider = "anthropic";
         private String llmModel = "claude-sonnet-4-6";
         private double maxCostPerRun = 0.50;
+
+        /**
+         * USD price per 1M input tokens of {@link #llmModel}, for the
+         * {@link #maxCostPerRun} budget. Null (the default): Dream assumes the
+         * documented upper-bound rate instead, which overestimates every current
+         * model's spend — so the budget stops early rather than late. Set both prices
+         * to make the budget accurate.
+         */
+        private Double inputPricePer1M;
+
+        /** USD price per 1M output tokens of {@link #llmModel}; see above. */
+        private Double outputPricePer1M;
         private int batchSize = 50;
         private int maxUsersPerRun = 1000;
 
@@ -975,6 +987,22 @@ public class AgentConfiguration {
 
         public void setMaxCostPerRun(double maxCostPerRun) {
             this.maxCostPerRun = maxCostPerRun;
+        }
+
+        public Double getInputPricePer1M() {
+            return inputPricePer1M;
+        }
+
+        public void setInputPricePer1M(Double inputPricePer1M) {
+            this.inputPricePer1M = inputPricePer1M;
+        }
+
+        public Double getOutputPricePer1M() {
+            return outputPricePer1M;
+        }
+
+        public void setOutputPricePer1M(Double outputPricePer1M) {
+            this.outputPricePer1M = outputPricePer1M;
         }
 
         public int getBatchSize() {
