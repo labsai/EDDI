@@ -212,6 +212,35 @@ describe("useActivateOperator — gate read-back enforcement", () => {
       expect(result.current.isError).toBe(false);
     });
 
+    it("does not refuse an endpoint whose required Authorization header the tools send themselves", async () => {
+      // caller-identity provisions the tools with an Authorization header, so a spec
+      // that also declares it as a required parameter is not a missing input.
+      const readEntry = parseEndpoint(READ_ENDPOINTS[0]!)!;
+      const withAuthParam = fullSpec();
+      withAuthParam.paths[readEntry.path]![readEntry.method.toLowerCase()] = {
+        parameters: [{ name: "Authorization", in: "header", required: true }],
+      };
+      const spy = { undeployed: false, deleted: false };
+      serveProvisioning(GOOD_GATE, spy);
+      server.use(http.get("*/openapi", () => HttpResponse.json(withAuthParam)));
+
+      const run = async (authMode: "none" | "caller-identity") => {
+        const { result } = renderHook(() => useActivateOperator(), { wrapper });
+        result.current.mutate({
+          agentName: "EDDI Platform Operator",
+          config: config({ scope: "read_only", authMode }),
+          apiKey: "sk-test",
+        });
+        await waitFor(() => expect(result.current.isSuccess || result.current.isError).toBe(true));
+        return result.current;
+      };
+
+      // With auth configured the header is not a missing input...
+      expect((await run("caller-identity")).error?.message ?? "").not.toMatch(/would not be able to send/);
+      // ...and without it, nothing sends the header, so the endpoint is refused.
+      expect((await run("none")).error?.message).toMatch(/would not be able to send.*Authorization/);
+    });
+
     it("rolls back when the backend itself reports a skipped endpoint", async () => {
       // The pre-flight sees a spec it considers fine; the backend, which knows
       // its own generator, disagrees. Its report wins and the deployed agent goes.
@@ -242,6 +271,37 @@ describe("useActivateOperator — gate read-back enforcement", () => {
       expect(result.current.error?.message).toMatch(/application\/x-tar/);
       await waitFor(() => expect(spy.deleted).toBe(true));
     });
+  });
+
+  it("says so when the rollback of a backend-rejected activation cannot remove the new agent", async () => {
+    const spy = { undeployed: false, deleted: false };
+    serveProvisioning(GOOD_GATE, spy);
+    server.use(
+      http.post("*/administration/agents/setup-api", () =>
+        HttpResponse.json(
+          {
+            agentId: AGENT_ID,
+            deployed: true,
+            deploymentStatus: "READY",
+            resources: { unusableEndpoints: ["PUT /x/{id}: requires a request body of type application/x-tar"] },
+          },
+          { status: 201 },
+        ),
+      ),
+      http.delete("*/agentstore/agents/:id", () => new HttpResponse(null, { status: 500 })),
+      http.post("*/administration/:env/undeploy/:agentId", () => new HttpResponse(null, { status: 500 })),
+    );
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: config({ scope: "read_only" }),
+      apiKey: "sk-test",
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/application\/x-tar/);
+    expect(result.current.error?.message).toMatch(new RegExp(`${AGENT_ID}.*still deployed`));
   });
 
   it("lets a read_only activation through when the gate does verify", async () => {

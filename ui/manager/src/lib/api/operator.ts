@@ -275,10 +275,10 @@ export function findMissingEndpoints(
  * {@link findUnusableEndpoints}.
  *
  * The backend twin (`McpApiToolBuilder.findUnmappableInput`) follows the same
- * rules with ONE intentional difference: it exempts a required header parameter
- * named like the configured auth header, because it sends that header on every
- * call (third-party specs often declare it). This check has no such exemption —
- * EDDI's own spec declares no auth header parameter, so none is needed here.
+ * rules, including the auth-header exemption: when auth is configured, a required
+ * header named like the auth header is not unusable, because the generated tool
+ * sends that header on every call. The Manager provisions with the default header
+ * name, `Authorization`, so that is the name exempted here.
  */
 const SUPPORTED_BODY_MEDIA_TYPES: readonly string[] = [
   "application/json",
@@ -310,15 +310,17 @@ function baseMediaType(mediaType: string): string {
 /**
  * Why one operation would produce a tool that cannot send an input it requires,
  * or `null` when it is fine. The client-side twin of the backend's
- * `McpApiToolBuilder.findUnmappableInput`; both must agree, except for the
- * backend-only auth-header exemption described at {@link SUPPORTED_BODY_MEDIA_TYPES}.
+ * `McpApiToolBuilder.findUnmappableInput`; both must agree, including the
+ * auth-header exemption described at {@link SUPPORTED_BODY_MEDIA_TYPES}.
  */
 function unusableReason(
   spec: FetchedSpec,
   pathItem: JsonObject,
   operation: unknown,
+  apiAuth?: string,
 ): string | null {
   if (!isObject(operation)) return null;
+  const authConfigured = apiAuth !== undefined && apiAuth.trim() !== "";
 
   const body = resolveLocalRef(spec, operation.requestBody);
   if (isObject(body) && body.required !== false && isObject(body.content)) {
@@ -342,6 +344,13 @@ function unusableReason(
       param.required === true &&
       (param.in === "header" || param.in === "cookie")
     ) {
+      if (
+        authConfigured &&
+        param.in === "header" &&
+        String(param.name).toLowerCase() === "authorization"
+      ) {
+        continue;
+      }
       return `requires the ${String(param.in)} parameter '${String(param.name)}', which generated tools cannot send`;
     }
   }
@@ -362,11 +371,16 @@ function unusableReason(
  * the spec before anything is created, and works against a backend too old to
  * report it. Entries missing from the spec are left to `findMissingEndpoints`.
  *
+ * `apiAuth` is the value the tools will send as the auth header (see
+ * `apiAuthForMode`); when set, a required `Authorization` header parameter is not
+ * counted against an endpoint.
+ *
  * Returns `"METHOD /path: reason"` lines; empty means every tool is usable.
  */
 export function findUnusableEndpoints(
   spec: FetchedSpec,
   endpoints: readonly string[],
+  apiAuth?: string,
 ): string[] {
   const unusable: string[] = [];
   for (const entry of endpoints) {
@@ -375,7 +389,7 @@ export function findUnusableEndpoints(
     const pathItem = spec.paths[parsed.path];
     const operation = pathItem?.[parsed.method.toLowerCase()];
     if (!pathItem || operation === undefined) continue;
-    const reason = unusableReason(spec, pathItem, operation);
+    const reason = unusableReason(spec, pathItem, operation, apiAuth);
     if (reason) unusable.push(`${entry}: ${reason}`);
   }
   return unusable;

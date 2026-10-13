@@ -242,6 +242,20 @@ describe("findUnusableEndpoints — tools that could not send a required input",
     expect(unusable[1]).toContain("sid");
   });
 
+  it("exempts a required Authorization header when auth is configured, and only then", () => {
+    const spec = specOf({
+      "/a": { get: { parameters: [{ name: "authorization", in: "header", required: true }] } },
+      "/b": { get: { parameters: [{ name: "X-Tenant", in: "header", required: true }] } },
+    });
+    // caller-identity: the tools send Authorization themselves.
+    expect(findUnusableEndpoints(spec, ["GET /a"], "Bearer ${caller:token}")).toEqual([]);
+    // no auth configured: nothing sends it, so it is unusable.
+    expect(findUnusableEndpoints(spec, ["GET /a"])).toHaveLength(1);
+    expect(findUnusableEndpoints(spec, ["GET /a"], "  ")).toHaveLength(1);
+    // a different required header is never exempt.
+    expect(findUnusableEndpoints(spec, ["GET /b"], "Bearer x")).toHaveLength(1);
+  });
+
   it("leaves endpoints missing from the spec to findMissingEndpoints", () => {
     expect(findUnusableEndpoints(specOf({}), ["GET /nope", "garbage"])).toEqual([]);
   });

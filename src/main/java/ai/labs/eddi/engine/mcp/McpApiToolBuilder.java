@@ -202,7 +202,7 @@ public final class McpApiToolBuilder {
                         continue;
                     }
 
-                    ApiCall httpCall = buildApiCall(method, path, operation, apiAuth, authHeader, openAPI);
+                    ApiCall httpCall = buildApiCall(method, path, pathItem, operation, apiAuth, authHeader, openAPI);
                     callsByGroup.computeIfAbsent(group, k -> new ArrayList<>()).add(httpCall);
                     endpointCount++;
 
@@ -417,7 +417,8 @@ public final class McpApiToolBuilder {
     /**
      * Build a single ApiCall from an OpenAPI operation.
      */
-    private static ApiCall buildApiCall(String method, String path, Operation operation, String apiAuth, String authHeader, OpenAPI openAPI) {
+    private static ApiCall buildApiCall(String method, String path, PathItem pathItem, Operation operation, String apiAuth, String authHeader,
+                                        OpenAPI openAPI) {
         var httpCall = new ApiCall();
 
         // Name: operationId or generated slug
@@ -474,7 +475,13 @@ public final class McpApiToolBuilder {
         // Template variable names for this operation's parameters. A parameter name
         // comes from a third-party spec and is copied into a {...} placeholder, so it
         // must be reduced to a plain identifier first — see safeVariableName.
-        Map<String, String> variableNames = variableNamesFor(operation);
+        // The SAME parameter set findUnmappableInput judges: path-item parameters and
+        // component $refs included. Reading operation.getParameters() alone gave a
+        // required query parameter declared at the path level (or via $ref) no field
+        // on the tool, while the usability check had already waved the operation
+        // through.
+        List<Parameter> parameters = effectiveParameters(operation, pathItem, openAPI);
+        Map<String, String> variableNames = variableNamesFor(parameters);
 
         // Convert path params to Qute templates: /{petId} → /{petId}
         String convertedPath = convertPathParams(path, variableNames);
@@ -491,34 +498,32 @@ public final class McpApiToolBuilder {
         var paramDescriptions = new LinkedHashMap<String, String>();
         var queryParams = new LinkedHashMap<String, String>();
 
-        if (operation.getParameters() != null) {
-            for (Parameter param : operation.getParameters()) {
-                if (param == null || param.getName() == null) {
-                    continue;
-                }
-                String paramName = param.getName();
-                String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
-                String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
-                // The description is the model's ONLY view of the value space —
-                // the generated tool schema types every parameter as a plain
-                // string, and every one is REQUIRED. Without the allowed values
-                // and the default spelled out, the model guesses: observed with
-                // `environment`, where a guessed value silently falls back to
-                // production on the lenient server-side enum parse — a
-                // test-drive that quietly exercises the wrong deployment.
-                paramDesc = appendSchemaHints(paramDesc, param.getSchema());
-
-                if ("query".equals(param.getIn())) {
-                    // Query params use Qute template for LLM-provided values
-                    // The query KEY stays the spec's name; only the placeholder (and so
-                    // the tool parameter the model fills) uses the safe variable name.
-                    queryParams.put(paramName, "{" + variableName + "}");
-                    paramDescriptions.put(variableName, paramDesc);
-                } else if ("path".equals(param.getIn())) {
-                    paramDescriptions.put(variableName, paramDesc);
-                }
-                // header/cookie params are skipped for now
+        for (Parameter param : parameters) {
+            if (param == null || param.getName() == null) {
+                continue;
             }
+            String paramName = param.getName();
+            String variableName = variableNames.getOrDefault(paramName, safeVariableName(paramName));
+            String paramDesc = param.getDescription() != null ? param.getDescription() : paramName;
+            // The description is the model's ONLY view of the value space —
+            // the generated tool schema types every parameter as a plain
+            // string, and every one is REQUIRED. Without the allowed values
+            // and the default spelled out, the model guesses: observed with
+            // `environment`, where a guessed value silently falls back to
+            // production on the lenient server-side enum parse — a
+            // test-drive that quietly exercises the wrong deployment.
+            paramDesc = appendSchemaHints(paramDesc, param.getSchema());
+
+            if ("query".equals(param.getIn())) {
+                // Query params use Qute template for LLM-provided values
+                // The query KEY stays the spec's name; only the placeholder (and so
+                // the tool parameter the model fills) uses the safe variable name.
+                queryParams.put(paramName, "{" + variableName + "}");
+                paramDescriptions.put(variableName, paramDesc);
+            } else if ("path".equals(param.getIn())) {
+                paramDescriptions.put(variableName, paramDesc);
+            }
+            // header/cookie params are skipped for now
         }
         request.setQueryParams(queryParams);
 
@@ -707,18 +712,28 @@ public final class McpApiToolBuilder {
         if (operation.getParameters() != null) {
             all.addAll(operation.getParameters());
         }
-        var resolved = new ArrayList<Parameter>();
+        // Keyed by name + location so an operation-level parameter OVERRIDES a
+        // path-level one of the same name, as OpenAPI defines, instead of both being
+        // mapped. An unresolvable $ref has no name; it is keyed by the ref itself.
+        var byKey = new LinkedHashMap<String, Parameter>();
         String prefix = "#/components/parameters/";
         for (Parameter param : all) {
-            if (param != null && param.get$ref() != null && param.get$ref().startsWith(prefix) && openAPI != null
-                    && openAPI.getComponents() != null && openAPI.getComponents().getParameters() != null) {
-                Parameter target = openAPI.getComponents().getParameters().get(param.get$ref().substring(prefix.length()));
-                resolved.add(target != null ? target : param);
-            } else {
-                resolved.add(param);
+            if (param == null) {
+                continue;
             }
+            Parameter effective = param;
+            if (param.get$ref() != null && param.get$ref().startsWith(prefix) && openAPI != null && openAPI.getComponents() != null
+                    && openAPI.getComponents().getParameters() != null) {
+                Parameter target = openAPI.getComponents().getParameters().get(param.get$ref().substring(prefix.length()));
+                if (target != null) {
+                    effective = target;
+                }
+            }
+            String key = effective.getName() != null ? effective.getName() + "\u0000" + effective.getIn() : "ref:" + effective.get$ref();
+            byKey.remove(key);
+            byKey.put(key, effective);
         }
-        return resolved;
+        return new ArrayList<>(byKey.values());
     }
 
     /**
@@ -885,18 +900,18 @@ public final class McpApiToolBuilder {
     }
 
     /**
-     * Assigns each declared parameter of {@code operation} a distinct safe variable
+     * Assigns each of the given (effective) parameters a distinct safe variable
      * name, in declaration order. Two names that reduce to the same identifier (a
      * {@code pet-id} and a {@code pet_id}) get distinct suffixes, so neither
      * silently takes the other's value.
      */
-    static Map<String, String> variableNamesFor(Operation operation) {
+    static Map<String, String> variableNamesFor(List<Parameter> parameters) {
         Map<String, String> names = new LinkedHashMap<>();
-        if (operation.getParameters() == null) {
+        if (parameters == null) {
             return names;
         }
         Set<String> taken = new HashSet<>();
-        for (Parameter param : operation.getParameters()) {
+        for (Parameter param : parameters) {
             if (param == null || param.getName() == null || names.containsKey(param.getName())) {
                 continue;
             }

@@ -18,6 +18,7 @@ import {
   fetchOpenApiSpec,
   findMissingEndpoints,
   findUnusableEndpoints,
+  apiAuthForMode,
   unusableEndpointsFromResult,
   unusableEndpointsMessage,
   defaultOperatorConfig,
@@ -210,7 +211,11 @@ export function useActivateOperator() {
       // body is of a type the tool generator cannot send (the text/plain
       // updateResourceUri once was) yields a tool that can only fail after the
       // admin has approved it. Refused here, by name, like a missing endpoint.
-      const unusable = findUnusableEndpoints(spec, endpointsForScope(config.scope));
+      const unusable = findUnusableEndpoints(
+        spec,
+        endpointsForScope(config.scope),
+        apiAuthForMode(config.authMode),
+      );
       if (unusable.length > 0) {
         throw new Error(unusableEndpointsMessage(unusable));
       }
@@ -253,12 +258,16 @@ export function useActivateOperator() {
       // post-provision failure.
       const reportedUnusable = unusableEndpointsFromResult(result);
       if (reportedUnusable.length > 0) {
+        let leftover = "";
         try {
           await removeSupersededAgent({ ...effectiveConfig, agentId: result.agentId, version: 1 });
         } catch {
-          // Left deployed; the error below is still the honest report.
+          // Left deployed. The refusal below is still the headline, but it must
+          // say so: the other rollback paths do, and an admin who is told only
+          // "unusable endpoints" has no reason to look for a second, live operator.
+          leftover = ` The new agent (${result.agentId}) could not be removed and is still deployed — remove it from the Agents screen.`;
         }
-        throw new Error(unusableEndpointsMessage(reportedUnusable));
+        throw new Error(unusableEndpointsMessage(reportedUnusable) + leftover);
       }
 
       // Everything from here to the config write is rolled back on failure.
