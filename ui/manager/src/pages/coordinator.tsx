@@ -1,580 +1,300 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useOnboarding } from "@/hooks/use-onboarding";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import {
-  Trash2,
-  RotateCcw,
-  Server,
-  Cloud,
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  RefreshCw,
-  Gauge,
-  Eye,
-  Clock,
-  TrendingUp,
-  ExternalLink,
-  Network,
-} from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { BookOpen, LineChart, Network, RefreshCw, ShieldOff } from "lucide-react";
+import { useOnboarding } from "@/hooks/use-onboarding";
+import { useAuth } from "@/hooks/use-auth";
+import { useClusterActivity, useClusterOverview } from "@/hooks/use-cluster";
+import { clusterAccess } from "@/lib/cluster-access";
+import { formatDuration } from "@/lib/cluster-labels";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { StreamBadge } from "@/components/ui/stream-badge";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
-import { toast } from "sonner";
-import {
-  useCoordinatorStatus,
-  useDeadLetters,
-  useReplayDeadLetter,
-  useDiscardDeadLetter,
-  usePurgeDeadLetters,
-  useCoordinatorSSE,
-} from "@/hooks/use-coordinator";
+import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
+import { ClusterVerdictCard } from "@/components/cluster/cluster-health";
+import { ClusterNodeGrid } from "@/components/cluster/cluster-nodes";
+import { ClusterNatsPanel } from "@/components/cluster/cluster-nats";
+import { ClusterAuditTrail, ClusterRecoveryActions } from "@/components/cluster/cluster-recovery";
+import { ClusterLeasesPanel } from "@/components/cluster/cluster-leases";
+import { ClusterDeadLettersPanel, DeadLetterCountsCard } from "@/components/cluster/cluster-dead-letters";
+import { ClusterActivityFeed } from "@/components/cluster/cluster-activity";
+import { ClusterDiagnosePanel } from "@/components/cluster/cluster-diagnose";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+type Tab = "overview" | "leases" | "deadLetters" | "activity" | "diagnose";
 
-function formatTime(iso: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
+const CLUSTERING_DOCS = "https://docs.labs.ai/clustering";
+const METRICS_DOCS = "https://docs.labs.ai/metrics#cluster-metrics";
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
-
+/**
+ * The cluster console, for an on-call admin: is the cluster healthy, which
+ * node is doing what, what went wrong, and what can safely be done about it.
+ * On a single node it says so and explains what cluster mode adds.
+ */
 export function CoordinatorPage() {
   const { t } = useTranslation();
+  const { roles, method } = useAuth();
+  const access = clusterAccess(roles, method);
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get("tab") as Tab | null) ?? "overview";
+  const [dlConversation, setDlConversation] = useState("");
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
-  useEffect(() => { const t = setTimeout(() => maybeAutoStart("coordinator"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
-
-  const { data: status, isLoading: statusLoading, isError: statusError, refetch: refetchStatus } = useCoordinatorStatus();
-  const {
-    data: deadLetters,
-    isLoading: dlLoading,
-    isError: dlError,
-    refetch: refetchDL,
-  } = useDeadLetters();
-  const { liveStatus, sseConnected, eventHistory } = useCoordinatorSSE();
-  const replayMutation = useReplayDeadLetter();
-  const discardMutation = useDiscardDeadLetter();
-  const purgeMutation = usePurgeDeadLetters();
-  const [confirmPurge, setConfirmPurge] = useState(false);
-  const [discardTarget, setDiscardTarget] = useState<string | null>(null);
-  const [refreshInterval, setRefreshInterval] = useState(10);
-  const [expandedPayloads, setExpandedPayloads] = useState<Set<string>>(new Set());
-
-  // Live SSE status while the stream is up, polling otherwise. This used to be
-  // `liveStatus ?? status`: once one SSE snapshot had arrived it won for the
-  // rest of the page's life, so after the stream dropped the page showed that
-  // last snapshot forever while the polled status underneath kept updating.
-  // A dropped stream's snapshot is never a fallback either — with the status
-  // read failing too, it hid the error state behind a frozen "CONNECTED".
-  const currentStatus = (sseConnected ? liveStatus : null) ?? status;
-
-  const isNats = currentStatus?.coordinatorType === "nats";
-  const isConnected = currentStatus?.connected ?? false;
-
-  // Auto-refresh status polling
-  const intervalRef = useRef<number | null>(null);
-
   useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = window.setInterval(() => {
-      refetchStatus();
-      refetchDL();
-    }, refreshInterval * 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [refreshInterval, refetchStatus, refetchDL]);
+    const timer = setTimeout(() => maybeAutoStart("coordinator"), 500);
+    return () => clearTimeout(timer);
+  }, [maybeAutoStart]);
 
-  // Throughput rate — approximate tasks/sec from totalProcessed
-  const prevProcessed = useRef<{ count: number; time: number } | null>(null);
-  const [throughput, setThroughput] = useState<number | null>(null);
+  const overview = useClusterOverview(access.canView);
+  const activity = useClusterActivity(access.canView);
+  const data = overview.data;
+  const clustered = data?.mode === "cluster";
 
-  useEffect(() => {
-    if (!currentStatus) return;
-    const now = Date.now();
-    if (prevProcessed.current) {
-      const dt = (now - prevProcessed.current.time) / 1000;
-      if (dt > 0) {
-        const rate = (currentStatus.totalProcessed - prevProcessed.current.count) / dt;
-        setThroughput(Math.max(0, rate));
-      }
-    }
-    prevProcessed.current = { count: currentStatus.totalProcessed, time: now };
-  }, [currentStatus]);
+  const setTab = useCallback(
+    (next: Tab) => {
+      setParams(
+        (p) => {
+          const n = new URLSearchParams(p);
+          if (next === "overview") n.delete("tab");
+          else n.set("tab", next);
+          return n;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
 
-  // Computed metrics
-  const successRate = useMemo(() => {
-    if (!currentStatus) return null;
-    const total = currentStatus.totalProcessed + currentStatus.totalDeadLettered;
-    if (total === 0) return 100;
-    return Math.round((currentStatus.totalProcessed / total) * 100);
-  }, [currentStatus]);
+  if (!access.canView) {
+    return (
+      <div className="space-y-6">
+        <PageHeader />
+        <EmptyState
+          icon={ShieldOff}
+          title={t("cluster.access.denied", "This screen needs the eddi-admin or eddi-viewer role")}
+          description={t("cluster.access.deniedText", "Ask an administrator for access. Nothing on this page is shown without one of those roles.")}
+        />
+      </div>
+    );
+  }
 
-  const activeQueueCount = useMemo(() => {
-    if (!currentStatus) return 0;
-    return Object.keys(currentStatus.queueDepths).length;
-  }, [currentStatus]);
-
-  const totalPending = useMemo(() => {
-    if (!currentStatus) return 0;
-    return Object.values(currentStatus.queueDepths).reduce((sum, d) => sum + d, 0);
-  }, [currentStatus]);
-
-  const togglePayload = useCallback((id: string) => {
-    setExpandedPayloads((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  // Dead-letter error category breakdown
-  const errorCategories = useMemo(() => {
-    if (!deadLetters || deadLetters.length === 0) return [];
-    const cats = new Map<string, number>();
-    for (const dl of deadLetters) {
-      const cat = dl.error.includes("timeout") ? "Timeout"
-        : dl.error.includes("503") || dl.error.includes("502") ? "Backend Unavailable"
-        : dl.error.includes("401") || dl.error.includes("403") ? "Auth Error"
-        : dl.error.includes("rate") ? "Rate Limited"
-        : "Other";
-      cats.set(cat, (cats.get(cat) ?? 0) + 1);
-    }
-    return [...cats.entries()].sort((a, b) => b[1] - a[1]);
-  }, [deadLetters]);
-
-  const handleReplay = (id: string) => {
-    replayMutation.mutate(id, {
-      onSuccess: () => toast.success(t("coordinator.replaySuccess", "Dead-letter replayed")),
-      onError: () => toast.error(t("coordinator.replayError", "Failed to replay")),
-    });
-  };
-
-  const confirmDiscard = () => {
-    if (!discardTarget) return;
-    discardMutation.mutate(discardTarget, {
-      onSuccess: () => {
-        toast.success(t("coordinator.discardSuccess", "Dead-letter discarded"));
-        setDiscardTarget(null);
-      },
-      onError: () => toast.error(t("coordinator.discardError", "Failed to discard")),
-    });
-  };
-
-  const handlePurge = () => {
-    purgeMutation.mutate(undefined, {
-      onSuccess: (count) => {
-        toast.success(t("coordinator.purgeSuccess", `Purged ${count} entries`));
-        setConfirmPurge(false);
-      },
-      onError: () => toast.error(t("coordinator.purgeError", "Failed to purge")),
-    });
-  };
+  const tabs: { id: Tab; label: string; badge?: number }[] = [
+    { id: "overview", label: t("cluster.tab.overview", "Overview") },
+    ...(clustered ? [{ id: "leases" as Tab, label: t("cluster.tab.leases", "Leases") }] : []),
+    {
+      id: "deadLetters",
+      label: t("cluster.tab.deadLetters", "Dead letters"),
+      badge: data ? data.deadLetters.shared + data.deadLetters.local : undefined,
+    },
+    { id: "activity", label: t("cluster.tab.activity", "Activity") },
+    { id: "diagnose", label: t("cluster.tab.diagnose", "Stuck conversation") },
+  ];
+  const activeTab = tabs.some((x) => x.id === tab) ? tab : "overview";
+  const nodeIds = (data?.nodes ?? []).map((n) => n.nodeId);
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center gap-3">
-        <Network className="h-7 w-7 text-accent" />
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold text-foreground">
-            {t("coordinator.title", "Coordinator Dashboard")}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {t("coordinator.subtitle", "Monitor conversation processing and manage dead-letter entries")}
-          </p>
-        </div>
-        {/* Auto-refresh selector */}
-        <div className="flex items-center gap-2">
-          <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" style={{ animationDuration: `${refreshInterval}s` }} />
-          <select
-            value={refreshInterval}
-            onChange={(e) => setRefreshInterval(Number(e.target.value))}
-            className="h-8 appearance-none rounded-lg border border-input bg-background pe-6 ps-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            data-testid="refresh-interval"
-          >
-            <option value={5}>5s</option>
-            <option value={10}>10s</option>
-            <option value={30}>30s</option>
-            <option value={60}>60s</option>
-          </select>
-          {throughput !== null && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent" data-testid="throughput-badge">
-              <Gauge className="h-3.5 w-3.5" />
-              {throughput < 0.1 ? "<0.1" : throughput.toFixed(1)} {t("coordinator.tasksPerSec", "tasks/s")}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ─── Hero: Connection Status ─── */}
-      {statusLoading && !currentStatus ? (
-        <div className="cq-stat-grid">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-5">
-              <div className="h-4 w-24 rounded bg-muted" />
-              <div className="mt-3 h-8 w-16 rounded bg-muted" />
-            </div>
-          ))}
-        </div>
-      ) : statusError && !currentStatus ? (
-        // Distinct from the empty state below: that one tells the user to wait for
-        // data that is still coming, which is the wrong advice after a failed fetch.
-        <ErrorState
-          message={t("common.error", "Something went wrong")}
-          onRetry={() => refetchStatus()}
-          retryLabel={t("common.retry", "Retry")}
-        />
-      ) : currentStatus ? (
-        <>
-          {/* Hero card — full-width connection status */}
-          <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-connection-card">
-            <div className="flex items-center gap-4">
-              <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-                isConnected ? "bg-emerald-500/10" : "bg-red-500/10"
-              }`}>
-                {isNats ? <Cloud className={`h-6 w-6 ${isConnected ? "text-emerald-500" : "text-red-500"}`} /> : <Server className={`h-6 w-6 ${isConnected ? "text-emerald-500" : "text-red-500"}`} />}
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                    isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"
-                  }`} />
-                  <span className={`text-lg font-semibold ${
-                    isConnected ? "text-emerald-500" : "text-red-500"
-                  }`}>
-                    {currentStatus.connectionStatus}
-                  </span>
-                  <span className={`ms-2 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    isNats
-                      ? "bg-blue-500/10 text-blue-500"
-                      : "bg-purple-500/10 text-purple-500"
-                  }`} data-testid="coordinator-type-card">
-                    {isNats ? "NATS JetStream" : "In-Memory"}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {t("coordinator.activeConversations", "Active conversations")}: {currentStatus.activeConversations}
-                </p>
-              </div>
-              <StreamBadge connected={sseConnected} />
-            </div>
-          </div>
-
-          {/* 3 metric cards */}
-          <div className="grid gap-4 sm:grid-cols-3">
-            {/* Tasks Processed */}
-            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-processed-card">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                {t("coordinator.processed", "Tasks Processed")}
-              </div>
-              <p className="mt-2 text-2xl font-bold text-foreground tabular-nums">
-                {currentStatus.totalProcessed.toLocaleString()}
-              </p>
-            </div>
-
-            {/* Dead-Lettered */}
-            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-dead-letter-card">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                {t("coordinator.deadLettered", "Dead-Lettered")}
-              </div>
-              <p className={`mt-2 text-2xl font-bold tabular-nums ${
-                currentStatus.totalDeadLettered > 0 ? "text-amber-500" : "text-foreground"
-              }`}>
-                {currentStatus.totalDeadLettered.toLocaleString()}
-              </p>
-            </div>
-
-            {/* Success Rate */}
-            <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-success-rate-card">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <TrendingUp className="h-4 w-4 text-blue-500" />
-                {t("coordinator.successRate", "Success Rate")}
-              </div>
-              <p className={`mt-2 text-2xl font-bold tabular-nums ${
-                successRate !== null && successRate < 90 ? "text-amber-500" : "text-emerald-500"
-              }`}>
-                {successRate !== null ? `${successRate}%` : "—"}
-              </p>
-              {/* Ratio bar */}
-              {successRate !== null && currentStatus.totalProcessed + currentStatus.totalDeadLettered > 0 && (
-                <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-muted" data-testid="success-rate-bar">
-                  <div
-                    className="bg-emerald-500 transition-all"
-                    style={{ width: `${successRate}%` }}
-                  />
-                  <div
-                    className="bg-red-400 transition-all"
-                    style={{ width: `${100 - successRate}%` }}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-border py-16">
-          <Network className="h-12 w-12 text-muted-foreground/40" />
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            {t("coordinator.empty", "No coordinator data available")}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground/70">
-            {t("coordinator.emptyHint", "The coordinator service may still be starting up. Data will appear automatically.")}
-          </p>
-        </div>
-      )}
-
-      {/* Error category breakdown */}
-      {errorCategories.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {errorCategories.map(([cat, count]) => (
-            <span key={cat} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
-              <span className="h-2 w-2 rounded-full bg-red-400" />
-              {cat}: {count}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* ─── Active Queues ─── */}
-      <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-queues">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">
-            {t("coordinator.activeQueues", "Active Queues")}
-          </h2>
-          {activeQueueCount > 0 && (
-            <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-semibold text-accent tabular-nums">
-              {totalPending} {t("coordinator.totalPending", "pending")}
-            </span>
-          )}
-        </div>
-        {currentStatus && Object.keys(currentStatus.queueDepths).length > 0 ? (
-          <div className="space-y-2">
-            {Object.entries(currentStatus.queueDepths).map(([convId, depth]) => (
-              <div key={convId} className="flex items-center gap-3 rounded-lg bg-muted/50 px-3 py-2">
-                <Link
-                  to={`/manage/conversations`}
-                  className="flex-1 truncate font-mono text-sm text-foreground hover:text-primary transition-colors"
-                  title={convId}
-                >
-                  {convId}
-                  <ExternalLink className="ms-1.5 inline h-3 w-3 text-muted-foreground" />
-                </Link>
-                <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-sm font-semibold text-accent tabular-nums">
-                  {depth} {t("coordinator.queued", "queued")}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <CheckCircle2 className="h-5 w-5 text-emerald-500/50" />
-            {t("coordinator.noActiveQueues", "No active conversations being processed")}
-          </div>
-        )}
-      </div>
-
-      {/* ─── SSE Event History ─── */}
-      {eventHistory.length > 0 && (
-        <div className="rounded-xl border border-border bg-card p-5" data-testid="coordinator-event-history">
-          <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-foreground">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            {t("coordinator.eventHistory", "Event History")}
-            <span className="text-xs font-normal text-muted-foreground">
-              ({t("coordinator.lastNSnapshots", "Last {{count}} snapshots", {
-                count: eventHistory.length,
-              })})
-            </span>
-          </h2>
-          <div className="max-h-48 overflow-y-auto space-y-0.5 rounded-lg bg-muted/30 p-2 font-mono text-[11px]">
-            {[...eventHistory].reverse().map((snap, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-2 rounded px-2 py-1 text-muted-foreground hover:bg-muted/50 transition-colors"
-              >
-                <span className="text-foreground/40 tabular-nums">
-                  [{formatTime(snap.receivedAt)}]
-                </span>
-                <span className="text-emerald-500 tabular-nums">
-                  ✓{snap.totalProcessed.toLocaleString()}
-                </span>
-                <span className={`tabular-nums ${snap.totalDeadLettered > 0 ? "text-red-400" : "text-muted-foreground/40"}`}>
-                  ✗{snap.totalDeadLettered.toLocaleString()}
-                </span>
-                <span className="text-blue-400 tabular-nums">
-                  ⧗{Object.keys(snap.queueDepths).length}q
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─── Dead-Letter Admin ─── */}
-      <div className="rounded-xl border border-border bg-card" data-testid="coordinator-dead-letters">
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h2 className="text-lg font-semibold text-foreground">
-            {t("coordinator.deadLetterTitle", "Dead-Letter Queue")}
-          </h2>
-          <div className="flex items-center gap-2">
-            {!dlError && deadLetters && deadLetters.length > 0 && (
-              confirmPurge ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">
-                    {t("coordinator.confirmPurge", "Purge all?")}
-                  </span>
-                  <button
-                    onClick={handlePurge}
-                    disabled={purgeMutation.isPending}
-                    className="rounded-lg bg-red-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
-                  >
-                    {t("coordinator.yes", "Yes")}
-                  </button>
-                  <button
-                    onClick={() => setConfirmPurge(false)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                  >
-                    {t("coordinator.cancel", "Cancel")}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setConfirmPurge(true)}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-red-500/50 hover:text-red-500"
-                  data-testid="purge-dead-letters-btn"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t("coordinator.purgeAll", "Purge All")}
-                </button>
-              )
+      <PageHeader
+        right={
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <StreamBadge connected={activity.live} />
+            {data && (
+              <span data-testid="cluster-answered-by">
+                {t("cluster.answeredBy", "Answered by {{node}}", { node: data.answeredBy })}
+              </span>
             )}
+            {!access.canAct && (
+              <Badge variant="secondary" data-testid="cluster-read-only">
+                {t("cluster.access.readOnly", "Read-only")}
+              </Badge>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => overview.refetch()} aria-label={t("common.refresh", "Refresh")} data-testid="cluster-refresh">
+              <RefreshCw aria-hidden="true" />
+            </Button>
           </div>
-        </div>
+        }
+      />
 
-        {dlLoading ? (
-          <div className="p-8 text-center">
-            <div className="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+      {overview.isError && data && (
+        <RefetchErrorNotice
+          onRetry={() => overview.refetch()}
+          message={t("cluster.staleNotice", "The latest refresh failed — this is the view from {{age}} ago.", {
+            age: formatDuration(Date.now() - data.generatedAt),
+          })}
+        />
+      )}
+
+      <Tabs tabs={tabs} active={activeTab} onSelect={setTab} />
+
+      <div role="tabpanel" id={`cluster-panel-${activeTab}`} aria-labelledby={`cluster-tab-${activeTab}`} tabIndex={0} className="focus:outline-none">
+        {overview.isLoading ? (
+          <div className="space-y-4" data-testid="cluster-loading">
+            <Skeleton className="h-32 w-full rounded-xl" />
+            <div className="cq-card-grid">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-40 rounded-xl" />
+              ))}
+            </div>
           </div>
-        ) : dlError ? (
-          // A failed read is not an empty queue. It used to fall through to the
-          // green "No dead-letter entries" check — telling an operator nothing
-          // is stuck at the moment the check for stuck work failed. That holds
-          // for a failed REFETCH too: TanStack keeps the last good list (even an
-          // empty one) alongside the error, and showing it hid the failure.
-          <div className="p-8" data-testid="dead-letters-error">
-            <ErrorState
-              message={t("common.error")}
-              onRetry={() => refetchDL()}
-              retryLabel={t("common.retry")}
-            />
+        ) : overview.isError && !data ? (
+          <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => overview.refetch()} retryLabel={t("common.retry", "Retry")} />
+        ) : !data ? null : activeTab === "overview" ? (
+          <div className="space-y-6">
+            <ClusterVerdictCard overview={data} />
+            {!clustered && <SingleNodeExplainer />}
+            <ClusterNodeGrid nodes={data.nodes} canAct={access.canAct && clustered} leaseTtlMs={Number(data.settings["leaseTtlMs"] ?? 20000)} />
+            <div className="grid gap-6 lg:grid-cols-2">
+              <DeadLetterCountsCard onOpen={access.canAct ? () => setTab("deadLetters") : undefined} />
+              <ClusterActivityFeed activity={activity} compact />
+            </div>
+            {data.nats && <ClusterNatsPanel nats={data.nats} />}
+            {access.canAct && (
+              <div className="grid gap-6 lg:grid-cols-2">
+                <ClusterRecoveryActions localDeadLetters={data.deadLetters.local} clustered={clustered} />
+                <ClusterAuditTrail />
+              </div>
+            )}
+            <MetricsLinks />
           </div>
-        ) : !deadLetters || deadLetters.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground" data-testid="dead-letters-empty">
-            <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500/50" />
-            <p>{t("coordinator.noDeadLetters", "No dead-letter entries")}</p>
-          </div>
+        ) : activeTab === "leases" ? (
+          <ClusterLeasesPanel canAct={access.canAct} />
+        ) : activeTab === "deadLetters" ? (
+          access.canAct ? (
+            <ClusterDeadLettersPanel key={dlConversation} nodes={nodeIds} initialConversationId={dlConversation} />
+          ) : (
+            <div className="space-y-3">
+              <DeadLetterCountsCard />
+              <p className="text-sm text-muted-foreground" data-testid="cluster-dl-admin-only">
+                {t("cluster.access.deadLettersAdmin", "The entries themselves carry what users typed, so only eddi-admin can open, replay or discard them.")}
+              </p>
+            </div>
+          )
+        ) : activeTab === "activity" ? (
+          <ClusterActivityFeed activity={activity} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full" data-testid="dead-letters-table">
-              <thead>
-                <tr className="border-b border-border text-start text-sm text-muted-foreground">
-                  <th className="px-5 py-3 text-start font-medium">{t("coordinator.colId", "ID")}</th>
-                  <th className="px-5 py-3 text-start font-medium">{t("coordinator.colConversation", "Conversation")}</th>
-                  <th className="px-5 py-3 text-start font-medium">{t("coordinator.colError", "Error")}</th>
-                  <th className="px-5 py-3 text-start font-medium">{t("coordinator.colTime", "Time")}</th>
-                  <th className="px-5 py-3 text-end font-medium">{t("coordinator.colActions", "Actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deadLetters.map((entry) => (
-                  <tr key={entry.id} className="border-b border-border/50 transition-colors hover:bg-muted/30">
-                    <td className="px-5 py-3">
-                      <code className="text-xs text-muted-foreground">{entry.id}</code>
-                    </td>
-                    <td className="px-5 py-3">
-                      <code className="text-sm text-foreground">{entry.conversationId}</code>
-                    </td>
-                    <td className="max-w-[300px] px-5 py-3 text-sm text-red-400">
-                      <div className="truncate" title={entry.error}>{entry.error}</div>
-                      {/* Expandable payload viewer */}
-                      {entry.payload && (
-                        <button
-                          onClick={() => togglePayload(entry.id)}
-                          className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                          data-testid={`toggle-payload-${entry.id}`}
-                        >
-                          {expandedPayloads.has(entry.id) ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                          <Eye className="h-3 w-3" />
-                          {t("coordinator.payload", "Payload")}
-                        </button>
-                      )}
-                      {expandedPayloads.has(entry.id) && entry.payload && (
-                        <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/50 p-2 text-xs text-foreground/80 border border-border/50" data-testid={`payload-content-${entry.id}`}>
-                          {(() => { try { return JSON.stringify(JSON.parse(entry.payload), null, 2); } catch { return entry.payload; } })()}
-                        </pre>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-muted-foreground tabular-nums">
-                      {new Date(entry.timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleReplay(entry.id)}
-                          disabled={replayMutation.isPending}
-                          title={t("coordinator.replay", "Replay")}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-accent disabled:opacity-50"
-                          data-testid={`replay-${entry.id}`}
-                        >
-                          <RotateCcw className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => setDiscardTarget(entry.id)}
-                          disabled={discardMutation.isPending}
-                          title={t("coordinator.discard", "Discard")}
-                          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
-                          data-testid={`discard-${entry.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ClusterDiagnosePanel
+            initialId={params.get("conversation") ?? ""}
+            canAct={access.canAct}
+            onIdChange={(id) =>
+              setParams(
+                (p) => {
+                  const n = new URLSearchParams(p);
+                  if (id) n.set("conversation", id);
+                  else n.delete("conversation");
+                  return n;
+                },
+                { replace: true },
+              )
+            }
+            onShowDeadLetters={(id) => {
+              setDlConversation(id);
+              setTab("deadLetters");
+            }}
+          />
         )}
       </div>
-
-      {/* Single dead-letter discard confirmation */}
-      <AlertDialog
-        open={discardTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDiscardTarget(null);
-        }}
-        title={t("coordinator.confirmDiscardTitle", "Discard dead-letter entry?")}
-        description={t(
-          "coordinator.confirmDiscardDescription",
-          "This permanently removes the dead-lettered task. It cannot be replayed afterwards. This cannot be undone."
-        )}
-        confirmLabel={t("coordinator.discard", "Discard")}
-        cancelLabel={t("coordinator.cancel", "Cancel")}
-        onConfirm={confirmDiscard}
-        variant="destructive"
-        isPending={discardMutation.isPending}
-      />
     </div>
+  );
+}
+
+function PageHeader({ right }: { right?: React.ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+          <Network className="h-8 w-8 text-primary" aria-hidden="true" />
+          {t("cluster.title", "Cluster")}
+        </h1>
+        <p className="mt-1 text-muted-foreground">
+          {t("cluster.subtitle", "Health, nodes, leases and failed turns across every EDDI replica — and what you can safely do about them")}
+        </p>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+/** Tabs with roving focus: arrow keys move, Home/End jump. */
+function Tabs({ tabs, active, onSelect }: { tabs: { id: Tab; label: string; badge?: number }[]; active: Tab; onSelect: (tab: Tab) => void }) {
+  const { t } = useTranslation();
+  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const onKey = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const rtl = document.documentElement.dir === "rtl";
+    let next = -1;
+    if (e.key === (rtl ? "ArrowLeft" : "ArrowRight")) next = (index + 1) % tabs.length;
+    else if (e.key === (rtl ? "ArrowRight" : "ArrowLeft")) next = (index - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    const target = tabs[next]!;
+    onSelect(target.id);
+    refs.current[target.id]?.focus();
+  };
+  return (
+    <div role="tablist" aria-label={t("cluster.tabs", "Cluster console sections")} className="flex flex-wrap gap-1 border-b border-border" data-testid="cluster-tabs">
+      {tabs.map((tab, i) => (
+        <button
+          key={tab.id}
+          ref={(el) => {
+            refs.current[tab.id] = el;
+          }}
+          role="tab"
+          id={`cluster-tab-${tab.id}`}
+          aria-selected={active === tab.id}
+          aria-controls={`cluster-panel-${tab.id}`}
+          tabIndex={active === tab.id ? 0 : -1}
+          onClick={() => onSelect(tab.id)}
+          onKeyDown={(e) => onKey(e, i)}
+          className={`-mb-px inline-flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            active === tab.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          data-testid={`cluster-tab-${tab.id}`}
+        >
+          {tab.label}
+          {tab.badge !== undefined && tab.badge > 0 && <Badge variant="warning">{tab.badge}</Badge>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SingleNodeExplainer() {
+  const { t } = useTranslation();
+  return (
+    <section className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm" data-testid="cluster-single-node">
+      <h2 className="font-semibold text-foreground">{t("cluster.single.title", "What cluster mode adds")}</h2>
+      <ul className="mt-2 list-disc space-y-1 ps-5 text-foreground/90">
+        <li>{t("cluster.single.scale", "Any number of EDDI replicas behind a plain round-robin load balancer, sharing one database and a NATS JetStream cluster.")}</li>
+        <li>{t("cluster.single.leases", "Conversation leases with fencing tokens: turns of one conversation never overlap anywhere, and a node that lost its lease cannot overwrite newer turns.")}</li>
+        <li>{t("cluster.single.failover", "Failover: a crashed node's conversations continue on another node within the lease TTL; dead letters, caches, deployments and cancel work cluster-wide.")}</li>
+      </ul>
+      <a href={CLUSTERING_DOCS} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-primary hover:underline" data-testid="cluster-docs-link">
+        <BookOpen className="h-4 w-4" aria-hidden="true" />
+        {t("cluster.single.docs", "Read the clustering guide")}
+      </a>
+    </section>
+  );
+}
+
+function MetricsLinks() {
+  const { t } = useTranslation();
+  return (
+    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+      <LineChart className="h-4 w-4" aria-hidden="true" />
+      <span>{t("cluster.metrics.text", "Trends over time are on the EDDI Cluster Grafana dashboard (eddi_cluster_* metrics).")}</span>
+      <a href={METRICS_DOCS} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+        {t("cluster.metrics.reference", "Cluster metrics reference")}
+      </a>
+      <a href="/q/metrics" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+        {t("cluster.metrics.raw", "Raw metrics of this node")}
+      </a>
+      <a href={CLUSTERING_DOCS} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+        {t("cluster.metrics.runbook", "Clustering runbook")}
+      </a>
+    </p>
   );
 }

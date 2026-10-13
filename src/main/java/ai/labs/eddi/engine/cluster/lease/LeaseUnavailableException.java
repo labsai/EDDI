@@ -16,7 +16,12 @@ public class LeaseUnavailableException extends RuntimeException {
         /** NATS is unreachable and {@code eddi.cluster.degraded.turns=reject}. */
         DEGRADED,
         /** The node is shutting down. */
-        SHUTTING_DOWN
+        SHUTTING_DOWN,
+        /**
+         * An administrator drained the node: it takes no new leases until it is
+         * undrained or restarted.
+         */
+        DRAINING
     }
 
     private final Reason reason;

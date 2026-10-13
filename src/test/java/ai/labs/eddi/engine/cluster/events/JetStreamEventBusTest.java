@@ -146,4 +146,11 @@ class JetStreamEventBusTest {
         assertEquals(1.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count(),
                 "a failed publish is not counted as published");
     }
+
+    @Test
+    @DisplayName("an admin resync while NATS is down flushes here and says it was only queued for the others")
+    void resyncWhileDisconnectedIsQueued() throws Exception {
+        assertFalse(bus.requestResyncAll("test"), "the request waits in the outbox");
+        assertEquals(1, bus.outboxDepth());
+    }
 }
