@@ -816,7 +816,9 @@ public class AgentSetupService {
         group.setRules(List.of(rule));
 
         var config = new RuleSetConfiguration();
-        config.setExpressionsAsActions(true);
+        // expressionsAsActions stays at its default (false). It used to be forced on,
+        // which nothing here needs — the single rule fires on any input — and it
+        // turned every expression the parser produced into an action.
         config.setBehaviorGroups(List.of(group));
         return config;
     }
@@ -965,7 +967,9 @@ public class AgentSetupService {
             }
         }
 
-        // Wire httpcall URIs as EddiToolBridge tools (used by API agents)
+        // Record the API agent's httpcall URIs on the task. Setting them is what puts
+        // the task into agent (tool-calling) mode; the tools themselves are discovered
+        // from the workflow's httpcalls step by HttpCallToolsProvider
         if (toolUris != null && !toolUris.isEmpty()) {
             task.setTools(toolUris);
         }
