@@ -100,7 +100,10 @@ class ConfigPatchRoundTripTest {
             return Boolean.TRUE;
         }
         if (type == Integer.class || type == int.class) {
-            return 7;
+            // Small on purpose: setters clamp to a ceiling (retries, for one), and a value
+            // past it
+            // is not a stored value to begin with.
+            return 2;
         }
         if (type == Long.class || type == long.class) {
             return 9L;
