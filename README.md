@@ -5,46 +5,30 @@ edit by hand and do not merge into `main` — this is an orphan branch
 with no source tree.
 
 - `data/metrics.csv` — one row per UTC day: Docker pulls, stars,
-  forks, and GitHub's rolling 14-day views/clones.
-- `data/stargazers.csv` — the stargazer roster, sorted by login.
-  GitHub publishes no unstar event, so the commit history of this
-  file is the only record of who unstarred and when:
+  forks, and GitHub's rolling 14-day views/clones. Aggregate counts
+  only; nothing here identifies a person.
+- `data/digests.json` — the last daily and weekly Slack digest
+  sent, by window end date. Deleting it re-sends both.
 
-      git log -p metrics -- data/stargazers.csv
+## Personal data
 
-## Data retention
+None is collected. Until 2026-10 this branch also kept
+`data/stargazers.csv` — every stargazer's GitHub login and star
+time, re-snapshotted daily so its commit history recorded who
+unstarred and when. That collection was stopped as data
+minimisation (the aggregate star count answers the project-health
+question) and the file was removed from the branch tip, but the
+snapshots remain in this branch's history.
 
-`data/stargazers.csv` contains GitHub logins and star timestamps.
-Both are public — the same values the stargazers API returns to any
-caller — but the commit history of this file is not: it reconstructs
-*departures*, which GitHub deliberately does not publish. Treat it as
-a per-person record, not as incidental public data.
+To purge them, rewrite the branch on a fresh clone. Nothing builds
+from `metrics`, so force-pushing it is safe — but force-push
+`metrics` only:
 
-- **Purpose:** understanding project health — whether lost stars are
-  brief visitors or long-term followers.
-- **Retention:** kept for the life of the branch. Snapshots are not
-  pruned, because the history *is* the dataset.
-- **Removal:** to erase one person from the whole history while
-  keeping the file and everyone else's rows, run a row-level
-  rewrite on a fresh clone. Nothing builds from this branch, so
-  force-pushing it is safe — but force-push `metrics` only.
+    git clone --single-branch -b metrics <repo-url> purge
+    cd purge
+    git filter-repo --force --refs metrics --path data/stargazers.csv --invert-paths
+    git push --force origin metrics
 
-      git clone --single-branch -b metrics <repo-url> erase
-      cd erase
-      git filter-repo --force --refs metrics --blob-callback '
-      lines = blob.data.split(b"\n")
-      if lines and lines[0].startswith(b"login,starred_at"):
-          blob.data = b"\n".join(
-              l for l in lines if not l.startswith(b"\"THE_LOGIN\","))
-      '
-      git push --force origin metrics
-
-  `data/metrics.csv` is aggregate-only and is not touched by the
-  callback above. To stop collection entirely, delete the roster
-  block from the `Persist metrics history` step in
-  `.github/workflows/docker-pull-notify.yml`.
-
-  As with any history rewrite, the pre-rewrite commits survive in
-  existing clones and stay reachable on GitHub until it garbage
-  collects them — ask GitHub Support to expire them if the removal
-  has to be complete.
+The pre-rewrite commits survive in existing clones and stay
+reachable on GitHub until it garbage-collects them — ask GitHub
+Support to expire them if the removal has to be complete.
