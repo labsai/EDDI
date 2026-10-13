@@ -574,6 +574,40 @@ public class AgentConfiguration {
         }
     }
 
+    // === Turn deadline ===
+
+    /**
+     * Wall-clock budget of one conversation turn, in milliseconds. Unset (the
+     * default) means no deadline: every layer applies only its own timeouts, as
+     * before. When set, model retries, cascade steps and HTTP calls spend from this
+     * one budget and stop early enough to leave {@link #turnDeadlineReserveMs} for
+     * the fallback answer. A caller can only shorten it, per request, with the
+     * {@code X-EDDI-Turn-Deadline-Ms} header.
+     */
+    private Long turnDeadlineMs;
+
+    /**
+     * Milliseconds kept back from {@link #turnDeadlineMs} for producing a fallback
+     * answer and persisting the turn. Defaults to 1500 when unset.
+     */
+    private Long turnDeadlineReserveMs;
+
+    public Long getTurnDeadlineMs() {
+        return turnDeadlineMs;
+    }
+
+    public void setTurnDeadlineMs(Long turnDeadlineMs) {
+        this.turnDeadlineMs = turnDeadlineMs;
+    }
+
+    public Long getTurnDeadlineReserveMs() {
+        return turnDeadlineReserveMs;
+    }
+
+    public void setTurnDeadlineReserveMs(Long turnDeadlineReserveMs) {
+        this.turnDeadlineReserveMs = turnDeadlineReserveMs;
+    }
+
     // === Persistent User Memory (Phase 11a) ===
 
     /**

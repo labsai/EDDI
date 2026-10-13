@@ -58,11 +58,17 @@ test.describe("Schedules Page", () => {
   });
 
   test("disabled schedule shows disabled status", async ({ page }) => {
-    await expect(
-      page.getByText(/disabled/i).first().or(
-        page.getByText(/dead.lettered/i).first()
-      )
-    ).toBeVisible();
+    // Not `getByText(/disabled/i).first().or(getByText(/dead.lettered/i).first())`:
+    // `or` unions the two, and once both match different elements (the
+    // "Disabled by a person" note and the "Failed / Dead-Lettered" panel) the
+    // strict-mode check fails. Name the rows instead.
+    //
+    // "Weekly Digest" (sched-4) is disabled with a COMPLETED fire status, so
+    // its badge reads "Disabled", with the reason EDDI switched it off below it.
+    await expect(page.getByText("Disabled", { exact: true }).first()).toBeVisible();
+    await expect(page.getByTestId("disabled-reason-sched-4")).toBeVisible();
+    // "Failed Report" (sched-3) is disabled and carries no reason: a person did it.
+    await expect(page.getByTestId("disabled-by-person-sched-3")).toBeVisible();
   });
 
   test("schedule cards show cron expression for CRON type", async ({
