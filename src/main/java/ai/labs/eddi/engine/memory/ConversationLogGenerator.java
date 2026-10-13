@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart;
 import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.Content;
 import ai.labs.eddi.engine.memory.model.ConversationLog.ConversationPart.ContentType;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -134,8 +135,15 @@ public class ConversationLogGenerator {
                 }
 
                 if (skipFallbackOutputs && isFallbackStep(allSteps, index)) {
-                    mergeNextUser = true;
-                    continue;
+                    // Drop only what the fallback wrote when its items are marked, so the
+                    // answer of another task in the same step survives; an unmarked
+                    // (postResponse) fallback drops the step's whole output.
+                    var kept = ConversationOutputExtractor.withoutFallbackItems(conversationOutput);
+                    if (kept == conversationOutput || ConversationOutputExtractor.extractText(kept, " ") == null) {
+                        mergeNextUser = true;
+                        continue;
+                    }
+                    conversationOutput = kept;
                 }
 
                 // Every item is inspected, whatever its type. Deciding the list's shape
@@ -218,6 +226,19 @@ public class ConversationLogGenerator {
         IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
         List<IData<Object>> flags = step.getAllData(MemoryKeys.LLM_FALLBACK_PREFIX);
         return flags != null && flags.stream().anyMatch(flag -> Boolean.TRUE.equals(flag.getResult()));
+    }
+
+    /**
+     * How many input files a turn's output carries (each becomes one content of its
+     * user message, ahead of the text).
+     */
+    public static int inputFileCount(ConversationOutput conversationOutput) {
+        var context = conversationOutput != null ? conversationOutput.get(OUTPUT_KEY_CONTEXT, Map.class) : null;
+        if (!isNullOrEmpty(context) && context.get(KEY_INPUT_FILES) instanceof List<?> files && !files.isEmpty()
+                && files.getFirst() instanceof Map) {
+            return files.size();
+        }
+        return 0;
     }
 
     private static List<Content> joined(List<Content> first, List<Content> second) {

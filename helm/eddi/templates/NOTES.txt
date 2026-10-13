@@ -98,6 +98,6 @@
   📖 Full docs: https://github.com/labsai/EDDI/blob/main/docs/kubernetes.md
 {{- if .Values.nats.buildProfileImage }}
 
-  ⚠️  nats.buildProfileImage is deprecated and ignored: since chart 2.6.0 the
+  ⚠️  nats.buildProfileImage is deprecated and ignored: since chart 2.7.0 the
      published image selects cluster mode at runtime (eddi.messagingType=nats).
 {{- end }}

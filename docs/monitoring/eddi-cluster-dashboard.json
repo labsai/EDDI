@@ -24,12 +24,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 2,
       "title": "Members",
       "type": "stat",
-      "description": "`eddi_cluster_members` \u2014 replicas in the presence bucket.",
+      "description": "`eddi_cluster_members` — replicas in the presence bucket.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -58,12 +58,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 3,
       "title": "NATS connected (per node)",
       "type": "stat",
-      "description": "`eddi_cluster_nats_connected` \u2014 1 while the node is connected.",
+      "description": "`eddi_cluster_nats_connected` — 1 while the node is connected.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -92,12 +92,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 4,
       "title": "Degraded nodes",
       "type": "stat",
-      "description": "`eddi_cluster_degraded` \u2014 nodes running in degraded mode (NATS unreachable past the grace). Alert after 5 min.",
+      "description": "`eddi_cluster_degraded` — nodes running in degraded mode (NATS unreachable past the grace). Alert after 5 min.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -126,7 +126,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 5,
       "title": "NATS reconnects",
@@ -154,7 +154,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 6,
       "title": "Degraded-mode decisions",
@@ -182,12 +182,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 7,
       "title": "Node RPC latency",
       "type": "timeseries",
-      "description": "`eddi_cluster_rpc_seconds` \u2014 cancel, group control, GDPR stop, status scatter.",
+      "description": "`eddi_cluster_rpc_seconds` — cancel, group control, GDPR stop, status scatter.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -225,12 +225,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 9,
       "title": "Lease acquisitions by outcome",
       "type": "timeseries",
-      "description": "`eddi_cluster_lease_acquire_seconds` \u2014 `timeout` means a turn waited past the acquire timeout (409 Retry-After).",
+      "description": "`eddi_cluster_lease_acquire_seconds` — `timeout` means a turn waited past the acquire timeout (409 Retry-After).",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -253,7 +253,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 10,
       "title": "Mean lease wait",
@@ -288,12 +288,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 11,
       "title": "Leases held",
       "type": "timeseries",
-      "description": "`eddi_cluster_lease_held` \u2014 turns running under a lease, per node.",
+      "description": "`eddi_cluster_lease_held` — turns running under a lease, per node.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -316,7 +316,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 12,
       "title": "Leases lost / taken over",
@@ -354,12 +354,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 13,
       "title": "Fenced (zombie) writes refused",
       "type": "timeseries",
-      "description": "`eddi_cluster_fence_rejected_total` \u2014 a node that lost its lease tried to write. Each one is dead-lettered.",
+      "description": "`eddi_cluster_fence_rejected_total` — a node that lost its lease tried to write. Each one is dead-lettered.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -382,7 +382,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 14,
       "title": "Dead letters retained",
@@ -428,12 +428,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 16,
       "title": "KV calls by bucket/outcome",
       "type": "timeseries",
-      "description": "`eddi_cluster_kv_seconds` \u2014 every KV operation.",
+      "description": "`eddi_cluster_kv_seconds` — every KV operation.",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -456,7 +456,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 17,
       "title": "KV latency",
@@ -486,12 +486,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 18,
       "title": "CAS conflicts",
       "type": "timeseries",
-      "description": "`eddi_cluster_kv_cas_conflicts_total` \u2014 lost compare-and-sets (lease contention, global rate limits).",
+      "description": "`eddi_cluster_kv_cas_conflicts_total` — lost compare-and-sets (lease contention, global rate limits).",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -527,7 +527,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 20,
       "title": "Events published / consumed",
@@ -560,7 +560,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 21,
       "title": "Outbox & failed publishes",
@@ -593,12 +593,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 22,
       "title": "Resyncs",
       "type": "timeseries",
-      "description": "`eddi_cluster_events_resync_total` \u2014 full cache flushes after possibly missed events.",
+      "description": "`eddi_cluster_events_resync_total` — full cache flushes after possibly missed events.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -634,12 +634,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 24,
       "title": "Nonce checks unavailable",
       "type": "timeseries",
-      "description": "`eddi_agent_nonce_unavailable_total` \u2014 signed envelopes refused because the shared nonce store was unreachable (fail closed).",
+      "description": "`eddi_agent_nonce_unavailable_total` — signed envelopes refused because the shared nonce store was unreachable (fail closed).",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -662,12 +662,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 25,
       "title": "Tool rate-limit backend",
       "type": "timeseries",
-      "description": "`eddi_cluster_ratelimit_decisions_total` \u2014 cluster-wide rate-limit decisions.",
+      "description": "`eddi_cluster_ratelimit_decisions_total` — cluster-wide rate-limit decisions.",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -695,12 +695,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 26,
       "title": "Audit sequence allocation",
       "type": "timeseries",
-      "description": "`eddi_cluster_audit_sequence_total` \u2014 chain positions allocated cluster-wide (`unsequenced` while NATS is down).",
+      "description": "`eddi_cluster_audit_sequence_total` — chain positions allocated cluster-wide (`unsequenced` while NATS is down).",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -723,12 +723,12 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${datasource}"
       },
       "id": 27,
       "title": "Admin recovery actions",
       "type": "timeseries",
-      "description": "`eddi_cluster_admin_actions_total` \u2014 recovery actions taken from the cluster console (force-release, drain, resync, reconcile, dead-letter replay/discard/forward), by action and outcome. Every one is also in the `cluster-admin` audit trail.",
+      "description": "`eddi_cluster_admin_actions_total` — recovery actions taken from the cluster console (force-release, drain, resync, reconcile, dead-letter replay/discard/forward), by action and outcome. Every one is also in the `cluster-admin` audit trail.",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -758,20 +758,43 @@
   "templating": {
     "list": [
       {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
         "name": "job",
+        "label": "Scrape job",
         "type": "query",
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${datasource}"
         },
-        "query": "label_values(eddi_cluster_members, job)",
-        "includeAll": true,
-        "multi": true,
+        "definition": "label_values(process_uptime_seconds, job)",
+        "query": {
+          "query": "label_values(process_uptime_seconds, job)",
+          "refId": "job"
+        },
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "eddi",
+          "value": "eddi",
+          "selected": false
         },
-        "refresh": 2
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "hide": 0,
+        "refresh": 2,
+        "sort": 1,
+        "options": [],
+        "regex": "",
+        "skipUrlSync": false
       }
     ]
   },

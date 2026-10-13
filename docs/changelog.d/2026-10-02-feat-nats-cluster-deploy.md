@@ -7,7 +7,7 @@ cluster, and every one still refuses to run several in-memory replicas.
 
 ### What changed
 
-- **Helm chart 2.6.0** — `eddi.messagingType=nats` unlocks `eddi.replicas > 1`, a real
+- **Helm chart 2.7.0** — `eddi.messagingType=nats` unlocks `eddi.replicas > 1`, a real
   HorizontalPodAutoscaler and a `RollingUpdate`; each stays refused with in-memory messaging.
   `eddi.updateStrategy` defaults per mode (Recreate for in-memory, RollingUpdate with
   maxSurge 1 / maxUnavailable 0 for nats); `eddi.terminationGracePeriodSeconds` and
@@ -39,7 +39,7 @@ cluster, and every one still refuses to run several in-memory replicas.
 ### Design decisions
 
 - `eddi.updateStrategy` reuses the key and null-fallback semantics of the build-hygiene PR
-  (#938, chart 2.5.0), extended by the messaging-type default; this chart is 2.6.0. Its
+  (#938, chart 2.5.0), extended by the messaging-type default; this chart is 2.7.0 (#951 took 2.6.0). Its
   default is now empty (per messaging type) rather than #938's `{type: Recreate}`, and both
   shapes render. One deliberate difference: #938 let an in-memory deployment opt into
   `RollingUpdate`; this chart refuses that, because cluster mode is now the way to roll

@@ -186,6 +186,13 @@ jobs:
               - 'docs/kubernetes.md'
               - 'README.md'
               - 'docs/security.md'
+              # The alert rules and dashboards are test inputs too:
+              # MetricsDashboardCoverageTest and AlertRulesTest parse every
+              # dashboard and rule against the meters the code registers, and
+              # manifest-lint runs promtool over the rules. A PR that only edits a
+              # dashboard or a rule is exactly the PR those checks exist for.
+              - 'docs/monitoring/**'
+              - 'docs/metrics.md'
               # Same shape, one guard along. ChangelogRotationTest owns the live
               # file's size cap and the Archive index, and ChangelogFragmentTest
               # owns the shape of a pending fragment — and both of them grade
@@ -622,7 +629,9 @@ jobs:
     name: Deployment Manifests
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    # operator_docs as well: it carries docs/monitoring/**, whose alert rules the
+    # promtool step below validates.
+    if: needs.detect-changes.outputs.code == 'true' || needs.detect-changes.outputs.operator_docs == 'true'
 
     steps:
       - name: Checkout
@@ -688,6 +697,25 @@ jobs:
             rm -rf "$parent"
           done < <(find k8s -name kustomization.yaml | sort)
           exit $status
+
+      - name: Validate the Prometheus alert rules
+        # promtool is the parser Prometheus itself uses, so this is the check that
+        # the rules LOAD (AlertRulesTest only reads them as YAML), and `test rules`
+        # runs the cases in eddi-alerts.test.yml, which make each essential alert
+        # fire on synthetic series and stay quiet on a healthy one. The image is
+        # the compose stack's Prometheus, pinned by digest.
+        run: |
+          set -euo pipefail
+          image='prom/prometheus:v3.4.0@sha256:78ed1f9050eb9eaf766af6e580230b1c4965728650e332cd1ee918c0c4699775'
+          docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" check rules eddi-alerts.yml
+          docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" test rules eddi-alerts.test.yml
+          docker run --rm -v "$PWD/docs/monitoring:/etc/prometheus:ro" --entrypoint promtool "$image" check config /etc/prometheus/prometheus.yml
+
+      - name: Check the generated monitoring copies
+        # helm/eddi/files/ and k8s/overlays/monitoring/ carry copies of the rules
+        # and dashboards (neither Helm nor kustomize may read docs/). Also asserted
+        # by DeploymentManifestsTest; here it fails fast without a Java build.
+        run: python3 scripts/sync-monitoring-assets.py --check
 
       - name: Render the Helm chart
         # Uses the helm preinstalled on ubuntu-latest, matching the shell-lint

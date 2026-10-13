@@ -21,6 +21,8 @@ import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
 import jakarta.annotation.PreDestroy;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.mongodb.MongoMetricsConnectionPoolListener;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.Produces;
 import org.bson.BsonInvalidOperationException;
@@ -59,11 +61,13 @@ public class PersistenceModule {
     @ApplicationScoped
     @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
-                                        @ConfigProperty(name = "mongodb.database") String database) {
+                                        @ConfigProperty(name = "mongodb.database") String database,
+                                        MeterRegistry meterRegistry) {
         BsonFactory bsonFactory = new BsonFactory();
         bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
-        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory), DRIVER_INFO);
+        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory, meterRegistry),
+                DRIVER_INFO);
         this.mongoClient = client;
 
         return client.getDatabase(database);
@@ -94,7 +98,8 @@ public class PersistenceModule {
         }
     }
 
-    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory) {
+    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory,
+                                                        MeterRegistry meterRegistry) {
 
         var objectMapper = new ObjectMapper(bsonFactory);
         objectMapper.registerModule(new JavaTimeModule());
@@ -105,7 +110,15 @@ public class PersistenceModule {
                         new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(), new JacksonProvider(objectMapper)));
 
         return MongoClientSettings.builder().applyConnectionString(new ConnectionString(connectionString)).codecRegistry(codecRegistry)
-                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference).build();
+                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference)
+                // This client is built here, not by the quarkus-mongodb-client
+                // extension, so quarkus.mongodb.metrics.enabled never reached it and
+                // the dashboards' connection-pool panels had no series to show. The
+                // pool listener adds a handful of gauges per server (size,
+                // checked out, wait queue); the per-command listener is left out on
+                // purpose — it adds a timer per command and collection.
+                .applyToConnectionPoolSettings(pool -> pool.addConnectionPoolListener(new MongoMetricsConnectionPoolListener(meterRegistry)))
+                .build();
     }
 
     public static class URIStringCodec implements Codec<URI> {

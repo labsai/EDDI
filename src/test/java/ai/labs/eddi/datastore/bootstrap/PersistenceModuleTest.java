@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.bootstrap;
 
 import com.mongodb.client.MongoDatabase;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.annotation.PreDestroy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ class PersistenceModuleTest {
 
         PersistenceModule module = new PersistenceModule();
         // Nothing listens on port 1; creating the client does not connect.
-        MongoDatabase database = module.provideMongoDB("mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=200", "eddi");
+        MongoDatabase database = module.provideMongoDB("mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=200", "eddi", new SimpleMeterRegistry());
 
         module.closeMongoClient();
 

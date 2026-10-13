@@ -3,7 +3,7 @@
 **Repo:** EDDI · **Branch:** `feat/nats-cluster` (PR #956, with #957, #958 and #970 merged into it)
 
 `origin/main` merged into the cluster stack after #937, #942–#954, #990, #993, #996,
-#999, #1001, #1008, #969, #936, #967, #1000 and #951 had landed on it.
+#999, #1001, #1008, #969, #936, #967, #1000, #951 and #1002 had landed on it.
 
 ### How the cluster code now sits on main's APIs
 
@@ -33,11 +33,11 @@
   `A2A_STATES` is no longer used and is gone from the bucket map and the docs.
 - **Undeploy (#990).** `IAgentFactory.undeployAgent` no longer throws checked exceptions;
   the cluster's local undeploy catches `RuntimeException` only.
-- **Helm chart 2.6.0** (main is at 2.5.0). `eddi.updateStrategy` keeps the per-messaging-type
+- **Helm chart 2.7.0** (main is at 2.6.0, from #951). `eddi.updateStrategy` keeps the per-messaging-type
   default and accepts main's object shape; the chart still refuses `RollingUpdate` with
   in-memory messaging, which #938 had documented as an opt-in (see
   [Kubernetes](../kubernetes.md#upgrades-replace-the-pod-no-surge)).
-- **Operator revision 8** (main is at 7): the merged prompt carries both the cluster
+- **Operator revision 9** (main is at 8, from #1002): the merged prompt carries both the cluster
   questions and main's admin-action / redaction text.
 - **Turn deadline (#996).** [Clustering](../clustering.md#sizing) now says that a deadline
   counts from arrival, so time spent waiting for the lease is spent from it.

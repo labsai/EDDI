@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -295,6 +296,14 @@ public class AuditLedgerService implements UserErasureParticipant {
         this.maxQueueSize = maxQueueSize > 0 ? maxQueueSize : DEFAULT_MAX_QUEUE_SIZE;
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
         this.sequenceCollisionCounter = meterRegistry.counter("eddi_audit_sequence_collisions_total");
+        // The drop counter only moves once the queue is already full. Depth against
+        // capacity is the warning that comes before it: a store that has stopped
+        // keeping up shows here minutes before the first entry is lost.
+        meterRegistry.gauge("eddi_audit_queue_depth", queueSize, AtomicInteger::get);
+        // A supplier, not gauge(name, Integer): that overload holds the boxed value
+        // weakly, and an Integer above the box cache is collected and reads NaN.
+        final int capacity = this.maxQueueSize;
+        Gauge.builder("eddi_audit_queue_capacity", () -> capacity).register(meterRegistry);
         this.clusterSupport = clusterSupport;
         this.agentSigningService = agentSigningService;
         this.objectMapper = objectMapper;

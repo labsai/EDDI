@@ -102,6 +102,17 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                 .description("Conversation tasks dead-lettered (failed after they started, or could not be scheduled)")
                 .register(meterRegistry);
         meterRegistry.gauge("eddi.coordinator.dead_letters", this, AbstractQueuedConversationCoordinator::retainedDeadLetterCount);
+        // The same two numbers under the names main's alert rules and dashboards use
+        // (#951: eddi_coordinator_dead_lettered_total,
+        // eddi_coordinator_dead_letters_retained),
+        // so those keep working in both modes. The counter is cumulative (it survives
+        // the
+        // cap and a purge); the gauge is what the dead-letter list holds right now — in
+        // cluster mode the shared stream.
+        FunctionCounter.builder("eddi.coordinator.dead_lettered", totalDeadLettered, AtomicLong::doubleValue)
+                .description("Conversation tasks the coordinator dead-lettered (cumulative)")
+                .register(meterRegistry);
+        meterRegistry.gauge("eddi.coordinator.dead_letters_retained", this, AbstractQueuedConversationCoordinator::retainedDeadLetterCount);
     }
 
     /**

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
@@ -72,6 +73,41 @@ public final class ConversationOutputExtractor {
      */
     public static String extractText(ConversationOutput output) {
         return extractText(output, LINE_DELIMITER);
+    }
+
+    /**
+     * The output without the items an LLM task marked as its fallback
+     * ({@code fallback: true} on the {@code OutputItem}), or {@code output} itself
+     * (same instance) when none is marked. A step can run several LLM tasks; this
+     * is what lets a history drop the apology of the one that fell back while
+     * keeping the answer of another. A fallback rendered by a {@code postResponse}
+     * carries no marker, which is why the caller still treats a flagged step with
+     * no marked item as fallback-only.
+     */
+    public static ConversationOutput withoutFallbackItems(ConversationOutput output) {
+        if (output == null || !(output.get("output") instanceof List<?> list)) {
+            return output;
+        }
+        var kept = new ArrayList<Object>();
+        for (var item : list) {
+            if (!isMarkedFallback(item)) {
+                kept.add(item);
+            }
+        }
+        if (kept.size() == list.size()) {
+            return output;
+        }
+        var copy = new ConversationOutput();
+        copy.putAll(output);
+        copy.put("output", kept);
+        return copy;
+    }
+
+    private static boolean isMarkedFallback(Object item) {
+        if (item instanceof OutputItem outputItem) {
+            return Boolean.TRUE.equals(outputItem.getFallback());
+        }
+        return item instanceof Map<?, ?> map && Boolean.TRUE.equals(map.get("fallback"));
     }
 
     /**

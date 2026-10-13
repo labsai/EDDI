@@ -1650,6 +1650,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
 
         @Override
+        public void onLlmRetry(String reason, int attempt) {
+            delegate.onLlmRetry(reason, attempt);
+        }
+
+        @Override
         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
             idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, false));
             delegate.onComplete(snapshot);
