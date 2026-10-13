@@ -163,7 +163,7 @@ class Infra:
             sh("docker", "rm", "-f", f"{P}-mongo")
             sh("docker", "run", "-d", "--name", f"{P}-mongo", "--network", NET, "--memory", "1g",
                "-p", f"127.0.0.1:{MONGO_PORT}:27017",
-               "-e", "MONGO_INITDB_ROOT_USERNAME=eddi", "-e", "MONGO_INITDB_ROOT_PASSWORD=changeme", "mongo:7.0.14", check=True)
+               "-e", "MONGO_INITDB_ROOT_USERNAME=eddi", "-e", "MONGO_INITDB_ROOT_PASSWORD=changeme", "mongo:7.0.43", check=True)
         else:
             sh("docker", "rm", "-f", f"{P}-postgres")
             sh("docker", "run", "-d", "--name", f"{P}-postgres", "--network", NET, "--memory", "1g",

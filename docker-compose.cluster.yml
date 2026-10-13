@@ -32,7 +32,7 @@ x-nats: &nats
 
 services:
   mongodb:
-    image: mongo:7.0.14
+    image: mongo:7.0.43
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: eddi
