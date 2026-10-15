@@ -3836,8 +3836,8 @@
         {
           "id": 98,
           "type": "timeseries",
-          "title": "NATS Messaging",
-          "description": "Only active under nats messaging profile. Shows 'No data' with in-memory messaging.",
+          "title": "Cluster events & dead letters",
+          "description": "Cluster mode only (eddi.messaging.type=nats): cache-coherence events; dead letters in both modes. The EDDI Cluster dashboard has the rest.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -3850,8 +3850,8 @@
           },
           "targets": [
             {
-              "expr": "rate(eddi_nats_publish_count_total{job=~\"$job\"}[5m]) or on() vector(0)",
-              "legendFormat": "Publish/s",
+              "expr": "sum(rate(eddi_cluster_events_published_total{job=~\"$job\"}[5m])) or on() vector(0)",
+              "legendFormat": "Cluster events published/s",
               "refId": "A",
               "datasource": {
                 "type": "prometheus",
@@ -3859,8 +3859,8 @@
               }
             },
             {
-              "expr": "rate(eddi_nats_consume_count_total{job=~\"$job\"}[5m]) or on() vector(0)",
-              "legendFormat": "Consume/s",
+              "expr": "sum(rate(eddi_cluster_events_consumed_total{job=~\"$job\"}[5m])) or on() vector(0)",
+              "legendFormat": "Cluster events consumed/s",
               "refId": "B",
               "datasource": {
                 "type": "prometheus",
@@ -3868,7 +3868,7 @@
               }
             },
             {
-              "expr": "sum(rate(eddi_nats_dead_letter_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "expr": "sum(rate(eddi_coordinator_dead_lettered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "legendFormat": "Dead letters / s",
               "refId": "C",
               "datasource": {

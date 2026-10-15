@@ -269,21 +269,24 @@ test.describe("Coordinator Page", () => {
     await waitForApp(page);
   });
 
-  test("renders coordinator page", async ({ page }) => {
-    await expect(page.locator("main")).toBeVisible();
+  test("states the cluster verdict and marks the lost node", async ({ page }) => {
+    // MSW: three nodes, eddi-3 lost (cluster-handlers.ts)
+    await expect(page.getByTestId("cluster-verdict")).toHaveAttribute("data-verdict", "DEGRADED", { timeout: 5000 });
+    await expect(page.getByTestId("cluster-node-eddi-3")).toHaveAttribute("data-state", "LOST");
+    await expect(page.getByTestId("cluster-nats-status")).toHaveText("CONNECTED");
   });
 
-  test("shows connection status", async ({ page }) => {
-    // MSW returns coordinator status with connected: true
-    await expect(
-      page.getByText(/connected/i).first()
-    ).toBeVisible({ timeout: 5000 });
+  test("lists the orphaned lease first", async ({ page }) => {
+    await page.getByTestId("cluster-tab-leases").click();
+    await expect(page.getByTestId("cluster-lease-flag-HOLDER_GONE").first()).toBeVisible({ timeout: 5000 });
   });
 
-  test("shows queue depth information", async ({ page }) => {
-    // MSW returns 12 queue entries
-    const main = page.locator("main");
-    await expect(main).toBeVisible();
+  test("opens a fenced dead letter in the drawer and closes it with Escape", async ({ page }) => {
+    await page.getByTestId("cluster-tab-deadLetters").click();
+    await page.getByTestId("cluster-dl-open-14").click();
+    await expect(page.getByTestId("cluster-dl-fence")).toContainText("1791045643049531");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("cluster-dl-drawer")).toHaveCount(0);
   });
 });
 

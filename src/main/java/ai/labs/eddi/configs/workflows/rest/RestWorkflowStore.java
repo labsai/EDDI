@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.workflows.rest;
 
+import ai.labs.eddi.engine.runtime.IWorkflowFactory;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -59,6 +60,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private final ResourceAccessGuard resourceAccessGuard;
 
     private static final Logger log = Logger.getLogger(RestWorkflowStore.class);
+
+    /** Field-injected (null in tests built with {@code new}). */
+    @Inject
+    IWorkflowFactory workflowFactory;
 
     @Inject
     public RestWorkflowStore(IWorkflowStore workflowStore, ResourceClientLibrary resourceClientLibrary,
@@ -236,6 +241,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         // ResourceModifiedException), so a workflow that moved on in the meantime
         // now raises before anything it references has been touched.
         Response response = restVersionInfo.delete(id, version, permanent);
+        if (workflowFactory != null) {
+            // Forget the deleted version here and — cluster mode — on every node.
+            workflowFactory.evict(id, version);
+        }
 
         int skipped = plan.skipped();
         for (URI candidate : plan.toDelete()) {

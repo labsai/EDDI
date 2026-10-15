@@ -14,9 +14,12 @@ import java.util.Optional;
 
 /**
  * The default {@link IA2ATaskStore}: two {@code ICacheFactory} caches, bounded
- * and node-local like every cache the factory hands out (see
- * {@code CacheFactory}). A miss is not an error — the handler falls back to the
- * conversation store for the tasks it issued itself.
+ * and node-local on a single node. In cluster mode
+ * ({@code eddi.messaging.type=nats}) {@code CacheFactory} backs both with
+ * JetStream KV buckets ({@code A2A_TASKS}, {@code A2A_CONTEXTS}), so a task
+ * issued on one node is found on every other; the records travel as JSON. A
+ * miss is not an error — the handler falls back to the conversation store for
+ * the tasks it issued itself.
  */
 @ApplicationScoped
 public class CachedA2ATaskStore implements IA2ATaskStore {

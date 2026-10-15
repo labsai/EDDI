@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.model.DeploymentImpact;
 import ai.labs.eddi.engine.model.DeploymentPreflight;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
@@ -40,6 +41,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.MediaType;
@@ -75,6 +77,12 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
     private final ResourceAccessGuard resourceAccessGuard;
     private final SpaceReferenceGuard spaceReferenceGuard;
+
+    /**
+     * Cluster mode: told about unrecorded deploys. Field-injected; null in tests.
+     */
+    @Inject
+    Instance<IAgentDeploymentManagement> agentDeploymentManagement;
 
     /**
      * Field-injected, like {@code AgentFactory}'s, so the test-seam constructors
@@ -366,6 +374,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                         reported.set(status);
                         if (status == READY && autoDeploy) {
                             deploymentStore.setDeploymentInfo(environment.toString(), agentId, version, DeploymentInfo.DeploymentStatus.deployed);
+                        } else if (status == READY) {
+                            // Not recorded on purpose; in cluster mode the other nodes still
+                            // have to serve it.
+                            deploymentStore.announceTransientDeployment(environment.toString(), agentId, version);
+                            if (agentDeploymentManagement != null && agentDeploymentManagement.isResolvable()) {
+                                agentDeploymentManagement.get().noteUnrecordedDeployment(environment, agentId, version);
+                            }
                         }
                     });
                     // AgentFactory.deployAgent does not throw on a failed deployment: a

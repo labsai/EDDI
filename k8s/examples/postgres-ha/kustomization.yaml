@@ -1,15 +1,11 @@
-# EDDI + PostgreSQL + production hardening — combined example
+# EDDI + PostgreSQL + production hardening + cluster mode — combined example
 #
-# ⚠️  This is NOT a horizontally scaled deployment. EDDI runs at exactly ONE
-# replica: the per-conversation lock is JVM-local, so a second replica silently
-# drops turns. See the comment on spec.replicas in k8s/base/eddi-deployment.yaml.
-#
-# NATS is deliberately no longer part of this example. The published
-# labsai/eddi image is built without the `nats` Quarkus build profile, so the
-# NATS coordinator bean does not exist in it and EDDI_MESSAGING_TYPE is read by
-# no code — the component provisioned a JetStream StatefulSet with a 5Gi PVC
-# that EDDI never connected to. If you build your own image with
-# `-Dquarkus.profile=nats`, add `- ../../overlays/nats` under `components:`.
+# Three EDDI replicas behind the base's round-robin Service, coordinated through
+# a three-node NATS JetStream cluster (../../overlays/nats): any replica serves
+# any conversation, a replica can be lost or rolled without losing a turn, and
+# the published image selects cluster mode at runtime. PostgreSQL itself is a
+# single instance here; point EDDI at a replicated PostgreSQL for a database that
+# survives a node loss too. See docs/clustering.md.
 #
 # Usage:
 #   bash k8s/create-secrets.sh              # once, before the first apply
@@ -27,5 +23,7 @@ resources:
 
 components:
   # PDB, NetworkPolicy and the production resource limits.
-  # NOTE: eddi-hpa.yaml is deliberately absent — see that file's header.
   - ../../overlays/production
+  # Cluster mode: NATS JetStream + 3 EDDI replicas. AFTER production, whose
+  # replicas patch (1) it overrides.
+  - ../../overlays/nats

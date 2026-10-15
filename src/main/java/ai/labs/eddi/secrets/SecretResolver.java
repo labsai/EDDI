@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -68,6 +70,15 @@ public class SecretResolver {
      */
     private final List<Consumer<SecretReference>> invalidationListeners = new CopyOnWriteArrayList<>();
 
+    /**
+     * Cluster mode: tells the other nodes that a secret rotated here, so they drop
+     * their cached plaintext and every model built with it. A no-op on a single
+     * node. Field-injected so the tests that build this class with {@code new} keep
+     * working; null there.
+     */
+    @Inject
+    IClusterEventBus clusterEvents;
+
     // ─── Metrics ───
     private Counter cacheHitCounter;
     private Counter cacheMissCounter;
@@ -92,6 +103,17 @@ public class SecretResolver {
         this.cacheMissCounter = meterRegistry.counter("eddi.vault.cache.misses");
         this.resolveErrorCounter = meterRegistry.counter("eddi.vault.resolve.errors");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.time");
+
+        if (clusterEvents != null) {
+            clusterEvents.subscribe(ClusterEvent.SECRET_CHANGED, event -> {
+                if (Boolean.TRUE.equals(event.get("all"))) {
+                    invalidateAllLocal();
+                } else if (event.getString("tenantId") != null && event.getString("keyName") != null) {
+                    invalidateLocal(new SecretReference(event.getString("tenantId"), event.getString("keyName")));
+                }
+            });
+            clusterEvents.onResync(this::invalidateAllLocal);
+        }
 
         if (secretProvider.isAvailable()) {
             LOGGER.infof("SecretResolver initialized (cache TTL=%dmin, maxSize=%d)", cacheTtlMinutes, cacheMaxSize);
@@ -276,6 +298,19 @@ public class SecretResolver {
      * Invalidate a specific cache entry (called on secret rotation).
      */
     public void invalidateCache(SecretReference reference) {
+        invalidateLocal(reference);
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.SECRET_CHANGED, Map.of("tenantId", reference.tenantId(), "keyName", reference.keyName()));
+        }
+    }
+
+    /**
+     * The local half of {@link #invalidateCache}: evicts this node's cache and
+     * notifies the local listeners, without announcing it — what a node does when
+     * ANOTHER node rotated the secret (a received event must never be
+     * re-published).
+     */
+    public void invalidateLocal(SecretReference reference) {
         String cacheKey = reference.tenantId() + "/" + reference.keyName();
         cache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
@@ -286,6 +321,14 @@ public class SecretResolver {
      * Invalidate all cached secrets (e.g., on master key rotation).
      */
     public void invalidateAll() {
+        invalidateAllLocal();
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.SECRET_CHANGED, Map.of("all", true));
+        }
+    }
+
+    /** The local half of {@link #invalidateAll}; see {@link #invalidateLocal}. */
+    public void invalidateAllLocal() {
         cache.invalidateAll();
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);

@@ -40,8 +40,14 @@ import java.util.Map;
  * resume is gated too: it enqueues a full turn through the same coordinator
  * this drain is waiting on, and it is rejected BEFORE the pause is consumed, so
  * the approval simply stays pending;</li>
+ * <li><b>tells the coordinator</b> ({@code beginShutdown}) — in cluster mode
+ * the turns still waiting for a conversation lease are answered 409 +
+ * Retry-After at once instead of being waited for;</li>
  * <li><b>drains the coordinator queues</b> with a BOUNDED wait, so turns
- * already queued or executing get the chance to finish and persist.</li>
+ * already queued or executing get the chance to finish and persist;</li>
+ * <li><b>completes the coordinator's shutdown</b> ({@code completeShutdown}) —
+ * in cluster mode the leases still held are released, so those conversations
+ * continue on other nodes without waiting out the lease TTL.</li>
  * </ol>
  *
  * <p>
@@ -130,7 +136,23 @@ public class GracefulShutdownService {
     }
 
     void onShutdown(@Observes ShutdownEvent shutdownEvent) {
-        drain();
+        try {
+            drain();
+        } finally {
+            completeShutdown();
+        }
+    }
+
+    /**
+     * After the drain, completed or not: the coordinator gives back what it still
+     * holds (in cluster mode, the conversation leases).
+     */
+    void completeShutdown() {
+        try {
+            conversationCoordinator.completeShutdown();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Coordinator shutdown completion failed: %s", e.getMessage());
+        }
     }
 
     /**
@@ -145,6 +167,15 @@ public class GracefulShutdownService {
         // — even if the drain below fails, no new work is admitted.
         shuttingDown = true;
         LOGGER.info("Shutdown signalled — readiness is now DOWN and new conversation turns are rejected");
+        // Turns that have not started yet are answered now rather than drained: in
+        // cluster mode a turn still waiting for its conversation lease could otherwise
+        // hold this drain until its acquire timeout (longer than the drain), and then
+        // fail after the container had gone.
+        try {
+            conversationCoordinator.beginShutdown();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Coordinator shutdown start failed: %s", e.getMessage());
+        }
 
         // The poll loop below honours this return value; the grace sleep must too, or
         // an interrupt gets acknowledged (the flag is restored) and then ignored — we
