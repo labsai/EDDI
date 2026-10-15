@@ -67,7 +67,9 @@ public record AgentCascadeResult(String agentId, int previousAgentVersion, int n
      * @param error
      *            why it failed, if it did
      * @param previousVersionStillDeployed
-     *            a deploy never retires the version it supersedes
+     *            always {@code true} once a redeploy was attempted: a deploy never
+     *            retires the version it supersedes, so after a failed or refused
+     *            one the previous version is still the one serving
      * @param failure
      *            the structured reason the deploy reported (for a missing vault
      *            grant: the secret names and the exact grant call), when it
@@ -129,9 +131,7 @@ public record AgentCascadeResult(String agentId, int previousAgentVersion, int n
                     result.put("fix", failure.fix());
                 }
             }
-            if (deployment.environment() != null) {
-                result.put("previousVersionStillDeployed", deployment.previousVersionStillDeployed());
-            }
+            result.put("previousVersionStillDeployed", deployment.previousVersionStillDeployed());
         }
         return result;
     }

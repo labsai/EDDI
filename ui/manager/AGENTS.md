@@ -281,8 +281,10 @@ what it finds. Off by default. Worth knowing before touching it:
 - **Multi-step changes cost two approvals, not one per step.** Two levers, both
   stated to the operator by `buildBatchingSection` in `system-prompt.ts` (a
   clearly delimited block — keep it that way): (1) it lists the WHOLE plan before
-  the first gated call and waits for agreement (a plan is a *proposal*, which is
-  what keeps it compatible with the "check/look/verify is read-only" rule), then
+  the first gated call — after a look/check/verify request the plan is a
+  *proposal* and it waits for agreement (the "check/look/verify is read-only"
+  rule); for a change asked for outright it states the plan and makes the first
+  call in the same turn, because the approval pause is the confirmation — then
   issues independent writes as **parallel tool calls in one turn** — the backend
   gate classifies a whole model message as one batch and pauses it once
   (`docs/hitl.md` → "Batching"), and `approval-banner.tsx` already decides it call

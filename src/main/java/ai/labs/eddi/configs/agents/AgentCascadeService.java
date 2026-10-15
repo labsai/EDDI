@@ -367,9 +367,9 @@ public class AgentCascadeService {
             // The previous version stays deployed: deploy never retires a version, and
             // undeploying would also disable the agent's schedules.
             return new AgentCascadeResult.Deployment(environment.name(), redeployed, status == null ? null : String.valueOf(status),
-                    error == null ? null : String.valueOf(error), redeployed, failure);
+                    error == null ? null : String.valueOf(error), true, failure);
         } catch (Exception deployErr) {
-            return new AgentCascadeResult.Deployment(null, false, null, "Redeployment failed: " + deployErr.getMessage(), false, null);
+            return new AgentCascadeResult.Deployment(null, false, null, "Redeployment failed: " + deployErr.getMessage(), true, null);
         }
     }
 

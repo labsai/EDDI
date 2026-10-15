@@ -5049,7 +5049,7 @@
         "heading": "Modifications de ressources appliquées à l'agent {{agentId}} (à partir de la version {{version}})",
         "redeploy": "Sera redéployé vers {{environment}} avec attente du résultat. La version remplacée reste déployée.",
         "noRedeploy": "Ne sera pas redéployé : la nouvelle version de l'agent est enregistrée mais n'est active qu'une fois déployée.",
-        "compatible": "Marquée comme compatible : les conversations en cours passent à la nouvelle version à leur prochain tour.",
+        "compatible": "Marquée comme compatible : les conversations en cours passent à la nouvelle version à leur prochain tour, une fois celle-ci déployée avec succès.",
         "breaking": "Marquée comme changement incompatible : les conversations en cours restent sur leur version actuelle."
       },
       "blockedSelfTarget": "Un agent ne peut pas modifier sa propre définition, et cette requête vise l'agent de l'opérateur lui-même ({{agentId}}). Tant qu'elle est présente, l'ensemble du lot ne peut pas être approuvé — rejetez-la et effectuez cette modification depuis la page de cet agent.",

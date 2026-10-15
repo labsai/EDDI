@@ -551,6 +551,8 @@ class AgentCascadeServiceTest {
 
             assertFalse(result.deployment().redeployed());
             assertEquals("Deployment failed.", result.deployment().error());
+            assertTrue(result.deployment().previousVersionStillDeployed(), "a failed deploy retires nothing");
+            assertEquals(true, result.toMap().get("previousVersionStillDeployed"));
             // The documents are written either way; the result must say so.
             assertEquals(2, result.newAgentVersion());
         }
@@ -566,6 +568,8 @@ class AgentCascadeServiceTest {
 
             assertFalse(result.deployment().redeployed());
             assertTrue(result.deployment().error().contains("vault key"), result.deployment().error());
+            assertTrue(result.deployment().previousVersionStillDeployed(), "a refused deploy retires nothing");
+            assertEquals(true, result.toMap().get("previousVersionStillDeployed"));
             assertNull(result.deployment().environment());
         }
 
@@ -623,6 +627,9 @@ class AgentCascadeServiceTest {
             verify(agentAdmin, never()).deployAgent(any(), any(), any(), anyBoolean(), anyBoolean());
             assertNull(result.deployment());
             assertFalse(result.toMap().containsKey("redeployed"));
+            // No redeploy was attempted, so there is nothing to say about the previous
+            // version.
+            assertFalse(result.toMap().containsKey("previousVersionStillDeployed"));
         }
 
         @Test

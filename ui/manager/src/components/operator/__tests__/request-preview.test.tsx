@@ -500,6 +500,29 @@ describe("RequestPreview — cascade summary", () => {
     expect(screen.getByTestId("request-preview-body-c1")).toBeInTheDocument();
   });
 
+  it("promises the switch only after a SUCCESSFUL deployment, with or without a redeploy in this call", () => {
+    for (const redeploy of [true, false]) {
+      const { unmount } = renderWithProviders(
+        <RequestPreview
+          preview={cascade({
+            resourceMappings: [
+              {
+                oldUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=1`,
+                newUri: `eddi://ai.labs.llm/llmstore/llms/${LLM}?version=2`,
+              },
+            ],
+            redeploy,
+            compatible: true,
+          })}
+          pinned
+          callId="c1"
+        />,
+      );
+      expect(screen.getByTestId("cascade-compatible-c1")).toHaveTextContent("after it is deployed successfully");
+      unmount();
+    }
+  });
+
   it("states when it will NOT redeploy", () => {
     renderWithProviders(
       <RequestPreview

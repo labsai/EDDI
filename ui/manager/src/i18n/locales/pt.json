@@ -5049,7 +5049,7 @@
         "heading": "Alterações de recursos aplicadas ao agente {{agentId}} (a partir da versão {{version}})",
         "redeploy": "Será reimplantado em {{environment}} e aguardará o resultado. A versão substituída continua implantada.",
         "noRedeploy": "Não será reimplantado: a nova versão do agente é gravada, mas só entra em produção depois de implantada.",
-        "compatible": "Marcada como compatível: as conversas em andamento passam para a nova versão no próximo turno.",
+        "compatible": "Marcada como compatível: as conversas em andamento passam para a nova versão no próximo turno, depois que ela for implantada com sucesso.",
         "breaking": "Marcada como alteração incompatível: as conversas em andamento permanecem na versão atual."
       },
       "blockedSelfTarget": "Um agente não pode alterar a sua própria definição, e este pedido visa o próprio agente do operador ({{agentId}}). Enquanto estiver presente, todo o lote não pode ser aprovado — rejeite-o e faça esta alteração a partir da página desse agente.",

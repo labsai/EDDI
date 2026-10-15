@@ -4995,7 +4995,7 @@
         "heading": "Ressourcenänderungen für Agent {{agentId}} (ab Version {{version}})",
         "redeploy": "Wird in {{environment}} neu bereitgestellt; es wird auf das Ergebnis gewartet. Die ersetzte Version bleibt bereitgestellt.",
         "noRedeploy": "Wird nicht neu bereitgestellt — die neue Agent-Version wird gespeichert, ist aber erst nach der Bereitstellung live.",
-        "compatible": "Als kompatibel markiert: laufende Konversationen wechseln bei ihrem nächsten Zug zur neuen Version.",
+        "compatible": "Als kompatibel markiert: laufende Konversationen wechseln bei ihrem nächsten Zug zur neuen Version, sobald sie erfolgreich bereitgestellt wurde.",
         "breaking": "Als inkompatible Änderung markiert: laufende Konversationen bleiben auf ihrer aktuellen Version."
       },
       "blockedSelfTarget": "Ein Agent darf seine eigene Definition nicht ändern, und diese Anfrage betrifft den eigenen Agenten des Operators ({{agentId}}). Solange sie enthalten ist, kann der gesamte Stapel nicht genehmigt werden — lehnen Sie ab und nehmen Sie diese Änderung auf der Seite dieses Agenten vor.",

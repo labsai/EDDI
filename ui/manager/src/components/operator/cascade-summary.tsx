@@ -62,7 +62,7 @@ export function CascadeSummary({ preview, callId }: { preview: ResolvedRequestPr
         {cascade.compatible
           ? t(
               "operator.approval.cascade.compatible",
-              "Marked compatible: conversations already running switch to the new version on their next turn.",
+              "Marked compatible: conversations already running switch to the new version on their next turn after it is deployed successfully.",
             )
           : t(
               "operator.approval.cascade.breaking",

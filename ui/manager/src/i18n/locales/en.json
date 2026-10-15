@@ -4995,7 +4995,7 @@
         "heading": "Resource changes wired into agent {{agentId}} (from version {{version}})",
         "redeploy": "Will redeploy to {{environment}} and wait for the result. The version it replaces stays deployed.",
         "noRedeploy": "Will not redeploy — the new agent version is written but not live until it is deployed.",
-        "compatible": "Marked compatible: conversations already running switch to the new version on their next turn.",
+        "compatible": "Marked compatible: conversations already running switch to the new version on their next turn after it is deployed successfully.",
         "breaking": "Marked as a breaking change: conversations already running stay on their current version."
       },
       "blockedSelfTarget": "An agent may not modify its own definition, and this request targets the operator's own agent ({{agentId}}). Approving is unavailable for the whole batch while it is present — reject, and make this change from that agent's own page.",

@@ -673,7 +673,7 @@ class McpAdminToolsBranchCoverageTest {
             assertEquals(false, result.get("redeployed"));
             assertEquals("ERROR", result.get("deploymentStatus"));
             assertEquals("Deployment failed. Check server logs for details.", result.get("deployError"));
-            assertEquals(false, result.get("previousVersionStillDeployed"));
+            assertEquals(true, result.get("previousVersionStillDeployed"), "a failed deploy retires nothing: the previous version still serves");
         }
 
         @Test
