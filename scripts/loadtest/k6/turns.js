@@ -34,6 +34,9 @@ const turns409 = new Counter('turns_409');
 const turns5xx = new Counter('turns_5xx_other');
 const turnsOther = new Counter('turns_other');
 const turnsNoResponse = new Counter('turns_no_response');
+// HTTP 200 whose snapshot carries a structured TurnError: the pipeline failed and the client got a
+// fallback, so it is neither a successful turn nor part of its latency.
+const turnsAppError = new Counter('turns_app_error');
 const startFailed = new Counter('start_failed');
 
 function executor() {
@@ -105,8 +108,18 @@ export default function (data) {
   });
   const s = res.status;
   if (s === 200) {
-    turnsOk.add(1);
-    turnDuration.add(res.timings.duration);
+    let error = null;
+    try {
+      error = res.json('error');
+    } catch (e) {
+      error = 'unparsable response';
+    }
+    if (error) {
+      turnsAppError.add(1);
+    } else {
+      turnsOk.add(1);
+      turnDuration.add(res.timings.duration);
+    }
   } else if (s === 503) turns503.add(1);
   else if (s === 429) turns429.add(1);
   else if (s === 408) turns408.add(1);

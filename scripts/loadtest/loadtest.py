@@ -164,6 +164,7 @@ def scrape():
     if s != 200:
         return {}
     out = {}
+    unparsable = 0
     for line in body.splitlines():
         if not line or line.startswith("#"):
             continue
@@ -171,8 +172,8 @@ def scrape():
         if m:
             try:
                 out[m.group(1) + (m.group(2) or "")] = float(m.group(3))
-            except ValueError:
-                pass
+            except ValueError:  # a value Prometheus text allows but float() does not; not a meter we read
+                unparsable += 1
     return out
 
 
@@ -235,10 +236,13 @@ def cmd_run(args, label=None):
         raise SystemExit("no agent — run `up` first")
     label = label or args.label
     s, _, b = http("POST", WIREMOCK + "/__admin/settings", {"fixedDelay": args.delay_ms})
-    if s >= 300:
+    if s == 0 or s >= 300:  # 0: WireMock not reachable
         raise SystemExit(f"could not set the mock delay: {s} {b}")
     name = f"{label}-{args.scenario}-{args.vus}vu-{args.delay_ms}ms"
     os.makedirs(RESULTS, exist_ok=True)
+    summary_path = os.path.join(RESULTS, f"{name}.k6.json")
+    if os.path.exists(summary_path):
+        os.remove(summary_path)  # a summary left by an earlier run must never stand in for this one
     m_before, db_before = scrape(), mongo_snapshot()
     sampler = Sampler()
     sampler.start()
@@ -252,11 +256,13 @@ def cmd_run(args, label=None):
     sampler.join(5)
     time.sleep(2)  # let the last turns' persistence settle before counting Mongo ops
     m_after, db_after = scrape(), mongo_snapshot()
+    if r.returncode != 0:
+        raise SystemExit(f"k6 exited {r.returncode}; no result written for {name}")
     try:
-        with open(os.path.join(RESULTS, f"{name}.k6.json"), encoding="utf-8") as f:
+        with open(summary_path, encoding="utf-8") as f:
             summary = json.load(f)
-    except (OSError, ValueError):
-        summary = {}
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"k6 left no readable summary for {name} ({e}); no result written")
     ok = metric(summary, "turns_ok", "count") or 0
     mongo = mongo_diff(db_before, db_after)
     result = {
@@ -266,7 +272,7 @@ def cmd_run(args, label=None):
         "latency_ms": {k: metric(summary, "turn_duration", k) for k in ["med", "p(90)", "p(95)", "p(99)", "max"]},
         "errors": {k: metric(summary, k, "count") or 0 for k in
                    ["turns_503", "turns_429", "turns_408", "turns_409", "turns_5xx_other", "turns_other", "turns_no_response",
-                    "start_failed"]},
+                    "turns_app_error", "start_failed"]},
         "mongo": mongo,
         "mongo_ops_per_turn": {k: round(v / ok, 2) for k, v in mongo["opcounters"].items()} if ok else {},
         "peaks": sampler.peaks,
@@ -300,7 +306,7 @@ def report(results, path, args):
              f"think time {args.think_ms} ms. Image `{load_state().get('image') or 'labsai/eddi:6.5.0'}`"
              f"{' with the local build mounted' if load_state().get('app') else ''}; commit `{git_head()}`.", "",
              "| Concurrent conv. | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | 503 | 408 | 5xx other | no response | "
-             "Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | Mongo ops/turn (q/u/i/cmd) |",
+             + "Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | Mongo ops/turn (q/u/i/cmd) |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         e, o, lat = r["errors"], r["mongo_ops_per_turn"], r["latency_ms"]
@@ -350,7 +356,7 @@ def main():
         p = sub.add_parser(name)
         p.add_argument("--scenario", default="steady", choices=["steady", "burst", "same-conversation", "long-conversation"])
         p.add_argument("--vus", default="50" if name == "run" else "50,200,500")
-        p.add_argument("--turns", type=int, default=10)
+        p.add_argument("--turns", type=int, default=None, help="turns per conversation (default 10; long-conversation 200)")
         p.add_argument("--delay-ms", type=int, default=3000)
         p.add_argument("--think-ms", type=int, default=0)
         p.add_argument("--ramp", default="30s")
@@ -358,10 +364,12 @@ def main():
         p.add_argument("--label", default="run")
         p.add_argument("--agent", help="agent id (default: the one `up` created)")
     args = ap.parse_args()
+    if args.cmd in ("run", "matrix") and args.turns is None:
+        args.turns = 200 if args.scenario == "long-conversation" else 10
     if args.cmd == "run":
         args.vus = int(args.vus)
     {"up": cmd_up, "down": cmd_down, "run": cmd_run, "matrix": cmd_matrix}[args.cmd](args)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
