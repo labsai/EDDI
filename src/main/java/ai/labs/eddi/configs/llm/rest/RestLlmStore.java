@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -34,6 +35,11 @@ public class RestLlmStore implements IRestLlmStore {
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<LlmConfiguration> restVersionInfo;
+
+    // Field-injected, like the other optional collaborators, so the direct
+    // constructions in tests keep compiling.
+    @Inject
+    ConfigJsonPatcher jsonPatcher;
 
     @Inject
     public RestLlmStore(ILlmStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -66,6 +72,15 @@ public class RestLlmStore implements IRestLlmStore {
     public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.update(id, version, llmConfiguration);
+    }
+
+    @Override
+    public Response patchLlm(String id, Integer version, String jsonPatch) {
+        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, patched -> {
+            // The same pre-write check updateLlm runs.
+            warnOnPlaintextSecrets(patched);
+            return null;
+        });
     }
 
     @Override

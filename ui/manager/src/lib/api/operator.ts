@@ -283,6 +283,7 @@ export function findMissingEndpoints(
  */
 const SUPPORTED_BODY_MEDIA_TYPES: readonly string[] = [
   "application/json",
+  "application/json-patch+json",
   "text/plain",
 ];
 

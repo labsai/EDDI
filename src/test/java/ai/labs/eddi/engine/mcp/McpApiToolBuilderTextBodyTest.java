@@ -100,6 +100,29 @@ class McpApiToolBuilderTextBodyTest {
     }
 
     @Test
+    @DisplayName("a required json-patch body is supported (not reported), and plain JSON wins when both are declared")
+    void jsonPatchIsADispatchCase() {
+        String patchOnly = spec("""
+                "/x/{id}":{"patch":{"operationId":"patchIt","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+                  "requestBody":{"required":true,"content":{"application/json-patch+json":{"schema":{"type":"array","items":{"type":"object"}}}}},
+                  "responses":{"200":{"description":"ok"}}}}
+                """);
+        var result = McpApiToolBuilder.parseAndBuild(patchOnly, null, null, null);
+        ApiCall call = onlyCall(result);
+        assertTrue(result.unusableEndpoints().isEmpty(), result.unusableEndpoints().toString());
+        assertEquals("application/json-patch+json", call.getRequest().getContentType());
+        assertTrue(call.getParameters().get("requestBody").contains("RFC 6902"), call.getParameters().toString());
+
+        String both = spec("""
+                "/x":{"patch":{"operationId":"both","requestBody":{"content":{
+                  "application/json-patch+json":{"schema":{"type":"array"}},
+                  "application/json":{"schema":{"type":"object"}}}},
+                  "responses":{"200":{"description":"ok"}}}}
+                """);
+        assertEquals("application/json", onlyCall(McpApiToolBuilder.parseAndBuild(both, null, null, null)).getRequest().getContentType());
+    }
+
+    @Test
     @DisplayName("a name collision still renames the text body variable instead of dropping it")
     void textBodyCollidingWithPathParameter() {
         String spec = spec("""

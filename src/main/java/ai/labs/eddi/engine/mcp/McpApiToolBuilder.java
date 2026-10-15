@@ -587,10 +587,11 @@ public final class McpApiToolBuilder {
     /**
      * The request-body media types a generated tool can send. A new case here, and
      * in {@link #mapRequestBody}, is the whole change needed to support another
-     * type; anything absent is reported by {@link #findUnmappableInput}.
+     * type; anything absent is reported by {@link #findUnmappableInput}. Plain JSON
+     * is always preferred by {@link #selectSupportedBody}.
      */
     private static boolean isSupportedBodyType(String baseType) {
-        return JSON_MEDIA_TYPE.equals(baseType) || TEXT_MEDIA_TYPE.equals(baseType);
+        return JSON_MEDIA_TYPE.equals(baseType) || JSON_PATCH_MEDIA_TYPE.equals(baseType) || TEXT_MEDIA_TYPE.equals(baseType);
     }
 
     /** {@code "Text/Plain; charset=utf-8"} becomes {@code "text/plain"}. */
@@ -632,8 +633,16 @@ public final class McpApiToolBuilder {
             return null;
         }
         MediaType media = selected.getValue();
-        if (TEXT_MEDIA_TYPE.equals(baseMediaType(selected.getKey()))) {
+        String selectedType = baseMediaType(selected.getKey());
+        if (TEXT_MEDIA_TYPE.equals(selectedType)) {
             return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media));
+        }
+        // An RFC 6902 patch is declared as application/json-patch+json ONLY, and is
+        // chosen only when plain JSON is not declared (selectSupportedBody prefers
+        // it). It is the same single-variable JSON body, with a description that
+        // says what the array IS and sent under its own content type.
+        if (JSON_PATCH_MEDIA_TYPE.equals(selectedType)) {
+            return new BodyMapping(JSON_PATCH_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI), true));
         }
         // One level of $ref resolution, HERE and deliberately not resolveFully():
         // the parser leaves component references unresolved, so a body
@@ -959,6 +968,9 @@ public final class McpApiToolBuilder {
     /** Name of the whole-body variable used when the schema has no properties. */
     static final String WHOLE_BODY_VARIABLE = "requestBody";
 
+    /** The media type of an RFC 6902 JSON Patch request body. */
+    static final String JSON_PATCH_MEDIA_TYPE = "application/json-patch+json";
+
     /**
      * Resolves a top-level {@code $ref: #/components/schemas/X} to its component
      * schema, one level deep. Anything else — no ref, unknown name, no components —
@@ -980,6 +992,20 @@ public final class McpApiToolBuilder {
         }
         Schema<?> resolved = openAPI.getComponents().getSchemas().get(ref.substring(prefix.length()));
         return resolved != null ? resolved : schema;
+    }
+
+    private static BodyTemplate buildBodyTemplate(Schema<?> schema, boolean jsonPatch) {
+        BodyTemplate template = buildBodyTemplate(schema);
+        if (!jsonPatch) {
+            return template;
+        }
+        // Say what the array IS: the schema alone ("a JSON array") does not tell the
+        // model it is a diff, and a model that does not know sends the whole document.
+        var described = new LinkedHashMap<String, String>();
+        template.variables().forEach((name, description) -> described.put(name, description
+                + " An RFC 6902 JSON Patch: operations with op (add, replace, remove or test), path (a JSON Pointer) and, for add/replace/test,"
+                + " value. Send only what changes, never the document you read."));
+        return new BodyTemplate(template.template(), described);
     }
 
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {

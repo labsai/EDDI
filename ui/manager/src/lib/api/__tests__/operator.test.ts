@@ -191,6 +191,20 @@ describe("findUnusableEndpoints — tools that could not send a required input",
     return { raw: { paths, components }, paths };
   }
 
+  it("accepts a JSON Patch body, so the PATCH endpoints stay allow-listed", () => {
+    const spec = specOf({
+      "/p/{id}": {
+        patch: {
+          requestBody: {
+            required: true,
+            content: { "application/json-patch+json": { schema: { type: "array" } } },
+          },
+        },
+      },
+    });
+    expect(findUnusableEndpoints(spec, ["PATCH /p/{id}"])).toEqual([]);
+  });
+
   it("accepts the body types the generator can send (json, text/plain, with parameters)", () => {
     const spec = specOf({
       "/a": { put: { requestBody: { required: true, ...text } } },
