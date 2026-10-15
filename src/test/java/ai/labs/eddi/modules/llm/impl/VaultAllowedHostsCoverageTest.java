@@ -105,6 +105,17 @@ class VaultAllowedHostsCoverageTest {
         }
 
         @Test
+        @DisplayName("an allowed baseUrl does not vouch for an off-list endpoint the Azure builder actually reads")
+        void everyEndpointKeyChecked() {
+            var config = config("azure-openai",
+                    Map.of("apiKey", REF, "baseUrl", "https://" + ALLOWED, "endpoint", "https://azure.attacker.example/openai"));
+
+            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertTrue(e.getMessage().contains("azure.attacker.example"), e.getMessage());
+            verify(secretResolver, never()).resolveSecrets(any());
+        }
+
+        @Test
         @DisplayName("an Azure endpoint on the list reaches resolution")
         void endpointOnListAllowed() {
             var config = config("azure-openai", Map.of("apiKey", REF, "endpoint", "https://" + ALLOWED + "/openai"));

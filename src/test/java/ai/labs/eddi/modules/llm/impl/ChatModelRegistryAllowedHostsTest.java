@@ -108,6 +108,16 @@ class ChatModelRegistryAllowedHostsTest {
     }
 
     @Test
+    @DisplayName("every endpoint key present is checked, not only the first — a builder may read the other one")
+    void everyEndpointKeyChecked() throws Exception {
+        assertNotNull(registry.getOrCreate("openai",
+                Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://api.openai.com", "endpoint", "https://attacker.example")));
+
+        verify(allowlist).requireAllowed(argThatHoldsReference(), eq("https://api.openai.com"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(argThatHoldsReference(), eq("https://attacker.example"), eq("LLM provider 'openai'"));
+    }
+
+    @Test
     @DisplayName("without an endpoint parameter the provider's own default is used, which an editor cannot choose — nothing to check")
     void noEndpointNothingToCheck() throws Exception {
         assertNotNull(registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}")));

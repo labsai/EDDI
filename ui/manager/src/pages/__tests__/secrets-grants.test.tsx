@@ -764,6 +764,10 @@ describe("SecretsPage — allowed destinations (allowedHosts)", () => {
     await openEditor(user, "openai-api-key");
 
     await user.type(screen.getByTestId("grant-hosts-input-input"), "API.openai.com:443{Enter}");
+    // A first host restricts a secret that went anywhere: Save waits for the tick.
+    expect(screen.getByTestId("grant-hosts-tightened")).toBeInTheDocument();
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
     await user.click(screen.getByTestId("grant-save"));
 
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -777,6 +781,7 @@ describe("SecretsPage — allowed destinations (allowedHosts)", () => {
     await openEditor(user, "openai-api-key");
 
     await user.type(screen.getByTestId("grant-hosts-input-input"), "api.openai.com");
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
     await user.click(screen.getByTestId("grant-save"));
 
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -797,6 +802,34 @@ describe("SecretsPage — allowed destinations (allowedHosts)", () => {
 
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]!.allowedHosts).toEqual([]);
+  });
+
+  it("asks again when the list changes after the tick, and not at all for a widening", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+
+    // Adding a host to an existing list only widens it.
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "eu.googleapis.com{Enter}");
+    expect(screen.queryByTestId("grant-hosts-tightened")).not.toBeInTheDocument();
+
+    // Dropping the stored host narrows it: warn, and a tick given for one list
+    // does not carry over to another.
+    await user.click(
+      screen.getByTestId("grant-hosts-input-remove-generativelanguage.googleapis.com"),
+    );
+    expect(screen.getByTestId("grant-hosts-tightened")).toBeInTheDocument();
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    expect(screen.getByTestId("grant-save")).toBeEnabled();
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "other.example{Enter}");
+    expect(screen.getByTestId("grant-hosts-acknowledge")).not.toBeChecked();
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    await user.click(screen.getByTestId("grant-save"));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.allowedHosts).toEqual(["eu.googleapis.com", "other.example"]);
   });
 
   it("refuses a URL as it is typed and does not save it", async () => {

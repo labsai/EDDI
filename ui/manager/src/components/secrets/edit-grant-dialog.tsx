@@ -114,6 +114,7 @@ function GrantEditor({
   const [pendingHost, setPendingHost] = useState("");
   const [hostProblem, setHostProblem] = useState<AllowedHostProblem | null>(null);
   const hostErrorId = useId();
+  const [hostsAcknowledgedFor, setHostsAcknowledgedFor] = useState<string | null>(null);
   /* What the operator acknowledged, not merely that they did: the impact it was
    * given for. A different answer — another agent turns up, or the check fails —
    * is a different decision and needs its own tick. */
@@ -199,11 +200,32 @@ function GrantEditor({
 
   const label = (agentId: string) => nameById.get(agentId) ?? agentId;
 
+  /* The list as it would be saved: the chips plus a valid host still in the box. */
+  const draftHosts = useMemo(
+    () =>
+      pendingHost.trim() && validateAllowedHost(pendingHost) === null
+        ? commitPending(hosts, pendingHost.toLowerCase())
+        : hosts,
+    [hosts, pendingHost],
+  );
+  /* Adding a first host or dropping a stored one can stop a deployed agent whose
+   * configuration sends the key to a host no longer on the list — refused at
+   * use, not at deployment, so the agent-impact dry run above cannot see it.
+   * Widening an existing list, or lifting it, cannot break anything. The tick is
+   * keyed on the list it was given for, like the agent acknowledgement. */
+  const hostsTightened =
+    draftHosts.length > 0 &&
+    (storedHosts.length === 0 ||
+      storedHosts.some((host) => !draftHosts.includes(host)));
+  const hostsKey = draftHosts.join(",");
+  const hostsAcknowledged = hostsAcknowledgedFor === hostsKey;
+
   const canSave =
     !emptyList &&
     !updateMut.isPending &&
     !impactPending &&
-    (!needsAcknowledgement || acknowledged);
+    (!needsAcknowledgement || acknowledged) &&
+    (!hostsTightened || hostsAcknowledged);
 
   const handleSave = useCallback(() => {
     if (emptyList) return;
@@ -249,8 +271,8 @@ function GrantEditor({
 
   return (
     <div className="space-y-4 p-5">
-      {/* The reassurance that makes this dialog safe to use: no value is
-            involved, so nothing here can break a working secret. */}
+      {/* No value is involved, so the key itself cannot be broken here. What it
+            may reach can be — the warnings below say when. */}
       <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
         <Info
           className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
@@ -259,7 +281,7 @@ function GrantEditor({
         <p className="text-xs text-muted-foreground">
           {t(
             "secrets.grantValueUntouched",
-            "The secret value is not changed and does not need to be re-entered. Only who may use it changes.",
+            "The secret value is not changed and does not need to be re-entered. Only who may use it, and where it may be sent, changes.",
           )}
         </p>
       </div>
@@ -466,6 +488,39 @@ function GrantEditor({
             ? t("secrets.allowedHostsAny", "No restriction: an agent allowed to use this secret may send it to any host. Add hosts to refuse every other destination.")
             : t("secrets.allowedHostsHint", "A request, model, knowledge base or MCP/A2A server that would send this secret to any other host is refused. A host without a port matches every port.")}
         </p>
+        {hostsTightened && (
+          <div
+            className="space-y-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2"
+            data-testid="grant-hosts-tightened"
+          >
+            <p className="flex items-start gap-2 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                {t(
+                  "secrets.allowedHostsTightened",
+                  "This restricts where the secret may be sent. A deployed agent, knowledge base or MCP/A2A configuration that sends it to any other host stops working at its next call — this is not checked in advance.",
+                )}
+              </span>
+            </p>
+            <label className="flex items-start gap-2 ps-5 text-xs text-warning">
+              <input
+                type="checkbox"
+                checked={hostsAcknowledged}
+                onChange={(e) =>
+                  setHostsAcknowledgedFor(e.target.checked ? hostsKey : null)
+                }
+                data-testid="grant-hosts-acknowledge"
+                className="mt-0.5"
+              />
+              <span>
+                {t(
+                  "secrets.allowedHostsAcknowledge",
+                  "I have checked that everything using this secret sends it only to these hosts.",
+                )}
+              </span>
+            </label>
+          </div>
+        )}
       </div>
 
       {/* Always mounted: a live region that appears together with its text is

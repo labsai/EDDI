@@ -215,11 +215,13 @@ public class EmbeddingModelFactory {
         if (vaultHostAllowlist == null) {
             return;
         }
+        // Every key present, not the first: which one a provider reads is the
+        // builder's business (Azure reads endpoint, OpenAI baseUrl), and a config
+        // carrying both must not pass on the one that is ignored.
         for (String key : ENDPOINT_KEYS) {
             String endpoint = params.get(key);
             if (!isBlank(endpoint)) {
                 vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
-                return;
             }
         }
     }

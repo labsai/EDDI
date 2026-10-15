@@ -213,11 +213,12 @@ public class ChatModelRegistry {
      *            references still in place
      */
     private void requireSecretsAllowedAt(String type, Map<String, String> params) {
+        // Every key present, not the first: which one a builder reads differs by
+        // provider, and a config carrying two must not pass on the ignored one.
         for (String key : ENDPOINT_KEYS) {
             String endpoint = params.get(key);
             if (endpoint != null && !endpoint.isBlank()) {
                 vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
-                return;
             }
         }
     }
