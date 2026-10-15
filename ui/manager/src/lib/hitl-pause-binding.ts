@@ -73,6 +73,49 @@ function sameInstant(a: string, b: string): boolean {
   return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
 }
 
+/**
+ * Whether an approval-status response describes THE pause a surface is showing.
+ *
+ * The chat stream's `done` event announces a pause before the paused memory is
+ * persisted, and `approval-status` reads the persisted copy — so the first read
+ * after `done` can be "not paused yet" (`state` not AWAITING_HUMAN, `pauseId`
+ * `""`, `pauseDetails` null) or still describe an earlier pause. A card built
+ * from such a response has no calls to show, and with nothing to object to
+ * every guard on it evaluates to "fine". This is the one place that says
+ * whether a response is good enough to decide from; everything that derives
+ * "details pending" or "details missing" goes through it.
+ *
+ * - `state` must be AWAITING_HUMAN.
+ * - `pauseId` present and non-blank: it is the pause start in epoch
+ *   milliseconds, so with an `expectedPausedAt` (the ISO `hitlPausedAt` the
+ *   surface was told about) the two must name the same instant. Without one a
+ *   non-blank id is enough.
+ * - `pauseId` absent (a backend that predates it): fall back to `pausedAt`,
+ *   which must be non-empty and, given an `expectedPausedAt`, the same instant.
+ * - `pauseId` blank (`""`): the backend's "not paused" marker. Never a pause.
+ *
+ * Strict by design: a response that cannot be matched is a response that does
+ * not describe the pause. The cost of a false negative is a Retry click; the
+ * cost of a false positive is approving a call nobody saw.
+ */
+export function describesPause(
+  status: ApprovalStatusSummary | null | undefined,
+  expectedPausedAt?: string | null,
+): boolean {
+  if (!status || status.state !== "AWAITING_HUMAN") return false;
+  const expected = expectedPausedAt?.trim() || null;
+  if (status.pauseId !== undefined && status.pauseId !== null) {
+    const id = usablePauseId(status.pauseId);
+    if (!id) return false;
+    if (!expected) return true;
+    const expectedMs = Date.parse(expected);
+    return Number.isFinite(expectedMs) && expectedMs === Number(id);
+  }
+  const pausedAt = status.pausedAt?.trim();
+  if (!pausedAt) return false;
+  return expected ? sameInstant(pausedAt, expected) : true;
+}
+
 /** A pause as read just now: whether the subject is paused at all, and which pause. */
 export interface CurrentPause extends ShownPause {
   paused: boolean;

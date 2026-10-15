@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import {
   PropertyInstructionsEditor,
@@ -206,6 +207,7 @@ function TaskEditor({
   actionSuggestions?: readonly string[];
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const uid = useId();
   const [expanded, setExpanded] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
@@ -655,6 +657,7 @@ function TaskEditor({
                                 credential, and the backend refuses a
                                 connection reference in every model parameter. */}
                             <SecretKeyPicker
+                              agentId={owningAgentId}
                               value={v}
                               onChange={(val) => updateParam(k, val)}
                               readOnly={readOnly}
@@ -1120,6 +1123,7 @@ function TaskEditor({
                               value, and withheld from the agent-card fetch on
                               a per-user or caller-supplied binding. */}
                           <SecretKeyPicker
+                            agentId={owningAgentId}
                             value={agent.apiKey ?? ""}
                             onChange={(v) => {
                               const agents = [...(task.a2aAgents ?? [])];

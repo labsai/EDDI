@@ -17,7 +17,13 @@ import {
 import { t, getLocale } from "@/i18n";
 
 interface PausedCardProps {
-  status: ApprovalStatus;
+  /**
+   * What approval-status says about the pause, or null while it is not known yet.
+   * The stream announces a pause before it is stored, so the card is shown at
+   * once from the stream's own news (title, "checking", Cancel available) and
+   * enriched when the status arrives.
+   */
+  status: ApprovalStatus | null;
   onCancel: () => void;
   cancelDisabled?: boolean;
 }
@@ -48,7 +54,7 @@ function describePolicy(policy: string): string {
 }
 
 export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps) {
-  const deadline = approvalDeadline(status);
+  const deadline = status ? approvalDeadline(status) : null;
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -57,21 +63,27 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
     return () => clearInterval(id);
   }, [deadline]);
 
-  const tools = gatedToolNames(status);
+  const tools = status ? gatedToolNames(status) : [];
+  const policy = describePolicy(status?.timeoutPolicy ?? "");
 
   return (
     // No live region of its own: the card lands inside the transcript's log,
     // which announces what is added, and a nested region read the card twice
     // and again on every countdown tick.
-    <div className="paused-card" data-testid="paused-card">
-      <div className="paused-card__head">
-        {/* A raised hand: the same "waiting on a human" icon the Manager uses
-            for a paused conversation, so both UIs say it the same way. */}
-        <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
-        <span className="paused-card__title">{t("paused.title")}</span>
+    <div className={status ? "paused-card" : "paused-card paused-card--pending"} data-testid="paused-card">
+      <div data-testid={status ? undefined : "paused-pending"}>
+        <div className="paused-card__head">
+          {/* A raised hand: the same "waiting on a human" icon the Manager uses
+              for a paused conversation, so both UIs say it the same way. */}
+          <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
+          <span className="paused-card__title">{t("paused.title")}</span>
+        </div>
+        {!status && <p className="paused-card__text">{t("paused.pending")}</p>}
       </div>
 
-      <p className="paused-card__text">{pauseHeadline(status)}</p>
+      <p className="paused-card__text" data-testid="paused-headline">
+        {status ? pauseHeadline(status) : t("paused.headline")}
+      </p>
 
       {tools.length > 0 && (
         <ul className="paused-card__tools">
@@ -93,13 +105,13 @@ export function PausedCard({ status, onCancel, cancelDisabled }: PausedCardProps
             data-testid="paused-deadline"
           >
             {t("paused.deadline", {
-              policy: describePolicy(status.timeoutPolicy),
+              policy,
               remaining: formatRemaining(deadline - now),
             })}
           </p>
           <p className="chat-sr-only" data-testid="paused-deadline-sr">
             {t("paused.deadlineAt", {
-              policy: describePolicy(status.timeoutPolicy),
+              policy,
               time: new Date(deadline).toLocaleTimeString(getLocale(), {
                 hour: "2-digit",
                 minute: "2-digit",

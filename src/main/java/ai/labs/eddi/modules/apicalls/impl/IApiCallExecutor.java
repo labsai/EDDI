@@ -55,6 +55,13 @@ public interface IApiCallExecutor {
      *
      * @return the resolved request with every credential redacted — never the live
      *         header values
+     * @throws ConfigReferenceRefusedException
+     *             (unchecked) when the request carries a credential reference that
+     *             came from conversation data — {@code execute} would refuse the
+     *             same request, so the approval gate refuses the call before asking
+     *             a human. Thrown only for a call whose resolution is what
+     *             {@code execute} builds; any other failure is a
+     *             {@link LifecycleException}.
      */
     ResolvedRequest resolve(ApiCall httpCall, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
             throws LifecycleException;

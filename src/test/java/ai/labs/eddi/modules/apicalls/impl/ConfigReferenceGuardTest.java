@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,6 +69,26 @@ class ConfigReferenceGuardTest {
         var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences(
                 "{\"q\":\"{memory.current.input}\"}", "{\"q\":\"${vault:other-agents-key}\"}", "a request body", DATA, VAULTED));
         assertTrue(e.getMessage().startsWith("a request body contains the reference ${vault:other-agents-key}"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("the refusal is its own type and says what to do instead, generically — it names no endpoint")
+    void refusalSaysWhatToDoInstead() {
+        var e = assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("{x}",
+                "${vault:other-agents-key}", "a request body", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("NAME"), e.getMessage());
+        assertTrue(e.getMessage().contains("partial update"), e.getMessage());
+        assertTrue(e.getMessage().contains("whoever typed it"), e.getMessage());
+        assertFalse(e.getMessage().contains("setup"), "the guard must not learn about a specific endpoint: " + e.getMessage());
+    }
+
+    @Test
+    @DisplayName("LLM parameters are refused with the same type and guidance")
+    void parameterRefusalIsTheSameType() {
+        assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("apiKey", "{context.k}"),
+                Map.of("apiKey", "${vault:x}"), Set.of(), "LLM", DATA, VAULTED));
+        assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("host", "{context.h}"),
+                Map.of("host", "${vars:x}"), Set.of(), "LLM", DATA, VAULTED));
     }
 
     @Test
@@ -249,5 +270,36 @@ class ConfigReferenceGuardTest {
                 () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("modelName", "${vars:outer${vars:model}"),
                         Map.of("modelName", "${vars:model}"), Set.of(), "LLM", DATA, VAULTED));
         assertTrue(e.getMessage().contains("${vars:model}"), e.getMessage());
+    }
+
+    /**
+     * The operator edits stored configurations through generated tools whose body
+     * is the single template {@code {requestBody}}, filled by the model. A
+     * reference in that body was never written by the configuration, so it is "from
+     * data" — and that is the control that keeps a PATCH from INTRODUCING a
+     * credential reference.
+     */
+    @Test
+    @DisplayName("a JSON Patch body that introduces a reference is refused (generated tool: body template is {requestBody})")
+    void patchIntroducingAReferenceIsRefused() {
+        String patch = "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/apiKey\",\"value\":\"${vault:someone-elses-key}\"}]";
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", patch, "a request body", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("${vault:someone-elses-key}"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a JSON Patch body with no reference passes — an edit that never mentions a credential needs no exemption")
+    void patchWithoutReferencesPasses() {
+        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/knowledgeBases\",\"value\":[{\"name\":\"eddi-docs\"}]}]";
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", patch, "a request body", DATA, VAULTED));
+    }
+
+    @Test
+    @DisplayName("echoing a document that holds a reference is still refused — the guard has no 'unchanged from the stored document' exemption")
+    void echoedDocumentIsStillRefused() {
+        String echoed = "{\"tasks\":[{\"parameters\":{\"apiKey\":\"${vault:anthropic-api-key}\"}}]}";
+        assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", echoed, "a request body", DATA, VAULTED));
     }
 }

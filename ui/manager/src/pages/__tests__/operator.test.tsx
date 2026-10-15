@@ -329,6 +329,96 @@ describe("OperatorPage", () => {
       expect(banner).toHaveTextContent(/auto.?reject/i);
     });
 
+    describe("when approval-status has not caught up with the stream", () => {
+      const PAUSED_AT = "2026-08-03T10:00:00Z";
+      const setupCall = {
+        callId: "call-1",
+        toolName: "setupAgent",
+        source: "http",
+        arguments: JSON.stringify({ requestBody: JSON.stringify({ agentName: "Support" }) }),
+        argsTruncated: false,
+        gateReason: "http.post:*",
+        requestPinned: false,
+        requestPreview: null,
+      };
+      const notYetStored = {
+        conversationId: "conv-1",
+        state: "READY",
+        pausedAt: "",
+        pauseReason: "",
+        pauseId: "",
+        pauseDetails: null,
+      };
+      const stored = (pauseId: string) => ({
+        conversationId: "conv-1",
+        state: "AWAITING_HUMAN",
+        pausedAt: PAUSED_AT,
+        pauseReason: "Tool approval required",
+        pauseId,
+        pauseDetails: { type: "TOOL_CALL", calls: [setupCall], executedUngatedCalls: [], outcomeUnknown: [] },
+      });
+
+      /** The pause is announced (store says AWAITING_HUMAN); approval-status answers from `responses`, last one repeating. */
+      function serveRace(responses: unknown[]) {
+        let reads = 0;
+        server.use(
+          http.post("*/agents/op-1/start", () => HttpResponse.json({ location: "/agents/conv-1" })),
+          http.post("*/agents/conv-1/stream", () => new HttpResponse(null, { status: 409 })),
+          http.get("*/conversationstore/conversations/simple/conv-1", () =>
+            HttpResponse.json({
+              conversationState: "AWAITING_HUMAN",
+              hitlPausedAt: PAUSED_AT,
+              conversationOutputs: [],
+            }),
+          ),
+          http.get("*/agents/conv-1/approval-status", () =>
+            HttpResponse.json(responses[Math.min(reads++, responses.length - 1)] as object),
+          ),
+        );
+        return () => reads;
+      }
+
+      it("holds Approve until the stored pause matches, then shows the tool layout", async () => {
+        serveConfig(activeConfig());
+        serveDeploymentStatus("READY");
+        // Two not-yet-stored reads: the pause key can arrive a render after the
+        // pause itself, which costs one read, so one would be gone before the
+        // assertions start.
+        const reads = serveRace([notYetStored, notYetStored, stored(String(Date.parse(PAUSED_AT)))]);
+
+        renderWithProviders(<OperatorPage />);
+        await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+        // The not-yet-stored first read: pending, and nothing approvable.
+        expect(await screen.findByTestId("approval-details-pending")).toBeInTheDocument();
+        expect(screen.getByTestId("approve-button")).toBeDisabled();
+
+        const banner = await screen.findByTestId("approval-banner");
+        await waitFor(() => expect(banner).toHaveAttribute("data-pause-type", "TOOL_CALL"), { timeout: 5000 });
+        expect(screen.getByTestId("tool-call-call-1")).toBeInTheDocument();
+        expect(screen.queryByTestId("approval-details-pending")).not.toBeInTheDocument();
+        // A lone call: no per-call buttons, and Approve is live once the details match.
+        expect(screen.queryByTestId("tool-approve-call-1")).not.toBeInTheDocument();
+        expect(screen.getByTestId("approve-button")).toBeEnabled();
+        // The nested requestBody reads as a document, not an escaped string.
+        expect(screen.getByTestId("tool-args-call-1").textContent).toContain('"agentName": "Support"');
+        expect(reads()).toBeGreaterThanOrEqual(3);
+      });
+
+      it("keeps Approve disabled for a response that names a different pause", async () => {
+        serveConfig(activeConfig());
+        serveDeploymentStatus("READY");
+        serveRace([stored(String(Date.parse(PAUSED_AT) - 60_000))]);
+
+        renderWithProviders(<OperatorPage />);
+        await userEvent.type(await screen.findByTestId("operator-input"), "create an agent{enter}");
+
+        expect(await screen.findByTestId("approval-details-pending")).toBeInTheDocument();
+        expect(screen.queryByTestId("tool-call-call-1")).not.toBeInTheDocument();
+        expect(screen.getByTestId("approve-button")).toBeDisabled();
+      });
+    });
+
     it("falls back to the client-side reconstruction when a call carries no preview", async () => {
       serveConfig(activeConfig());
       serveDeploymentStatus("READY");

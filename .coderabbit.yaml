@@ -1,0 +1,18 @@
+# CodeRabbit configuration. Settings here take precedence over the CodeRabbit UI.
+# Schema: https://docs.coderabbit.ai/reference/configuration
+language: en-US
+reviews:
+  # CHILL matches the setting reviews have used so far; switch to "assertive"
+  # to also get style-level nitpicks.
+  profile: chill
+  auto_review:
+    enabled: true
+    # Re-review every push, not just the first one.
+    auto_incremental_review: true
+    # Draft PRs are reviewed too.
+    drafts: true
+    # Review PRs into any branch, not only main. Stacked PRs (a PR based on
+    # another feature branch) were skipped with "Auto reviews are disabled on
+    # base/target branches other than the default branch".
+    base_branches:
+      - ".*"

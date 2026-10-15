@@ -1,4 +1,5 @@
-# NATS JetStream StatefulSet — durable messaging for multi-replica EDDI
+# NATS JetStream — three nodes routed into one cluster, for EDDI cluster mode.
+# R3 streams and buckets keep working while any one node is down.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -9,7 +10,11 @@ metadata:
     app.kubernetes.io/part-of: eddi
 spec:
   serviceName: nats
-  replicas: 1
+  replicas: 3
+  # Start all nodes at once: each waits for its routes, and an ordered start
+  # would hold node 1 until node 0 is Ready, which needs a quorum it cannot
+  # have alone.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app.kubernetes.io/name: nats
@@ -24,36 +29,82 @@ spec:
       # NATS never calls the Kubernetes API, so the pod does not mount the
       # service account token — nothing to steal for a process that gets in.
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: nats
+                    app.kubernetes.io/component: messaging
       containers:
         - name: nats
-          image: nats:2.10-alpine
-          command: ["nats-server", "--jetstream", "--store_dir=/data", "-m", "8222"]
+          image: nats:2.11-alpine
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          args:
+            - "--name=$(POD_NAME)"
+            - "--jetstream"
+            - "--store_dir=/data"
+            - "-m"
+            - "8222"
+            - "--cluster_name=eddi"
+            - "--cluster=nats://0.0.0.0:6222"
+            - "--routes=nats://nats-0.nats:6222,nats://nats-1.nats:6222,nats://nats-2.nats:6222"
           ports:
             - containerPort: 4222
               name: client
+            - containerPort: 6222
+              name: cluster
             - containerPort: 8222
               name: monitoring
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: nats-data
               mountPath: /data
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
+              memory: 128Mi
             limits:
               cpu: 500m
-              memory: 256Mi
-          livenessProbe:
+              memory: 512Mi
+          # Strict at start-up only. A rolling update restarts one NATS node at a time
+          # and must not touch the next until the restarted one has caught up its R3
+          # streams: readiness waits for that (js-server-only), and liveness only
+          # checks that JetStream is enabled, so a node that is still catching up is
+          # never killed for it.
+          startupProbe:
             httpGet:
               path: /healthz
               port: monitoring
-            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /healthz?js-enabled-only=true
+              port: monitoring
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /healthz?js-server-only=true
               port: monitoring
-            initialDelaySeconds: 3
             periodSeconds: 10
   volumeClaimTemplates:
     - metadata:

@@ -25,7 +25,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -158,6 +160,9 @@ class ConversationHitlService {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
         }
+        // Cluster mode: the turn may be running on another node (the lease holder) —
+        // ask that node to signal it. Always false on a single node.
+        boolean remoteSignalled = inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
@@ -197,7 +202,7 @@ class ConversationHitlService {
             }
             return IConversationService.CancelOutcome.CANCELLED;
         }
-        if (inFlightMemory != null) {
+        if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
             return IConversationService.CancelOutcome.CANCELLED;
@@ -596,8 +601,29 @@ class ConversationHitlService {
             // #4: guard the resume with the same watchdog the say path uses — a
             // hung LLM call or crashed executor must not leave the conversation
             // stuck IN_PROGRESS forever.
-            IDiscardableTask guardedResume = new IDiscardableTask() {
+            IDiscardableTask guardedResume = new ILeaseAwareTask() {
+                /** The cluster lease (cluster mode); null on a single node. */
+                private volatile LeaseHandle lease;
+
+                @Override
+                public void bindLease(LeaseHandle lease) {
+                    this.lease = lease;
+                }
+
                 public Void call() {
+                    LeaseHandle held = lease;
+                    if (held != null && held.fence() != null) {
+                        // Same fencing as a say turn: the resumed turn's write is refused if
+                        // another node took the conversation over, and losing the lease
+                        // cancels it at the next task boundary.
+                        memory.setFenceToken(held.fence());
+                        try {
+                            conversationMemoryStore.raiseFence(conversationId, held.fence());
+                        } catch (Exception e) {
+                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                        }
+                        held.onLost(() -> memory.setCancelled(true));
+                    }
                     try {
                         // The identities were captured on the REST request thread
                         // above, because this body already runs on a pool thread with

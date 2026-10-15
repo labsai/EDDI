@@ -7,7 +7,13 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef } from "react";
-import { getApprovalStatus, isSettledState, nextPollDelay } from "@/api/hitl-api";
+import {
+  UNOBSERVED_PAUSE_WINDOW_MS,
+  getApprovalStatus,
+  isSettledState,
+  nextPollDelay,
+  nextUnobservedPollDelay,
+} from "@/api/hitl-api";
 import type { ApprovalStatus } from "@/api/hitl-api";
 
 interface UseHitlPollingArgs {
@@ -46,6 +52,17 @@ export function useHitlPolling({
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
+    // The stream announces the pause BEFORE the paused memory is stored, and
+    // approval-status reads the store. A READY read taken before the pause has
+    // ever been seen stored is therefore "not stored yet", not "resolved":
+    // acting on it refreshed to the OLD snapshot and dropped the paused card.
+    // Once the pause HAS been seen (AWAITING_HUMAN, or IN_PROGRESS while the
+    // approved turn runs), any settled state is a genuine resolution. If it is
+    // never seen, the window below ends the doubt: a pause that was decided
+    // faster than the first poll looks exactly like this, and ENDED / ERROR /
+    // EXECUTION_INTERRUPTED are never what a not-yet-stored read returns.
+    let observedPause = false;
+    const startedAt = Date.now();
 
     const poll = async () => {
       try {
@@ -55,7 +72,14 @@ export function useHitlPolling({
         // IN_PROGRESS is NOT resolution: resume() flips AWAITING_HUMAN ->
         // IN_PROGRESS before running the approved turn, so treating it as
         // resolved abandons the watch while the answer is still being produced.
-        if (isSettledState(status?.state)) {
+        if (status?.state === "AWAITING_HUMAN" || status?.state === "IN_PROGRESS") {
+          observedPause = true;
+        }
+        const doubtful =
+          status?.state === "READY" &&
+          !observedPause &&
+          Date.now() - startedAt < UNOBSERVED_PAUSE_WINDOW_MS;
+        if (isSettledState(status?.state) && !doubtful) {
           const handled = await onResolvedRef.current(() => cancelled);
           if (cancelled) return;
           if (handled) {
@@ -78,7 +102,12 @@ export function useHitlPolling({
       }
 
       if (cancelled) return;
-      timer = setTimeout(poll, nextPollDelay(attempt));
+      timer = setTimeout(
+        poll,
+        observedPause || Date.now() - startedAt >= UNOBSERVED_PAUSE_WINDOW_MS
+          ? nextPollDelay(attempt)
+          : nextUnobservedPollDelay(attempt),
+      );
       attempt += 1;
     };
 

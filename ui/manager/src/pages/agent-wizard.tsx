@@ -33,11 +33,16 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
+import { useDeployWithGrants, isGrantFailure, type DeployWithGrantsOutcome } from "@/hooks/use-deploy-with-grants";
+import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
+import { getErrorMessage } from "@/lib/api-client";
+import { type DeploymentFailure } from "@/lib/api/agents";
 import {
   getProviderConfig,
   type SetupAgentRequest,
   type CreateApiAgentRequest,
   type SetupResult,
+  resolveSetupVersion,
 } from "@/lib/api/agent-setup";
 import {
   MODEL_SUGGESTIONS,
@@ -160,8 +165,13 @@ export function AgentWizardPage() {
 
   const setupAgent = useSetupAgent();
   const createApiAgent = useCreateApiAgent();
+  const { deploy: deployWithGrants, isRunning: isDeploying } = useDeployWithGrants();
+  /** Why the first deploy did not happen — kept so the success view can offer Fix. */
+  const [deployFailure, setDeployFailure] = useState<DeploymentFailure | null>(null);
+  /** The created agent's version, for that Fix. */
+  const [createdVersion, setCreatedVersion] = useState<number>(1);
 
-  const isCreating = setupAgent.isPending || createApiAgent.isPending;
+  const isCreating = setupAgent.isPending || createApiAgent.isPending || isDeploying;
   const steps = state.mode === "api" ? STEPS_API : STEPS_STANDARD;
   const step = steps[currentStep];
 
@@ -227,6 +237,15 @@ export function AgentWizardPage() {
 
   async function handleCreate(deploy: boolean) {
     setError("");
+    setDeployFailure(null);
+    /*
+     * Created WITHOUT deploying, then deployed through the grant flow. A vault
+     * grant names agent ids, so a brand-new agent is on no grant yet: a setup
+     * that deployed in the same call ended, for any restricted key, in a failed
+     * first deploy the user could do nothing about. Now the preflight runs on
+     * the created agent first and an admin is asked once to add it.
+     */
+    const wantsDeploy = deploy;
     try {
       let res: SetupResult;
       if (state.mode === "api") {
@@ -246,7 +265,7 @@ export function AgentWizardPage() {
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy,
+          deploy: false,
           environment: state.environment,
         };
         res = await createApiAgent.mutateAsync(req);
@@ -263,10 +282,13 @@ export function AgentWizardPage() {
           builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy,
+          deploy: false,
           environment: state.environment,
         };
         res = await setupAgent.mutateAsync(req);
+      }
+      if (wantsDeploy && res.agentId && res.agentId !== "unknown") {
+        res = await deployCreatedAgent(res);
       }
       setResult(res);
       toast.success(t("setupWizard.success", "Agent created successfully!"));
@@ -277,6 +299,66 @@ export function AgentWizardPage() {
           : t("common.error");
       setError(msg);
       toast.error(msg);
+    }
+  }
+
+  /**
+   * Deploy a just-created agent through the grant flow and fold the outcome
+   * into the result the success view renders. Never throws for a refused
+   * deploy — the agent exists either way, and the view says what happened.
+   */
+  async function deployCreatedAgent(res: SetupResult): Promise<SetupResult> {
+    const version = await resolveSetupVersion(res);
+    setCreatedVersion(version);
+    let outcome: DeployWithGrantsOutcome;
+    try {
+      outcome = await deployWithGrants({
+        agentId: res.agentId,
+        agentName: res.agentName || state.name,
+        version,
+        environment: state.environment,
+      });
+    } catch (err) {
+      // The agent exists: show it with the reason rather than leaving the person
+      // on Review, where pressing Create again would make a second one.
+      return { ...res, deployed: false, deploymentStatus: getErrorMessage(err) };
+    }
+    if (outcome.kind === "deployed") {
+      return { ...res, deployed: true, deploymentStatus: outcome.result.status };
+    }
+    if (outcome.kind === "cancelled") {
+      if (outcome.failure) setDeployFailure(outcome.failure);
+      return {
+        ...res,
+        deployed: false,
+        deploymentStatus: t("grantRequired.cancelled", "Not deployed — the vault key was not granted."),
+      };
+    }
+    if (outcome.failure) setDeployFailure(outcome.failure);
+    return { ...res, deployed: false, deploymentStatus: deployFailureMessage(outcome, t) };
+  }
+
+  async function handleFixDeploy() {
+    if (!result || !isGrantFailure(deployFailure)) return;
+    const options = {
+      agentId: result.agentId,
+      agentName: result.agentName,
+      version: createdVersion,
+      environment: state.environment,
+    };
+    // Through the hook, not fixGrantAndRedeploy: isDeploying then disables Fix
+    // while it runs, and the agent queries refresh afterwards.
+    let outcome: DeployWithGrantsOutcome;
+    try {
+      outcome = await deployWithGrants({ ...options, failure: deployFailure });
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+      return;
+    }
+    reportDeployOutcome(outcome, options, t);
+    if (outcome.kind === "deployed") {
+      setDeployFailure(null);
+      setResult({ ...result, deployed: true, deploymentStatus: outcome.result.status });
     }
   }
 
@@ -302,9 +384,25 @@ export function AgentWizardPage() {
             </div>
           )}
           {result.deployed === false && result.deploymentStatus && (
-            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <div
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400"
+              data-testid="wizard-deploy-status"
+            >
               <AlertCircle className="h-3.5 w-3.5" />
               {result.deploymentStatus}
+            </div>
+          )}
+          {result.deployed === false && isGrantFailure(deployFailure) && (
+            <div className="mt-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleFixDeploy()}
+                disabled={isDeploying}
+                data-testid="wizard-deploy-fix"
+              >
+                {t("grantRequired.fix", "Fix")}
+              </Button>
             </div>
           )}
 

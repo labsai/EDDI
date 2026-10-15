@@ -4,6 +4,16 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.HashMap;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.WebApplicationException;
+import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IRestCoordinatorAdmin;
 import ai.labs.eddi.engine.model.CoordinatorStatus;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
@@ -60,23 +70,78 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
         this.coordinator = coordinator;
     }
 
+    /** Cluster mode: other nodes' queue depths. Field-injected; null in tests. */
+    @Inject
+    IClusterRpc clusterRpc;
+
+    /** Submits replays. Field-injected; null in tests. */
+    @Inject
+    IConversationService conversationService;
+
     @Override
-    public CoordinatorStatus getStatus() {
-        return coordinator.getStatus();
+    public CoordinatorStatus getStatus(String scope) {
+        CoordinatorStatus status = coordinator.getStatus();
+        if (!"cluster".equals(scope) || status.cluster() == null || clusterRpc == null || !clusterRpc.isClustered()) {
+            return status;
+        }
+        Map<String, Object> cluster = new LinkedHashMap<>(status.cluster());
+        Map<String, Object> perNode = new LinkedHashMap<>();
+        perNode.put(status.nodeId(), status.queueDepths());
+        clusterRpc.callAll(IClusterRpc.COORDINATOR_STATUS, Map.of()).forEach((node, reply) -> perNode.put(node, reply.get("queueDepths")));
+        cluster.put("queueDepths", perNode);
+        return new CoordinatorStatus(status.coordinatorType(), status.connected(), status.connectionStatus(), status.activeConversations(),
+                status.totalProcessed(), status.totalDeadLettered(), status.queueDepths(), status.nodeId(), cluster);
     }
 
     @Override
-    public List<DeadLetterEntry> getDeadLetters() {
-        return coordinator.getDeadLetters();
+    public List<DeadLetterEntry> getDeadLetters(int limit, String after) {
+        List<DeadLetterEntry> all = coordinator.getDeadLetters();
+        int max = limit <= 0 ? 100 : Math.min(limit, 1000);
+        int start = 0;
+        if (after != null) {
+            for (int i = 0; i < all.size(); i++) {
+                if (after.equals(all.get(i).id())) {
+                    start = i + 1;
+                    break;
+                }
+            }
+        }
+        return all.subList(Math.min(start, all.size()), Math.min(all.size(), start + max));
     }
 
+    /**
+     * A replay is a NEW turn: the failed task is gone, and re-running it would
+     * repeat any side effect it already performed. The entry's captured input is
+     * submitted through the conversation service as the calling admin, with the
+     * context {@code replayOf=<entry id>}; the entry is removed only once the turn
+     * was accepted. Used to delete the entry and answer "replayed" without
+     * replaying anything.
+     */
     @Override
     public void replayDeadLetter(String entryId) {
-        boolean replayed = coordinator.replayDeadLetter(entryId);
-        if (!replayed) {
-            throw new NotFoundException("Dead-letter entry not found: " + sanitize(entryId));
+        DeadLetterEntry entry = coordinator.getDeadLetter(entryId)
+                .orElseThrow(() -> new NotFoundException("Dead-letter entry not found: " + sanitize(entryId)));
+        if (!entry.isReplayable() || conversationService == null) {
+            throw new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN)
+                    .entity("Dead-letter entry " + sanitize(entryId) + " cannot be replayed: its input was not captured "
+                            + "(eddi.coordinator.dead-letter.capture-input=false, or not a conversation turn). Discard it instead.")
+                    .build());
         }
-        log.infof("Dead-letter %s replayed via REST", sanitize(entryId));
+        Map<String, Context> context = new HashMap<>();
+        context.put("replayOf", new Context(Context.ContextType.string, entryId));
+        InputData input = new InputData(String.valueOf(entry.turn().get("input")), context);
+        try {
+            conversationService.say(entry.conversationId(), false, true, List.of(), input, false, snapshot -> {
+            });
+        } catch (Exception e) {
+            throw new WebApplicationException(Response.status(Response.Status.CONFLICT).type(MediaType.TEXT_PLAIN)
+                    .entity("Replay of " + sanitize(entryId) + " was not accepted (" + e.getClass().getSimpleName() + ": "
+                            + sanitize(String.valueOf(e.getMessage())) + "); the entry is kept.")
+                    .build());
+        }
+        coordinator.replayDeadLetter(entryId);
+        log.infof("Dead-letter %s of conversation %s replayed as a new turn via REST", sanitize(entryId),
+                sanitize(entry.conversationId()));
     }
 
     @Override
