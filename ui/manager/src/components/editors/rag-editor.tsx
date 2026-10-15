@@ -20,8 +20,10 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
+import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
 import type { IngestionSource } from "@/lib/api/ingestion-sources";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -32,6 +34,13 @@ export interface RagConfig {
   embeddingParameters?: Record<string, string>;
   storeType?: string;
   storeParameters?: Record<string, string>;
+  /**
+   * How the vector store is addressed (EDDI 6.6+): `"id"` — a store of its own,
+   * stamped by the server on every knowledge base created since — or absent /
+   * `"name"`, the 6.5 layout addressed by the name. Never written by the editor
+   * except through the explicit "move to its own store" action.
+   */
+  storeNamespace?: string;
   chunkStrategy?: string;
   chunkSize?: number;
   chunkOverlap?: number;
@@ -124,12 +133,12 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
   "mongodb-atlas": [
     { key: "connectionString", placeholder: "${vault:mongo-uri}" },
     { key: "databaseName", placeholder: "eddi" },
-    { key: "collectionName", placeholder: "eddi_kb_product-docs" },
+    { key: "collectionName", placeholder: "product_docs" },
     { key: "indexName", placeholder: "vector_index" },
   ],
   elasticsearch: [
     { key: "serverUrl", placeholder: "http://localhost:9200" },
-    { key: "indexName", placeholder: "eddi_kb_product-docs" },
+    { key: "indexName", placeholder: "product-docs" },
     { key: "apiKey", placeholder: "${vault:es-key}" },
     { key: "userName", placeholder: "elastic" },
     { key: "password", placeholder: "${vault:es-password}" },
@@ -240,6 +249,7 @@ function KeyValueEditor({
   testIdPrefix?: string;
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const pairs = Object.entries(entries);
 
   const addEntry = () => {
@@ -296,6 +306,7 @@ function KeyValueEditor({
                   {/* No `connections` here: embedding models and vector stores
                       need a bare credential and refuse ${connection:…}. */}
                   <SecretKeyPicker
+                    agentId={owningAgentId}
                     value={value}
                     onChange={(v) => updateValue(key, v)}
                     readOnly={readOnly}
@@ -915,6 +926,8 @@ export function RagEditor({
               />
             </div>
           )}
+
+          <RagStoragePanel data={data} onChange={onChange} readOnly={readOnly} resourceId={resourceId} version={version} />
         </div>
       </Section>
 

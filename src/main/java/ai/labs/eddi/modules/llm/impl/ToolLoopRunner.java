@@ -15,11 +15,14 @@ import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -29,6 +32,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -42,6 +46,7 @@ import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import io.micrometer.core.instrument.Metrics;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -428,7 +433,7 @@ class ToolLoopRunner {
                 ChatResponse chatResponse;
                 try {
                     chatResponse = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(chatRequest), task, "Agent execution",
-                            backoffSpentMs);
+                            backoffSpentMs, memory.getTurnDeadline());
                 } catch (LifecycleException requestFailure) {
                     // Nothing has executed in this run until the first request is
                     // answered. Say so, so a caller that may retry the run (the cascade's
@@ -466,8 +471,13 @@ class ToolLoopRunner {
                     // (bound to id + tool + arguments, each usable once). Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                            effectiveToolApprovals, clearedCalls);
+                    var screened = refuseDoomedGatedCalls(
+                            toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                    effectiveToolApprovals, clearedCalls),
+                            setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
+                    var gateResult = screened.gateResult();
+                    // The pin step below reuses what the screening already resolved.
+                    var pinResolvers = screened.resolvers();
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = ToolApprovalGateSupport.readToolPauseCount(memory);
@@ -552,7 +562,7 @@ class ToolLoopRunner {
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
                                     toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
-                                    setup.toolRequestResolvers());
+                                    pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(
@@ -728,6 +738,110 @@ class ToolLoopRunner {
                 addResult(currentMessages, call, skipped, refusal, exchangeRecorder);
                 trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
             }
+        }
+    }
+
+    /**
+     * Refuses, before a human is asked, every gated call that is certain to be
+     * refused when it runs: one whose rendered request carries a credential
+     * reference conversation data supplied
+     * ({@link ConfigReferenceRefusedException}, the {@code ConfigReferenceGuard}
+     * rule).
+     * <p>
+     * <b>Why here.</b> Gate time already resolves each gated http call to pin it
+     * ({@code ToolApprovalGateSupport#pinResolvedRequest}), and that resolution
+     * runs the same request build — the guard included — as execution. But the
+     * pinning step is deliberately never allowed to fail a pause, so the guard's
+     * refusal was swallowed there ("approved unpinned") and the approver was shown
+     * a card for a call that was refused the instant they approved it: an approval
+     * spent on nothing, and a model told "refused" only afterwards. Refusing first
+     * costs the human nothing, and the refusal — which names the reference and the
+     * field, never a value — goes back to the model as the tool result so it can
+     * correct the request instead of waiting on a decision.
+     * <p>
+     * Only {@link ConfigReferenceRefusedException} counts. Any other failure to
+     * resolve is not known to be deterministic (and its message may quote the
+     * material being rendered), so those calls stay gated and are approved
+     * unpinned, exactly as before.
+     */
+    private static Screened refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
+                                                   Map<String, ToolRequestResolver> resolvers,
+                                                   List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                   List<Map<String, Object>> trace,
+                                                   ToolExchangeRecorder exchangeRecorder) {
+        if (resolvers == null || resolvers.isEmpty() || gateResult.gated().isEmpty()) {
+            return new Screened(gateResult, resolvers);
+        }
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        // Each gated call is resolved ONCE: the pin step that builds the pending batch
+        // is handed this outcome instead of building the same request a second time.
+        // A failure is remembered too and rethrown there, so the pin step still treats
+        // it exactly as before — a failure that may never stop a pause.
+        Map<ToolExecutionRequest, Object> outcomes = new IdentityHashMap<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            var resolver = resolvers.get(req.name());
+            if (resolver == null) {
+                stillGated.add(req);
+                continue;
+            }
+            try {
+                outcomes.put(req, resolver.resolve(req));
+                stillGated.add(req);
+            } catch (ConfigReferenceRefusedException refused) {
+                LOGGER.warnf("Refusing gated tool '%s' before asking for approval: a credential reference in its request came "
+                        + "from conversation data.", sanitize(req.name()));
+                addResult(currentMessages, aiMessage, req, errorJson(refused.getMessage()), exchangeRecorder);
+                Map<String, Object> step = new HashMap<>();
+                step.put("type", "tool_error");
+                step.put("tool", req.name());
+                step.put("error", "credential_reference_refused");
+                trace.add(step);
+            } catch (Exception e) {
+                // Not known to be deterministic: leave it to the pause, which pins it
+                // best-effort and approves it unpinned.
+                outcomes.put(req, e);
+                stillGated.add(req);
+            }
+        }
+        var screenedGate = stillGated.size() == gateResult.gated().size()
+                ? gateResult
+                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+        Map<String, ToolRequestResolver> memoised = new HashMap<>();
+        for (var entry : resolvers.entrySet()) {
+            ToolRequestResolver original = entry.getValue();
+            memoised.put(entry.getKey(), req -> {
+                Object outcome = outcomes.get(req);
+                if (outcome == null) {
+                    return original.resolve(req);
+                }
+                if (outcome instanceof RuntimeException failure) {
+                    throw failure;
+                }
+                if (outcome instanceof LifecycleException failure) {
+                    throw failure;
+                }
+                return (ResolvedRequest) outcome;
+            });
+        }
+        return new Screened(screenedGate, memoised);
+    }
+
+    /**
+     * The gate result after screening, and the resolvers to pin it with — the same
+     * ones, except that a call already resolved during screening answers from that
+     * resolution.
+     */
+    private record Screened(ToolApprovalGate.GateResult gateResult, Map<String, ToolRequestResolver> resolvers) {
+    }
+
+    private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
+
+    /** One JSON object with an {@code error} string, escaped. */
+    private static String errorJson(String message) {
+        try {
+            return ERROR_MAPPER.writeValueAsString(Map.of("error", message != null ? message : "refused"));
+        } catch (Exception e) {
+            return "{\"error\":\"refused\"}";
         }
     }
 
@@ -917,7 +1031,10 @@ class ToolLoopRunner {
         // tracking
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
-        if (executor != null) {
+        if (executor != null && memory != null && memory.getTurnDeadline() != null && memory.getTurnDeadline().isExpired()) {
+            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "tool").increment();
+            toolResult = "Error: the turn deadline has passed; tool '" + toolRequest.name() + "' was not run";
+        } else if (executor != null) {
             // A built-in is DISPATCHED under its @Tool method name ("calculate") but
             // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
             // here, and hand both names down: only the price and the cache TTL are looked
@@ -954,6 +1071,12 @@ class ToolLoopRunner {
                                     task.getDefaultToolCacheScope(), memory != null ? memory.getUserId() : null, conversationId),
                             memory != null ? memory.getAgentId() : null, toolSource)
                     : null;
+
+            // Inside a turn deadline a tool may not outlive what is left of the turn.
+            TurnDeadline turnDeadline = memory != null ? memory.getTurnDeadline() : null;
+            if (turnDeadline != null) {
+                toolTimeoutMs = deadlineBoundedToolTimeoutMs(toolTimeoutMs, turnDeadline);
+            }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
             toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
@@ -1139,6 +1262,23 @@ class ToolLoopRunner {
             limit = toolRateLimits.get(canonicalName);
         }
         return limit != null ? limit : defaultRateLimit;
+    }
+
+    /**
+     * A tool's timeout shortened to what the turn can still spare: what is left
+     * after the reserve, or all of what is left when that is almost nothing. Never
+     * longer than the configured timeout (a non-positive, i.e. unbounded, one takes
+     * the whole budget), never below 1 ms.
+     */
+    static int deadlineBoundedToolTimeoutMs(int configuredMs, TurnDeadline deadline) {
+        long budget = deadline.remainingAfterReserveMs();
+        if (budget < 500L) {
+            budget = deadline.remainingMs();
+        }
+        // A non-positive configured timeout means "no per-tool timeout": the turn's
+        // remaining budget is then the only bound, not a 1 ms one.
+        long bounded = configuredMs <= 0 ? budget : Math.min((long) configuredMs, budget);
+        return (int) Math.max(1L, Math.min((long) Integer.MAX_VALUE, bounded));
     }
 
     /**

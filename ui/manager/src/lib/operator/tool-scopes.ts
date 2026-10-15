@@ -58,7 +58,8 @@ const WORKFLOW_EXTENSION_STORES = [
  * **What makes it safe.** `gate-guard.ts` refuses in the Manager's approval UI,
  * as a control rather than a warning label, any llmstore write whose body carries a
  * `toolApprovals` key at all (and any whose body cannot be read in full to
- * prove it does not). A body with no task-level `toolApprovals` resolves to
+ * prove it does not). For a `PATCH` the same guard reads the operations: one
+ * that names the field in its path or value is refused, as is `copy`/`move`. A body with no task-level `toolApprovals` resolves to
  * `null`, so the agent-level gate applies — the operator can therefore change
  * what an agent *says and runs*, and cannot change what *gates* it. Removing a
  * gate that was protecting something is not reachable: falling back to the
@@ -84,6 +85,47 @@ const WORKFLOW_EXTENSION_STORES = [
  * Approve instead of annotating it.
  */
 const WRITABLE_EXTENSION_STORES = WORKFLOW_EXTENSION_STORES;
+
+/**
+ * The subset of {@link WRITABLE_EXTENSION_STORES} that also gets a credential-safe
+ * partial edit: `PATCH /{store}/{id}?version=N` with an RFC 6902 JSON Patch.
+ *
+ * **Why these stores, and why a patch at all.** A document in one of them can
+ * hold credential REFERENCES — an LLM task's `apiKey: ${vault:…}`, an apicall's
+ * `Authorization` header, an MCP server's key. The operator edits through a
+ * generated tool whose body the model writes, and a full-document `PUT` of a
+ * document it read back echoes those references. That fails twice over: the
+ * backend's `ConfigReferenceGuard` refuses any reference in a request body that
+ * the tool's own configuration did not write (correct, and deliberately without
+ * an "unchanged from the stored document" exemption — the guard does not know
+ * the target, and what the model read back is conversation data), and were it
+ * allowed, `ApiCallExecutor` resolves `${vault:…}` in the rendered body before
+ * sending, so the store would receive and keep the PLAINTEXT key. Without this
+ * the `llmstore` write grant is unusable for nearly every LLM configuration.
+ *
+ * A patch sends only what changes, so it never carries a credential, and the
+ * guard stays exactly as strict: the operator can edit everything in these
+ * documents except their credentials, and a patch that tries to introduce a
+ * reference is refused like any other call.
+ *
+ * **`llmstore` is patchable ONLY together with `gate-guard.ts`** — the same
+ * coupling as its `PUT`. A patch can name `toolApprovals` in a path, in a
+ * value, or move it from one place to another; the guard refuses all three (and
+ * `copy`/`move` outright). Never grant this PATCH without that guard.
+ *
+ * **`ragstore/rags` is not here** because it is not writable at all; when it is,
+ * add it to both lists — its embedding and vector-store credentials are the same
+ * kind of reference (`planning/rag-embedding-ux-plan.md` WS4).
+ *
+ * **`PUT` stays granted** on all of them. It still works, and is the right verb,
+ * for a document that holds no reference, and for a create-shaped rewrite. The
+ * system prompt steers the operator to PATCH for edits; the endpoint boundary is
+ * not narrowed by removing the other verb, because removing it would not make
+ * the backend refuse it — only the operator's tool for it would be gone, at the
+ * cost of the whole-document rewrite some edits (reordering, replacing a
+ * section) are simpler as.
+ */
+const PATCHABLE_EXTENSION_STORES = ["llmstore/llms", "apicallstore/apicalls", "mcpcallsstore/mcpcalls"] as const;
 
 /**
  * Read endpoints the operator is allowed to call.
@@ -129,7 +171,41 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /groups/{groupId}/conversations/{groupConversationId}",
   // Operations
   "GET /administration/{environment}/deploymentstatus/{agentId}",
+  // What would stop a deploy (EDDI 6.6.0+): the restricted vault keys an agent
+  // uses and is not granted. Read-only and secret-free (an editor gets counts,
+  // only an admin the ids on a grant). Its write counterpart — appending an
+  // agent to a grant, POST /secretstore/secrets/{tenantId}/{keyName}/grant/
+  // agents/{agentId} — is deliberately NOT on this list, nor anywhere else
+  // here: no LLM may widen a vault grant. Granting stays a human action in the
+  // Manager's grant dialog.
+  "GET /administration/{environment}/deploy/{agentId}/preflight",
   "GET /administration/coordinator/status",
+  // The cluster console's read side (EDDI 6.6+): the health verdict and node
+  // cards, the lease list, the activity timeline, the stuck-conversation
+  // diagnosis and the dead-letter COUNTS. All of them carry ids, counts, states
+  // and timings only — the backend opens them to eddi-viewer for that reason.
+  //
+  // Deliberately NOT granted:
+  // - `GET /administration/cluster/dead-letters` (and the coordinator's
+  //   `/dead-letters` listing): each entry carries the failed turn's captured
+  //   input, i.e. what a user typed. The summary answers "how many, why, where"
+  //   without it.
+  // - Every recovery action (`POST …/leases/{id}/release`, `…/nodes/{id}/drain`
+  //   and `/undrain`, `…/caches/resync`, `…/deployments/reconcile`,
+  //   `…/dead-letters/replay|discard|forward-local`). They are not in
+  //   `planning/operator-write-scope-plan.md`'s write set, and each acts on the
+  //   live cluster rather than on a reviewable config document: the operator
+  //   explains what is wrong and which action the admin should take in the
+  //   console; the admin takes it.
+  //
+  // Like the docs entries below, these raise the backend floor: activation
+  // refuses a spec without them, i.e. an EDDI older than 6.6. The Manager ships
+  // inside the same jar as its backend, so the two move together.
+  "GET /administration/cluster/overview",
+  "GET /administration/cluster/leases",
+  "GET /administration/cluster/activity",
+  "GET /administration/cluster/diagnose/{conversationId}",
+  "GET /administration/cluster/dead-letters/summary",
   "GET /administration/logs",
   "GET /administration/quotas",
   // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
@@ -189,6 +265,13 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /ragstore/rags/{id}/sources/{sourceId}/files",
   // Audit
   "GET /auditstore/agent/{agentId}",
+  // Administrative actions — who changed, deployed, imported, erased or was
+  // refused what (backend `AdminActionAuditFilter`). The records hold caller,
+  // method, path, endpoint and status only — never a request body — and the id of
+  // a person an action was about is already pseudonymised, so the read exposes
+  // nothing the agent read above does not. "Who changed this agent's prompt?" is
+  // the question an admin asks first after a misbehaving deploy.
+  "GET /auditstore/admin-actions",
 ] as const;
 
 /**
@@ -246,6 +329,11 @@ export const READ_ENDPOINTS: readonly string[] = [
  *   enforces it on every other approval path) any llmstore write carrying that field.
  *   See {@link WRITABLE_EXTENSION_STORES} for the full reasoning and the
  *   residual. Do not grant this without that guard.
+ * - `PATCH` on `llmstore`, `apicallstore` and `mcpcallsstore` — the
+ *   credential-safe edit, an RFC 6902 patch that sends only what changes. These
+ *   are the stores whose documents carry `${vault:…}` references, which a
+ *   full-document `PUT` cannot round-trip. See {@link PATCHABLE_EXTENSION_STORES}
+ *   for why, and for the `llmstore` coupling to `gate-guard.ts`.
  * - `POST /administration/agents/setup` and `.../setup-api` — build a whole
  *   new agent (standard, and OpenAPI-spec-backed) in one call. Unlike an
  *   update, a create has no prior version to diff against, so "does this body
@@ -359,6 +447,10 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // endpoint, aimed at its own agent, that would close the loop.
   "PUT /agentstore/agents/{id}/updateResourceUri",
   ...WRITABLE_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
+  // Credential-safe partial edits — see PATCHABLE_EXTENSION_STORES. Gated like
+  // every other write (`http.patch:*`), and for llmstore only ever approvable
+  // through gate-guard.ts.
+  ...PATCHABLE_EXTENSION_STORES.map((store) => `PATCH /${store}/{id}`),
 ] as const;
 
 /**
@@ -523,6 +615,25 @@ export function grantsAgentModification(endpoints: readonly string[]): boolean {
     set.has("PUT /workflowstore/workflows/{id}") ||
     WRITABLE_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
   );
+}
+
+/**
+ * The credential-safe partial-edit endpoints (`PATCH /{store}/{id}`) the granted
+ * set contains, in {@link PATCHABLE_EXTENSION_STORES} order.
+ *
+ * Exact membership, per store, so the prompt names only tools that were
+ * generated: a deployment whose spec lacks one (an older EDDI cannot activate
+ * at all — see `findMissingEndpoints` — but a hand-edited scope can) must not be
+ * told it can patch a store it cannot.
+ */
+export function grantedPatchEndpoints(endpoints: readonly string[]): string[] {
+  const set = new Set(endpoints);
+  return PATCHABLE_EXTENSION_STORES.map((store) => `PATCH /${store}/{id}`).filter((entry) => set.has(entry));
+}
+
+/** Whether any credential-safe partial edit is granted. */
+export function grantsCredentialSafeEdits(endpoints: readonly string[]): boolean {
+  return grantedPatchEndpoints(endpoints).length > 0;
 }
 
 /**

@@ -734,6 +734,21 @@ class TenantQuotaServiceTest {
         }
     }
 
+    /**
+     * A counter created by its first increment is first scraped at 1, so the first
+     * store outage was invisible to increase() and EddiQuotaStoreUnavailable never
+     * fired on it. The default tenant's series exist at 0 from the start.
+     */
+    @Test
+    @DisplayName("quota-store-unavailable counters exist at zero for the default tenant")
+    void unavailableCountersExistBeforeTheFirstOutage() {
+        for (String type : List.of("conversation", "api_call", "cost")) {
+            var counter = meterRegistry.find("eddi.tenant.quota.unavailable").tags("tenant", TENANT_ID, "type", type).counter();
+            assertNotNull(counter, type + " is registered only by its first increment");
+            assertEquals(0.0, counter.count());
+        }
+    }
+
     // --- Helpers ---
 
     private void enableQuotaWithConversationLimit(int limit) {

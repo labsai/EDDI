@@ -5,6 +5,7 @@ import {
   bindDecisionToPause,
   currentGroupPauseOf,
   currentPauseOf,
+  describesPause,
   isPauseChanged,
   isSamePause,
   PauseChangedError,
@@ -144,5 +145,84 @@ describe("isPauseChanged", () => {
     expect(isPauseChanged(new ApiClientError(409, "Conversation is not in a resumable state (current state: READY)"))).toBe(false);
     expect(isPauseChanged(new ApiClientError(500, "changed since this decision"))).toBe(false);
     expect(isPauseChanged(new Error("x"))).toBe(false);
+  });
+});
+
+describe("describesPause", () => {
+  const iso = "2026-07-01T10:00:00.000Z";
+  const ms = String(Date.parse(iso));
+  const paused = (over: Partial<ApprovalStatusSummary> = {}): ApprovalStatusSummary => ({
+    conversationId: "c",
+    state: "AWAITING_HUMAN",
+    pausedAt: iso,
+    pauseId: ms,
+    pauseDetails: null,
+    ...over,
+  });
+
+  it("is false for nothing at all", () => {
+    expect(describesPause(null, iso)).toBe(false);
+    expect(describesPause(undefined, iso)).toBe(false);
+  });
+
+  it("is false for the not-yet-persisted shape (READY, blank pauseId, no details)", () => {
+    expect(
+      describesPause({ conversationId: "c", state: "READY", pausedAt: "", pauseId: "", pauseDetails: null }, iso),
+    ).toBe(false);
+  });
+
+  it("is false when the state is not AWAITING_HUMAN even if an id is present", () => {
+    expect(describesPause(paused({ state: "IN_PROGRESS" }), iso)).toBe(false);
+  });
+
+  it("is false for a blank pauseId even when AWAITING_HUMAN", () => {
+    expect(describesPause(paused({ pauseId: "" }), iso)).toBe(false);
+    expect(describesPause(paused({ pauseId: "   " }), null)).toBe(false);
+  });
+
+  it("matches a pauseId against the expected ISO instant", () => {
+    expect(describesPause(paused(), iso)).toBe(true);
+    // The same instant serialized with sub-millisecond digits / an offset.
+    expect(describesPause(paused(), "2026-07-01T12:00:00.000+02:00")).toBe(true);
+  });
+
+  it("is false for a pauseId that names a different pause", () => {
+    expect(describesPause(paused({ pauseId: String(Date.parse(iso) - 5_000) }), iso)).toBe(false);
+  });
+
+  it("is false when the expected instant is unparseable", () => {
+    expect(describesPause(paused(), "not-a-date")).toBe(false);
+  });
+
+  it("accepts any non-blank pauseId when no pause is expected", () => {
+    expect(describesPause(paused(), null)).toBe(true);
+    expect(describesPause(paused(), undefined)).toBe(true);
+    expect(describesPause(paused(), "  ")).toBe(true);
+  });
+
+  describe("a backend that predates pauseId", () => {
+    const legacy = (over: Partial<ApprovalStatusSummary> = {}): ApprovalStatusSummary => {
+      const { pauseId: _omitted, ...rest } = paused(over);
+      void _omitted;
+      return rest;
+    };
+
+    it("falls back to pausedAt against the expected instant", () => {
+      expect(describesPause(legacy(), iso)).toBe(true);
+      expect(describesPause(legacy({ pausedAt: "2026-07-01T10:00:09.000Z" }), iso)).toBe(false);
+    });
+
+    it("needs a non-empty pausedAt", () => {
+      expect(describesPause(legacy({ pausedAt: "" }), iso)).toBe(false);
+      expect(describesPause(legacy({ pausedAt: undefined }), null)).toBe(false);
+    });
+
+    it("accepts a non-empty pausedAt when no pause is expected", () => {
+      expect(describesPause(legacy(), null)).toBe(true);
+    });
+
+    it("still requires AWAITING_HUMAN", () => {
+      expect(describesPause(legacy({ state: "READY" }), iso)).toBe(false);
+    });
   });
 });

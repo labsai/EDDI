@@ -10,20 +10,16 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { type CascadeStep } from "../types";
 import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
-import { parseNum as num, nextParamKey } from "./cascade-utils";
+import { parseNum as num, nextParamKey, LEGACY_MODEL_KEY, modelField, withModel } from "./cascade-utils";
+import { ModelSettingsSection } from "../model-settings-section";
+import { PARAMETER_CATALOG, catalogKeys } from "@/lib/llm-parameter-catalog";
+import { modelParamSpec } from "../model-params";
 
-/**
- * Params owned by the dedicated controls (model input + API key picker), hidden
- * from the advanced grid. Matched EXACT-case: the dedicated controls only read
- * `model` / `apiKey`, so a mis-cased key like `apikey` / `Model` must stay
- * visible in the grid — otherwise the cross-provider warning fires on a key the
- * user cannot see or remove.
- */
-const STEP_HIDDEN_PARAM_KEYS = new Set(["model", "apiKey"]);
 const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token"]);
 
 /**
@@ -36,6 +32,7 @@ export function CascadeStepCard({
   index,
   totalSteps,
   taskType,
+  taskParameters,
   issues,
   onChange,
   onMoveUp,
@@ -47,6 +44,8 @@ export function CascadeStepCard({
   index: number;
   totalSteps: number;
   taskType?: string;
+  /** The task's parameters: the backend runs a step with them under the step's own. */
+  taskParameters?: Record<string, string>;
   issues: CascadeIssue[];
   onChange: (patch: Partial<CascadeStep>) => void;
   onMoveUp: () => void;
@@ -55,6 +54,7 @@ export function CascadeStepCard({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const params = step.parameters ?? {};
@@ -66,9 +66,38 @@ export function CascadeStepCard({
     onChange({ parameters: next });
   };
 
+  // A step without its own type runs on the task's provider.
+  const stepType = step.type ?? taskType ?? "openai";
+  const model = modelField(params, stepType);
+  // What the backend sees for this step, the legacy model moved to its real key —
+  // so the settings panel judges the model the field shows. Its first write
+  // performs the same move.
+  const viewParams = model.legacy ? withModel(params, model.key, model.value, true) : params;
+
+  /** Exact-case: a mis-cased `apikey` stays visible, so a warning about it can be acted on. */
+  const hiddenKeys = new Set([model.key, "apiKey", ...(model.legacy ? [LEGACY_MODEL_KEY] : [])]);
+  // Keys the catalog lists for the step's provider are edited in the Model
+  // settings panel below; the grid keeps everything else.
+  const panelKeys = catalogKeys(PARAMETER_CATALOG, stepType);
   const extraParamEntries = Object.entries(params).filter(
-    ([k]) => !STEP_HIDDEN_PARAM_KEYS.has(k),
+    ([k]) => !hiddenKeys.has(k) && !panelKeys.has(k),
   );
+
+  /** A provider change carries the model to the key the new provider reads. */
+  const changeType = (type: string) => {
+    const nextKey = modelParamSpec(type).modelKey;
+    if (nextKey === model.key && !model.legacy) {
+      onChange({ type });
+      return;
+    }
+    const next = { ...params };
+    if (model.value !== "") {
+      delete next[model.key];
+      if (model.legacy) delete next[LEGACY_MODEL_KEY];
+      next[nextKey] = model.value;
+    }
+    onChange({ type, parameters: next });
+  };
   const isCrossProvider = !!step.type && step.type !== taskType;
 
   return (
@@ -83,15 +112,18 @@ export function CascadeStepCard({
         </span>
         <ProviderSelect
           value={step.type ?? "openai"}
-          onChange={(type) => onChange({ type })}
+          onChange={changeType}
           disabled={readOnly}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           testId="cascade-step-type"
         />
         <input
           type="text"
-          value={params.model ?? ""}
-          onChange={(e) => setParam("model", e.target.value)}
+          value={model.value}
+          onChange={(e) => onChange({ parameters: withModel(params, model.key, e.target.value, model.legacy) })}
+          aria-label={t("llmEditor.cascadeStepModel", "Step {{n}} model", { n: index + 1 })}
+          data-testid={`cascade-step-model-${index}`}
+          data-model-key={model.key}
           readOnly={readOnly}
           placeholder={t("llmEditor.cascadeModelName", "e.g. claude-sonnet-5-5")}
           className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -180,6 +212,7 @@ export function CascadeStepCard({
           )}
         </label>
         <SecretKeyPicker
+          agentId={owningAgentId}
           value={params.apiKey ?? ""}
           onChange={(v) => setParam("apiKey", v)}
           readOnly={readOnly}
@@ -234,7 +267,24 @@ export function CascadeStepCard({
               </div>
             </div>
 
-            {/* Extra parameters (baseUrl, temperature, …) */}
+            {/* Typed, model-aware settings for this step's provider. The step
+                runs with the task's parameters under its own, so they are the
+                inherited values. */}
+            <div>
+              <label className="mb-1 block text-[10px] text-muted-foreground">
+                {t("llmEditor.modelSettings.title", "Model settings")}
+              </label>
+              <ModelSettingsSection
+                type={stepType}
+                parameters={viewParams}
+                onChange={(parameters) => onChange({ parameters })}
+                inheritedParameters={taskParameters}
+                readOnly={readOnly}
+                testIdPrefix={`cascade-step-${index}-settings`}
+              />
+            </div>
+
+            {/* Extra parameters (baseUrl, timeout, …) */}
             <div>
               <label className="mb-1 block text-[10px] text-muted-foreground">
                 {t("llmEditor.cascadeStepParams", "Extra parameters")}
@@ -253,6 +303,7 @@ export function CascadeStepCard({
                       {sensitive ? (
                         <div className="flex-1">
                           <SecretKeyPicker
+                            agentId={owningAgentId}
                             value={v}
                             onChange={(val) => setParam(k, val)}
                             readOnly={readOnly}

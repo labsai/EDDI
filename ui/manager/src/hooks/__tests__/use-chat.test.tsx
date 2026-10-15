@@ -777,6 +777,29 @@ describe("useSendMessage", () => {
     expect(userMessages[0]!.content).toBe("Hello");
   });
 
+  it("records which pause a non-streaming send landed on", async () => {
+    // The pause notice verifies approval-status against this instant, as the
+    // streamed path already does; without it any stored pause would match.
+    server.use(
+      http.post("*/agents/:conversationId", () =>
+        HttpResponse.json({
+          conversationState: "AWAITING_HUMAN",
+          hitlPausedAt: "2026-10-12T10:00:00.000Z",
+          conversationSteps: [],
+          conversationOutputs: [{ "output:text:pending": "Waiting for approval." }],
+        }),
+      ),
+    );
+
+    const { result } = renderHook(() => useSendMessage(), { wrapper: createWrapper() });
+    result.current.mutate({ message: "Delete it" });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const state = useChatStore.getState();
+    expect(state.isPaused).toBe(true);
+    expect(state.pausedAt).toBe("2026-10-12T10:00:00.000Z");
+  });
+
   it("shows why a turn failed instead of rendering nothing", async () => {
     server.use(
       http.post("*/agents/:conversationId", () =>
@@ -890,7 +913,7 @@ describe("useSendMessage", () => {
       }),
       // A 409 is read as a pause only when the conversation says so.
       http.get("*/agents/:conversationId", () =>
-        HttpResponse.json({ conversationState: "AWAITING_HUMAN", conversationSteps: [] }),
+        HttpResponse.json({ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-10-12T09:00:00.000Z", conversationSteps: [] }),
       ),
     );
 
@@ -908,6 +931,8 @@ describe("useSendMessage", () => {
     expect(state.messages.some((m) => m.content === "already paused, try again")).toBe(false);
     expect(state.messages).toHaveLength(0);
     expect(state.isPaused).toBe(true);
+    // The pause's identity is kept, so the notice verifies this pause.
+    expect(state.pausedAt).toBe("2026-10-12T09:00:00.000Z");
     expect(state.isProcessing).toBe(false);
   });
 

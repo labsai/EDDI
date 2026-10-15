@@ -4,9 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import java.util.concurrent.ConcurrentHashMap;
+import io.quarkus.scheduler.Scheduled;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
+import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -18,6 +22,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -144,6 +149,36 @@ public class ChatModelRegistry {
      */
     private final Object publishLock = new Object();
 
+    /**
+     * Cluster mode only: when each cached model was built. A model is otherwise
+     * kept for as long as it is used ({@code expireAfterAccess}), so a busy model
+     * built with a since-rotated key lived for ever on a node that missed the
+     * rotation event. {@link #expireOldModels} rebuilds every model older than
+     * {@code eddi.cluster.model-cache.max-age} (15 min) — the bound on how long a
+     * lost event can matter. Empty, and never consulted, on a single node.
+     */
+    private final Map<ModelCacheKey, Long> builtAtMillis = new ConcurrentHashMap<>();
+
+    /** Field-injected; null in tests built with {@code new}. */
+    @Inject
+    ClusterConfig clusterConfig;
+
+    /**
+     * Which parameters each model version rejects or ignores. Loaded with the
+     * registry, so a malformed catalog fails startup rather than a turn.
+     */
+    private final ModelParameterCatalog parameterCatalog = ModelParameterCatalog.defaultCatalog();
+
+    /**
+     * When true (the default), a parameter the catalog says the configured model
+     * rejects is removed before the model is built, with a warning; when false it
+     * is only warned about and still sent. Field-injected so that registries
+     * constructed directly (tests) get the production default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.llm.parameter-catalog.drop-rejected", defaultValue = "true")
+    boolean dropRejectedParameters = true;
+
     @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -152,6 +187,38 @@ public class ChatModelRegistry {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.telemetryListener = telemetryListener;
+    }
+
+    /**
+     * Cluster mode: evicts models built longer ago than
+     * {@code eddi.cluster.model-cache.max-age}, busy or not, so a rotated key
+     * reaches every node within that bound even if its event was lost.
+     */
+    @Scheduled(every = "60s", delayed = "60s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void expireOldModels() {
+        if (clusterConfig == null || !clusterConfig.isNats() || builtAtMillis.isEmpty()) {
+            return;
+        }
+        long cutoff = System.currentTimeMillis() - clusterConfig.modelCacheMaxAge().toMillis();
+        int evicted = 0;
+        synchronized (publishLock) {
+            for (var entry : builtAtMillis.entrySet()) {
+                ModelCacheKey key = entry.getKey();
+                boolean cached = modelCache.containsKey(key) || streamingModelCache.containsKey(key);
+                if (!cached) {
+                    builtAtMillis.remove(key, entry.getValue());
+                } else if (entry.getValue() < cutoff) {
+                    modelCache.remove(key);
+                    streamingModelCache.remove(key);
+                    builtAtMillis.remove(key, entry.getValue());
+                    evicted++;
+                }
+            }
+        }
+        if (evicted > 0) {
+            LOGGER.infof("Rebuilding %d cached model(s) older than %s (eddi.cluster.model-cache.max-age)", evicted,
+                    clusterConfig.modelCacheMaxAge());
+        }
     }
 
     /**
@@ -228,6 +295,7 @@ public class ChatModelRegistry {
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
         resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
+        resolvedParams = adaptToModel(type, resolvedParams);
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
@@ -281,6 +349,7 @@ public class ChatModelRegistry {
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
             resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
+            resolvedParams = adaptToModel(type, resolvedParams);
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);
@@ -291,6 +360,36 @@ public class ChatModelRegistry {
             LOGGER.debugf("Streaming not supported for type '%s', falling back to sync", type);
             return null;
         }
+    }
+
+    /**
+     * Apply {@link ModelParameterCatalog} to the resolved parameters of one build:
+     * remove what the configured model rejects (unless
+     * {@code eddi.llm.parameter-catalog.drop-rejected=false}) and warn once per
+     * finding. Runs on the cache miss only, so the warnings do not repeat on every
+     * turn. Only keys, the model id and the rule's note are logged — never a
+     * parameter value, which can be a credential.
+     */
+    private Map<String, String> adaptToModel(String type, Map<String, String> resolvedParams) {
+        var adapted = parameterCatalog.adapt(type, resolvedParams, dropRejectedParameters);
+        for (var finding : adapted.findings()) {
+            if (finding.migratedTo() != null) {
+                LOGGER.warnv("LLM parameter ''{0}'' is not accepted by {1} model ''{2}'': {3} (sent as ''{4}'' instead)",
+                        sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note(),
+                        sanitize(finding.migratedTo()));
+            } else if (finding.removed()) {
+                LOGGER.warnv("LLM parameter ''{0}'' was not sent to {1} model ''{2}'': {3} "
+                        + "(set eddi.llm.parameter-catalog.drop-rejected=false to send it anyway)",
+                        sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note());
+            } else if (finding.effect() == ModelParameterCatalog.Effect.REJECTED) {
+                LOGGER.warnv("LLM parameter ''{0}'' is rejected by {1} model ''{2}'' and will likely fail the request: {3}",
+                        sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note());
+            } else {
+                LOGGER.warnv("LLM parameter ''{0}'' has no effect on {1} model ''{2}'': {3}",
+                        sanitize(finding.key()), sanitize(type), sanitize(finding.model()), finding.note());
+            }
+        }
+        return adapted.parameters();
     }
 
     /**
@@ -319,6 +418,9 @@ public class ChatModelRegistry {
         synchronized (publishLock) {
             if (invalidationGeneration.get() == generationAtBuildStart) {
                 cache.put(cacheKey, model);
+                if (clusterConfig != null && clusterConfig.isNats()) {
+                    builtAtMillis.put(cacheKey, System.currentTimeMillis());
+                }
             } else {
                 LOGGER.debugf("Model built while an invalidation landed — not caching it; the next use rebuilds");
             }

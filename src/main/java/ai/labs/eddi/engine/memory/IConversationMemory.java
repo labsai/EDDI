@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -74,6 +75,24 @@ public interface IConversationMemory extends Serializable {
      * {@code ConversationService.sayStreaming()} before lifecycle execution.
      */
     default void setEventSink(ConversationEventSink eventSink) {
+        // no-op by default
+    }
+
+    /**
+     * The wall-clock deadline of the turn now running, or {@code null} when none
+     * applies (the default — today's behaviour). Transient: it describes this
+     * request, is set by the engine before each turn and is never persisted.
+     *
+     * @see TurnDeadline
+     */
+    default TurnDeadline getTurnDeadline() {
+        return null;
+    }
+
+    /**
+     * Set (or clear, with {@code null}) the deadline of the turn about to run.
+     */
+    default void setTurnDeadline(TurnDeadline turnDeadline) {
         // no-op by default
     }
 
@@ -442,6 +461,37 @@ public interface IConversationMemory extends Serializable {
      * @since 6.4.1
      */
     default void setPersistedStepCount(int persistedStepCount) {
+        // no-op by default
+    }
+
+    /**
+     * The cluster fencing token the current turn's writes carry — the revision of
+     * the conversation lease the turn holds — or {@code null} for an unfenced turn
+     * (single-node mode, or a degraded-mode turn without NATS). Transient: set by
+     * the conversation step runner when the turn starts, never persisted.
+     *
+     * @since 6.6.0
+     */
+    default Long getFenceToken() {
+        return null;
+    }
+
+    default void setFenceToken(Long fenceToken) {
+        // no-op by default
+    }
+
+    /**
+     * The {@code _fence} value the document carried when this memory was loaded
+     * ({@code null} for a document never written under a cluster lease). Carried so
+     * a full-document write keeps it.
+     *
+     * @since 6.6.0
+     */
+    default Long getStoredFence() {
+        return null;
+    }
+
+    default void setStoredFence(Long storedFence) {
         // no-op by default
     }
 

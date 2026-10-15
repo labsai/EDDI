@@ -37,7 +37,13 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { useCreateGroup, useAvailableStyles, isStyleSupported } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { styleLabel, styleDisplay } from "@/lib/discussion-styles";
-import { groupSaveProblems, uncoveredRolePhases, type GroupSaveProblem } from "@/lib/group-config";
+import {
+  groupSaveProblems,
+  idsTakenByOtherMembers,
+  optionsOfferedTo,
+  uncoveredRolePhases,
+  type GroupSaveProblem,
+} from "@/lib/group-config";
 import { GroupSaveProblems } from "@/components/groups/group-save-problems";
 import { getErrorMessage } from "@/lib/api-client";
 import {
@@ -64,9 +70,12 @@ import {
 } from "@/lib/group-templates";
 import {
   setupAgent,
+  resolveSetupVersion,
   LLM_PROVIDERS,
   type SetupAgentRequest,
 } from "@/lib/api/agent-setup";
+import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { describeUndeployed, reportDeployOutcome } from "@/lib/deploy-outcome";
 import { isProvisionableBySetup } from "@/lib/model-suggestions";
 import { providerNeedsKey, providerLabel } from "@/components/workforce/wizard/member-validation";
 import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
@@ -90,6 +99,12 @@ interface MemberSlot extends GroupMember {
   created: boolean;
   /** Set while creating */
   creating: boolean;
+  /**
+   * Created but not live yet: the version to deploy. Set when the agent is
+   * created, cleared once it is deployed - so a deploy the person cancelled (or
+   * that failed) is retried by the next Create instead of being forgotten.
+   */
+  pendingDeploy?: { version: number };
 }
 
 interface WizardState {
@@ -228,7 +243,10 @@ function buildSetupRequest(slot: MemberSlot, name: string, systemPrompt: string)
     provider,
     model: slot.model || (LLM_PROVIDERS.find((p) => p.id === provider)?.defaultModel ?? "claude-sonnet-5-5"),
     apiKey: providerNeedsKey(provider) ? slot.apiKey.trim() || undefined : undefined,
-    deploy: true,
+    // Created first, deployed afterwards through the grant flow: a new agent is
+    // on no vault key's grant yet, so deploying it in the same call would be
+    // refused for any restricted key.
+    deploy: false,
   };
 }
 
@@ -426,6 +444,7 @@ export function GroupWizardPage() {
   const [isBatchCreating, setIsBatchCreating] = useState(false);
 
   const createMutation = useCreateGroup();
+  const { deployMany } = useDeployWithGrants();
   // Gate progression on it here too: ConfigStep only renders the warning, and
   // this wizard provisions agents before saving.
   const availableStyles = useAvailableStyles();
@@ -502,7 +521,13 @@ export function GroupWizardPage() {
             slot.systemPrompt || defaultMemberPrompt(t, slot.displayName, slot.role ?? null),
           ),
         );
-        updatedMembers[index] = { ...updatedMembers[index]!, agentId: result.agentId, created: true };
+        const version = await resolveSetupVersion(result);
+        updatedMembers[index] = {
+          ...updatedMembers[index]!,
+          agentId: result.agentId,
+          created: true,
+          pendingDeploy: { version },
+        };
       } catch (err) {
         abort(err);
         return; // Stop on first failure
@@ -520,9 +545,45 @@ export function GroupWizardPage() {
             updatedModerator.systemPrompt || defaultModeratorPrompt(t),
           ),
         );
-        updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true };
+        const version = await resolveSetupVersion(result);
+        updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true, pendingDeploy: { version } };
       } catch (err) {
         abort(err);
+        return;
+      }
+    }
+
+    // --- Phase 1b: Deploy every created-but-not-live agent, grants asked ONCE ---
+    // (also the ones a previous attempt created and could not deploy).
+    const toDeploy = [...updatedMembers, ...(updatedModerator ? [updatedModerator] : [])].filter(
+      (m) => m.pendingDeploy && m.agentId,
+    );
+    if (toDeploy.length > 0) {
+      setCreationProgress(t("groupWizard.deployingAgents", "Deploying the agents..."));
+      const results = await deployMany({
+        targets: toDeploy.map((m) => ({
+          agentId: m.agentId,
+          version: m.pendingDeploy!.version,
+          agentName: m.displayName,
+        })),
+      });
+      const live = new Set(results.filter((r) => r.outcome.kind === "deployed").map((r) => r.target.agentId));
+      const settle = (m: MemberSlot): MemberSlot =>
+        live.has(m.agentId) ? { ...m, pendingDeploy: undefined } : m;
+      for (let i = 0; i < updatedMembers.length; i++) updatedMembers[i] = settle(updatedMembers[i]!);
+      if (updatedModerator) updatedModerator = settle(updatedModerator);
+      setState((s) => ({ ...s, members: updatedMembers, moderator: updatedModerator }));
+
+      const problem = describeUndeployed(
+        results.filter((r) => r.outcome.kind !== "deployed"),
+        t,
+      );
+      if (problem) {
+        // Do not save a group whose members are not live, and do not call it done:
+        // the agents exist, so say that and how to finish.
+        toast.error(problem, { duration: 15000 });
+        setIsBatchCreating(false);
+        setCreationProgress(null);
         return;
       }
     }
@@ -1382,6 +1443,7 @@ function MembersStep({
   const { t } = useTranslation();
   const { data: agentDescriptors, refetch: refetchAgents } = useAgentDescriptors(100);
   const agents = agentDescriptors ? groupAgentsByName(agentDescriptors) : [];
+  const { deploy } = useDeployWithGrants();
 
   function addMember() {
     onChange({
@@ -1414,16 +1476,33 @@ function MembersStep({
       slot.systemPrompt || defaultMemberPrompt(t, slot.displayName, slot.role ?? null),
     );
 
+    // Known once the agent exists, so a failure AFTER that still records it.
+    let created: { agentId: string; version: number } | null = null;
     try {
       const result = await setupAgent(req);
+      created = { agentId: result.agentId, version: await resolveSetupVersion(result) };
+      // Through the grant flow: a new agent is on no vault key's grant yet.
+      const options = { agentId: created.agentId, agentName: slot.displayName, version: created.version };
+      const outcome = await deploy(options);
       updateMember(idx, {
-        agentId: result.agentId,
+        agentId: created.agentId,
         created: true,
         creating: false,
+        // Not live? The final Create deploys it again rather than forgetting it.
+        pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
       });
-      toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
+      if (outcome.kind === "deployed") {
+        toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
+      } else {
+        reportDeployOutcome(outcome, options, t);
+      }
     } catch (err) {
-      updateMember(idx, { creating: false });
+      updateMember(
+        idx,
+        created
+          ? { agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
+          : { creating: false },
+      );
       toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
     }
   }
@@ -1440,14 +1519,32 @@ function MembersStep({
       mod.systemPrompt || defaultModeratorPrompt(t),
     );
 
+    let created: { agentId: string; version: number } | null = null;
     try {
       const result = await setupAgent(req);
+      created = { agentId: result.agentId, version: await resolveSetupVersion(result) };
+      const options = { agentId: created.agentId, agentName: mod.displayName, version: created.version };
+      const outcome = await deploy(options);
       onChange({
-        moderator: { ...mod, agentId: result.agentId, created: true, creating: false },
+        moderator: {
+          ...mod,
+          agentId: created.agentId,
+          created: true,
+          creating: false,
+          pendingDeploy: outcome.kind === "deployed" ? undefined : { version: created.version },
+        },
       });
-      toast.success(t("groupWizard.moderatorCreated"));
+      if (outcome.kind === "deployed") {
+        toast.success(t("groupWizard.moderatorCreated"));
+      } else {
+        reportDeployOutcome(outcome, options, t);
+      }
     } catch (err) {
-      onChange({ moderator: { ...mod, creating: false } });
+      onChange({
+        moderator: created
+          ? { ...mod, agentId: created.agentId, created: true, creating: false, pendingDeploy: { version: created.version } }
+          : { ...mod, creating: false },
+      });
       toast.error(t("groupWizard.agentCreateFailed", { error: getErrorMessage(err) }));
     }
   }
@@ -1500,7 +1597,10 @@ function MembersStep({
             key={idx}
             member={member}
             index={idx}
-            agents={agents}
+            // An agent seated in another slot is not offered again: both seats
+            // would share one member conversation, and EDDI 6.6 refuses the save.
+            agents={optionsOfferedTo(agents, state.members, idx)}
+            takenIds={idsTakenByOtherMembers(state.members, idx)}
             styleColors={styleColors}
             onUpdate={(updates) => updateMember(idx, updates)}
             onRemove={() => removeMember(idx)}
@@ -1737,11 +1837,14 @@ function MemberCard({
   onUpdate,
   onRemove,
   onCreateAgent,
+  takenIds,
   t,
 }: {
   member: MemberSlot;
   index: number;
   agents: { id: string; name: string }[];
+  /** Ids other slots already hold — keyed by id whatever the member type. */
+  takenIds?: Set<string>;
   styleColors: typeof STYLE_COLORS[DiscussionStyle];
   onUpdate: (updates: Partial<MemberSlot>) => void;
   onRemove: () => void;
@@ -1889,6 +1992,7 @@ function MemberCard({
             <GroupMemberPicker
               agentId={member.agentId}
               onUpdate={onUpdate}
+              exclude={takenIds}
               t={t}
             />
           ) : member.memberType === "HUMAN" ? (
@@ -2071,6 +2175,19 @@ function MemberCard({
 
       {/* Created confirmation */}
       {member.created && (
+        member.pendingDeploy ? (
+          // Created, but the deploy was cancelled or failed: the next Create
+          // deploys it, so it must not read as done.
+          <div className="px-4 py-2 bg-warning/5 border-t border-warning/20 flex items-center gap-2" data-testid="member-not-deployed">
+            <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+            <span className="text-xs text-warning font-medium">
+              {t("groupWizard.agentNotDeployed", "Agent created but not deployed")}
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono ms-auto">
+              {member.agentId.slice(0, 12)}…
+            </span>
+          </div>
+        ) : (
         <div className="px-4 py-2 bg-emerald-500/5 border-t border-emerald-500/20 flex items-center gap-2">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
@@ -2080,6 +2197,7 @@ function MemberCard({
             {member.agentId.slice(0, 12)}…
           </span>
         </div>
+        )
       )}
     </div>
   );
@@ -2106,6 +2224,21 @@ function ModeratorCard({
   const needsKey = providerNeedsKey(moderator.provider || DEFAULT_PROVIDER);
   const keyMissing = missingApiKey(moderator);
   const id = useId();
+
+  if (moderator.created && moderator.pendingDeploy) {
+    // Created, but the deploy was cancelled or failed: the next Create deploys it.
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-warning/5 border border-warning/20 p-2.5" data-testid="moderator-not-deployed">
+        <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
+        <span className="text-xs text-warning font-medium flex-1">
+          {t("groupWizard.agentNotDeployed", "Agent created but not deployed")}
+        </span>
+        <span className="text-[10px] text-muted-foreground font-mono">
+          {moderator.agentId.slice(0, 12)}…
+        </span>
+      </div>
+    );
+  }
 
   if (moderator.created) {
     return (
@@ -2458,10 +2591,12 @@ function ReviewStep({
 function GroupMemberPicker({
   agentId,
   onUpdate,
+  exclude,
   t,
 }: {
   agentId: string;
   onUpdate: (updates: Partial<MemberSlot>) => void;
+  exclude?: Set<string>;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const { data: groups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100);
@@ -2507,7 +2642,7 @@ function GroupMemberPicker({
             )}
           >
             <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
-            {groups.map((group) => (
+            {groups.filter((group) => group.id === agentId || !exclude?.has(group.id)).map((group) => (
               <option key={group.id} value={group.id}>
                 {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
               </option>

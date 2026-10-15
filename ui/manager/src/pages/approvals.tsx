@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Clock,
@@ -22,7 +22,7 @@ import { getErrorMessage } from "@/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {
   usePendingApprovals,
@@ -35,8 +35,10 @@ import {
   useCancelGroupDiscussion,
   useApprovalStatus,
 } from "@/hooks/use-hitl";
-import { useGroupDescriptors } from "@/hooks/use-groups";
-import { groupGroupsByName } from "@/lib/api/groups";
+import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
+import { useAgentDescriptors } from "@/hooks/use-agents";
+import { parseResourceUri } from "@/lib/api/agents";
+import { getGroupConversation, groupGroupsByName } from "@/lib/api/groups";
 import { timeoutPolicyLabel } from "@/lib/hitl-labels";
 import { useHasRole } from "@/hooks/use-auth";
 import type {
@@ -78,6 +80,10 @@ interface ApprovalQueueRowProps {
    * version comes from the descriptor list; the conversation from the row.
    */
   groupHref: string | null;
+  /** The agent's or group's display name, when the descriptor lists are loaded. */
+  displayName: string | null;
+  /** The group's current version — needed to resolve a HUMAN member's name. */
+  groupVersion: number | null;
   onRequestConfirm: (item: PendingApprovalSummary, action: HitlVerdict | "CANCEL") => void;
   onToolDecide: (
     item: PendingApprovalSummary,
@@ -87,6 +93,13 @@ interface ApprovalQueueRowProps {
     toolDecisions?: Record<string, ToolCallDecision>,
   ) => void;
   onToolCancel: (item: PendingApprovalSummary) => void;
+  /** Decide a group pause from the inline review panel (note included). */
+  onGroupDecide: (
+    item: PendingApprovalSummary,
+    verdict: HitlVerdict,
+    note?: string,
+    taskApprovals?: Record<string, string>,
+  ) => void;
   /**
    * Whether a decision or cancel for THIS row is in flight.
    *
@@ -112,9 +125,12 @@ interface ApprovalQueueRowProps {
 function ApprovalQueueRow({
   item,
   groupHref,
+  displayName,
+  groupVersion,
   onRequestConfirm,
   onToolDecide,
   onToolCancel,
+  onGroupDecide,
   busy,
 }: ApprovalQueueRowProps) {
   const { t } = useTranslation();
@@ -122,12 +138,33 @@ function ApprovalQueueRow({
   const isToolCall = !item.groupId && item.pauseType === "TOOL_CALL";
   /** I6: a member's turn, not a decision anyone takes from this queue. */
   const isHumanTurn = item.pauseType === "HUMAN_TURN";
+  /** A group phase pause: decided here, and reviewable in place like a tool call. */
+  const isGroupDecision = !!item.groupId && !isHumanTurn;
+  // A HUMAN turn names its member by id; the group's roster has the name a
+  // person would recognise. Only fetched for those rows.
+  const { data: turnGroup } = useGroup(
+    isHumanTurn && item.groupId ? item.groupId : "",
+    groupVersion ?? undefined,
+  );
+  const turnMemberName =
+    turnGroup?.members?.find((m) => m.agentId === item.pendingMemberId)?.displayName || null;
+  // The paused discussion itself, fetched only while the review is open: what
+  // phase it stopped in and what was just said is what a verdict is about.
+  const groupConversation = useQuery({
+    queryKey: ["groupConversations", item.groupId, item.conversationId],
+    queryFn: () => getGroupConversation(item.groupId!, item.conversationId),
+    enabled: expanded && isGroupDecision,
+  });
   // Fetched only while expanded: pauseDetails (the per-call redacted arguments
   // and request preview) is not on the list summary, deliberately — a payload
   // that size has no place in an endpoint that lists every pending approval at
   // once. `enabled: expanded` means collapsing and re-expanding re-fetches
   // rather than trusting a stale cache, matching every other pause surface.
-  const approvalStatus = useApprovalStatus(item.conversationId, expanded);
+  // The inbox row knows when the pause started, so the same verify-the-pause
+  // rule applies as on every other approval surface (see useApprovalStatus).
+  const approvalStatus = useApprovalStatus(item.conversationId, expanded, item.pausedAt, {
+    verifyPause: true,
+  });
 
   const isSubmitting = busy;
   /** This row's own group decision, so one busy row does not disable the queue. */
@@ -154,8 +191,8 @@ function ApprovalQueueRow({
 
   return (
     <>
-      <tr className="hover:bg-muted/20 transition-colors">
-        <td className="px-4 py-3">
+      <tr className="hover:bg-muted/20 transition-colors max-md:block max-md:px-4 max-md:py-3">
+        <td className="px-4 py-3 max-md:block max-md:px-0 max-md:py-0.5">
           <span className={cn(
             "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
             item.groupId
@@ -169,7 +206,14 @@ function ApprovalQueueRow({
             )}
           </span>
         </td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.conversationColumn", "Conversation")}>
+          {/* Two rows of "conv-awaitin…" were indistinguishable: lead with the
+              agent's (or group's) name, and keep the id as the secondary line. */}
+          {displayName && (
+            <p className="text-sm font-medium text-foreground" data-testid={`name-${item.conversationId}`}>
+              {displayName}
+            </p>
+          )}
           {item.groupId && !groupHref ? (
             // Held until the group's current version is known — see `groupHrefFor`.
             <span
@@ -186,13 +230,14 @@ function ApprovalQueueRow({
             <Link
               to={groupHref ?? `/manage/conversationview/${item.conversationId}`}
               className="font-mono text-xs text-primary hover:underline"
+              title={item.conversationId}
             >
               {item.conversationId.slice(0, 12)}…
               <ExternalLink className="ms-1 inline h-3 w-3" />
             </Link>
           )}
         </td>
-        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">
+        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate max-md:block max-md:max-w-none max-md:whitespace-normal max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pauseReason", "Reason")}>
           {item.pauseType === "TOOL_CALL" && (
             <span
               className="me-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
@@ -220,22 +265,25 @@ function ApprovalQueueRow({
             ? item.toolNames.join(", ")
             : isHumanTurn
               ? t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
-                  member: item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                  member:
+                    turnMemberName ||
+                    item.pendingMemberId ||
+                    t("hitl.humanTurnMemberFallback", "a member"),
                 })
               : item.pauseReason || "—"}
         </td>
-        <td className="px-4 py-3 text-muted-foreground text-xs">
+        <td className="px-4 py-3 text-muted-foreground text-xs max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pausedAt", "Paused")}>
           {item.pausedAt
             ? new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "medium" }).format(new Date(item.pausedAt))
             : "—"}
         </td>
-        <td className="px-4 py-3">
+        <td className="px-4 py-3 max-md:block max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.timeoutPolicy", "Timeout")}>
           <span className="text-xs text-muted-foreground">
             {timeoutPolicyLabel(t, item.timeoutPolicy) || "—"}
           </span>
         </td>
-        <td className="px-4 py-3">
-          <div className="flex items-center justify-end gap-1">
+        <td className="px-4 py-3 max-md:block max-md:px-0 max-md:pt-2">
+          <div className="flex flex-wrap items-center justify-end gap-1 max-md:justify-start">
             {isToolCall && (
               <>
                 <Button
@@ -298,8 +346,22 @@ function ApprovalQueueRow({
                 decided here like a 1:1 pause. A HUMAN_TURN is not a decision —
                 a member owes the discussion their contribution — so it keeps
                 the link only, and the link now opens that discussion. */}
-            {item.groupId && !isHumanTurn && (
+            {isGroupDecision && (
               <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setExpanded((v) => !v)}
+                  aria-expanded={expanded}
+                  className="gap-1 bg-warning/10 text-warning hover:bg-warning/20"
+                  data-testid={`review-${item.conversationId}`}
+                >
+                  {expanded ? t("common.close", "Close") : t("hitl.review", "Review")}
+                  <ChevronDown
+                    className={cn("transition-transform", expanded && "rotate-180")}
+                    aria-hidden="true"
+                  />
+                </Button>
                 <Button
                   variant="primary"
                   size="sm"
@@ -354,9 +416,62 @@ function ApprovalQueueRow({
           </div>
         </td>
       </tr>
+      {isGroupDecision && expanded && (
+        <tr className="max-md:block" data-testid={`group-review-row-${item.conversationId}`}>
+          <td colSpan={6} className="bg-muted/10 p-0 max-md:block">
+            <div className="w-0 min-w-full space-y-3 px-4 py-4 max-md:w-auto">
+              {/* Enough of the discussion to decide on: where it stopped and the
+                  last things said — not just why it paused. */}
+              <div className="rounded-lg border border-border bg-background/60 p-3" data-testid={`group-review-context-${item.conversationId}`}>
+                {groupConversation.isLoading ? (
+                  <p className="text-xs text-muted-foreground">{t("common.loading", "Loading…")}</p>
+                ) : groupConversation.isError || !groupConversation.data ? (
+                  <div className="flex items-center gap-2 text-xs text-destructive">
+                    <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("hitl.groupReviewLoadError", "The discussion could not be loaded.")}
+                    <Button variant="link" size="sm" onClick={() => void groupConversation.refetch()}>
+                      {t("common.retry", "Retry")}
+                    </Button>
+                  </div>
+                ) : (
+                  <GroupReviewContext conversation={groupConversation.data} />
+                )}
+              </div>
+              <ApprovalCard
+                surface="group"
+                // The same card, receipt and verify-the-pause rule as every other
+                // deciding surface: until the stored discussion is the one paused
+                // for approval, there is no phase/task data to decide from.
+                cardKey={`${item.conversationId}:${item.pausedAt}`}
+                isResolving={groupDecisionPending}
+                pauseDetailsPending={
+                  groupConversation.isLoading ||
+                  (!!groupConversation.data && groupConversation.data.state !== "AWAITING_APPROVAL")
+                }
+                pauseDetailsError={groupConversation.isError}
+                onRetryPauseDetails={() => void groupConversation.refetch()}
+                pauseReason={item.pauseReason ?? undefined}
+                pausedAt={item.pausedAt}
+                timeoutPolicy={item.timeoutPolicy ?? undefined}
+                approvalTimeout={item.approvalTimeout ?? undefined}
+                pausedPhaseName={groupConversation.data?.pausedPhaseName}
+                granularity={groupConversation.data?.hitlPauseType}
+                pendingTaskIds={(groupConversation.data?.taskList?.tasks ?? [])
+                  .filter((task) => task.status === "AWAITING_APPROVAL")
+                  .map((task) => task.id)}
+                isSubmitting={isSubmitting}
+                onDecide={(verdict, note, taskApprovals) =>
+                  onGroupDecide(item, verdict, note, taskApprovals)
+                }
+                onCancel={() => onRequestConfirm(item, "CANCEL")}
+              />
+            </div>
+          </td>
+        </tr>
+      )}
       {isToolCall && expanded && (
-        <tr data-testid={`tool-decision-row-${item.conversationId}`}>
-          <td colSpan={6} className="bg-muted/10 p-0">
+        <tr className="max-md:block" data-testid={`tool-decision-row-${item.conversationId}`}>
+          <td colSpan={6} className="bg-muted/10 p-0 max-md:block">
             {/* `w-0 min-w-full`, not padding on the cell: an auto-layout table
                 sizes its columns from their content's min-content width, and
                 the banner's redacted-arguments <pre> is a single very long
@@ -368,8 +483,11 @@ function ApprovalQueueRow({
                 `min-width: 100%` then fills the cell the OTHER rows sized.
                 The inner panels keep scrolling within themselves as before. */}
             <div className="w-0 min-w-full px-4 py-4">
-              <ApprovalBanner
+              <ApprovalCard
                 surface="regular"
+                cardKey={`${item.conversationId}:${item.pausedAt}`}
+                isResolving={busy}
+                expectToolCall
                 pauseReason={item.pauseReason ?? undefined}
                 pausedAt={item.pausedAt}
                 timeoutPolicy={item.timeoutPolicy ?? undefined}
@@ -381,9 +499,9 @@ function ApprovalQueueRow({
                 // the surface where an approver has the LEAST context, while
                 // the operator chat blocked it for the same pause. All three
                 // approval surfaces now derive this identically.
-                pauseDetailsPending={approvalStatus.isLoading}
-                pauseDetailsError={approvalStatus.isError}
-                onRetryPauseDetails={() => void approvalStatus.refetch()}
+                pauseDetailsPending={approvalStatus.detailsPending}
+                pauseDetailsError={approvalStatus.detailsError}
+                onRetryPauseDetails={() => void approvalStatus.retry()}
                 isSubmitting={isSubmitting}
                 requireExplicitPerCall
                 blockedCalls={blockedCalls}
@@ -400,6 +518,50 @@ function ApprovalQueueRow({
         </tr>
       )}
     </>
+  );
+}
+
+/** How much of each recent entry the review shows. */
+const REVIEW_EXCERPT_CHARS = 280;
+/** How many of the latest transcript entries the review shows. */
+const REVIEW_ENTRY_COUNT = 3;
+
+/** The phase a group paused in and the last things said — the context for a verdict. */
+function GroupReviewContext({ conversation }: { conversation: Awaited<ReturnType<typeof getGroupConversation>> }) {
+  const { t } = useTranslation();
+  const recent = (conversation.transcript ?? [])
+    .filter((e) => e.type !== "QUESTION" && !!e.content)
+    .slice(-REVIEW_ENTRY_COUNT);
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="text-muted-foreground">
+        <span className="font-medium text-foreground">{t("groups.question", "Question")}: </span>
+        {conversation.originalQuestion}
+      </p>
+      {conversation.pausedPhaseName && (
+        <p className="text-muted-foreground">
+          <span className="font-medium text-foreground">{t("hitl.phase", "Phase")}: </span>
+          {conversation.pausedPhaseName}
+        </p>
+      )}
+      {recent.length > 0 ? (
+        <ul className="space-y-1.5" data-testid="group-review-entries">
+          {recent.map((entry, idx) => (
+            <li key={`${entry.speakerAgentId}-${entry.timestamp}-${idx}`} className="rounded-md bg-muted/40 p-2">
+              <span className="font-medium text-foreground">{entry.speakerDisplayName}</span>
+              {entry.phaseName && <span className="text-muted-foreground"> · {entry.phaseName}</span>}
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-muted-foreground">
+                {entry.content!.length > REVIEW_EXCERPT_CHARS
+                  ? `${entry.content!.slice(0, REVIEW_EXCERPT_CHARS)}…`
+                  : entry.content}
+              </p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">{t("hitl.groupReviewNoEntries", "Nothing has been said yet.")}</p>
+      )}
+    </div>
   );
 }
 
@@ -486,6 +648,29 @@ export function ApprovalsPage() {
     }
     return map;
   }, [groupDescriptors]);
+  // Names for the rows. A conversation id says nothing about who it belongs to,
+  // and two rows used to read identically. Best effort: a row whose agent or
+  // group is outside the window (or the list is still loading) shows its id.
+  const { data: agentDescriptors } = useAgentDescriptors(500);
+  const agentNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of agentDescriptors ?? []) {
+      if (d.name) map.set(parseResourceUri(d.resource).id, d.name);
+    }
+    return map;
+  }, [agentDescriptors]);
+  const groupNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of groupGroupsByName(groupDescriptors ?? [])) {
+      if (group.name) map.set(group.id, group.name);
+    }
+    return map;
+  }, [groupDescriptors]);
+  const nameFor = useCallback(
+    (item: PendingApprovalSummary): string | null =>
+      (item.groupId ? groupNames.get(item.groupId) : item.agentId ? agentNames.get(item.agentId) : null) ?? null,
+    [agentNames, groupNames],
+  );
 
   /**
    * Where a row's View link should land: the group, at its current version,
@@ -537,7 +722,11 @@ export function ApprovalsPage() {
     return (
       a.conversationId?.toLowerCase().includes(q) ||
       a.agentId?.toLowerCase().includes(q) ||
+      a.groupId?.toLowerCase().includes(q) ||
+      nameFor(a)?.toLowerCase().includes(q) ||
+      a.pendingMemberId?.toLowerCase().includes(q) ||
       a.pauseReason?.toLowerCase().includes(q) ||
+      a.toolNames?.some((n) => n.toLowerCase().includes(q)) ||
       a.userId?.toLowerCase().includes(q)
     );
   });
@@ -575,6 +764,30 @@ export function ApprovalsPage() {
       item.conversationId,
       () => resumeMutation.mutateAsync({ conversationId: item.conversationId, decision: { verdict }, shown }),
       ok,
+    );
+  };
+
+  /** Decide a group pause from its review panel — the note and per-task verdicts ride along. */
+  const decideGroupPhase = (
+    item: PendingApprovalSummary,
+    verdict: HitlVerdict,
+    note?: string,
+    taskApprovals?: Record<string, string>,
+  ) => {
+    if (!item.groupId) return;
+    const groupId = item.groupId;
+    const shown: ShownPause = { pausedAt: item.pausedAt, pauseType: item.pauseType ?? null };
+    void runForRow(
+      item.conversationId,
+      () =>
+        groupApproveMutation.mutateAsync({
+          groupId,
+          gcId: item.conversationId,
+          request: { decision: { verdict, note }, taskApprovals },
+          shown,
+        }),
+      () =>
+        toast.success(verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected")),
     );
   };
 
@@ -858,24 +1071,31 @@ export function ApprovalsPage() {
         // phone, and clipping them put Review/Approve/Reject permanently out
         // of reach there — the decision buttons sat ~350px past the card edge
         // with no way to scroll to them. Now the table scrolls inside its card.
+        //
+        // On a phone the table is laid out as cards (each row a block, each cell
+        // labelled by `data-label`) rather than scrolled: a horizontal scroll
+        // still left Approve/Reject a swipe away from the row they belong to.
         <div className="rounded-xl border bg-card shadow-sm overflow-x-auto">
-          <table className="w-full text-sm" data-testid="approval-queue-table">
-            <thead>
+          <table className="w-full text-sm max-md:block" data-testid="approval-queue-table">
+            <thead className="max-md:hidden">
               <tr className="border-b bg-muted/30">
                 <th className="px-4 py-3 text-start font-medium text-muted-foreground">{t("hitl.surface", "Surface")}</th>
-                <th className="px-4 py-3 text-start font-medium text-muted-foreground">ID</th>
+                <th className="px-4 py-3 text-start font-medium text-muted-foreground">{t("hitl.conversationColumn", "Conversation")}</th>
                 <th className="px-4 py-3 text-start font-medium text-muted-foreground">{t("hitl.pauseReason", "Reason")}</th>
                 <th className="px-4 py-3 text-start font-medium text-muted-foreground">{t("hitl.pausedAt", "Paused")}</th>
                 <th className="px-4 py-3 text-start font-medium text-muted-foreground">{t("hitl.timeoutPolicy", "Timeout")}</th>
                 <th className="px-4 py-3 text-end font-medium text-muted-foreground">{t("common.actions", "Actions")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y max-md:block">
               {filtered.map((item) => (
                 <ApprovalQueueRow
                   key={item.conversationId}
                   item={item}
                   groupHref={groupHrefFor(item)}
+                  displayName={nameFor(item)}
+                  groupVersion={item.groupId ? (groupVersions.get(item.groupId) ?? null) : null}
+                  onGroupDecide={decideGroupPhase}
                   onRequestConfirm={(row, action) => setConfirm({ item: row, action })}
                   onToolDecide={decideToolCall}
                   onToolCancel={doCancel}

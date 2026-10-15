@@ -51,26 +51,125 @@ applies in dev mode only.
 
 ---
 
+## Settings operators set first
+
+The settings a new deployment needs before anything else are mostly **not**
+`eddi.*` properties: they belong to Quarkus or to EDDI's MongoDB client, so the
+tables further down do not list them. The defaults below are the ones in
+`src/main/resources/application.properties`; the environment-variable spelling
+follows the same mechanical rule as above (`quarkus.http.cors.origins` →
+`QUARKUS_HTTP_CORS_ORIGINS`).
+
+### Datastore
+
+EDDI uses **one** datastore per deployment: MongoDB (the default) or
+PostgreSQL.
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `mongodb.connectionString` | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000` (`mongodb://localhost:27017/…` in dev mode) | MongoDB connection string, credentials included (`docker-compose.yml` passes one with `authSource=admin`). Read by `PersistenceModule` |
+| `mongodb.database` | `MONGODB_DATABASE` | `eddi` | The database EDDI uses. This, not the path in the connection string, selects the database |
+| `quarkus.profile` | `QUARKUS_PROFILE` | *(none — MongoDB)* | `postgres` switches the deployment to PostgreSQL: the profile sets `eddi.datastore.type=postgres` and activates the JDBC datasource, which is inactive (`quarkus.datasource.active=false`) otherwise |
+| `quarkus.datasource.jdbc.url` | `QUARKUS_DATASOURCE_JDBC_URL` | *(unset)* | PostgreSQL only, e.g. `jdbc:postgresql://postgres:5432/eddi`. Required whenever the `postgres` profile is active — there is no default, and datasource Dev Services are disabled (`quarkus.datasource.devservices.enabled=false`) |
+| `quarkus.datasource.username` | `QUARKUS_DATASOURCE_USERNAME` | *(unset)* | PostgreSQL only. Required with the `postgres` profile |
+| `quarkus.datasource.password` | `QUARKUS_DATASOURCE_PASSWORD` | *(unset)* | PostgreSQL only. Required with the `postgres` profile |
+
+`docker-compose.postgres-only.yml` is a worked example of the PostgreSQL
+settings.
+
+### Authentication (OIDC)
+
+Authentication is off until you turn it on. With it off, a production boot
+fails unless you opt out explicitly (see the escape hatches below).
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `quarkus.oidc.tenant-enabled` | `QUARKUS_OIDC_TENANT_ENABLED` | `false` | The master switch. `true` turns on bearer-token validation, and `authorization.enabled` follows it, so `@RolesAllowed` is enforced exactly when this is on |
+| `quarkus.oidc.auth-server-url` | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8180/realms/eddi` | The issuer EDDI validates tokens against (for Keycloak, the realm URL) |
+| `quarkus.oidc.client-id` | `QUARKUS_OIDC_CLIENT_ID` | `eddi-backend` | EDDI's own client in the identity provider |
+| `quarkus.oidc.token.audience` | `QUARKUS_OIDC_TOKEN_AUDIENCE` | `eddi-backend` | Required `aud` of an access token. A token minted for another client is refused unless that client adds this audience (the shipped realm's clients do). The literal `any` disables the audience check |
+| `quarkus.oidc.roles.role-claim-path` | `QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH` | `realm_access/roles` | Where EDDI reads roles from in the token. Leave it unless your provider puts roles elsewhere: the Quarkus default (the `groups` claim) replaces a grouped user's roles with group paths, and every role-protected endpoint then answers 403 |
+
+The three opt-outs for running without authentication outside dev mode are all
+`false` by default and are described under [Security &
+authentication](#security--authentication):
+`EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (`eddi.security.allow-unauthenticated`,
+checked by `AuthStartupGuard`), and, separately for the two surfaces
+`HighValueSurfaceGuard` protects, `EDDI_MCP_ALLOW_UNAUTHENTICATED`
+(`eddi.mcp.allow-unauthenticated`) and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED`
+(`eddi.secretstore.allow-unauthenticated`). The first does not imply the other
+two.
+
+### HTTP
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `quarkus.http.port` | `QUARKUS_HTTP_PORT` | `7070` | HTTP port (`quarkus.http.ssl-port` is `7443`) |
+| `quarkus.http.host` | `QUARKUS_HTTP_HOST` | Quarkus default: `localhost` in dev and test, `0.0.0.0` otherwise | Bind address. The container image sets `-Dquarkus.http.host=0.0.0.0` in `JAVA_OPTS_APPEND`, and a system property outranks an environment variable, so in the image change it through `JAVA_OPTS_APPEND`, not `QUARKUS_HTTP_HOST` |
+| `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:3000,http://localhost:7070,https://localhost:7443` | Origins allowed to call the API from a browser. Add the origin of every page that embeds the Chat UI or calls EDDI from another host. CORS itself is on (`quarkus.http.cors.enabled=true`); the allowed methods and headers are set next to it in `application.properties` |
+| `quarkus.http.limits.max-body-size` | `QUARKUS_HTTP_LIMITS_MAX_BODY_SIZE` | `60M` | The absolute ceiling on any request body, enforced before EDDI sees the request. Only a knowledge base's file upload may use all of it; every other endpoint is held to `eddi.http.limits.default-max-body-size` (below) |
+
+### Secrets and external configuration
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `EDDI_VAULT_MASTER_KEY` (`eddi.vault.master-key`) | *(empty — vault inactive)* | The master key the secrets vault derives its key-encryption key from. Set it before storing any secret, and keep it: secrets encrypted under a lost key cannot be recovered. A weak or known key fails a production boot. Details under [Secrets vault](#secrets-vault) and in [secrets-vault.md](secrets-vault.md) |
+| `QUARKUS_CONFIG_LOCATIONS` (`quarkus.config.locations`) | *(unset)* | Comma-separated list of extra properties files to load, for keeping secrets in a mounted file instead of environment variables. The `k8s/` manifests mount `/etc/eddi/secrets/application-secrets.properties` this way. Set as an environment variable, the listed file is loaded at environment-variable priority and its value wins over an environment variable that sets the same key, so keep each key in one place |
+
+---
+
 ## Data store & messaging
 
 | Property | Default | Description |
 |---|---|---|
 | `eddi.datastore.type` | `mongodb` | `mongodb` or `postgres`, matched exactly and case-sensitively — any other value, `Postgres` included, means MongoDB. Selects which store implementations EDDI uses, but not the connection: PostgreSQL also needs the `postgres` Quarkus profile (`QUARKUS_PROFILE=postgres`, which activates the datasource and sets this property for you) and `QUARKUS_DATASOURCE_JDBC_URL`, `QUARKUS_DATASOURCE_USERNAME` and `QUARKUS_DATASOURCE_PASSWORD`. Setting `EDDI_DATASTORE_TYPE=postgres` without the profile leaves the datasource inactive. A PostgreSQL deployment never opens a MongoDB connection, so no MongoDB is needed — see [Architecture → DB-agnostic design](architecture.md) |
+| `eddi.datastore.postgres.startup-lock-timeout` | `180` | PostgreSQL only. Seconds a booting replica waits for the startup advisory lock, which runs the startup (table creation, migrations) of replicas sharing one database one after another — `CREATE TABLE IF NOT EXISTS` is not safe against a concurrent copy of itself. On expiry the node starts without the lock |
 | `eddi.datastore.postgres.substring-search-index` | `true` | PostgreSQL only. Builds `pg_trgm` trigram indexes for the descriptor listings' search box, in the background after boot (`CREATE INDEX CONCURRENTLY`, so writes are not blocked). Needs `CREATE EXTENSION pg_trgm`, which is trusted since PostgreSQL 13; if the role is refused, a warning is logged and search runs unindexed. Costs about 0.1 ms more per descriptor write. `false` builds nothing |
-| `eddi.messaging.type` | `in-memory` | `in-memory` or `nats`. `in-memory` confines the conversation coordinator to a single instance; `nats` distributes it |
+| `eddi.messaging.type` | `in-memory` | Read at runtime; one image serves both. `in-memory`: a single node, no dependencies. `nats`: any number of replicas behind a plain round-robin load balancer, coordinated through NATS JetStream — see [Clustering](clustering.md). Any other value fails the boot |
 
-### NATS JetStream (only when `eddi.messaging.type=nats`)
+### Clustering (only when `eddi.messaging.type=nats`)
+
+Every property below is inert in `in-memory` mode. The model, the degraded-mode
+contract and the operator runbook are in [Clustering](clustering.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.nats.url` | `nats://localhost:4222` | Server URL |
-| `eddi.nats.stream-name` | `EDDI_CONVERSATIONS` | JetStream stream carrying conversation work |
-| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream that receives messages past `max-retries` |
-| `eddi.nats.max-retries` | `3` | Redelivery attempts before dead-lettering |
-| `eddi.nats.ack-wait-seconds` | `60` | How long JetStream waits for an ack before redelivering. Must exceed your slowest conversation turn, or slow turns are processed twice |
-| `eddi.nats.stream-max-age` | `1h` | Age bound of the conversation stream. Its messages are ordering markers nothing consumes, so the oldest are discarded when any of the three bounds is reached |
-| `eddi.nats.stream-max-messages` | `100000` | Message-count bound of the conversation stream |
-| `eddi.nats.stream-max-bytes` | `268435456` | Size bound of the conversation stream (256 MiB) |
+| `eddi.cluster.node-id` | host name | This replica's id. Must be unique per replica; falls back to `eddi.schedule.instance-id`, then the host name. Helm and the Kustomize overlay set it from the pod name |
+| `eddi.nats.url` | `nats://localhost:4222` | NATS servers, comma-separated — list every member of the NATS cluster |
+| `eddi.nats.prefix` | `EDDI` | Prefix of every KV bucket, stream and subject (`eddi.<prefix>.…`), so two deployments can share one NATS cluster |
+| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster. A bucket created with another value keeps it (logged as a warning) |
+| `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node. While left at the default it follows `eddi.nats.prefix` (`<prefix>_DEAD_LETTERS` for any prefix other than `EDDI`), so deployments with different prefixes on one NATS cluster never share it |
+| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials |
+| `eddi.nats.token` | — | NATS token authentication |
+| `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
+| `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
+| `eddi.nats.tls.enabled` | `false` | TLS to NATS |
+| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
+| `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
+| `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
+| `eddi.nats.request-timeout` | `2s` | Timeout of every KV, JetStream and RPC call. While disconnected, calls fail at once instead |
+| `eddi.nats.reconnect-wait` | `1s` | Pause between reconnect attempts (plus jitter); reconnects never stop |
+| `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation |
+| `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
+| `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
+| `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
+| `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
+| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
+| `eddi.cluster.degraded.nonces` | `reject` | Signed-envelope replay protection when NATS is down: `reject` refuses signed envelopes with `503` (fail closed); `local` checks node-locally only |
+| `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
+| `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
+| `eddi.cluster.events.max-age` | `1h` | Retention of the cluster event stream. A node disconnected for longer, or that sees a gap, flushes every invalidatable cache |
+| `eddi.cluster.activity.max-age` | `24h` | Retention of the cluster activity timeline (`<prefix>_ACTIVITY` stream, at most 10,000 entries) the cluster console shows: nodes joining and getting lost, lease takeovers, fenced writes, degraded mode, deployments and admin actions |
+| `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
+| `eddi.cluster.local-cache-ttl` | `60s` | Backstop expiry of node-local caches that events invalidate (agent triggers, user conversations), for an event that was lost anyway |
+| `eddi.cluster.model-cache.max-age` | `15m` | A cached chat model is rebuilt at least this often even while busy, so a rotated key reaches it even if the rotation event was lost |
+| `eddi.cluster.hitl-recovery.interval` | `60s` | Period of the leader-elected sweep that recovers conversations a crashed node left `IN_PROGRESS` |
+| `eddi.cluster.hitl-recovery.min-age` | `3m` | A conversation must have been seen `IN_PROGRESS`, with no lease and an unchanged revision, for at least this long before the sweep recovers it |
+| `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
+| `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
+| `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
+| `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error |
 
 ---
 
@@ -81,6 +180,7 @@ applies in dev mode only.
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are ended after this many days without a turn. A daily sweep does it, first run five minutes after boot; it only changes the state to `ENDED` and deletes nothing, and a conversation paused for human approval is never ended. **`-1` (or `0`) disables it**: no conversation is ended for idleness, and startup logs that it is off. The same sweep still undeploys an old agent version once no conversation on it is active, whatever this is set to |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
+| `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds` and `delegationDepth` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
@@ -103,6 +203,7 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
+| `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
 
 ---
 
@@ -155,6 +256,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.api-docs.http-policy` | `eddi-api-docs-reader` | Quarkus HTTP policy for the API description — `/openapi`, `/q/openapi`, `/q/swagger-ui`. The default admits a token carrying one of `eddi.api-docs.roles-allowed`; `authenticated` admits any token, `permit` anyone. See [security.md → Deny by default](security.md#deny-by-default-and-what-a-role-less-token-reaches) |
 | `eddi.api-docs.roles-allowed` | `eddi-admin,eddi-editor,eddi-user,eddi-approver,eddi-viewer` | The realm roles the default API-description policy admits — any EDDI role. The Manager reads `/openapi` for the backend version, and the Platform Operator for its tool list |
 | `eddi.chat.frame-ancestors` | `'none'` | CSP `frame-ancestors` for the Chat UI at `/chat` — the origins allowed to embed it in an `<iframe>`, space-separated (`https://www.example.com https://*.example.org`). The default refuses every embedder; the rest of EDDI always sends `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
+| `eddi.chat.img-sources` | `https:` | Sources appended to the Chat UI's CSP `img-src` (after `'self' data: blob:`), so the image output items an agent designer configures can be shown from wherever they are hosted. Markdown images in model-written text are never rendered as `<img>`, whatever this says. `https:` allows any https host, which also lets markup injected by some other flaw send data to any host through an `<img>`; list your image hosts (`https://cdn.example.com`) to keep that narrow, or set `'self'` to allow none beyond EDDI (an empty value falls back to the default). See [the Chat UI embedding contract](chat-ui-embedding.md) |
 | `eddi.csp.extra-connect-sources` | *(empty)* | Sources appended to the Manager's CSP `connect-src`. Needed only for the agent wizard's "fetch the OpenAPI spec from a URL", the one browser request to a host nobody chose in advance — list the spec hosts you use. `https:` allows any host, and with it lets any injected script send data anywhere |
 
 ### Workspaces & resource sharing
@@ -204,7 +306,8 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 Full guide: [audit-ledger.md](audit-ledger.md). Note there is **no retention
 property** — the ledger is append-only by design; see
-[gdpr-compliance.md](gdpr-compliance.md).
+[gdpr-compliance.md](gdpr-compliance.md). A GDPR erasure keeps the user's rows
+but redacts their content (`eddi.audit.erasure-mode`).
 
 | Property | Default | Description |
 |---|---|---|
@@ -216,6 +319,8 @@ property** — the ledger is append-only by design; see
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
+| `eddi.audit.erasure-mode` | `redact` | What `DELETE /admin/gdpr/{userId}` does to the user's ledger rows. `redact`: the user id is pseudonymized **and** the recorded content (`input`, `output`, `llmDetail`, `toolCalls`) is replaced by a redaction marker; rows that verified are re-signed, so they still verify, and the chain stays intact. `pseudonymize`: the user id only — prompts, responses and tool calls are **kept**; for a legal hold that requires the content, and logged as a WARN at startup. Any other value means `redact`. See [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion) |
+| `eddi.audit.admin-actions.enabled` | `true` | Record every mutating REST request outside the chat APIs — caller, method, path, endpoint, status; never the body — in the ledger. See [audit-ledger.md](audit-ledger.md#administrative-actions) |
 | `eddi.audit.hmac-previous-keys` | *(empty)* | Comma-separated retired `eddi.audit.hmac-key` values (or retired vault master keys) that old entries were signed with. Verification only. An entry naming a key the deployment recorded as having signed, but that nobody lists, reports `UNKNOWN_KEY`; an id that was never recorded reports `INVALID` |
 
 ---
@@ -242,6 +347,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
+| `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
@@ -284,6 +390,8 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
+| `eddi.attachments.max-per-user` | `0` (off) | Attachments per user across all of their conversations, counted against the conversation's owner. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
+| `eddi.attachments.max-total-bytes-per-user` | `0` (off) | Aggregate bytes per user across all of their conversations |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
@@ -382,7 +490,9 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
-| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |
+| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout. A stream that runs out of it ends with an OpenAI error event (`code: timeout`) and one `[DONE]` |
+| `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat (`X-OpenWebUI-Chat-Id`, `X-EDDI-Chat-Id`, `metadata.chat_id` or `user`) is mapped: `history` keys it by a hash of its first system and first user message, so each client-side chat gets its own conversation; `shared` keeps one conversation per user and agent, as earlier releases did. See [open-webui-integration.md](open-webui-integration.md#session-mapping) |
+| `eddi.openai-compat.max-conversation-steps` | `0` (off) | Steps after which an idle mapped conversation is ended and the chat continues in a fresh one, bounding the size of one conversation document. The agent no longer sees the earlier history; the ended conversation stays readable |
 
 ### Connections
 
@@ -435,8 +545,25 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.logs.db-enabled` | `true` | Also persist logs to the database |
 | `eddi.logs.db-flush-interval-seconds` | `5` | Persistence batch cadence |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level persisted. Lowering this to `DEBUG` in production will fill the database quickly |
+| `eddi.logs.db-retention-days` | `-1` | Delete persisted log entries older than this many days. `-1` (or `0`) keeps them until deleted by hand. Persisted entries carry the user id (pseudonymized on GDPR erasure) and the message text, so set this wherever a data-retention policy applies. Applies to entries already stored even after `eddi.logs.db-enabled=false` |
+| `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
+| `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
 | `eddi.docs.enabled` | `true` | Serve EDDI's own docs at `/administration/docs`, as MCP resources (`eddi://docs/*`) and as the `list_docs`/`read_docs` MCP tools. One switch covers all three. The content is the public repository documentation, so this is an exposure policy, not a secrecy control |
 | `eddi.docs.path` | `docs` | Directory the above is served from |
+
+---
+
+## Metrics & tracing
+
+`eddi.metrics.http-policy` (who may read `/q/metrics`) is under [Security & authentication](#security--authentication). The rest of the telemetry configuration is Quarkus' own; these are the settings EDDI ships or that an operator usually changes. The alert rules and dashboards that read the metrics are described in [monitoring-guide.md](monitoring/monitoring-guide.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `quarkus.otel.sdk.disabled` | `true` | Tracing is off until a collector exists. Set `false` (env `QUARKUS_OTEL_SDK_DISABLED=false`) together with the endpoint below; `docker-compose.monitoring.yml` and the Helm chart's `tracing.otlpEndpoint` value (under `eddi:`) do both |
+| `quarkus.otel.exporter.otlp.endpoint` | `http://localhost:4317` | OTLP gRPC endpoint spans are exported to |
+| `quarkus.micrometer.binder.http-server.max-uri-tags` | see `application.properties` | Distinct `uri` tag values `http_server_requests_seconds_*` may carry; requests past the cap are not measured. `http.server.requests` publishes no histogram buckets on purpose — buckets would multiply every one of these series — so the dashboards chart HTTP latency as mean and peak |
+| `quarkus.datasource.metrics.enabled` | `true` | Build-time. Publishes the Agroal pool meters (`agroal_*`) for the PostgreSQL datastore; on the MongoDB datastore the datasource is inactive and nothing is registered. MongoDB pool meters (`mongodb_driver_pool_*`) come from a listener on EDDI's own client and need no setting |
+| `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
 

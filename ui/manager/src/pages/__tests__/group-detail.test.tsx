@@ -532,7 +532,14 @@ describe("GroupDetailPage", () => {
     useLifecycleConv(makeLifecycleConv());
     renderGroupDetail();
 
-    // Wait for the conversation to load and input to switch to continue mode
+    // The auto-selected discussion is shown, not chosen: the composer starts a
+    // NEW discussion until the user says otherwise.
+    await waitFor(() => {
+      expect(screen.getByTestId("composer-mode-toggle")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("start-discussion-btn")).not.toHaveTextContent("Continue");
+
+    await userEvent.click(screen.getByTestId("composer-mode-continue"));
     await waitFor(() => {
       expect(screen.getByTestId("start-discussion-btn")).toHaveTextContent("Continue");
     });

@@ -7,6 +7,32 @@ read it again before you upgrade. For an older deployment, start with
 
 ---
 
+## Authorization defaults
+
+These apply only with authorization on (`QUARKUS_OIDC_TENANT_ENABLED=true`). A 6.5 client that
+held a token but no EDDI role, or that relied on an endpoint being open to any token, now gets
+refused:
+
+- **Metrics.** `/q/metrics` now needs the `eddi-admin` or `eddi-metrics` realm role
+  (`eddi.metrics.roles-allowed`); in 6.5 any token was enough, so a scrape whose service account
+  holds neither now gets **403**. Create an `eddi-metrics` realm role and give it to the
+  scraper's service account ([Monitoring](monitoring/monitoring-guide.md)). As a stopgap,
+  `EDDI_METRICS_HTTP_POLICY=authenticated` restores the 6.5 behaviour.
+- **API docs.** `/openapi` and the Swagger UI need an EDDI role.
+- **`/v1` (OpenAI-compatible API).** In `authenticated` mode it needs `eddi-admin`, `eddi-editor`
+  or `eddi-user`.
+- **Other role-gated endpoints.** `/a2a/agents` and the per-conversation `/conversationstore`
+  operations need an EDDI role.
+- **Descriptor listing.** A `type` that is not a configuration type now gets **400**.
+- **Triggers.** Changing a trigger needs EDIT access; a `PUT` whose body names a different intent
+  than the path gets **400**.
+- **Conversations without an owner** are readable by administrators only.
+- **Custom JAX-RS resources** deployed as extensions must carry a security annotation
+  (`@RolesAllowed`, `@PermitAll`, …). Unannotated endpoints are now denied
+  (`quarkus.security.jaxrs.deny-unannotated-endpoints=true`).
+
+---
+
 ## MCP server
 
 ### MCP role tiers

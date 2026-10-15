@@ -9,19 +9,32 @@ E.D.D.I ships three dashboards, all auto-provisioned into Grafana by
 
 | Dashboard | UID | File | Shape | Use it for |
 |-----------|-----|------|-------|------------|
-| **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 51 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
-| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 138 panels, 19 subsystem rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
+| **Operations Command Center** | `eddi-ops` | `eddi-operations-dashboard.json` | 58 panels, KPI strip + 9 rows | The front door. Is the platform healthy, and if not, roughly where. |
+| **Full Metrics Reference** | `eddi-metrics-all` | `eddi-full-metrics-dashboard.json` | 166 panels, 22 rows | Every meter E.D.D.I registers. Go here when the number you need is not on the ops dashboard. |
 | **EDDI Observability** | `eddi-observability` | `eddi-grafana-dashboard.json` | 16 panels, 6 rows | The original dashboard: Coordinator Health, Pipeline Tasks, Tool Execution, Vault & Security, NATS, HTTP & JVM. |
 
 The Full Metrics Reference covers **every `eddi.*` meter the codebase
 registers**, and that is a checked property rather than an aspiration:
 `MetricsDashboardCoverageTest` scans the registration sites in `src/main/java`
-and fails the build if any meter has no panel. Add a meter without a panel and
-`./mvnw test` tells you, naming the meter and the file that registers it.
+and fails the build if any meter is queried by no panel. Add a meter without a panel and
+`./mvnw test` tells you, naming the meter and the file that registers it. The same
+test parses all three dashboards and fails on a query naming a series no meter
+produces (a counter without `_total`, a timer percentile with no buckets), on a
+duplicate panel id, on a pinned datasource uid or scrape job, and on a rate KPI
+that would read "No data" on a quiet system.
 
 All rows but the first are collapsed; open the subsystem you care about. Two
-template variables scope everything: the Prometheus **data source** and the
-scrape **job**.
+template variables scope every dashboard that has them (the Operations Command
+Center and the Full Metrics Reference): the Prometheus **data source** and the
+scrape **job**, which lists the jobs that have `process_uptime_seconds`.
+
+**Quiet is 0, not "No data".** Panels over a counter that has never moved fall
+back to `0` (`… or on() vector(0)`); ratios and latencies, which have no honest
+value without traffic, say why they are empty instead ("no tool calls (1h)",
+"no samples yet").
+
+**Alerts.** `docker-compose.monitoring.yml` also loads the shipped alert rules
+(`docs/monitoring/eddi-alerts.yml`); see [Prometheus Alerts](#prometheus-alerts).
 
 ### Enable Monitoring
 
@@ -46,22 +59,23 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 
 | Row | Title | Key Panels |
 |-----|-------|------------|
-| **KPI Strip** | _(always visible)_ | Uptime, Agents Deployed, Active Conversations, Messages/sec, Tool Success %, Cache Hit %, Error Rate, Cost/hr |
-| **Row 1** | Platform Overview & HTTP Traffic | Request rate by status (2xx/4xx/5xx), latency P50/P95/P99, CPU usage, top 10 slowest endpoints |
-| **Row 2** | Conversations | Start/end/processing rate, processing duration percentiles, active gauge, undo/redo, start vs load latency |
+| **KPI Strip** | _(always visible)_ | EDDI up, Uptime, Agents Deployed, Active Conversations, Messages/sec, Tool Success % (1h), Cache Hit % (1h), 5xx Ratio, Tool Cost (last 1h) |
+| **Row 1** | Platform Overview & HTTP Traffic | Request rate by status (2xx/4xx/5xx), latency mean and peak, CPU usage, top 10 slowest endpoints |
+| **Row 2** | Conversations | Start/end/processing rate, processing duration mean and peak, active gauge, undo/redo, start vs load latency, dead-lettered turns, pending approvals and the oldest one's age |
 | **Row 3** | Tool Execution Engine | Success vs failure rate, per-tool execution duration, cached/rate-limited breakdown, per-tool call counts |
 | **Row 4** | Tool Cache Performance | Hit rate %, hits vs misses, cache size, get/put duration |
 | **Row 5** | Rate Limiting & Cost | Allowed vs denied, denied by tool, total cost, budget exceeded events, cost accumulation, cost by tool |
 | **Row 6** | Multi-Agent Group Discussions | Started vs failed, failure rate gauge, discussion duration |
 | **Row 7** | Scheduled Triggers | Poll/fire/failed, fire duration, claim conflicts, dead-lettered |
-| **Row 8** | Tenant Quotas & Audit | Quota allowed vs denied, denied by type, audit entries dropped, tenant usage |
-| **Row 9** | JVM & Infrastructure | Heap/non-heap memory, threads, GC, MongoDB pool, PostgreSQL Agroal pool, NATS messaging |
+| **Row 8** | Tenant Quotas & Audit | Quota allowed vs denied, denied by type, audit entries dropped, tenant usage, audit queue depth vs capacity |
+| **Row 9** | JVM & Infrastructure | Heap/non-heap memory, threads, GC, MongoDB pool, PostgreSQL Agroal pool, NATS messaging, turn executor load, Quarkus worker pool |
 
-> **Database-agnostic**: Row 9 includes panels for both MongoDB (`mongodb_driver_pool_*`) and PostgreSQL (`agroal_*`). Whichever backend is active shows data; the other gracefully shows "No data".
+> **Database-agnostic**: Row 9 includes panels for both MongoDB (`mongodb_driver_pool_*`) and PostgreSQL (`agroal_*`). Whichever backend is active shows data; the other shows "No data". Both used to be empty on every backend: EDDI builds its own MongoDB client, which `quarkus.mongodb.metrics.enabled` never reached, and Agroal's meters were off. A pool listener on that client and `quarkus.datasource.metrics.enabled=true` now publish them.
 
 ### Full Metrics Reference — rows
 
-`Overview` (open by default) · `Conversations` · `Coordinator & Lifecycle Pipeline` ·
+`Overview` (open by default) · `LLM — Per-call latency, tokens and errors` ·
+`Conversations` · `Coordinator & Lifecycle Pipeline` ·
 `Tool Execution Engine` · `Tool Cache` · `Tool Rate Limiting` ·
 `LLM — Model Cascade & Streaming` · `Guardrails, Counterweights & Masking` ·
 `Human-in-the-Loop` · `Group Conversations & Standing Teams` · `Scheduling` ·
@@ -99,9 +113,15 @@ carries `authType`, not `auth_type`. Only dots are rewritten.
 ### Timers do not publish percentiles
 
 Every E.D.D.I timer exposes `_seconds_sum`, `_seconds_count` and `_seconds_max`.
-Only **one** — `eddi.pipeline.task.duration` — calls
-`publishPercentileHistogram()`, so it is the only one with a `_seconds_bucket`
-series and therefore the only one where `histogram_quantile()` returns anything.
+Only **two** — `eddi.pipeline.task.duration` and `eddi.llm.request.duration` —
+call `publishPercentileHistogram()`, so they are the only ones with a
+`_seconds_bucket` series and therefore the only ones where `histogram_quantile()`
+returns anything.
+
+Quarkus' own `http.server.requests` publishes no buckets either, deliberately:
+it is tagged by `uri`, `method`, `status` and `outcome`, and a percentile
+histogram adds about seventy series to each of those combinations. The
+dashboards chart HTTP latency as mean and peak instead.
 
 ```promql
 # Mean over the interval — works for every timer
@@ -111,7 +131,7 @@ sum(rate(eddi_tool_execution_duration_seconds_sum[5m]))
 # Peak — the decaying max, not p100 of the window
 max(eddi_tool_execution_duration_seconds_max)
 
-# A true quantile — ONLY for eddi_pipeline_task_duration
+# A true quantile — ONLY for eddi_pipeline_task_duration and eddi_llm_request_duration
 histogram_quantile(0.99, sum by (le) (rate(eddi_pipeline_task_duration_seconds_bucket[5m])))
 ```
 
@@ -125,7 +145,12 @@ site first; it is not free (one series per bucket per tag combination).
 A `PrometheusMeterRegistry` keeps only the **first** tag-key shape registered
 under a given metric name and silently drops every later one — no exception, no
 log line. Registering `foo` untagged and then `foo{tenant,type}` means the tagged
-series never reaches `/q/metrics` at all.
+series never reaches `/q/metrics` at all. (Re-verified for this page against
+`micrometer-registry-prometheus-simpleclient` 1.17.1, the registry in the 6.5.0
+image, both directly and behind the composite registry Quarkus wraps it in:
+the second registration returns normally and the scrape shows only the first
+shape. Micrometer's newer `micrometer-registry-prometheus` reports the conflict
+differently, so re-check if Quarkus switches registries.)
 
 So a metric must be registered with the same tag keys at every call site. Where
 you want both a total and a breakdown, tag everything and aggregate at query time
@@ -149,6 +174,7 @@ eddi_conversation_undo_count_total          # Undo operations
 eddi_conversation_redo_count_total          # Redo operations
 eddi_conversation_agent_version_switch_count_total  # Conversations moved to another compatible version of their agent
 eddi_conversation_store_conflict_count_total  # Writes refused: another writer changed the conversation first
+eddi_turn_idempotency_total                  # Keyed (Idempotency-Key) duplicate requests; tag: outcome (replayed|waited|wait_timeout)
 eddi_processing_conversation_count          # Currently active (gauge)
 eddi_conversation_abandoned_running         # Turns the agent-timeout watchdog gave up on that are still running (gauge, normally 0)
 
@@ -235,9 +261,10 @@ eddi_tool_costs_total{tool="weather"}       # Cost per tool
 > **The total-cost gauge was renamed to `eddi_tool_costs_accrued`.** It used to
 > be registered as `eddi.tool.costs.total`, which the exposition renders as
 > `eddi_tool_costs_total` — the same name as the `tool`-tagged counter above.
-> Prometheus refuses two meters under one name with different tag keys, so the
-> first priced tool call threw, and the tool returned that error instead of its
-> result. `eddi_tool_costs_total` now always means the per-tool counter; take the
+> The Prometheus registry keeps only the first meter registered under a name
+> (see [One name, one tag shape](#one-name-one-tag-shape)), so one of the two
+> never reached the scrape — the registration returns normally and nothing is
+> logged; re-verified on the 6.5.0 registry. `eddi_tool_costs_total` now always means the per-tool counter; take the
 > all-tools total from the gauge, or as `sum(eddi_tool_costs_total)`. A dashboard
 > or alert written against the old gauge must switch to `eddi_tool_costs_accrued`.
 
@@ -355,10 +382,32 @@ sum(rate(eddi_tenant_quota_unavailable_total[5m])) by (tenant)
 eddi_coordinator_active_conversations       # Conversations with a live queue (gauge)
 eddi_coordinator_queue_depth                # Total queued messages across all conversations (gauge)
 eddi_coordinator_total_processed_total      # Messages processed since start
+eddi_coordinator_total_dead_lettered_total  # Turns dead-lettered (failed after they started, or could not be scheduled)
+eddi_coordinator_dead_letters               # Dead letters retained right now (gauge; in cluster mode the shared stream's count)
+eddi_coordinator_dead_lettered_total        # The same count under the name the shipped alert rules use (both modes)
+eddi_coordinator_dead_letters_retained      # The same gauge under the name the shipped dashboards use (both modes)
+eddi_runtime_executor_active                # Conversation work running; tag: pool (managed|nested)
+eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
+eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
-backlog: work is arriving faster than it drains.
+backlog: work is arriving faster than it drains. Both coordinators register the
+same five meters; `dead_letters > 0` means a turn failed and is waiting for an
+operator (list, replay or discard it — see [Coordinator Admin](coordinator-admin.md)).
+
+`dead_lettered_total` counts turns that failed after they had started (alert
+`EddiConversationTurnsDeadLettered`); it keeps counting through the
+`eddi.coordinator.max-dead-letters` cap and through a purge, while
+`dead_letters_retained` is what `GET /administration/coordinator/dead-letters`
+lists. Both coordinators register them; in cluster mode the gauge is the shared
+dead-letter stream's count, and the console at `/administration/cluster` lists it.
+
+`queue_depth` counts turns waiting behind an earlier turn of the **same**
+conversation. `eddi_runtime_executor_queued{pool="managed"}` counts turns
+waiting for a **thread**: above zero for minutes means the worker pool is
+saturated (alert `EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not
+see this work — they count only what is dispatched through Vert.x.
 
 ### Pipeline Metrics
 
@@ -367,9 +416,9 @@ eddi_pipeline_task_duration_seconds         # Per-task latency; tags: task.id, t
 eddi_pipeline_task_errors_total             # Per-task failures; tags: task.id, task.type, error.type
 ```
 
-`eddi_pipeline_task_duration` is the **only** EDDI meter publishing histogram
-buckets, so it is the only one where `histogram_quantile` gives a real
-percentile. See [Timers do not publish percentiles](#timers-do-not-publish-percentiles).
+`eddi_pipeline_task_duration` is one of the two EDDI meters publishing histogram
+buckets (with `eddi_llm_request_duration`), so `histogram_quantile` gives a real
+percentile for it. See [Timers do not publish percentiles](#timers-do-not-publish-percentiles).
 
 ### LLM Call Metrics
 
@@ -440,8 +489,10 @@ eddi_llm_cascade_executions_total           # Cascade runs started; tag: agentMo
 eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: reason (low_confidence|timeout|<error type>)
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
-eddi_llm_failure_total                      # Failed cascade steps by failure class; tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model
+eddi_llm_failure_total                      # Failed model calls by failure class: each failed cascade step, and each failed single-model task (a cascade's overall failure is not counted twice); tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model (the resolved name, not a ${vars:...} template)
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
+eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
@@ -453,12 +504,31 @@ eddi_llm_cascade_confidence                 # Confidence scores (distribution su
 Mass at the last step means every turn pays for the cheap attempt *and* the
 expensive one.
 
+### LLM Circuit Breaker Metrics
+
+Full guide: [langchain.md](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing). Only recorded for tasks that set `circuitBreaker.enabled`.
+
+```text
+eddi_llm_circuit_total                      # State changes of a model's circuit; tags: state (open|half_open|closed), class (INVALID_OUTPUT|BAD_REQUEST|MODEL_NOT_FOUND|AUTH|QUOTA_EXHAUSTED — what opened it; none on a close)
+eddi_llm_circuit_skipped_total              # Turns that did not call the model because its circuit was open; tag: class
+eddi_llm_circuit_open                       # Gauge: circuits open or half-open on this node right now
+```
+
+Every `state="open"` is also one ERROR log line (`LLM circuit OPEN …`) naming the agent, version, provider, model, the class and EDDI's reason (never model output). Alert on `increase(eddi_llm_circuit_total{state="open"}[5m]) > 0`, or on `eddi_llm_circuit_open > 0` for a standing condition. The breakers are per node and in memory: with several nodes, each opens on its own traffic.
+
 ### Streaming Metrics
 
 ```text
 eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: reason
 eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
-eddi_llm_recovery_total                     # Turns answered with the configured fallback; tags: action (fallback), outcome (served), trigger (onError|validation)
+eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
+                                            #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
+                                            #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,
+                                            #                    trigger=empty|truncated|content_filter|invalid_json|context_too_long   (a same-model re-ask)
+                                            #   action=escalate, outcome=invalid_output|timeout|error|retryable_error|low_confidence, trigger=<reply problem or failure class>   (a cascade step handed over)
+                                            #   action=repair,   outcome=recovered, trigger=invalid_json       (a reply parsed only after fence stripping / extraction)
+                                            #   action=circuit_skip, outcome=skipped, trigger=<class>          (a model with an open circuit was not called)
+                                            # every action also writes one INFO line, "LLM recovery conversationId=... action=..." (see llm-resilience.md)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
@@ -476,6 +546,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 eddi_attachment_forwarded_total             # Attachments converted to LLM content
 eddi_attachment_reinlined_total             # Extracted text stitched back into history
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
+eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
 
 ### HITL Metrics
@@ -495,21 +566,40 @@ eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, 
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
 ```
 
-Pauses without matching resumes are approvals nobody answered. Alert on
-`eddi_hitl_pause_count_total - eddi_hitl_resume_count_total` growing without
-bound, not on either alone.
+```text
+eddi_hitl_pending                           # Conversations waiting for a human right now (gauge)
+eddi_hitl_pending_oldest_age_seconds        # How long the oldest of them has waited (gauge)
+```
+
+The two gauges read the backlog from the conversation store every
+`eddi.hitl.metrics.refresh-interval` (default 60 s) — a bounded, projected read
+of at most 1000 rows, never on the scrape thread. Every replica reports the
+store-wide number, so aggregate with `max`, not `sum`; past 1000 pending
+approvals the count saturates, while the oldest age stays exact (the store
+lists the oldest pauses first, so the cap drops the newest). They read `NaN` until the first refresh and
+after a failed one. Pauses minus resumes, the old way of estimating the backlog,
+reset with every restart and never saw pauses taken before it; alert on
+`eddi_hitl_pending_oldest_age_seconds` instead (`EddiApprovalWaitingLong`).
 
 ### Platform Operator Metrics
 
 ```text
 eddi_operator_write_approval_total          # Gated operator writes; tag: decision
 eddi_operator_gate_verified                 # Write gate is verified and active (gauge, 1|0)
+eddi_operator_gate_last_verified_timestamp_seconds # When this process last received a verified report (epoch s; 0 = never)
 eddi_operator_canary_total                  # Canary probes of the write gate
 eddi_operator_canary_duration_seconds       # Canary probe latency
 ```
 
 `eddi_operator_gate_verified` dropping to `0` means the Platform Operator's
-human-approval gate is no longer proven — treat it as a security alert.
+human-approval gate is no longer proven — treat it as a security alert. It also
+reads `0` before any report has arrived (a deployment that never activated the
+operator), so the shipped rule `EddiOperatorGateRegressed` fires on the
+transition — verified by the running process, unverified now — not on the value.
+`eddi_operator_gate_last_verified_timestamp_seconds` records when this process last
+received a verified report (0 until it has). Both gauges restart at `0` on every
+boot, so a restart alone is not a regression, while a regression minutes after a
+restart still pages. Both gauges exist from startup.
 
 ### Prompt & Guardrail Metrics
 
@@ -543,12 +633,16 @@ Full guide: [capability-match-guide.md](capability-match-guide.md).
 ```text
 eddi_capability_query_count_total           # Capability lookups
 eddi_capability_query_time_seconds          # Lookup latency (timer)
-eddi_capability_miss_count_total            # Lookups matching no agent; tag: skill
+eddi_capability_miss_count_total            # Lookups matching no agent (untagged)
 eddi_capability_strategy_applied_total      # Resolution strategy used; tag: strategy
 ```
 
-`miss_count` tagged by `skill` names exactly which capability your agents cannot
-serve — the most directly actionable metric in this list.
+`miss_count` is deliberately **untagged**: the skill string is caller-supplied
+(REST, A2A discovery, templated rules, LLM tools), so a `skill` label would be
+unbounded. The rate says how often a capability is missing; which one is in the
+WARN log line `No capability match`. (The Full dashboard's "Top missing skills"
+panel grouped by a `skill` label that does not exist and was always empty; it
+is now "Capability misses (1h)".)
 
 ### Secrets Vault Metrics
 
@@ -560,7 +654,7 @@ eddi_vault_store_count_total                # Secrets written
 eddi_vault_rotate_count_total               # Key rotations
 eddi_vault_grant_update_count_total         # allowedAgents edited without the value (PUT .../grant)
 eddi_vault_delete_count_total               # Secrets deleted
-eddi_vault_errors_count_total               # Vault operation failures
+eddi_vault_errors_count_total               # Vault operation failures (store unreachable, decryption failed) — not "no such key"
 eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
@@ -579,6 +673,8 @@ eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; t
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
 eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
+eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
+eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
@@ -632,12 +728,26 @@ eddi_conversations_listing_orphaned_descriptors_total  # Descriptors a listing s
 ```text
 eddi_audit_entries_dropped_total            # Audit entries dropped (compliance-critical)
 eddi_audit_sequence_collisions_total        # Chain positions allocated by another replica
+eddi_audit_queue_depth                      # Entries waiting to be written to the audit store (gauge)
+eddi_audit_queue_capacity                   # eddi.audit.max-queue-size (gauge)
 ```
+
+The drop counter moves only once the queue is already full. Depth against
+capacity is the warning before it — `EddiAuditQueueFilling` fires at half.
 
 `eddi_audit_sequence_collisions_total` is non-zero only on a multi-replica deployment
 without conversation affinity, where two nodes allocate the same per-conversation chain
 positions and `/auditstore/verify` then grades those conversations `BROKEN`. See
 [Chain sequences and multi-replica deployments](audit-ledger.md#chain-sequences-and-multi-replica-deployments).
+
+### Database Log Retention Metrics
+
+```text
+eddi_logs_db_retention_deleted_total        # Persisted log entries the retention sweep deleted
+```
+
+Stays at zero while `eddi.logs.db-retention-days` is off (the default). See
+[log-administration.md](log-administration.md#retention).
 
 ### Dream (Background Memory Consolidation) Metrics
 
@@ -648,6 +758,7 @@ eddi_dream_entries_summarized_total         # Entries folded into a consolidatio
 eddi_dream_contradictions_found_total       # Same-key/different-value pairs flagged
 eddi_dream_cycles_failed_total              # Dream cycles that aborted
 eddi_dream_summarization_failed_total       # LLM summarization steps that failed
+eddi_dream_conflicts_skipped_total          # Writes skipped because the memory changed during the cycle
 eddi_dream_duration_seconds                 # Dream cycle duration (timer)
 ```
 
@@ -664,6 +775,12 @@ a provider outage that does not present as a timeout. Confirm from the ERROR lin
 logs: it names the provider, the model and the configured parameter *keys*, which is enough to
 tell a missing `apiKey` from a wrong `llmModel` without exposing the value. If credentials are
 the cause, set `userMemoryConfig.dream.parameters` — see [user-memory.md](user-memory.md).
+
+`eddi_dream_conflicts_skipped_total` counts the prunes, in-place overwrites and deletes a cycle
+did **not** make because the memory was written after the cycle read it — every Dream write is a
+compare-and-set on `updatedAt`, so the user's newer fact wins. Occasional increments are normal
+on active users; a steady rise means cycles keep racing live conversations, and scheduling them at
+a quieter hour helps.
 
 ### Conversation Summarization Metrics
 
@@ -710,17 +827,45 @@ eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: o
 eddi_agents_deployed                        # Currently deployed agents (gauge)
 ```
 
-### NATS Messaging Metrics
+### Cluster Metrics
 
-> Only active when using the NATS messaging profile. Shows nothing under in-memory messaging.
+> Registered only when `eddi.messaging.type=nats` — an in-memory deployment
+> exposes none of them. Charted on the **EDDI Cluster** dashboard
+> (`docs/monitoring/eddi-cluster-dashboard.json`). The `eddi_nats_*` meters of
+> the former build-profile coordinator no longer exist.
 
 ```text
-eddi_nats_publish_count_total               # Messages published
-eddi_nats_consume_count_total               # Messages consumed
-eddi_nats_dead_letter_count_total           # Dead letters
-eddi_nats_publish_duration_seconds          # Publish latency (timer)
-eddi_nats_consume_duration_seconds          # Consume latency (timer)
+eddi_cluster_nats_connected                 # 1 while this node is connected to NATS (gauge)
+eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
+eddi_cluster_nats_reconnects_total          # Reconnects of this node
+eddi_cluster_members                        # Members in the presence bucket (gauge)
+eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
+eddi_cluster_lease_held                     # Leases this node holds (gauge)
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
+eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
+eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
+eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
+eddi_cluster_kv_seconds                     # KV calls {bucket, op, outcome} (timer)
+eddi_cluster_kv_cas_conflicts_total         # Lost compare-and-sets {bucket}
+eddi_cluster_events_published_total         # Cluster events published {type}
+eddi_cluster_events_consumed_total          # Cluster events handled from other nodes {type}
+eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
+eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
+eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
+eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
+eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
+eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}
+eddi_cluster_ratelimit_cas_retries_total    # Lost compare-and-sets on a shared rate-limit bucket (retried)
+eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|unsequenced|conflict}
+eddi_agent_nonce_unavailable_total          # Signed envelopes refused: the shared nonce store was unreachable (fail closed)
+eddi_cluster_admin_actions_total            # Recovery actions from the cluster console {action, outcome}
 ```
+
+Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of
+`eddi_cluster_fence_rejected_total`, a rising
+`eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` and
+`eddi_coordinator_dead_letters > 0` — the rules ship in
+`docs/monitoring/eddi-cluster-alerts.yml`. See [Clustering](clustering.md).
 
 ### JVM & HTTP Server (auto-exposed)
 
@@ -735,23 +880,32 @@ jvm_threads_daemon_threads
 jvm_threads_peak_threads
 jvm_gc_pause_seconds{action="..."}
 process_uptime_seconds
+process_start_time_seconds
 process_cpu_usage
 system_cpu_usage
-http_server_requests_seconds{method,uri,status}
+jvm_memory_usage_after_gc{area="heap",pool="long-lived"}   # live data after GC / max; EddiHeapAfterGc*
+worker_pool_ratio{pool_name}                               # Quarkus worker pools, Vert.x-dispatched work only
+http_server_requests_seconds{method,uri,status,outcome}    # _count, _sum, _max — no _bucket
 ```
+
+`jvm_info` is exposed as `jvm_info_total` (a counter of 1); the Full dashboard's
+`$job` variable used to be sourced from `jvm_info` and found nothing.
 
 `uri` is the endpoint's template (`/agentstore/agents/{id}`), so it has one value per endpoint, not per resource. Static files would otherwise get one value each, which is ~800 for the Manager's hashed chunks alone. Instead they fold into one value per directory: `/assets/{file}`, `/fonts/{file}`, `/scripts/{file}` and `/img/{file}`. Unknown paths share `NOT_FOUND`. Micrometer registers at most `quarkus.micrometer.binder.http-server.max-uri-tags` (500) values. A URI first seen after that has no request metrics, and the log says "Reached the maximum number … of URI tags" once.
 
 ### Database Connection Pool (auto-exposed)
 
-**MongoDB** (when `eddi.datastore.type=mongodb`):
+**MongoDB** (when `eddi.datastore.type=mongodb`), from Micrometer's
+`MongoMetricsConnectionPoolListener` on the client EDDI builds itself; tags
+`cluster_id`, `server_address`:
 ```text
 mongodb_driver_pool_size
 mongodb_driver_pool_checkedout
 mongodb_driver_pool_waitqueuesize
 ```
 
-**PostgreSQL / Agroal** (when `eddi.datastore.type=postgres`):
+**PostgreSQL / Agroal** (when `eddi.datastore.type=postgres`), from
+`quarkus.datasource.metrics.enabled=true`:
 ```text
 agroal_active_count
 agroal_available_count
@@ -763,80 +917,31 @@ agroal_max_used_count
 
 ## Prometheus Alerts
 
-### Sample Alert Rules
+E.D.D.I ships its alert rules: [`docs/monitoring/eddi-alerts.yml`](monitoring/eddi-alerts.yml),
+25 rules in nine groups. They are loaded
 
-```yaml
-groups:
-  - name: eddi_alerts
-    rules:
-      # Critical
-      - alert: ToolSystemDown
-        expr: rate(eddi_tool_execution_success_total[5m]) == 0
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "No successful tool executions in 2 minutes"
+- by `docker-compose.monitoring.yml` (mounted and listed under `rule_files`),
+- by the Kubernetes monitoring component (`k8s/overlays/monitoring`, a generated
+  `prometheus-rules` ConfigMap), and
+- by the Helm chart as a Prometheus Operator `PrometheusRule`
+  (`--set prometheusRule.enabled=true`, with `serviceMonitor.enabled=true` for the
+  scrape).
 
-      - alert: BudgetExceeded
-        expr: eddi_tool_costs_accrued > 10
-        labels:
-          severity: critical
-        annotations:
-          summary: "Total tool costs exceeded $10"
+They cover availability (`EddiDown`, `EddiMetricsAbsent`, `EddiRestartLoop`),
+the 5xx ratio, the coordinator backlog and dead letters, pipeline task errors,
+executor saturation, LLM error ratio and p95 latency, the tool failure ratio, the
+vault, the Platform Operator gate and canary, audit drops, queue fill and chain
+collisions, quota-store failures, schedule and NATS dead letters, and heap after
+GC. Every rule has a runbook in
+[monitoring-guide.md → Alert runbooks](monitoring/monitoring-guide.md#alert-runbooks),
+linked from its `runbook_url` annotation; `promtool test rules` cases in
+`docs/monitoring/eddi-alerts.test.yml` make each essential alert fire on synthetic
+series and stay quiet on a healthy one.
 
-      - alert: AuditEntriesDropped
-        expr: eddi_audit_entries_dropped_total > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: "Audit entries are being dropped — compliance risk"
-
-      - alert: AuditSequenceCollisions
-        expr: eddi_audit_sequence_collisions_total > 0
-        labels:
-          severity: critical
-        annotations:
-          summary: "Audit chain positions are being allocated by more than one replica — enable conversation affinity"
-
-      # Warning
-      - alert: HighToolFailureRate
-        expr: >
-          rate(eddi_tool_execution_failure_total[5m]) /
-          (rate(eddi_tool_execution_success_total[5m]) +
-           rate(eddi_tool_execution_failure_total[5m])) > 0.05
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Tool failure rate above 5%"
-
-      - alert: CacheDegraded
-        expr: >
-          sum(rate(eddi_tool_cache_hits_total[5m])) /
-          (sum(rate(eddi_tool_cache_hits_total[5m])) +
-           sum(rate(eddi_tool_cache_misses_total[5m]))) < 0.5
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Cache hit rate below 50%"
-
-      - alert: HighRateLimitDenials
-        expr: rate(eddi_tool_ratelimit_denied_total[5m]) > 5
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "High rate limit denials: {{ $value }}/sec"
-
-      - alert: ScheduleDeadLetters
-        expr: eddi_schedule_fire_deadlettered_total > 0
-        labels:
-          severity: warning
-        annotations:
-          summary: "Dead-lettered schedules detected"
-```
+The thresholds are starting points for a single replica with modest traffic, and
+every ratio alert also requires a minimum number of events. Tune them in the YAML.
+The rules over generic series (`up`, `http_*`, `jvm_*`, `process_*`) select on
+`job="eddi"`; every shipped scrape configuration uses that job name.
 
 ---
 
@@ -881,7 +986,7 @@ POST   /llm/tools/costs/reset
 |--------|--------|-----|
 | Cache Hit Rate | > 70% | Below this, tool calls are mostly un-cached → higher latency & cost |
 | Tool Success Rate | > 95% | Dropping below indicates tool integration issues |
-| P95 Latency | < 2s | Conversation responsiveness depends on tool speed |
+| Mean tool latency | < 2s | Conversation responsiveness depends on tool speed |
 | Cost Per Request | < $0.001 | Runaway costs indicate misconfigured tools or abuse |
 | Audit Drops | = 0 | Any non-zero value is a compliance incident |
 | Error Rate (HTTP 5xx) | < 1% | Proxy for overall platform health |
@@ -920,10 +1025,14 @@ histogram_quantile(0.99,
   sum by (le) (rate(eddi_pipeline_task_duration_seconds_bucket[5m])))
 ```
 
-**Cost Per Hour:**
+**Cost in the last hour:**
 ```promql
-sum(rate(eddi_tool_costs_total[1h]))
+sum(increase(eddi_tool_costs_total[1h]))
 ```
+
+> `rate()` would be dollars per **second** — 3600 times too low for a figure
+> labelled per hour. The Operations dashboard's "Cost / hr" KPI had exactly that
+> bug.
 
 ---
 

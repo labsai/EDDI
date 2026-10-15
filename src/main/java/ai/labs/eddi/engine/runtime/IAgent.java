@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,26 @@ public interface IAgent {
     }
 
     /**
+     * The agent's {@code turnDeadlineMs}; {@code null} when no deadline is
+     * configured.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineMs() {
+        return null;
+    }
+
+    /**
+     * The agent's {@code turnDeadlineReserveMs}; {@code null} means the engine
+     * default.
+     *
+     * @since 6.6.0
+     */
+    default Long getTurnDeadlineReserveMs() {
+        return null;
+    }
+
+    /**
      * Memory policy from agent deployment. {@code null} when no policy is
      * configured.
      *
@@ -70,6 +91,16 @@ public interface IAgent {
      * @since 6.5.0
      */
     default Integer getCompatibilityGeneration() {
+        return null;
+    }
+
+    /**
+     * Why this deployment is in {@link Deployment.Status#ERROR}, or {@code null}
+     * when it is not or the cause was not recorded.
+     *
+     * @since 6.6.0
+     */
+    default DeploymentFailure getDeploymentFailure() {
         return null;
     }
 

@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -47,6 +48,11 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     private final McpToolProviderManager mcpToolProviderManager;
     private final RestVersionInfo<McpCallsConfiguration> restVersionInfo;
 
+    // Field-injected, like the other optional collaborators, so the direct
+    // constructions in tests keep compiling.
+    @Inject
+    ConfigJsonPatcher jsonPatcher;
+
     @Inject
     public RestMcpCallsStore(IMcpCallsStore mcpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
             McpToolProviderManager mcpToolProviderManager,
@@ -80,6 +86,15 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     public Response updateMcpCalls(String id, Integer version, McpCallsConfiguration mcpCallsConfiguration) {
         validateForWrite(mcpCallsConfiguration);
         return restVersionInfo.update(id, version, mcpCallsConfiguration);
+    }
+
+    @Override
+    public Response patchMcpCalls(String id, Integer version, String jsonPatch) {
+        return restVersionInfo.patch(id, version, jsonPatch, McpCallsConfiguration.class, jsonPatcher, patched -> {
+            // The same pre-write check updateMcpCalls runs.
+            validateForWrite(patched);
+            return null;
+        });
     }
 
     @Override

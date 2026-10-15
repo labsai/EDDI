@@ -77,7 +77,7 @@ describe("SchedulesPage", () => {
     renderSchedules();
     await waitFor(() => {
       const card = screen.getByTestId("schedules-total-card");
-      expect(within(card).getByText("3")).toBeInTheDocument();
+      expect(within(card).getByText("5")).toBeInTheDocument();
     });
   });
 
@@ -93,8 +93,8 @@ describe("SchedulesPage", () => {
     renderSchedules();
     await waitFor(() => {
       const card = screen.getByTestId("schedules-failed-card");
-      // sched-3 is DEAD_LETTERED
-      expect(within(card).getByText("1")).toBeInTheDocument();
+      // sched-3 is DEAD_LETTERED, sched-5 FAILED (its access was revoked)
+      expect(within(card).getByText("2")).toBeInTheDocument();
     });
   });
 
@@ -559,7 +559,7 @@ describe("SchedulesPage", () => {
     await user.type(nameInput, "My Test Schedule");
 
     const agentInput = within(dialog).getByPlaceholderText(/agent ID/i);
-    await user.type(agentInput, "agent-123");
+    await user.type(agentInput, "agent-123{Enter}");
 
     // Create button should now be enabled (name + agentId filled, cron has default)
     const createBtn = within(dialog).getByText("Create");

@@ -15,9 +15,15 @@ import {
   useGroupConversations,
   useGroupConversation,
   useDeleteGroupConversation,
+  isActiveConversationState,
   useGroupVersionLookup,
 } from "@/hooks/use-groups";
-import { persistedHasCaughtUp, useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import {
+  persistedHasCaughtUp,
+  streamErrorOf,
+  useGroupDiscussionStream,
+  whenStreamAccepted,
+} from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
@@ -47,9 +53,18 @@ import {
   type GroupConversation,
   type GroupConversationState,
 } from "@/lib/api/groups";
-import type { HitlVerdict } from "@/lib/api/hitl";
+import { getGroupApprovalStatus, type HitlDecision, type HitlVerdict } from "@/lib/api/hitl";
+import {
+  bindDecisionToPause,
+  currentGroupPauseOf,
+  isPauseChanged,
+  type ShownPause,
+} from "@/lib/hitl-pause-binding";
 import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
 import { safeFormatDate } from "@/components/groups/group-utils";
+
+/** Discussions fetched per page of the history list. */
+const CONVERSATION_PAGE = 20;
 
 const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" } as const;
 
@@ -195,6 +210,40 @@ export function GroupDetailPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [configSheetOpen, setConfigSheetOpen] = useState(false);
+  // An inline config editor is open in the panel (reported by the panel). Hiding
+  // the panel, going fullscreen or closing the sheet unmounts it and its draft.
+  const [configEditing, setConfigEditing] = useState(false);
+  const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
+  const guardConfigDiscard = useCallback(
+    (action: () => void) => {
+      if (configEditing) setDiscardAction(() => action);
+      else action();
+    },
+    [configEditing],
+  );
+  /** How many discussions the history asks for; grows by a page per "Load more". */
+  const [convLimit, setConvLimit] = useState(CONVERSATION_PAGE);
+  /**
+   * What the composer does with a selected, continuable discussion.
+   *
+   * Defaults to a NEW discussion: the page auto-selects the newest discussion
+   * to show something, and an Enter on the composer used to silently continue
+   * it — appending a round to a conversation the user never chose. "continue"
+   * is only the default once they picked a discussion themselves (history click
+   * or a deep link), and the toggle above the composer states which it is.
+   */
+  const [composerIntent, setComposerIntent] = useState<"new" | "continue">(() =>
+    searchParams.get("conversation") ? "continue" : "new",
+  );
+  const intentGroupRef = useRef(groupId);
+  useEffect(() => {
+    if (intentGroupRef.current === groupId) return;
+    intentGroupRef.current = groupId;
+    setComposerIntent("new");
+    setConvLimit(CONVERSATION_PAGE);
+  }, [groupId]);
+  /** A HUMAN member's turn was submitted and the discussion is resuming server-side. */
+  const [resuming, setResuming] = useState<{ gcId: string; requestedAt: string | null } | null>(null);
   // Discussion id awaiting a cancel confirmation. The hover "X" sits right next
   // to the Delete trash icon, so a mis-click must not abort a live discussion —
   // route it through a confirmation before the cancel mutation fires.
@@ -214,13 +263,14 @@ export function GroupDetailPage() {
     data: groupConfig,
     isLoading: configLoading,
     isError: configError,
+    error: configErr,
     refetch: refetchConfig,
   } = useGroup(resolvedVersion ? (groupId ?? "") : "", version);
 
   const {
     data: conversations,
     isLoading: convsLoading,
-  } = useGroupConversations(groupId || "");
+  } = useGroupConversations(groupId || "", convLimit);
 
   const {
     data: selectedConversation,
@@ -258,6 +308,9 @@ export function GroupDetailPage() {
   // Track an in-flight HITL decision so we can toast on the ACTUAL outcome
   // (hitl_resume ack / FAILED) rather than optimistically.
   const pendingDecisionRef = useRef<HitlVerdict | null>(null);
+  // An approve/reject is in flight, from submit until the resumed stream confirms
+  // or fails. Drives the approval card's receipt.
+  const [isApproving, setIsApproving] = useState(false);
 
   /**
    * Set when the user explicitly asked for an empty composer ("New Discussion"),
@@ -302,9 +355,9 @@ export function GroupDetailPage() {
     if (!selectedConvId) return "new";
     if (!selectedConversation) return "disabled"; // still loading
     const actions = selectedConversation.availableActions ?? [];
-    if (actions.includes("continue")) return "continue";
+    if (actions.includes("continue")) return composerIntent;
     return "disabled";
-  }, [streamState.isStreaming, selectedConvId, selectedConversation]);
+  }, [streamState.isStreaming, selectedConvId, selectedConversation, composerIntent]);
 
   const disabledMessage = useMemo(() => {
     if (streamState.isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
@@ -331,46 +384,87 @@ export function GroupDetailPage() {
       // The stored document seeds the stream: the continue endpoint replays
       // nothing, so after a reload the live view would otherwise hold only the
       // new round.
-      continueStream(groupId, selectedConvId, question, selectedConversation);
-      toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
-    } else {
-      // New discussion
-      pendingDecisionRef.current = null;
-      // Same guard as handleNewDiscussion: the clear must survive until the
-      // stream owns the selection, or the auto-select effect wins the gap
-      // between here and startStream flipping isStreaming.
-      userClearedRef.current = true;
-      setSelectedConvId(null);
-      startStream(groupId, question, attachments);
-      toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
+      void continueStream(groupId, selectedConvId, question, selectedConversation);
+      // Confirmed on the first frame, not on the click — and the composer keeps
+      // the draft until then: a request the server refuses (a 409, a 403) used
+      // to toast "streaming live" over an already-emptied box.
+      return whenStreamAccepted(groupId).then((ok) => {
+        if (ok) toast.info(t("groups.continueStreamStarted", "Continuation started — streaming live"));
+        else toast.error(streamErrorOf(groupId) ?? t("common.error", "Something went wrong"));
+        return ok;
+      });
     }
+    // New discussion
+    pendingDecisionRef.current = null;
+    // Same guard as handleNewDiscussion: the clear must survive until the
+    // stream owns the selection, or the auto-select effect wins the gap
+    // between here and startStream flipping isStreaming.
+    userClearedRef.current = true;
+    setSelectedConvId(null);
+    void startStream(groupId, question, attachments);
+    return whenStreamAccepted(groupId).then((ok) => {
+      if (ok) toast.info(t("groups.discussionStarted", "Discussion started — streaming live"));
+      else toast.error(streamErrorOf(groupId) ?? t("common.error", "Something went wrong"));
+      return ok;
+    });
   }, [groupId, inputMode, selectedConvId, selectedConversation, continueStream, startStream, setSelectedConvId, t]);
 
   const handleNewDiscussion = useCallback(() => {
     resetStream();
     pendingDecisionRef.current = null;
     userClearedRef.current = true;
+    setComposerIntent("new");
     setSelectedConvId(null);
   }, [resetStream, setSelectedConvId]);
 
   // Approve/reject a paused group discussion. Resumes over the approve/stream
   // SSE endpoint so the continued discussion renders live in the transcript.
   const handleApproveDiscussion = useCallback(
-    (gcId: string, verdict: HitlVerdict, note?: string, taskApprovals?: Record<string, string>) => {
+    async (gcId: string, verdict: HitlVerdict, note?: string, taskApprovals?: Record<string, string>) => {
       if (!groupId) return;
+      setIsApproving(true);
+      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
+      // Bound to the pause the card showed, exactly as the approvals inbox binds a
+      // group decision: the STORED pause (its start, and its id when the backend
+      // reports one) is compared with the pause now, and a changed pause refuses
+      // instead of approving something nobody reviewed.
+      const shown: ShownPause = {
+        pausedAt: paused?.pausedAt ?? null,
+        pauseType: paused?.hitlPauseType ?? "PHASE",
+      };
+      let decision: HitlDecision = { verdict, note };
+      try {
+        decision = await bindDecisionToPause(decision, shown, async () =>
+          currentGroupPauseOf(await getGroupApprovalStatus(groupId, gcId)),
+        );
+      } catch (err) {
+        setIsApproving(false);
+        if (isPauseChanged(err)) {
+          toast.error(
+            t(
+              "hitl.pauseChanged",
+              "This request changed since you opened it — nothing was decided. Review it again.",
+            ),
+          );
+          queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+          queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+        } else {
+          toast.error(friendlyGroupActionError(err, t));
+        }
+        return;
+      }
       // Feedback is driven off the resume outcome (see effect below), not fired
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
       userClearedRef.current = true; // hold the clear until the stream takes over
-      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
       setResumedConversation(paused);
       setSelectedConvId(null); // switch the transcript to the live resumed stream
       // Seeded for the same reason as the snapshot above: the approve endpoint
       // replays nothing, so without it the first resumed turn made the live
       // transcript the ONLY transcript, and every earlier phase left the view.
-      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals }, paused);
+      approveAndStream(groupId, gcId, { decision, taskApprovals }, paused);
     },
-    [groupId, approveAndStream, setSelectedConvId, selectedConversation],
+    [groupId, approveAndStream, setSelectedConvId, selectedConversation, queryClient, t],
   );
 
   // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
@@ -390,24 +484,30 @@ export function GroupDetailPage() {
       // Approvals inbox now (mirrors the cancel path) rather than waiting for the poll.
       queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     } else if (streamState.state === "FAILED") {
       toast.error(streamState.error || t("common.error", "Something went wrong"));
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     }
   }, [streamState.hitlResume, streamState.state, streamState.error, queryClient, t]);
 
-  // Submit a HUMAN member's pending turn (I6). Unlike approve/reject, this is a
-  // plain synchronous mutation — the backend has no streaming variant, so there
-  // is no live progress to switch to; the settled conversation lands via the
-  // mutation's own query invalidation, and the transcript re-renders once it refetches.
+  // Submit a HUMAN member's pending turn (I6). The backend has no streaming
+  // variant, and it resumes the discussion asynchronously after recording the
+  // turn, so there is no live stream to reattach to: the page follows the
+  // persisted conversation (which polls while it runs) and says so with a
+  // "resuming" notice until the state moves on.
   const handleSubmitHumanInput = useCallback(
     (gcId: string, memberId: string, content: string) => {
       if (!groupId) return;
+      const requestedAt =
+        selectedConversation?.id === gcId ? (selectedConversation.pendingHumanInput?.requestedAt ?? null) : null;
       submitHumanInputMutation.mutate(
         { groupId, gcId, memberId, content },
         {
           onSuccess: () => {
             toast.success(t("groups.humanTurnSubmitted", "Your response was recorded"));
+            setResuming({ gcId, requestedAt });
           },
           onError: (err) => {
             toast.error(friendlyGroupActionError(err, t));
@@ -415,8 +515,22 @@ export function GroupDetailPage() {
         },
       );
     },
-    [groupId, submitHumanInputMutation, t],
+    [groupId, submitHumanInputMutation, selectedConversation, t],
   );
+
+  const showResuming =
+    !!resuming &&
+    resuming.gcId === selectedConvId &&
+    !streamState.isStreaming &&
+    !!selectedConversation &&
+    (isActiveConversationState(selectedConversation.state) ||
+      (selectedConversation.state === "AWAITING_HUMAN_INPUT" &&
+        (selectedConversation.pendingHumanInput?.requestedAt ?? null) === resuming.requestedAt));
+  // Once the discussion has moved on (next pause, finished), forget the submit,
+  // so a later turn is not mislabelled as "resuming".
+  useEffect(() => {
+    if (resuming && selectedConversation?.id === resuming.gcId && !showResuming) setResuming(null);
+  }, [resuming, selectedConversation, showResuming]);
 
   const handleCancelDiscussion = useCallback(
     (gcId: string) => {
@@ -479,7 +593,11 @@ export function GroupDetailPage() {
   const handleFollowupMember = useCallback(
     (targetAgentId: string, question: string) => {
       if (!groupId || !selectedConvId) return;
-      followupMutation.mutate({ gcId: selectedConvId, targetAgentId, question });
+      // Settles to whether it landed, so the composer keeps the question on a
+      // failure (the mutation's own onError has already toasted it).
+      return followupMutation
+        .mutateAsync({ gcId: selectedConvId, targetAgentId, question })
+        .then(() => true, () => false);
     },
     [groupId, selectedConvId, followupMutation],
   );
@@ -524,8 +642,22 @@ export function GroupDetailPage() {
     }
   }, [streamState.state, streamState.interrupted, streamState.conversationId, groupId, queryClient, setSelectedConvId]);
 
-  function handleDeleteConversation(convId: string) {
+  async function handleDeleteConversation(convId: string) {
     if (!groupId) return;
+    // A discussion that is still running is stopped first. Deleting alone left
+    // this tab's stream open and the run going — it then streamed into a
+    // conversation that no longer existed.
+    const streamingThis = streamState.isStreaming && streamState.conversationId === convId;
+    const live =
+      streamingThis || isActiveConversationState(conversations?.find((c) => c.id === convId)?.state);
+    if (live) {
+      if (streamingThis) abortStream();
+      try {
+        await cancelDiscussionMutation.mutateAsync({ groupId, gcId: convId });
+      } catch {
+        // It may have ended in the meantime — the delete below is what matters.
+      }
+    }
     deleteConvMutation.mutate(
       { groupId, conversationId: convId },
       {
@@ -538,10 +670,24 @@ export function GroupDetailPage() {
     );
   }
 
+  // Escape leaves fullscreen — unless something else owns that Escape: a dialog
+  // (its own close), or the history dropdown (which consumes it).
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      setIsFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isFullscreen]);
+
   function handleSelectConversation(convId: string) {
     if (streamState.isStreaming) abortStream();
     pendingDecisionRef.current = null; // abandon any un-acked prior decision
     userClearedRef.current = false; // a deliberate pick re-arms the auto-select
+    setComposerIntent("continue"); // …and means "carry on with this one"
     setSelectedConvId(convId);
     setHistoryOpen(false);
   }
@@ -572,7 +718,7 @@ export function GroupDetailPage() {
     return (
       <div className="space-y-4">
         <BackLink to="/manage/groups" label={t("groups.backToGroups", "Back to Groups")} />
-        <ErrorState message={t("common.error")} onRetry={() => refetchConfig()} retryLabel={t("common.retry")} />
+        <ErrorState error={configErr} message={t("common.error")} onRetry={() => refetchConfig()} retryLabel={t("common.retry")} />
       </div>
     );
   }
@@ -725,7 +871,10 @@ export function GroupDetailPage() {
                 >
                   <Trash2 />
                 </Button>
-                {(conv.state === "AWAITING_APPROVAL" || conv.state === "AWAITING_HUMAN_INPUT" || conv.state === "IN_PROGRESS") && (
+                {(conv.state === "AWAITING_APPROVAL" ||
+                  conv.state === "AWAITING_HUMAN_INPUT" ||
+                  conv.state === "IN_PROGRESS" ||
+                  conv.state === "SYNTHESIZING") && (
                   <Button
                     variant="ghost"
                     size="iconSm"
@@ -754,6 +903,22 @@ export function GroupDetailPage() {
           <p className="text-[10px] text-muted-foreground/50 mt-1">
             {t("groups.askBelow", "Ask a question below to start")}
           </p>
+        </div>
+      )}
+      {/* The list is fetched a page at a time; a full page means there may be
+          older discussions that were not asked for yet. */}
+      {conversationCount >= convLimit && (
+        <div className="p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs"
+            onClick={() => setConvLimit((n) => n + CONVERSATION_PAGE)}
+            data-testid="load-more-discussions"
+          >
+            {t("groups.loadMoreDiscussions", "Load older discussions")}
+          </Button>
         </div>
       )}
     </>
@@ -865,10 +1030,17 @@ export function GroupDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={() =>
+              isFullscreen ? setIsFullscreen(false) : guardConfigDiscard(() => setIsFullscreen(true))
+            }
             title={isFullscreen
               ? t("groups.exitFullscreen", "Exit fullscreen")
               : t("groups.enterFullscreen", "Fullscreen")}
+            aria-label={isFullscreen
+              ? t("groups.exitFullscreen", "Exit fullscreen")
+              : t("groups.enterFullscreen", "Fullscreen")}
+            aria-pressed={isFullscreen}
+            data-testid="group-fullscreen-toggle"
           >
             {isFullscreen ? (
               <Minimize2 className="h-4 w-4" />
@@ -938,6 +1110,38 @@ export function GroupDetailPage() {
               </div>
             </div>
           )}
+          {/* The live connection dropped without the server saying the run ended.
+              It may still be going, so this is a notice, not an error: the page
+              follows the saved discussion from here (the Workforce board says
+              the same). */}
+          {streamState.interrupted && (!selectedConvId || selectedConvId === streamState.conversationId) && (
+            <div
+              className="border-b border-warning/30 bg-warning/5 px-4 py-2.5"
+              role="status"
+              data-testid="group-stream-interrupted"
+            >
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "groups.streamInterrupted",
+                  "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+                )}
+              </p>
+            </div>
+          )}
+          {showResuming && (
+            <div
+              className="border-b border-primary/30 bg-primary/5 px-4 py-2.5"
+              role="status"
+              data-testid="group-human-turn-resuming"
+            >
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "groups.humanTurnResuming",
+                  "Your response was recorded. The discussion is resuming — this page follows it and updates every few seconds.",
+                )}
+              </p>
+            </div>
+          )}
           {/* The transcript is passed through untouched — DiscussionPanel only
               adds the transcript / overview / split switch around it, so
               approvals, human turns and the composer keep working unchanged. */}
@@ -983,7 +1187,7 @@ export function GroupDetailPage() {
                 rosterDisplayNames={rosterDisplayNames}
                 onApprove={handleApproveDiscussion}
                 onCancelDiscussion={handleCancelDiscussion}
-                isDeciding={cancelDiscussionMutation.isPending}
+                isDeciding={cancelDiscussionMutation.isPending || isApproving}
                 onSubmitHumanInput={handleSubmitHumanInput}
                 isSubmittingHumanInput={submitHumanInputMutation.isPending}
                 humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
@@ -1005,6 +1209,38 @@ export function GroupDetailPage() {
                 onFollowup={handleFollowupMember}
                 onCloseDiscussion={handleCloseConversation}
               />
+            )}
+          {/* What the composer will do with a selected discussion that could be
+              continued — stated, not implied by which one happens to be open. */}
+          {!isStreamActive &&
+            selectedConversation &&
+            (selectedConversation.availableActions ?? []).includes("continue") && (
+              <div
+                role="group"
+                aria-label={t("groups.composerMode", "What to do with your message")}
+                className="flex items-center gap-1 border-t border-border bg-card/60 px-3 pt-2"
+                data-testid="composer-mode-toggle"
+              >
+                {(["new", "continue"] as const).map((intent) => (
+                  <button
+                    key={intent}
+                    type="button"
+                    aria-pressed={inputMode === intent}
+                    onClick={() => setComposerIntent(intent)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                      inputMode === intent
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-transparent text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
+                    )}
+                    data-testid={`composer-mode-${intent}`}
+                  >
+                    {intent === "new"
+                      ? t("groups.composerModeNew", "New discussion")
+                      : t("groups.composerModeContinue", "Continue this discussion")}
+                  </button>
+                ))}
+              </div>
             )}
           {/* Input always at the bottom of the transcript panel */}
           <DiscussionInput
@@ -1029,7 +1265,7 @@ export function GroupDetailPage() {
               </h3>
               <button
                 type="button"
-                onClick={() => setShowConfig(false)}
+                onClick={() => guardConfigDiscard(() => setShowConfig(false))}
                 className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
                 title={t("groups.hideConfig", "Hide config panel")}
                 aria-label={t("groups.hideConfig", "Hide config panel")}
@@ -1043,6 +1279,7 @@ export function GroupDetailPage() {
               groupId={groupId}
               groupVersion={version}
               onVersionChange={setVersion}
+              onEditingChange={setConfigEditing}
               className="flex-1 min-h-0"
             />
           </div>
@@ -1053,7 +1290,7 @@ export function GroupDetailPage() {
           sidebar is hidden. One `GroupConfigPanel`, two placements. */}
       <AccessibleDialog
         open={configSheetOpen}
-        onClose={() => setConfigSheetOpen(false)}
+        onClose={() => guardConfigDiscard(() => setConfigSheetOpen(false))}
         title={t("groups.configuration", "Configuration")}
         testId="config-sheet-dialog"
       >
@@ -1064,6 +1301,7 @@ export function GroupDetailPage() {
             groupId={groupId}
             groupVersion={version}
             onVersionChange={setVersion}
+            onEditingChange={setConfigEditing}
           />
         </div>
       </AccessibleDialog>
@@ -1076,16 +1314,47 @@ export function GroupDetailPage() {
           if (!open) setDeleteTarget(null);
         }}
         title={t("groups.confirmDeleteDiscussionTitle", "Delete this discussion?")}
-        description={t(
-          "groups.confirmDeleteDiscussionDescription",
-          "The transcript and everything in it are removed permanently. This cannot be undone.",
-        )}
+        description={
+          deleteTarget &&
+          ((streamState.isStreaming && streamState.conversationId === deleteTarget) ||
+            isActiveConversationState(conversations?.find((c) => c.id === deleteTarget)?.state))
+            ? t(
+                "groups.confirmDeleteLiveDiscussionDescription",
+                "This discussion is still running. It is stopped, and the transcript and everything in it are removed permanently. This cannot be undone.",
+              )
+            : t(
+                "groups.confirmDeleteDiscussionDescription",
+                "The transcript and everything in it are removed permanently. This cannot be undone.",
+              )
+        }
         confirmLabel={t("common.delete", "Delete")}
         cancelLabel={t("common.cancel")}
         variant="destructive"
         onConfirm={() => {
           if (deleteTarget) handleDeleteConversation(deleteTarget);
           setDeleteTarget(null);
+        }}
+      />
+
+      {/* An inline config editor is open and the panel is about to go away. */}
+      <AlertDialog
+        open={discardAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscardAction(null);
+        }}
+        title={t("groups.discardEditsTitle", "Discard unsaved edits?")}
+        description={t(
+          "groups.discardEditsDescription",
+          "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
+        )}
+        confirmLabel={t("groups.discardEditsConfirm", "Discard")}
+        cancelLabel={t("groups.keepEditing", "Keep editing")}
+        variant="destructive"
+        onConfirm={() => {
+          const action = discardAction;
+          setDiscardAction(null);
+          setConfigEditing(false);
+          action?.();
         }}
       />
 
@@ -1129,8 +1398,10 @@ function HistoryDropdown({
 }) {
   const { t } = useTranslation();
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // Click-outside to close
+  // Click-outside and Escape to close. Escape returns focus to the trigger and
+  // is consumed, so it does not also leave fullscreen.
   useEffect(() => {
     if (!historyOpen) return;
     function handleClick(e: MouseEvent) {
@@ -1138,17 +1409,32 @@ function HistoryDropdown({
         setHistoryOpen(false);
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      setHistoryOpen(false);
+      triggerRef.current?.focus();
+    }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [historyOpen, setHistoryOpen]);
 
   return (
     <div ref={dropdownRef} className={cn("relative", !isFullscreen && "lg:hidden")}>
       <Button
+        ref={triggerRef}
         variant="outline"
         size="sm"
         className="relative"
         onClick={() => setHistoryOpen(!historyOpen)}
+        aria-label={t("groups.discussions", "Discussions")}
+        aria-expanded={historyOpen}
+        title={t("groups.discussions", "Discussions")}
+        data-testid="history-dropdown-trigger"
       >
         <History className="h-4 w-4" />
         {conversationCount > 0 && (

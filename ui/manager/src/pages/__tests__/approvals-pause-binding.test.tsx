@@ -188,7 +188,7 @@ describe("queue decisions are bound to the pause the row showed", () => {
     renderWithProviders(<ApprovalsPage />);
 
     await user.click(await screen.findByTestId("review-conv-tool-1"));
-    await user.click(await screen.findByTestId("tool-approve-call-1"));
+    await screen.findByTestId("tool-call-call-1");
     // Meanwhile the batch was decided elsewhere and a new one — same time
     // resolution, different call — is waiting.
     serveStatus("conv-tool-1", {

@@ -86,6 +86,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      * see {@link ConversationMemorySnapshot#getHistoryRevision()}.
      */
     private static final String KEY_HISTORY_REVISION = "_histRev";
+    /**
+     * The highest cluster fencing token a write of this document carried — see
+     * {@link ConversationMemorySnapshot#getFence()}. Absent on documents only ever
+     * written in single-node mode.
+     */
+    private static final String KEY_FENCE = "_fence";
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     /**
@@ -95,7 +101,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      * to update it).
      */
     private static final Set<String> APPEND_HANDLED_KEYS = Set.of(OBJECT_ID, KEY_REVISION, KEY_HISTORY_REVISION,
-            KEY_CONVERSATION_STEPS, KEY_CONVERSATION_OUTPUTS);
+            KEY_CONVERSATION_STEPS, KEY_CONVERSATION_OUTPUTS, KEY_FENCE);
     /**
      * States a say turn's append must never be applied over — see
      * {@link #appendPreconditions(long)}.
@@ -143,7 +149,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             // the latest rewrite. An append in flight elsewhere reads this to learn that
             // re-applying its push would no longer land on the history it was built on.
             snapshot.setHistoryRevision(expectedRevision + 1);
-            var result = conversationCollectionObject.replaceOne(fullReplaceFilter(conversationId, expectedRevision, snapshot), snapshot);
+            Long loadedFence = snapshot.getFence();
+            snapshot.setFence(snapshot.effectiveFence());
+            var result = conversationCollectionObject.replaceOne(
+                    withFence(fullReplaceFilter(conversationId, expectedRevision, snapshot), snapshot.getFenceToken()), snapshot);
             // No upsert on purpose: a missing document means the conversation was
             // deleted while the turn was running (GDPR erasure, retention sweep).
             // Ignoring matchedCount discarded the turn's memory silently and still
@@ -154,7 +163,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 // it actually loaded, not the one this attempt failed to create.
                 snapshot.setRevision(expectedRevision);
                 snapshot.setHistoryRevision(loadedHistoryRevision);
-                throw conversationNotWritten(conversationId, expectedRevision);
+                snapshot.setFence(loadedFence);
+                throw conversationNotWritten(conversationId, expectedRevision, snapshot.getFenceToken());
             }
             snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
         } else {
@@ -182,9 +192,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             return false;
         }
         long expectedRevision = snapshot.getRevision();
-        var filter = Filters.and(
+        var filter = withFence(Filters.and(
                 revisionFilter(conversationId, expectedRevision),
-                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name()));
+                Filters.eq(KEY_CONVERSATION_STATE, expectedState.name())), snapshot.getFenceToken());
         // Atomic compare-and-store on BOTH arbiters: replaces the whole document
         // (including its new state) only while the persisted state still equals
         // expectedState AND nothing has written the document since this snapshot was
@@ -194,12 +204,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // undo was in flight — from being overwritten too, which the state filter alone
         // cannot see because both writers leave the same state behind.
         long loadedHistoryRevision = snapshot.getHistoryRevision();
+        Long loadedFence = snapshot.getFence();
         snapshot.setRevision(expectedRevision + 1);
         snapshot.setHistoryRevision(expectedRevision + 1);
+        snapshot.setFence(snapshot.effectiveFence());
         var result = conversationCollectionObject.replaceOne(filter, snapshot);
         if (result.getMatchedCount() == 0) {
             snapshot.setRevision(expectedRevision);
             snapshot.setHistoryRevision(loadedHistoryRevision);
+            snapshot.setFence(loadedFence);
             return false;
         }
         snapshot.setPersistedStepCount(snapshot.getConversationSteps().size());
@@ -318,11 +331,17 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         operations.add(Updates.pushEach(KEY_CONVERSATION_STEPS, List.copyOf(encoded.getArray(KEY_CONVERSATION_STEPS))));
         operations.add(Updates.pushEach(KEY_CONVERSATION_OUTPUTS, List.copyOf(encoded.getArray(KEY_CONVERSATION_OUTPUTS))));
         operations.add(Updates.inc(KEY_REVISION, 1L));
+        final Long fenceToken = snapshot.getFenceToken();
+        if (fenceToken != null) {
+            // $max: the stored fence only ever grows, whichever fenced writer lands last.
+            operations.add(Updates.max(KEY_FENCE, fenceToken));
+        }
         Bson update = Updates.combine(operations);
 
         long attemptRevision = loadedRevision;
         for (int attempt = 1;; attempt++) {
-            var filter = Filters.and(revisionFilter(conversationId, attemptRevision), appendPreconditions(loadedRevision));
+            var filter = withFence(Filters.and(revisionFilter(conversationId, attemptRevision), appendPreconditions(loadedRevision)),
+                    fenceToken);
             var result = conversationCollectionDocument.updateOne(filter, update);
             if (result.getMatchedCount() > 0) {
                 if (attempt == 1) {
@@ -334,11 +353,16 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 return;
             }
             var stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
-                    .projection(new Document(KEY_REVISION, 1).append(KEY_HISTORY_REVISION, 1).append(KEY_CONVERSATION_STATE, 1))
+                    .projection(new Document(KEY_REVISION, 1).append(KEY_HISTORY_REVISION, 1).append(KEY_CONVERSATION_STATE, 1)
+                            .append(KEY_FENCE, 1))
                     .first();
             if (stored == null) {
                 // Gone, not contended — there is nothing to append to.
-                throw conversationNotWritten(conversationId, loadedRevision);
+                throw conversationNotWritten(conversationId, loadedRevision, null);
+            }
+            if (fenceToken != null && stored.get(KEY_FENCE) instanceof Number storedFence && storedFence.longValue() > fenceToken) {
+                // A newer lease holder has written: this is a zombie write. Never retried.
+                throw new ConversationFencedException(conversationId, fenceToken, storedFence.longValue());
             }
             long storedRevision = longOrUnversioned(stored.get(KEY_REVISION));
             long storedHistoryRevision = longOrUnversioned(stored.get(KEY_HISTORY_REVISION));
@@ -387,6 +411,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         return Filters.and(
                 Filters.or(Filters.lte(KEY_HISTORY_REVISION, loadedRevision), Filters.exists(KEY_HISTORY_REVISION, false)),
                 Filters.nin(KEY_CONVERSATION_STATE, NON_APPENDABLE_STATES));
+    }
+
+    /**
+     * Adds the fencing condition to a write filter: the document must not carry a
+     * fencing token newer than the one this write carries. {@code null} (single
+     * node, or a degraded-mode turn) adds nothing — today's filter, unchanged.
+     */
+    static Bson withFence(Bson filter, Long fenceToken) {
+        if (fenceToken == null) {
+            return filter;
+        }
+        return Filters.and(filter, Filters.or(Filters.exists(KEY_FENCE, false), Filters.lte(KEY_FENCE, fenceToken)));
     }
 
     private static boolean isNonAppendableState(Object storedState) {
@@ -456,10 +492,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      * it is there at a different revision (another writer committed first — a retry
      * from a fresh load can still land).
      */
-    private IResourceStore.ResourceStoreException conversationNotWritten(String conversationId, long expectedRevision) {
-        boolean stillExists = conversationCollectionDocument
+    private IResourceStore.ResourceStoreException conversationNotWritten(String conversationId, long expectedRevision, Long fenceToken) {
+        Document stored = conversationCollectionDocument
                 .find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
-                .projection(new Document(OBJECT_ID, 1)).first() != null;
+                .projection(new Document(OBJECT_ID, 1).append(KEY_FENCE, 1)).first();
+        if (stored != null && fenceToken != null && stored.get(KEY_FENCE) instanceof Number storedFence
+                && storedFence.longValue() > fenceToken) {
+            return new ConversationFencedException(conversationId, fenceToken, storedFence.longValue());
+        }
+        boolean stillExists = stored != null;
         if (stillExists) {
             return new ConcurrentConversationModificationException(conversationId, expectedRevision);
         }
@@ -822,8 +863,10 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
      * stays cheap and never risks exposing tool-call arguments.
      */
+    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
+
     private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
-            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+            KEY_HITL_PAUSED_AT, "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
 
     @Override
@@ -832,22 +875,39 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // (potentially multi-MB) step/output data of paused conversations is
         // never deserialized, and there are no per-id point-reads (this listing
         // is polled and backs the crash-recovery sweep).
-        return collectPendingSummaries(
-                conversationCollectionObject.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
-                        .projection(PENDING_SUMMARY_PROJECTION)
-                        .limit(limit));
+        return pendingOldestFirst(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()), limit);
     }
 
     @Override
     public List<PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
-        return collectPendingSummaries(
-                conversationCollectionObject.find(Filters.and(
-                        Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
-                        Filters.eq("userId", ownerUserId)))
+        return pendingOldestFirst(Filters.and(
+                Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
+                Filters.eq("userId", ownerUserId)), limit);
+    }
+
+    /**
+     * Oldest pause first, pauses without a {@code hitlPausedAt} last, then the
+     * limit. Unordered, the limit kept an arbitrary sample: past it, the oldest
+     * approval could be the one left out — and the oldest is exactly what the
+     * retention sweep and {@code eddi_hitl_pending_oldest_age_seconds} need.
+     * MongoDB sorts a missing field FIRST, so the dated and the undated pauses are
+     * two reads; the second runs only when the first left room under the limit.
+     */
+    private List<PendingApprovalSummary> pendingOldestFirst(Bson filter, int limit) {
+        List<PendingApprovalSummary> out = collectPendingSummaries(
+                conversationCollectionObject.find(Filters.and(filter, Filters.ne(KEY_HITL_PAUSED_AT, null)))
                         .projection(PENDING_SUMMARY_PROJECTION)
+                        .sort(Sorts.ascending(KEY_HITL_PAUSED_AT))
                         .limit(limit));
+        if (out.size() < limit) {
+            out.addAll(collectPendingSummaries(
+                    conversationCollectionObject.find(Filters.and(filter, Filters.eq(KEY_HITL_PAUSED_AT, null)))
+                            .projection(PENDING_SUMMARY_PROJECTION)
+                            .limit(limit - out.size())));
+        }
+        return out;
     }
 
     private List<PendingApprovalSummary> collectPendingSummaries(
@@ -873,6 +933,16 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             out.add(summary);
         });
         return out;
+    }
+
+    @Override
+    public void raiseFence(String conversationId, long fence) {
+        // $max: never lowers; the revision is deliberately not touched, so the turn
+        // that is about to write on the revision it loaded does not conflict with it.
+        conversationCollectionDocument.updateOne(
+                Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                        Filters.or(Filters.exists(KEY_FENCE, false), Filters.lt(KEY_FENCE, fence))),
+                Updates.max(KEY_FENCE, fence));
     }
 
     @Override

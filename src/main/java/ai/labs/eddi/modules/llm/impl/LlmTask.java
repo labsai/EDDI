@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.shared.LlmFailureClassifier;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -92,6 +94,11 @@ public class LlmTask implements ILifecycleTask {
     private static final String KEY_CONVERT_TO_OBJECT = "convertToObject";
     /** Step key prefix for the convertToObject parse outcome (task id appended). */
     static final String KEY_OUTPUT_OUTCOME = "llm:output:outcome:";
+    /**
+     * Step data {@code llm:retry:<taskId>}: {@code {reasks, unresolved}} of a
+     * format recovery.
+     */
+    static final String KEY_RETRY = "llm:retry:";
     /** Why the outcome is not valid ({@code invalid}, {@code schema_mismatch}). */
     static final String KEY_OUTPUT_REASON = "llm:output:reason:";
     private static final String KEY_ADD_TO_OUTPUT = "addToOutput";
@@ -116,6 +123,14 @@ public class LlmTask implements ILifecycleTask {
     private final LegacyChatExecutor legacyChatExecutor;
     private final StreamingLegacyChatExecutor streamingLegacyChatExecutor;
     private final CascadingModelExecutor cascadingModelExecutor;
+    private final FormatRetryRunner formatRetryRunner;
+    /**
+     * The per-model circuit breakers (R8). Initializer-injected, so the many
+     * direct-construction unit tests are unaffected; null leaves every task
+     * unguarded, which is also what a task without {@code circuitBreaker.enabled}
+     * gets.
+     */
+    private LlmCircuitBreakers circuitBreakers;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
@@ -214,8 +229,15 @@ public class LlmTask implements ILifecycleTask {
         this.globalVariableResolver = globalVariableResolver;
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
+        this.formatRetryRunner = new FormatRetryRunner(modelOutputParser, meterRegistry);
         this.cascadingModelExecutor = new CascadingModelExecutor(chatModelRegistry, globalVariableResolver, templatingEngine, legacyChatExecutor,
-                streamingLegacyChatExecutor, meterRegistry, callerIdentityContext);
+                streamingLegacyChatExecutor, meterRegistry, callerIdentityContext, formatRetryRunner);
+    }
+
+    @Inject
+    void setCircuitBreakers(LlmCircuitBreakers circuitBreakers) {
+        this.circuitBreakers = circuitBreakers;
+        this.cascadingModelExecutor.setCircuitBreakers(circuitBreakers);
     }
 
     @Override
@@ -442,7 +464,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
-            String resolvedModelName = resolveModelName(processedParams, resolvedType);
+            String resolvedModelName = resolveModelNameOf(processedParams, resolvedType);
             var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
@@ -455,24 +477,32 @@ public class LlmTask implements ILifecycleTask {
         // Forward the current step's attachments to the LLM as multimodal content,
         // gated on the resolved (provider, model) capabilities, honoring any
         // per-task multimodal overrides.
-        if (attachmentForwarder != null) {
-            var mm = task.getMultimodal();
-            var vision = mm != null
-                    ? ModelCapabilityService.Support.parse(mm.getVision())
-                    : ModelCapabilityService.Support.AUTO;
-            var documents = mm != null
-                    ? ModelCapabilityService.Support.parse(mm.getDocuments())
-                    : ModelCapabilityService.Support.AUTO;
-            var audio = mm != null
-                    ? ModelCapabilityService.Support.parse(mm.getAudio())
-                    : ModelCapabilityService.Support.AUTO;
-            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams, resolvedType),
-                    vision, documents, audio);
-        }
+        forwardAttachments(messages, memory, task, resolvedType, processedParams);
 
         if (messages.isEmpty()) {
             return;
         }
+
+        // R5: the same-model recovery policy of the plain (non-cascade) paths, and the
+        // way to rebuild a smaller prompt for onContextTooLong. The cascade derives its
+        // own policy per step (a step may override maxFormatRetries).
+        final String shrinkSystemMessage = systemMessage;
+        final String shrinkSummaryPrefix = summaryPrefix;
+        final int shrinkSkipSteps = skipSteps;
+        final int shrinkLogSizeLimit = logSizeLimit;
+        FormatRetryRunner.ContextShrinker contextShrinker = () -> rebuildWithHalvedWindow(memory, task, shrinkSystemMessage,
+                processedParams.get(KEY_PROMPT), shrinkLogSizeLimit, maxContextTokens, anchorFirstSteps, includeFirstAgentMessage,
+                resolvedType, processedParams, shrinkSummaryPrefix, shrinkSkipSteps);
+        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
+                Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
+                FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+        FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
+                (trigger, attempt) -> {
+                    if (memory.getEventSink() != null) {
+                        memory.getEventSink().onLlmRetry(trigger.label(), attempt);
+                    }
+                });
 
         // Determine whether the multi-model cascade will run. The base model is only
         // needed outside the active-cascade branch, so create it lazily to avoid an
@@ -530,7 +560,25 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // R8: the circuit of the task's single model. A cascade guards each of its
+        // steps itself, so this is only for the non-cascade paths.
+        boolean circuitGuarded = !cascadeActive && circuitBreakers != null && task.getCircuitBreaker() != null
+                && task.getCircuitBreaker().isEnabled();
+        var circuitKey = circuitGuarded
+                ? new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), resolvedType,
+                        resolveModelNameOf(processedParams, resolvedType))
+                : null;
+        final LlmCircuitBreakers.Ticket circuitTicket = circuitGuarded
+                ? circuitBreakers.acquire(circuitKey, task.getCircuitBreaker())
+                : LlmCircuitBreakers.Ticket.DISABLED;
+        FormatRetryRunner.ReaskGate circuitGate = circuitTicket::reaskAllowed;
         try {
+            if (!circuitTicket.allowed()) {
+                recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", circuitTicket.denial().failure().label(), 0L);
+                // Nothing else can serve this task: onError=fallback absorbs it below, the
+                // default fails the turn fast with the class that opened the circuit.
+                throw new LlmCircuitOpenException(circuitTicket.denial().message(circuitKey), circuitTicket.denial().failure());
+            }
             var chatModel = cascadeActive ? null : chatModelRegistry.getOrCreate(resolvedType, processedParams);
             prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
@@ -540,7 +588,8 @@ public class LlmTask implements ILifecycleTask {
                 boolean allowLiveStreaming = eventSink != null && !addToOutputExplicitlyFalse;
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
-                        effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
+                        effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
+                        turnBudget(memory.getTurnDeadline()));
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -593,7 +642,8 @@ public class LlmTask implements ILifecycleTask {
                 // model construction, timeouts and escalation, so the streaming bridge the
                 // two non-cascade branches hand to the loop stops at this boundary rather
                 // than threading a second transport through the cascade's own machinery.
-                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
+                if (eventSink != null && retryPolicy == null && responseContent != null && !addToOutputExplicitlyFalse
+                        && !cascadeResult.streamedLive()) {
                     // F10: this is the same single-chunk downgrade the two non-cascade agent
                     // paths record. Agent mode is the DEFAULT here (enableInAgentMode defaults
                     // to true), so leaving it uninstrumented meant the most common streaming
@@ -626,20 +676,21 @@ public class LlmTask implements ILifecycleTask {
                 // Agent mode with cascade disabled — use normal agent flow. The streaming
                 // bridge is handed ONLY to the tool loop — see runToolLoopIfEnabled.
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
-                        resolvedType, processedParams);
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
+                        resolvedType, processedParams, retryPolicy, retryListener, currentStep, circuitGate);
                 if (outcome != null) {
                     responseContent = outcome.response();
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
                 } else {
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
+                            circuitGate, memory.getTurnDeadline());
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                     // Forward the buffered response to the stream so an SSE client is not left
                     // empty.
-                    if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    if (eventSink != null && retryPolicy == null && responseContent != null && !addToOutputExplicitlyFalse) {
                         eventSink.onToken(responseContent);
                     }
                 }
@@ -647,8 +698,8 @@ public class LlmTask implements ILifecycleTask {
             } else {
                 // === Standard (non-cascade) execution path ===
                 var outcome = runToolLoopIfEnabled(chatModel, agentSystemMessage, chatMessagesWithoutSystem, task, memory,
-                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, eventSink, addToOutputExplicitlyFalse,
-                        resolvedType, processedParams);
+                        effectiveToolApprovals, llmTaskIndex, jsonPolicy, retryPolicy != null ? null : eventSink, addToOutputExplicitlyFalse,
+                        resolvedType, processedParams, retryPolicy, retryListener, currentStep, circuitGate);
 
                 if (outcome != null) {
                     responseContent = outcome.response();
@@ -657,35 +708,46 @@ public class LlmTask implements ILifecycleTask {
                     usedToolMode = true;
                 } else if (eventSink != null) {
                     // Legacy mode with streaming — try to get a streaming model
-                    var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
+                    // R5: a task that may re-ask its model is buffered, never streamed — the
+                    // tokens of an attempt that is then retried cannot be taken back.
+                    var streamingModel = retryPolicy != null ? null : chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                     if (streamingModel != null) {
                         var streamingResult = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink, task, jsonPolicy);
                         responseContent = streamingResult.response();
                         responseMetadata.putAll(streamingResult.metadata());
                     } else {
-                        // Streaming not supported by this builder — fall back to sync, emit as single
-                        // chunk
-                        var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                        // Streaming not supported by this builder (or buffered for R5) — fall back
+                        // to sync, emit as single chunk
+                        var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener,
+                                currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse) {
+                        if (!addToOutputExplicitlyFalse && retryPolicy == null) {
                             eventSink.onToken(responseContent);
                         }
                     }
                 } else {
                     // Standard non-streaming legacy mode
-                    var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+                    var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
+                            circuitGate, memory.getTurnDeadline());
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
                 }
             }
+            settleCircuit(circuitTicket, responseContent, convertObject, processedParams, task);
 
         } catch (Exception e) {
+            settleCircuit(circuitTicket, e);
+            if (!cascadeActive) {
+                // A cascade counts each step's failure itself (with the step's model).
+                countFailure(e, resolveModelNameOf(processedParams, resolvedType));
+            }
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(e)) {
                 throw e;
             }
             markUncommitted(currentStep, dataBefore);
-            fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", e, convertObject, memory.getConversationId());
+            fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", e, convertObject, memory.getConversationId(),
+                    memory.getAgentId(), null);
             responseContent = fallbackServed.content();
             responseMetadata = new HashMap<>();
             toolTrace = new ArrayList<>();
@@ -700,11 +762,13 @@ public class LlmTask implements ILifecycleTask {
         // be
         // appended to the stream only when nothing did, since SSE cannot retract
         // tokens.
-        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent);
+        // A task that may re-ask is buffered (R5): nothing has been emitted yet, so the
+        // single emission below carries the final answer or the fallback, never both.
+        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent) && retryPolicy == null;
         if (fallbackServed == null) {
             try {
                 var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
-                        convertObject);
+                        convertObject, processedParams.get(KEY_RESPONSE_SCHEMA));
                 responseContent = validated.content();
                 fallbackServed = validated.fallback();
             } catch (LifecycleException validationFailure) {
@@ -715,13 +779,17 @@ public class LlmTask implements ILifecycleTask {
                 }
                 markUncommitted(currentStep, dataBefore);
                 fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", validationFailure,
-                        convertObject, memory.getConversationId());
+                        convertObject, memory.getConversationId(), memory.getAgentId(), null);
                 responseContent = fallbackServed.content();
             }
         }
 
+        recordAbnormalFinish(currentStep, responseMetadata);
+
         if (fallbackServed != null && eventSink != null && !addToOutputExplicitlyFalse && !modelTextStreamed) {
             eventSink.onToken(fallbackServed.text());
+        } else if (retryPolicy != null && fallbackServed == null && eventSink != null && !addToOutputExplicitlyFalse && responseContent != null) {
+            eventSink.onToken(responseContent);
         }
 
         // Store metadata if configured
@@ -749,7 +817,7 @@ public class LlmTask implements ILifecycleTask {
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields()));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -772,12 +840,17 @@ public class LlmTask implements ILifecycleTask {
             // resolveModelName, not params["model"]: most providers take "modelName", so
             // the
             // ledger recorded the provider type ("anthropic") instead of the model id.
-            String resolvedModelName = resolveModelName(processedParams, resolvedType);
+            String resolvedModelName = resolveModelNameOf(processedParams, resolvedType);
             String modelName = cascadeAuditModel != null ? cascadeAuditModel : resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
+        } else if (responseMetadata != null && responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
+            // adapter reports them as `usage`. Recorded without the rest of the audit
+            // evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateTokenUsage(currentStep, tokenUsage);
         }
 
         // Store tool trace if available
@@ -854,7 +927,7 @@ public class LlmTask implements ILifecycleTask {
                 // different vendor gets the neutral tuning values and none of the
                 // credentials.
                 var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
-                        resolveModelName(processedParams, resolvedType));
+                        resolveModelNameOf(processedParams, resolvedType));
                 conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
             } catch (Exception e) {
@@ -863,6 +936,172 @@ public class LlmTask implements ILifecycleTask {
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * What a same-model re-ask may still spend: the turn's time after the reserve,
+     * or no bound when the turn has no deadline. {@code minAttemptMs} is checked
+     * against it, so a re-ask never starts with the turn nearly out of time.
+     */
+    static FormatRetryRunner.RemainingBudget turnBudget(TurnDeadline deadline) {
+        return deadline != null ? deadline::remainingAfterReserveMs : FormatRetryRunner.RemainingBudget.UNBOUNDED;
+    }
+
+    /**
+     * One recovery action of this task:
+     * {@code eddi.llm.recovery{action,outcome,trigger}} and the single structured
+     * INFO line (R11).
+     */
+    private void recordRecovery(IConversationMemory memory, String action, String outcome, String failureClass, long durationMs) {
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi.llm.recovery", "action", action, "outcome", outcome, "trigger", failureClass).increment();
+        }
+        LlmRecoveryLog.log(memory != null ? memory.getConversationId() : null, memory != null ? memory.getAgentId() : null, failureClass, action,
+                outcome, 1, durationMs);
+    }
+
+    /**
+     * {@code eddi.llm.failure{class,model}} for a failed single-model call (the
+     * cascade counts its own steps). Control flow (a pause, a cancel) and the
+     * circuit's own refusal are not failures of the model.
+     */
+    void countFailure(Exception failure, String model) {
+        if (meterRegistry == null || failure instanceof LlmCircuitOpenException || LlmFallbackHandler.isControlFlow(failure)) {
+            return;
+        }
+        meterRegistry.counter("eddi.llm.failure", "class", LlmFailureClassifier.classify(failure).cls().name(), "model",
+                model == null || model.isBlank() ? "unknown" : model).increment();
+    }
+
+    /**
+     * Settles the task's circuit ticket (R8) for a model phase that returned: a
+     * reply that is still invalid JSON or off-shape is a counted failure, anything
+     * else a success. The reply is looked at directly rather than through
+     * {@code responseValidation}, so a model that never produces valid JSON is seen
+     * whatever the validation settings are.
+     */
+    private void settleCircuit(LlmCircuitBreakers.Ticket ticket, String responseContent, boolean convertObject,
+                               Map<String, String> processedParams, Task task) {
+        if (ticket == LlmCircuitBreakers.Ticket.DISABLED) {
+            return;
+        }
+        var detection = convertObject
+                ? formatRetryRunner.classifyJsonReply(responseContent, processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(),
+                        task.getId())
+                : null;
+        if (detection != null) {
+            ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
+        } else {
+            ticket.success();
+        }
+    }
+
+    /**
+     * Settles the ticket (R8) for a model phase that threw: a permanent provider
+     * failure is counted; a pause, a cancel, a transient error or anything
+     * unclassified is not.
+     */
+    private static void settleCircuit(LlmCircuitBreakers.Ticket ticket, Exception failure) {
+        if (ticket == LlmCircuitBreakers.Ticket.DISABLED) {
+            return;
+        }
+        var counted = LlmFallbackHandler.isControlFlow(failure) ? null : LlmFailureClassifier.classify(failure);
+        var circuitFailure = counted != null ? LlmCircuitBreakers.Failure.of(counted.cls()) : null;
+        if (circuitFailure != null) {
+            ticket.failure(circuitFailure, counted.reason());
+        } else {
+            ticket.release();
+        }
+    }
+
+    /**
+     * One plain chat completion, with the same-model recovery of
+     * {@code responseValidation} (R5) when a {@code "retry"} policy applies;
+     * exactly {@link LegacyChatExecutor#execute} otherwise.
+     */
+    private LegacyChatExecutor.ChatResult executePlain(FormatRetryRunner.Policy policy, ChatModel chatModel, List<ChatMessage> messages,
+                                                       Task task, JsonResponseFormatPolicy jsonPolicy,
+                                                       FormatRetryRunner.ContextShrinker shrinker, FormatRetryRunner.ReaskListener listener,
+                                                       IWritableConversationStep currentStep, FormatRetryRunner.ReaskGate gate,
+                                                       TurnDeadline deadline)
+            throws LifecycleException {
+        if (policy == null) {
+            return legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, deadline);
+        }
+        var outcome = formatRetryRunner.run(policy, messages, (msgs, maxTokens) -> {
+            var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, deadline);
+            return new FormatRetryRunner.Attempt(result.response(), result.responseMetadata());
+        }, shrinker, turnBudget(deadline), gate, listener);
+        recordRetry(currentStep, task, outcome);
+        return new LegacyChatExecutor.ChatResult(outcome.attempt().text(), outcome.attempt().metadata());
+    }
+
+    /**
+     * Notes a recovery on the step ({@code llm:retry:<taskId>}); a no-op without
+     * re-asks.
+     */
+    private void recordRetry(IWritableConversationStep currentStep, Task task, FormatRetryRunner.Outcome outcome) {
+        if (outcome.reasks() == 0 || currentStep == null) {
+            return;
+        }
+        Map<String, Object> note = new LinkedHashMap<>();
+        note.put("reasks", outcome.reasks());
+        note.put("unresolved", outcome.unresolved() != null ? outcome.unresolved().label() : null);
+        currentStep.storeData(dataFactory.createData(KEY_RETRY + (task.getId() != null ? task.getId() : "default"), note));
+    }
+
+    /**
+     * The prompt again with a halved history window, for the one
+     * {@code onContextTooLong} re-ask: half the token budget under
+     * {@code maxContextTokens}, otherwise half the step window
+     * ({@code conversationHistoryLimit}, or half of what the conversation holds
+     * when that is unlimited). The anchored opening steps stay, as always. Null
+     * when there is nothing left to halve.
+     */
+    private List<ChatMessage> rebuildWithHalvedWindow(IConversationMemory memory, Task task, String systemMessage, String prompt, int logSizeLimit,
+                                                      Integer maxContextTokens, int anchorFirstSteps, boolean includeFirstAgentMessage,
+                                                      String resolvedType, Map<String, String> processedParams, String summaryPrefix,
+                                                      int skipSteps) {
+        List<ChatMessage> smaller;
+        if (maxContextTokens != null && maxContextTokens > 0) {
+            int half = maxContextTokens / 2;
+            if (half < 1) {
+                return null;
+            }
+            var estimator = tokenCounterFactory.getEstimator(resolvedType, resolveModelNameOf(processedParams, resolvedType));
+            smaller = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, prompt, half, anchorFirstSteps,
+                    includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
+        } else {
+            if (logSizeLimit == 0) {
+                return null; // the prompt carried no history: nothing to halve
+            }
+            int window = logSizeLimit > 0 ? logSizeLimit : Math.max(0, memory.getConversationOutputs().size() - skipSteps);
+            int half = window / 2;
+            if (half < 1) {
+                return null;
+            }
+            smaller = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, half, includeFirstAgentMessage, summaryPrefix,
+                    skipSteps);
+        }
+        forwardAttachments(smaller, memory, task, resolvedType, processedParams);
+        return smaller;
+    }
+
+    /**
+     * Forward the current step's attachments to the LLM as multimodal content,
+     * gated on the resolved (provider, model) capabilities, honoring any per-task
+     * multimodal overrides.
+     */
+    private void forwardAttachments(List<ChatMessage> messages, IConversationMemory memory, Task task, String resolvedType,
+                                    Map<String, String> processedParams) {
+        if (attachmentForwarder == null) {
+            return;
+        }
+        var mm = task.getMultimodal();
+        var vision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
+        var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
+        attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
     }
 
     /**
@@ -924,6 +1163,41 @@ public class LlmTask implements ILifecycleTask {
             accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
         }
         accumulateToolCalls(currentStep, toolTrace, task.getId());
+    }
+
+    /**
+     * Leaves {@link MemoryKeys#LLM_FINISH_REASON} on the step when the model's
+     * answer was cut off at its token limit ({@code length}) or filtered by the
+     * provider ({@code content_filter}), so a caller can report it — the
+     * OpenAI-compatible {@code /v1} adapter turns it into {@code finish_reason}. A
+     * normal finish writes nothing, so a later sub-task of the same turn cannot
+     * overwrite an earlier truncation with "stop".
+     */
+    private void recordAbnormalFinish(IWritableConversationStep currentStep, Map<String, Object> responseMetadata) {
+        String reason = abnormalFinishReason(responseMetadata);
+        if (reason != null) {
+            currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_FINISH_REASON, reason));
+        }
+    }
+
+    /**
+     * {@code "length"} or {@code "content_filter"} when the response metadata says
+     * the model stopped for that reason — as the executors' {@code warning} or as
+     * the provider's raw {@code finishReason} — otherwise {@code null}.
+     */
+    static String abnormalFinishReason(Map<String, Object> responseMetadata) {
+        if (responseMetadata == null) {
+            return null;
+        }
+        Object warning = responseMetadata.get("warning");
+        String finishReason = String.valueOf(responseMetadata.get("finishReason"));
+        if ("truncated".equals(warning) || "LENGTH".equalsIgnoreCase(finishReason)) {
+            return "length";
+        }
+        if ("content_filter".equals(warning) || "CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
+            return "content_filter";
+        }
+        return null;
     }
 
     private void accumulateTokenUsage(IWritableConversationStep currentStep, Map<?, ?> delta) {
@@ -1005,7 +1279,8 @@ public class LlmTask implements ILifecycleTask {
      */
     private Validated applyResponseValidation(String responseContent, Map<String, Object> responseMetadata,
                                               Task task, IWritableConversationStep currentStep,
-                                              Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject)
+                                              Map<String, Object> templateDataObjects, IConversationMemory memory, boolean convertObject,
+                                              String processedParamsSchema)
             throws LifecycleException {
 
         ResponseValidation validation = task.getResponseValidation();
@@ -1068,6 +1343,38 @@ public class LlmTask implements ILifecycleTask {
             responseContent = step.content();
         }
 
+        // 6. Invalid JSON (convertToObject only): after the parser's own local repair.
+        // "retry" was already acted on by the executors; reaching it here means the
+        // re-asks (and every cascade step) are spent, so fallbackAction applies.
+        if (convertObject && (responseContent == null || responseContent.isBlank()) && "retry".equalsIgnoreCase(validation.getOnInvalidJson())) {
+            // retry was spent on a blank reply (see FormatRetryRunner): out of recoveries
+            var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json", "LLM response is empty", responseContent, task,
+                    currentStep, templateDataObjects, memory, convertObject);
+            if (step.fallback() != null) {
+                return step;
+            }
+            responseContent = step.content();
+        } else if (convertObject && responseContent != null && !responseContent.isBlank()) {
+            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
+            if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
+                var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",
+                        "LLM response does not match the response shape (" + parsed.reason() + ")", responseContent, task, currentStep,
+                        templateDataObjects, memory, convertObject);
+                if (step.fallback() != null) {
+                    return step;
+                }
+                responseContent = step.content();
+            } else if (parsed.kind() == ModelOutputParser.Kind.INVALID) {
+                var step = applyValidationAction(validation.getOnInvalidJson(), "invalid_json",
+                        "LLM response is not valid JSON (" + parsed.reason() + ")", responseContent, task, currentStep, templateDataObjects, memory,
+                        convertObject);
+                if (step.fallback() != null) {
+                    return step;
+                }
+                responseContent = step.content();
+            }
+        }
+
         return new Validated(responseContent, null);
     }
 
@@ -1078,6 +1385,10 @@ public class LlmTask implements ILifecycleTask {
      */
     private record Validated(String content, LlmFallbackHandler.Fallback fallback) {
     }
+
+    /** Validation types whose {@code "retry"} action the executors act on. */
+    private static final Set<String> RETRYABLE_VALIDATIONS = Set.of("empty_response", "truncated_response", "content_filter", "invalid_json",
+            "schema_mismatch");
 
     /**
      * Whether a completion opens with one of the configured refusal prefixes.
@@ -1133,12 +1444,31 @@ public class LlmTask implements ILifecycleTask {
                         Map.of("action", "fallback", "original", responseContent != null ? responseContent : ""));
                 currentStep.storeData(fallbackData);
                 var served = fallbackHandler.serve(task, templateDataObjects, currentStep, "validation", null, convertObject,
-                        memory.getConversationId());
+                        memory.getConversationId(), memory.getAgentId(), validationType);
                 return new Validated(served.content(), served);
 
             case "error" :
                 LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
                 throw new LifecycleException("Response validation failed [" + validationType + "]: " + message);
+
+            case "retry" :
+                // The re-asks happened (or were skipped) before validation ran; a reply
+                // still failing here is out of recoveries. Only the policies that are
+                // re-asked can say "retry"; for the others it is a configuration slip.
+                if (!RETRYABLE_VALIDATIONS.contains(validationType)) {
+                    LOGGER.warnf("[ResponseValidation] 'retry' is not available for %s (task=%s), treating as 'warn'", validationType,
+                            task.getId());
+                    currentStep.storeData(dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message));
+                    break;
+                }
+                String exhausted = task.getResponseValidation() != null ? task.getResponseValidation().getFallbackAction() : null;
+                if (exhausted == null || "retry".equalsIgnoreCase(exhausted)) {
+                    exhausted = "fallback";
+                }
+                LOGGER.warnf("[ResponseValidation] %s — retries exhausted, applying fallbackAction '%s' (task=%s)", validationType, exhausted,
+                        task.getId());
+                return applyValidationAction(exhausted, validationType, message, responseContent, task, currentStep, templateDataObjects, memory,
+                        convertObject);
 
             default :
                 LOGGER.warnf("[ResponseValidation] Unknown action '%s' for %s, treating as 'warn'", action, validationType);
@@ -1185,6 +1515,16 @@ public class LlmTask implements ILifecycleTask {
      */
     Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
                                    List<String> nonBlankFields) {
+        return convertResponseToObject(responseContent, taskId, currentStep, responseSchema, nonBlankFields, null);
+    }
+
+    /**
+     * As above; {@code memory} names the conversation and agent in the one
+     * structured line a local repair (fence stripping, prose extraction) leaves.
+     */
+    Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
+                                   List<String> nonBlankFields, IConversationMemory memory) {
+        long started = System.nanoTime();
         ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId);
         String label = outcome.label();
         switch (outcome.kind()) {
@@ -1195,7 +1535,7 @@ public class LlmTask implements ILifecycleTask {
             case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
             default -> {
                 if (outcome.repaired()) {
-                    LOGGER.debugf("convertToObject: response of task '%s' needed fence stripping/extraction before it parsed", taskId);
+                    recordRecovery(memory, LlmRecoveryLog.REPAIR, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
                 }
             }
         }
@@ -1294,6 +1634,27 @@ public class LlmTask implements ILifecycleTask {
         }
         var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
 
+        // R12: the recovery policies a resumed turn shares with a live one. The model
+        // phase below runs under the same onError guard, the final answer is re-asked
+        // on the same model when responseValidation says "retry" (a single call over
+        // the resumed transcript — no tool ever runs twice), and responseValidation's
+        // own actions apply to the answer. NOT applied: the circuit breaker (a resume
+        // neither consults nor settles a circuit) and the cascade (the resume pins the
+        // step whose tool loop paused). See docs/llm-resilience.md.
+        boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
+                FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+        FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
+                (trigger, attempt) -> {
+                    if (memory.getEventSink() != null) {
+                        memory.getEventSink().onLlmRetry(trigger.label(), attempt);
+                    }
+                });
+        boolean fallbackOnError = task.getOnError() != null && task.getOnError().isFallback();
+        Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
+        LlmFallbackHandler.Fallback fallbackServed = null;
+
         // === Hand off to the resume loop (Task 9) ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
@@ -1306,13 +1667,18 @@ public class LlmTask implements ILifecycleTask {
         // never call the model, so the bridge only ever forwards NEW tokens — text
         // streamed before the pause cannot be re-emitted. The resume path has no
         // single-chunk fallback emit, so no suppression bookkeeping is needed here.
-        var resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
-                "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
+        // A task that may re-ask its final answer is buffered, never streamed (R5): the
+        // tokens of an attempt that is then retried cannot be taken back.
+        var resumeBridge = retryPolicy != null
+                ? null
+                : createToolLoopStreamingBridge(memory.getEventSink(),
+                        "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
-        AgentOrchestrator.ExecutionResult result;
+        AgentOrchestrator.ExecutionResult result = null;
         try {
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
+            result = reaskResumedAnswer(result, retryPolicy, retryListener, chatModel, task, memory, jsonPolicy, currentStep);
         } catch (ToolApprovalRequiredException rePause) {
             // The continuation hit another gated call and paused again. The loop
             // builds that batch from scratch, and it knows nothing about cascades, so
@@ -1322,13 +1688,53 @@ public class LlmTask implements ILifecycleTask {
                 rePause.getBatch().setCascadeStepIndex(batch.getCascadeStepIndex());
             }
             throw rePause;
+        } catch (Exception failure) {
+            // onError: fallback (R7) on the resumed model phase. The approved tools
+            // already ran exactly once (the journal), so the failure is of the final
+            // answer; a pause, a cancel or a refused approval is control flow and
+            // propagates as before.
+            countFailure(failure, resolveModelNameOf(processedParams, resolvedType));
+            if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(failure)) {
+                throw failure;
+            }
+            markUncommitted(currentStep, dataBefore);
+            fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", failure, convertObject,
+                    memory.getConversationId(), memory.getAgentId(), null);
+            result = null;
         }
 
-        String responseContent = result != null ? result.response() : null;
+        String responseContent = fallbackServed != null ? fallbackServed.content() : result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+
+        // responseValidation's actions (R6) apply to the resumed answer as to a live
+        // one; the engine's own fallback text is not validated.
+        boolean modelTextStreamed = fallbackServed == null && !isNullOrEmpty(responseContent) && retryPolicy == null;
+        if (fallbackServed == null) {
+            try {
+                var validated = applyResponseValidation(responseContent, responseMetadata, task, currentStep, templateDataObjects, memory,
+                        convertObject, processedParams.get(KEY_RESPONSE_SCHEMA));
+                responseContent = validated.content();
+                fallbackServed = validated.fallback();
+            } catch (LifecycleException validationFailure) {
+                if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    throw validationFailure;
+                }
+                markUncommitted(currentStep, dataBefore);
+                fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", validationFailure, convertObject,
+                        memory.getConversationId(), memory.getAgentId(), null);
+                responseContent = fallbackServed.content();
+            }
+        }
+        boolean outputSuppressed = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+        var resumeSink = memory.getEventSink();
+        if (fallbackServed != null && resumeSink != null && !outputSuppressed && !modelTextStreamed) {
+            resumeSink.onToken(fallbackServed.text());
+        } else if (retryPolicy != null && fallbackServed == null && resumeSink != null && !outputSuppressed && responseContent != null) {
+            resumeSink.onToken(responseContent);
+        }
 
         // === Store the result EXACTLY like the normal path (executeTask) ===
         // Surface metadata the same way executeTask does. Note the continuation's
@@ -1350,9 +1756,12 @@ public class LlmTask implements ILifecycleTask {
         var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
         currentStep.storeData(langchainData);
 
-        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+        if (fallbackServed != null) {
+            // The engine's own text, never parsed (as on the live path).
+            templateDataObjects.put(responseObjectName, fallbackServed.object());
+        } else if (convertObject) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields()));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1367,11 +1776,12 @@ public class LlmTask implements ILifecycleTask {
                     processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "") + "\n---\n" + processedParams.getOrDefault(KEY_PROMPT, ""));
             currentStep.storeData(compiledPrompt);
 
-            if (responseContent != null) {
+            // Not for a fallback: the ledger records what the MODEL said.
+            if (responseContent != null && fallbackServed == null) {
                 var modelResponse = dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, responseContent);
                 currentStep.storeData(modelResponse);
             }
-            String resolvedModelName = resolveModelName(processedParams, resolvedType);
+            String resolvedModelName = resolveModelNameOf(processedParams, resolvedType);
             String modelName = resolvedModelName != null ? resolvedModelName : task.getType();
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
@@ -1380,6 +1790,11 @@ public class LlmTask implements ILifecycleTask {
             // calls (see the comment above) — the pre-pause segment is not recoverable
             // here, so a paused turn's ledger entry under-reports by that segment.
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
+        } else if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
+            // adapter reports them as `usage`. Recorded without the rest of the audit
+            // evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateTokenUsage(currentStep, tokenUsage);
         }
 
         // Tool trace (mirror executeTask)
@@ -1390,11 +1805,17 @@ public class LlmTask implements ILifecycleTask {
 
         // Output add. On resume the task used tool mode (that is why it paused), so
         // add the final response unless addToOutput was explicitly false.
-        boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+        boolean addToOutputExplicitlyFalse = outputSuppressed;
         if (!addToOutputExplicitlyFalse) {
-            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
+            // A fallback shows its message, not the JSON it was wrapped in for
+            // fallbackField.
+            String visibleText = fallbackServed != null ? fallbackServed.text() : responseContent;
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), visibleText);
             currentStep.storeData(outputData);
-            var outputItem = new TextOutputItem(responseContent, 0);
+            var outputItem = new TextOutputItem(visibleText, 0);
+            if (fallbackServed != null) {
+                outputItem.setFallback(true);
+            }
             currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
         }
 
@@ -1405,6 +1826,43 @@ public class LlmTask implements ILifecycleTask {
         // Batch consumed — clear the transient tool-pause state so the next turn does
         // not re-detect resume mode.
         clearToolPauseState(memory);
+    }
+
+    /**
+     * The same-model re-ask (R5) of a resumed turn's final answer: one model call
+     * over the resumed transcript (system, history, every tool exchange up to the
+     * answer, corrective message), through
+     * {@link IAgentOrchestrator#reaskFinalAnswer} — it ignores any tool request in
+     * the reply, so no tool runs a second time. Returns {@code result} untouched
+     * when the task does not retry, the resume did not record a transcript, or the
+     * answer is fine.
+     */
+    private AgentOrchestrator.ExecutionResult reaskResumedAnswer(AgentOrchestrator.ExecutionResult result, FormatRetryRunner.Policy retryPolicy,
+                                                                 FormatRetryRunner.ReaskListener retryListener, ChatModel chatModel,
+                                                                 Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy,
+                                                                 IWritableConversationStep currentStep)
+            throws LifecycleException {
+        if (result == null || retryPolicy == null || result.resumeTranscript().isEmpty()) {
+            return result;
+        }
+        var recovered = formatRetryRunner.resolve(retryPolicy, new FormatRetryRunner.Attempt(result.response(), result.responseMetadata()),
+                result.resumeTranscript(), (msgs, maxTokens) -> {
+                    var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
+                    if (reply == null) {
+                        throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                    }
+                    return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
+                }, turnBudget(memory.getTurnDeadline()), FormatRetryRunner.ReaskGate.ALWAYS, retryListener);
+        recordRetry(currentStep, task, recovered);
+        if (recovered.reasks() == 0) {
+            return result;
+        }
+        Map<String, Object> metadata = new HashMap<>(result.responseMetadata());
+        if (recovered.attempt().metadata() != null && recovered.attempt().metadata().get("tokenUsage") != null) {
+            metadata.put("tokenUsage", recovered.attempt().metadata().get("tokenUsage"));
+        }
+        return new AgentOrchestrator.ExecutionResult(recovered.attempt().text(), result.trace(), metadata, result.toolExchange(),
+                result.resumeTranscript());
     }
 
     /**
@@ -1772,14 +2230,42 @@ public class LlmTask implements ILifecycleTask {
                                                   ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
                                                   JsonResponseFormatPolicy jsonPolicy, ConversationEventSink eventSink,
                                                   boolean addToOutputExplicitlyFalse, String resolvedType,
-                                                  Map<String, String> processedParams)
+                                                  Map<String, String> processedParams, FormatRetryRunner.Policy retryPolicy,
+                                                  FormatRetryRunner.ReaskListener retryListener, IWritableConversationStep currentStep,
+                                                  FormatRetryRunner.ReaskGate gate)
             throws LifecycleException, ChatModelRegistry.UnsupportedLlmTaskException {
-        var toolLoopBridge = createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
+        // R5: a task that may re-ask its final answer buffers it (no streaming bridge).
+        var toolLoopBridge = retryPolicy != null
+                ? null
+                : createToolLoopStreamingBridge(eventSink, addToOutputExplicitlyFalse, resolvedType, processedParams, task);
         var agentResult = agentOrchestrator.executeIfToolsEnabled(toolLoopBridge != null ? toolLoopBridge : chatModel, systemMessage,
                 new ArrayList<>(chatMessagesWithoutSystem), task,
                 memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, jsonPolicy);
         if (agentResult == null) {
             return null;
+        }
+        if (retryPolicy != null) {
+            // Only the final model call is re-asked, over a transcript that already holds
+            // the tool results; the loop and its tools are never re-run.
+            var recovered = formatRetryRunner.resolve(retryPolicy,
+                    new FormatRetryRunner.Attempt(agentResult.response(), agentResult.responseMetadata()),
+                    CascadingModelExecutor.toolTranscript(systemMessage, chatMessagesWithoutSystem, agentResult.toolExchange()),
+                    (msgs, maxTokens) -> {
+                        var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
+                        if (reply == null) {
+                            throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                        }
+                        return new FormatRetryRunner.Attempt(reply.response(), reply.responseMetadata());
+                    }, turnBudget(memory.getTurnDeadline()), gate, retryListener);
+            recordRetry(currentStep, task, recovered);
+            if (recovered.reasks() > 0) {
+                Map<String, Object> metadata = new HashMap<>(agentResult.responseMetadata());
+                if (recovered.attempt().metadata() != null && recovered.attempt().metadata().get("tokenUsage") != null) {
+                    metadata.put("tokenUsage", recovered.attempt().metadata().get("tokenUsage"));
+                }
+                agentResult = new AgentOrchestrator.ExecutionResult(recovered.attempt().text(), agentResult.trace(), metadata,
+                        agentResult.toolExchange());
+            }
         }
         String responseContent = agentResult.response();
         // Null-guarded to match executeResume. No production path returns a null
@@ -2059,6 +2545,35 @@ public class LlmTask implements ILifecycleTask {
         return name;
     }
 
+    /**
+     * The model name with its {@code ${vars:...}} references resolved — the name
+     * the model was actually built with ({@code ChatModelRegistry} resolves the
+     * same references late). Used for everything that records or keys on the model
+     * (audit, circuit, metrics), so a task configured with {@code "modelName":
+     * "${vars:gemini-model}"} no longer reports the literal template.
+     */
+    private String resolveModelNameOf(Map<String, String> processedParams, String resolvedType) {
+        return resolveModelName(processedParams, resolvedType, globalVariableResolver);
+    }
+
+    /**
+     * As {@link #resolveModelName(Map, String)}, with {@code ${vars:...}}
+     * references resolved. An unresolvable reference (unknown variable, a resolver
+     * error) leaves the raw text: the audit then says exactly what was configured
+     * instead of failing the turn over a label.
+     */
+    static String resolveModelName(Map<String, String> processedParams, String resolvedType, GlobalVariableResolver resolver) {
+        String name = resolveModelName(processedParams, resolvedType);
+        if (resolver == null || !GlobalVariableResolver.containsReference(name)) {
+            return name;
+        }
+        try {
+            String resolved = resolver.resolveValue(name);
+            return resolved != null ? resolved : name;
+        } catch (RuntimeException e) {
+            return name;
+        }
+    }
     /**
      * Whether an LLM response should become a rendered message bubble.
      * <p>

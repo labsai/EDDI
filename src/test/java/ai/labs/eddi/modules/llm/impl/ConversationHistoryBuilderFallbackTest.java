@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -138,5 +139,43 @@ class ConversationHistoryBuilderFallbackTest {
         var log = new ConversationLogGenerator(memory).generate(-1, true);
 
         assertTrue(log.getMessages().stream().anyMatch(p -> "assistant".equals(p.getRole())));
+    }
+
+    private static ConversationOutput turnWithItems(String input, Object... items) {
+        var o = new ConversationOutput();
+        o.put("input", input);
+        o.put("output", List.of(items));
+        return o;
+    }
+
+    @Test
+    @DisplayName("a step with one task's marked fallback and another task's answer keeps the answer (live and summarized paths)")
+    void markedFallbackItemIsDroppedButAnotherTasksAnswerStays() {
+        var mixed = turnWithItems("q2", Map.of("text", "Sorry, I could not answer", "fallback", true),
+                Map.of("text", "the real answer"));
+        var memory = memoryOf(List.of(turn("q1", "answer 1"), mixed, turn("q3", null)), false, true, false);
+
+        List<ChatMessage> live = builder.buildMessages(memory, null, null, -1, true);
+        List<ChatMessage> summarized = builder.buildMessages(memory, null, null, -1, true, "summary", 1);
+
+        assertTrue(live.stream().noneMatch(m -> text(m).contains("Sorry")));
+        assertTrue(live.stream().anyMatch(m -> text(m).equals("the real answer")), live.toString());
+        assertTrue(summarized.stream().noneMatch(m -> text(m).contains("Sorry")));
+        assertTrue(summarized.stream().anyMatch(m -> text(m).equals("the real answer")), summarized.toString());
+    }
+
+    @Test
+    @DisplayName("a configured prompt replaces only the current input; the fallback turn's question stays")
+    void promptKeepsTheEarlierQuestion() {
+        var memory = memoryOf(List.of(turn("q1", "Sorry, I could not answer"), turn("q2", null)), true, false);
+
+        List<ChatMessage> live = builder.buildMessages(memory, null, "PROMPT", -1, true);
+        List<ChatMessage> summarized = builder.buildMessages(memory, null, "PROMPT", -1, true, "summary", 0 + 1);
+        List<ChatMessage> tokenAware = builder.buildTokenAwareMessages(memory, null, "PROMPT", 100_000, 2, true,
+                new TokenCounterFactory().getEstimator("openai", "gpt-4o"));
+
+        assertEquals("q1|PROMPT", text(live.getLast()));
+        assertEquals("q1|PROMPT", text(tokenAware.getLast()));
+        assertEquals("PROMPT", text(summarized.getLast()), "the earlier question is inside the summary window here");
     }
 }

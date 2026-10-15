@@ -1,7 +1,7 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
@@ -33,30 +33,50 @@ import {
   Sparkles,
   Info,
   CircleDashed,
+  Save,
+  Undo2,
+  GitCompareArrows,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { accessForDetail } from "@/lib/access";
 import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   useAgent,
   useDeploymentStatus,
   useDeploymentStatuses,
-  useDeployAgent,
   useUndeployAgent,
   useDeleteAgent,
   useDuplicateAgent,
   useAgentVersions,
+  useUpdateAgent,
+  useUpdateAgentDescriptor,
 } from "@/hooks/use-agents";
-import { useAgentSectionSave } from "@/hooks/use-agent-section-save";
+import { EditableTitle } from "@/components/shared/editable-title";
+import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import {
+  agentJson,
+  applyChangedFields,
+  changedAgentFields,
+  isAgentDraftDirty,
+  type AgentEdit,
+} from "@/lib/agent-draft";
+import { parseVersionFromLocation } from "@/lib/api/location-version";
+import { agentKeys } from "@/lib/query-keys";
+import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
 import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
-import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
+import { useWorkflowDescriptors } from "@/hooks/use-workflows";
+import { parseResourceUri, type EnvironmentStatus, type Agent } from "@/lib/api/agents";
+import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
+import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@/lib/deploy-outcome";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
@@ -92,7 +112,20 @@ export function AgentDetailPage() {
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  /**
+   * The agent document as edited on this page, or `null` while nothing has been
+   * touched. Every section edits it; nothing reaches the backend until Save,
+   * which writes it as ONE new version.
+   */
+  const [draft, setDraft] = useState<Agent | null>(null);
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  /**
+   * Set when a save hit a 409: the document the draft was built on. Once the
+   * page has moved onto the newer version, the draft's own edits are re-applied
+   * on top of it (see the effect below), so another client's change is kept.
+   */
+  const [rebaseFrom, setRebaseFrom] = useState<Agent | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   // Undeploy confirmation — tracks which environment is being undeployed plus
@@ -105,6 +138,10 @@ export function AgentDetailPage() {
   // the component, so useState values persist across route param changes).
   useEffect(() => {
     setVersion(undefined);
+    setDraft(null);
+    setRebaseFrom(null);
+    setShowReviewDialog(false);
+    setShowDiscardDialog(false);
   }, [id]);
 
   const { data: versions } = useAgentVersions(id!);
@@ -149,14 +186,20 @@ export function AgentDetailPage() {
    */
   const isChatReachable = liveEnvironments.length > 0;
 
-  const deployMutation = useDeployAgent();
+  const { deploy: deployWithGrants, isRunning: isDeploying } = useDeployWithGrants();
   const undeployMutation = useUndeployAgent();
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
-  const updateWorkflowsMutation = useUpdateAgentWorkflows();
+  const updateAgentMutation = useUpdateAgent();
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
+  // Production may be live at ANOTHER version than the one on screen (a save
+  // creates a new version nobody has deployed). Say so, rather than describing
+  // only the viewed version as "Not deployed" while v5 serves.
+  const productionEntry = envStatuses?.find((e) => e.environment === "production");
+  const liveElsewhereVersion =
+    status === "NOT_FOUND" && productionEntry?.status === "READY" ? productionEntry.deployedVersion : undefined;
   const config = statusIcons[status];
   const StatusIcon = config.icon;
   const statusLabels: Record<string, string> = {
@@ -165,9 +208,17 @@ export function AgentDetailPage() {
     ERROR: t("status.error", "Error"),
     NOT_FOUND: t("status.notDeployed", "Not deployed"),
   };
-  const statusLabel = statusLabels[status] ?? status;
+  const statusLabel =
+    liveElsewhereVersion !== undefined
+      ? t("agentDetail.liveElsewhere", "Live: v{{live}} · Viewing v{{viewing}} (not deployed)", {
+          live: liveElsewhereVersion,
+          viewing: resolvedVersion,
+        })
+      : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
+  const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
   // Derive agent display name from the version descriptor (the full agent
   // config returned by useAgent does NOT include name/description).
@@ -179,22 +230,130 @@ export function AgentDetailPage() {
     [agent?.workflows]
   );
   const { data: latestVersions } = useLatestVersions(workflowUris);
-
-  // Clear save message after 3s
-  useEffect(() => {
-    if (saveMessage) {
-      const timer = setTimeout(() => setSaveMessage(null), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [saveMessage]);
-
-  function handleDeploy() {
-    deployMutation.mutate(
-      { agentId: id!, version: resolvedVersion },
-      {
-        onSuccess: () => toast.success(t("agents.deploySuccess", "Deployment started")),
-        onError: (err) => toast.error(getErrorMessage(err)),
+  // Workflow rows show names, not raw ids.
+  const { data: workflowDescriptors } = useWorkflowDescriptors(100, 0, "");
+  const workflowNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const d of workflowDescriptors ?? []) {
+      if (!d.name) continue;
+      try {
+        names.set(parseResourceUri(d.resource).id, d.name);
+      } catch {
+        // an unparseable descriptor cannot name a row
       }
+    }
+    return names;
+  }, [workflowDescriptors]);
+  const renameMutation = useUpdateAgentDescriptor();
+
+  // ── Draft ──
+  const editable = draft ?? agent;
+  const isDirty = isAgentDraftDirty(draft, agent);
+  const changedFields = useMemo(() => changedAgentFields(draft, agent), [draft, agent]);
+  const isSaving = updateAgentMutation.isPending;
+  /** Whether any of these top-level fields holds an unsaved edit. */
+  const touched = (...fields: string[]) => fields.some((f) => changedFields.has(f));
+
+  const editAgent = useCallback<AgentEdit>(
+    (next) => {
+      if (!agent || !editable || configPending) return;
+      // Applied onto the latest draft, not taken wholesale: an edit built from
+      // a slightly older render must not undo the one before it.
+      setDraft((prev) => applyChangedFields(prev ?? agent, editable, next));
+    },
+    [agent, editable, configPending],
+  );
+
+  /** Writes the draft as one new version. Resolves whether it landed. */
+  const saveDraft = useCallback(async (): Promise<boolean> => {
+    if (!draft || !isDirty) return true;
+    const sent = draft;
+    try {
+      const result = await updateAgentMutation.mutateAsync({ id: id!, version: resolvedVersion, agent: sent });
+      const created = parseVersionFromLocation(result?.location);
+      // Edits made while the request was in flight stay in the draft.
+      setDraft((current) => (current === sent ? null : current));
+      // Follow the version the save created. The mutation has already seeded
+      // its cache with what was sent, so the page does not flash the old one.
+      if (created !== null) setVersion(created);
+      // Every save writes a new agent version that is not what is serving: say
+      // which one, and offer the deploy that closes the gap.
+      showSavedNotLiveToast({ t, queryClient, agentId: id!, newAgentVersion: created });
+      return true;
+    } catch (err) {
+      if (isApiError(err) && err.status === 409) {
+        // Someone saved a newer version meanwhile. Keep the edits, follow the
+        // latest version again (a save pins the one it created), and refetch;
+        // the rebase effect then moves the edits onto that version.
+        if (agent) setRebaseFrom(agent);
+        setVersion(undefined);
+        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        toast.error(
+          t(
+            "agentDetail.saveConflict",
+            "This agent was changed elsewhere since you opened it. Your edits are kept: review them and save again.",
+          ),
+        );
+      } else {
+        toast.error(getErrorMessage(err));
+      }
+      return false;
+    }
+  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t]);
+
+  useEffect(() => {
+    if (!rebaseFrom || !agent || agent === rebaseFrom) return;
+    // Only the top-level blocks the user changed are carried over; everything
+    // else comes from the newer version.
+    setDraft((current) => (current ? applyChangedFields(agent, rebaseFrom, current) : current));
+    setRebaseFrom(null);
+  }, [agent, rebaseFrom]);
+
+  function confirmDiscard() {
+    setDraft(null);
+    setShowDiscardDialog(false);
+    setShowReviewDialog(false);
+  }
+
+  // Tab close / reload, and leaving by any in-app navigation — the app's one
+  // blocker asks, and offers Save & leave because this page can save on demand.
+  useUnsavedChangesGuard(isDirty, { onSave: saveDraft });
+
+  // Ctrl/Cmd+S saves while there is something to save.
+  useEffect(() => {
+    if (!isDirty) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (!isSaving) void saveDraft();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isDirty, isSaving, saveDraft]);
+
+  /**
+   * Grant-aware, waited deploy: a restricted vault key this agent is not
+   * granted is settled in the grant dialog first, and a refusal toasts the
+   * backend's reason (with Fix for a grant refusal) instead of "started".
+   */
+  function handleDeploy(environment: string = "production") {
+    const options = { agentId: id!, version: resolvedVersion, agentName: agentDisplayName, environment };
+    deployWithGrants(options)
+      .then((outcome) =>
+        reportDeployOutcome(outcome, options, t, t("agentDetail.deployed", "Agent deployed"), () => {
+          void queryClient.invalidateQueries({ queryKey: ["agents"] });
+        }),
+      )
+      .catch((err) => toast.error(getErrorMessage(err)));
+  }
+
+  function handleFixDeployment() {
+    if (!isGrantFailure(deploymentFailure)) return;
+    void fixGrantAndRedeploy(
+      { agentId: id!, version: resolvedVersion, agentName: agentDisplayName, environment: "production", failure: deploymentFailure },
+      t,
+      () => void queryClient.invalidateQueries({ queryKey: ["agents"] }),
     );
   }
 
@@ -258,50 +417,24 @@ export function AgentDetailPage() {
   }
 
   function handleRemoveWorkflow(packageUri: string) {
-    if (!agent?.workflows || configPending) return;
-    const updated = agent.workflows.filter((p) => p !== packageUri);
-    updateWorkflowsMutation.mutate(
-      { agentId: id!, version: resolvedVersion, workflows: updated },
-      {
-        onSuccess: () => toast.success(t("agentDetail.workflowRemoved", "Workflow removed")),
-        onError: (err) => toast.error(getErrorMessage(err)),
-      }
-    );
+    if (!editable?.workflows || configPending) return;
+    editAgent({ ...editable, workflows: editable.workflows.filter((p) => p !== packageUri) });
   }
 
   function handleAddWorkflow(packageUri: string) {
-    if (configPending) return;
-    const current = agent?.workflows ?? [];
+    if (!editable || configPending) return;
+    const current = editable.workflows ?? [];
     if (current.includes(packageUri)) return;
-    updateWorkflowsMutation.mutate(
-      {
-        agentId: id!,
-        version: resolvedVersion,
-        workflows: [...current, packageUri],
-      },
-      {
-        onSuccess: () => toast.success(t("agentDetail.workflowAdded", "Workflow added")),
-        onError: (err) => toast.error(getErrorMessage(err)),
-      }
-    );
+    editAgent({ ...editable, workflows: [...current, packageUri] });
     setShowAddWorkflow(false);
   }
 
   function handleUpdateWorkflowVersion(oldUri: string, newVersion: number) {
-    if (!agent?.workflows || configPending) return;
-    const updated = agent.workflows.map((u) => {
-      if (u === oldUri) {
-        return u.replace(/([?&]version=)\d+/, `$1${newVersion}`);
-      }
-      return u;
-    });
-    updateWorkflowsMutation.mutate(
-      { agentId: id!, version: resolvedVersion, workflows: updated },
-      {
-        onSuccess: () => toast.success(t("agentDetail.workflowUpdated", "Workflow updated to latest version")),
-        onError: (err) => toast.error(getErrorMessage(err)),
-      }
+    if (!editable?.workflows || configPending) return;
+    const updated = editable.workflows.map((u) =>
+      u === oldUri ? u.replace(/([?&]version=)\d+/, `$1${newVersion}`) : u,
     );
+    editAgent({ ...editable, workflows: updated });
   }
 
   const handleVersionChange = useCallback(
@@ -351,6 +484,25 @@ export function AgentDetailPage() {
 
   const latestVersion = versions?.[0]?.version ?? resolvedVersion;
   const isNotLatest = resolvedVersion < latestVersion;
+  /** What the sections show and edit: the draft, or the stored document. */
+  const doc = editable ?? agent;
+  const modifiedSectionCount = [
+    touched("workflows"),
+    touched("a2aEnabled", "description", "a2aSkills"),
+    touched("security", "identity"),
+    touched("capabilities"),
+    touched("enableMemoryTools", "userMemoryConfig"),
+    touched("memoryPolicy"),
+    touched("sessionManagement"),
+    touched("conversationReview"),
+    touched("hitlConfig"),
+    touched("channels"),
+  ].filter(Boolean).length;
+  // Deploying acts on the SAVED version; with edits pending that is rarely
+  // what was meant, so it waits until they are saved or discarded.
+  const deployBlockedTitle = isDirty
+    ? t("agentDetail.saveBeforeDeploy", "Save or discard your changes before deploying")
+    : undefined;
 
   return (
     <div className="space-y-6">
@@ -361,30 +513,79 @@ export function AgentDetailPage() {
           <div className="flex items-center gap-3">
             <Bot className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                {versions?.find(v => v.version === resolvedVersion)?.name || t("agentDetail.title", "Agent Detail")}
-              </h1>
-              <p className="font-mono text-sm text-muted-foreground">
+              <EditableTitle
+                name={versions?.find((v) => v.version === resolvedVersion)?.name}
+                description={versions?.find((v) => v.version === resolvedVersion)?.description}
+                fallback={t("agentDetail.title", "Agent Detail")}
+                canEdit={access.canEdit}
+                onSave={async ({ name, description }) => {
+                  // The list reads the newest version's descriptor, the header
+                  // the viewed one: keep both in step.
+                  const latest = versions?.[0]?.version ?? resolvedVersion;
+                  await renameMutation.mutateAsync({ id: id!, version: latest, name, description });
+                  if (latest !== resolvedVersion) {
+                    await renameMutation.mutateAsync({ id: id!, version: resolvedVersion, name, description });
+                  }
+                }}
+                data-testid="agent-title"
+              />
+              <p className="font-mono text-sm text-muted-foreground" data-testid="agent-id">
                 {id}
-                <span className="ms-2 inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-semibold text-primary">
-                  v{resolvedVersion}
-                </span>
-                <CompatibilityGenerationBadge generation={agent.compatibilityGeneration} />
               </p>
             </div>
           </div>
-          {/* Version picker */}
+          {/* Version row — which version, and which compatible line it is on */}
           {versions && versions.length > 0 && (
-            <VersionSelect
-              versions={versions}
-              current={resolvedVersion}
-              onChange={handleVersionChange}
-            />
+            <div className="flex flex-wrap items-center gap-2" data-testid="agent-version-row">
+              <VersionSelect
+                versions={versions}
+                current={resolvedVersion}
+                onChange={handleVersionChange}
+                disabled={isDirty || isSaving}
+              />
+              <CompatibilityGenerationBadge generation={agent.compatibilityGeneration} />
+            </div>
           )}
         </div>
 
-        {/* Actions — grouped into primary (deploy/chat) and secondary (tools) */}
+        {/* Actions — edit state, then primary (deploy/chat), then secondary (tools) */}
         <div className="flex flex-col gap-2 items-end">
+          {/* Edits — same controls as the workflow and resource editors */}
+          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="agent-save-controls">
+            {isDirty && (
+              <button
+                type="button"
+                onClick={() => setShowReviewDialog(true)}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200 transition-colors dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
+                title={t("agentDetail.reviewChanges", "Review changes")}
+                data-testid="dirty-indicator"
+              >
+                <AlertCircle className="h-3 w-3" aria-hidden="true" />
+                {t("editor.dirty", "Unsaved changes")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowDiscardDialog(true)}
+              disabled={!isDirty || isSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary active:scale-[0.98] disabled:opacity-50"
+              data-testid="discard-btn"
+            >
+              <Undo2 className="h-4 w-4" aria-hidden="true" />
+              {t("editor.discard", "Discard")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveDraft()}
+              disabled={!isDirty || isSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
+              data-testid="save-btn"
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {isSaving ? t("editor.saving", "Saving...") : t("editor.save", "Save")}
+            </button>
+          </div>
+
           {/* Primary actions: status + deploy + chat */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Status badge */}
@@ -402,21 +603,24 @@ export function AgentDetailPage() {
 
             {/* Deploy/Undeploy */}
             <button
-              onClick={isDeployed ? () => openUndeployDialog("production") : handleDeploy}
-              disabled={isBusy}
+              onClick={isDeployed ? () => openUndeployDialog("production") : () => handleDeploy()}
+              disabled={isBusy || isDirty}
+              title={deployBlockedTitle}
               className={cn(
                 "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                 isDeployed
                   ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
                   : "bg-primary text-primary-foreground hover:bg-primary/90",
-                isBusy && "cursor-not-allowed opacity-50"
+                (isBusy || isDirty) && "cursor-not-allowed opacity-50"
               )}
               data-testid="deploy-btn"
             >
               {isBusy
                 ? t("common.loading")
                 : isDeployed
-                  ? t("agents.undeploy")
+                  ? liveEnvironments.length > 1
+                    ? t("agents.undeployFromProduction", "Undeploy from production")
+                    : t("agents.undeploy")
                   : t("agents.deploy")}
             </button>
 
@@ -431,12 +635,26 @@ export function AgentDetailPage() {
                   drawerStore.open(id!, agentDisplayName, "production");
                   drawerStore.setStep("deploying");
                   try {
-                    await deployAgent("production", id!, resolvedVersion);
-                    for (let i = 0; i < 15; i++) {
-                      await new Promise(r => setTimeout(r, 2000));
-                      const s = await getDeploymentStatus("production", id!, resolvedVersion);
-                      if (s.status === "READY") break;
-                      if (s.status === "ERROR") throw new Error("Deploy failed");
+                    const deployOptions = {
+                      agentId: id!,
+                      version: resolvedVersion,
+                      agentName: agentDisplayName,
+                      environment: "production",
+                    };
+                    const outcome = await deployWithGrants(deployOptions);
+                    if (outcome.kind === "cancelled") {
+                      drawerStore.setStep(
+                        "error",
+                        t("grantRequired.cancelled", "Not deployed — the vault key was not granted."),
+                      );
+                      return;
+                    }
+                    if (outcome.kind === "failed") {
+                      // The reason, not a bare "Deploy failed" — and a toast
+                      // with Fix when it is a grant refusal.
+                      drawerStore.setStep("error", deployFailureMessage(outcome, t));
+                      reportDeployOutcome(outcome, deployOptions, t);
+                      return;
                     }
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
@@ -454,7 +672,8 @@ export function AgentDetailPage() {
                     drawerStore.setStep("error", getErrorMessage(err));
                   }
                 }}
-                disabled={startConversationMutation.isPending}
+                disabled={startConversationMutation.isPending || isDirty}
+                title={deployBlockedTitle}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="deploy-chat-btn"
               >
@@ -572,20 +791,30 @@ export function AgentDetailPage() {
         </div>
       )}
 
-      {/* Save feedback */}
-      {saveMessage && (
+      {/* A deployment in ERROR says why — the detailed status carries the
+          backend's reason for a caller who may edit the agent. A grant refusal
+          gets the Fix that reopens the grant dialog. */}
+      {deploymentFailure && (
         <div
-          className={cn(
-            "rounded-lg px-4 py-2 text-sm font-medium transition-all",
-            saveMessage.type === "success"
-              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "bg-destructive/10 text-destructive"
-          )}
-          data-testid="save-feedback"
-          role="status"
-          aria-live="polite"
+          className="flex flex-wrap items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+          data-testid="deployment-failure"
         >
-          {saveMessage.text}
+          <span className="flex-1">
+            <strong className="font-medium">{t("agentDetail.deployFailedTitle", "Deployment failed.")}</strong>{" "}
+            {deploymentFailure.message}
+          </span>
+          {isGrantFailure(deploymentFailure) && access.canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFixDeployment}
+              disabled={isBusy}
+              data-testid="deployment-failure-fix"
+            >
+              {t("grantRequired.fix", "Fix")}
+            </Button>
+          )}
         </div>
       )}
 
@@ -595,12 +824,10 @@ export function AgentDetailPage() {
           agentId={id!}
           version={resolvedVersion}
           statuses={envStatuses}
-          onDeploy={(env) => deployMutation.mutate(
-            { environment: env, agentId: id!, version: resolvedVersion },
-            { onError: (err) => toast.error(getErrorMessage(err)) }
-          )}
+          onDeploy={(env) => handleDeploy(env)}
           onUndeploy={(env) => openUndeployDialog(env)}
           isBusy={isBusy}
+          blockedTitle={deployBlockedTitle}
         />
       )}
 
@@ -615,8 +842,9 @@ export function AgentDetailPage() {
               {t("agentDetail.packages", "Workflows")}
             </h2>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              {agent.workflows?.length ?? 0}
+              {doc.workflows?.length ?? 0}
             </span>
+            {touched("workflows") && <ModifiedPill />}
           </div>
           <button
             onClick={() => setShowAddWorkflow(!showAddWorkflow)}
@@ -630,18 +858,21 @@ export function AgentDetailPage() {
 
         {/* Workflow list — clickable cards */}
         <div className="divide-y divide-border">
-          {(!agent.workflows || agent.workflows.length === 0) && (
+          {(!doc.workflows || doc.workflows.length === 0) && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <Workflow className="h-10 w-10 opacity-50" />
               <p className="mt-3 text-sm">{t("agentDetail.noWorkflows", "No workflows added yet")}</p>
             </div>
           )}
 
-          {agent.workflows?.map((wfUri) => {
+          {doc.workflows?.map((wfUri) => {
             const { id: wfId, version: wfVersion } = parseResourceUri(wfUri);
             const latestVer = latestVersions?.[wfId];
             const isStale = latestVer !== undefined && latestVer > wfVersion;
-            const workflowLink = `/manage/workflowview/${wfId}?agentId=${id}&agentVer=${resolvedVersion}`;
+            // The version THIS agent references, not whatever is newest: opened at
+            // the latest, a save could not change an agent pinned to an older one.
+            const workflowLink = `/manage/workflowview/${wfId}?version=${wfVersion}&agentId=${id}&agentVer=${resolvedVersion}`;
+            const workflowName = workflowNames.get(wfId);
             return (
               <div
                 key={wfUri}
@@ -660,8 +891,11 @@ export function AgentDetailPage() {
                   className="flex-1 min-w-0"
                 >
                   <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                    {wfId}
+                    {workflowName ?? wfId}
                   </p>
+                  {workflowName && (
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{wfId}</p>
+                  )}
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                       v{wfVersion}
@@ -677,7 +911,7 @@ export function AgentDetailPage() {
                   {isStale && (
                     <button
                       onClick={(e) => { e.preventDefault(); handleUpdateWorkflowVersion(wfUri, latestVer!); }}
-                      disabled={updateWorkflowsMutation.isPending}
+                      disabled={isSaving}
                       className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50"
                       title={t("agentDetail.updateToLatest", "Update to latest version")}
                       data-testid={`update-workflow-${wfId}`}
@@ -695,11 +929,13 @@ export function AgentDetailPage() {
                   </Link>
                   <button
                     onClick={() => handleRemoveWorkflow(wfUri)}
-                    disabled={updateWorkflowsMutation.isPending}
+                    disabled={isSaving}
                     className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-                    title={t("common.delete")}
+                    title={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    aria-label={t("agentDetail.removeWorkflow", "Remove workflow from agent")}
+                    data-testid={`remove-workflow-${wfId}`}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -711,7 +947,7 @@ export function AgentDetailPage() {
       {/* Add package panel */}
       {showAddWorkflow && (
         <AddWorkflowPanel
-          currentWorkflows={agent.workflows ?? []}
+          currentWorkflows={doc.workflows ?? []}
           onAdd={handleAddWorkflow}
           onClose={() => setShowAddWorkflow(false)}
         />
@@ -720,45 +956,166 @@ export function AgentDetailPage() {
       {/* The editable sections. Disabled while the previous version's document
           is standing in for the one being loaded (see `configPending`). */}
       <fieldset
-        disabled={configPending}
-        aria-busy={configPending}
+        disabled={configPending || isSaving}
+        aria-busy={configPending || isSaving}
         className="contents"
         data-testid="agent-config-sections"
       >
       {/* A2A Protocol (collapsible, hidden by default) */}
       <A2ASection
-        agent={agent}
+        agent={doc}
         agentId={id!}
+        agentName={versions?.find((v) => v.version === resolvedVersion)?.name}
         version={resolvedVersion}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("a2aEnabled", "description", "a2aSkills")}
       />
 
       {/* Security & Identity */}
-      <SecurityIdentitySection agent={agent} agentId={id!} version={resolvedVersion} />
+      <SecurityIdentitySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("security", "identity")} />
 
       {/* Capabilities */}
-      <CapabilitiesSection agent={agent} agentId={id!} version={resolvedVersion} />
+      <CapabilitiesSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("capabilities")} />
 
       {/* User Memory */}
-      <UserMemorySection agent={agent} agentId={id!} version={resolvedVersion} />
+      <UserMemorySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("enableMemoryTools", "userMemoryConfig")} />
 
       {/* Memory Policy */}
-      <MemoryPolicySection agent={agent} agentId={id!} version={resolvedVersion} />
+      <MemoryPolicySection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("memoryPolicy")} />
 
       {/* Session Management */}
-      <SessionManagementSection agent={agent} agentId={id!} version={resolvedVersion} />
+      <SessionManagementSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("sessionManagement")} />
 
       {/* Usage, and opt-in review of conversations by the agent's maintainers */}
-      <ConversationReviewSection agent={agent} agentId={id!} version={resolvedVersion} />
+      <ConversationReviewSection
+        agent={doc}
+        agentId={id!}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("conversationReview")}
+      />
 
       {/* Human-in-the-Loop */}
-      <HitlConfigSection agent={agent} agentId={id!} version={resolvedVersion} />
+      <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
 
       {/* Channel Connectors */}
-      <ChannelsSection agent={agent} agentId={id!} version={resolvedVersion} />
+      <ChannelsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("channels")} />
 
       {/* Raw config (collapsible) */}
-      <RawConfigSection agent={agent} />
+      <RawConfigSection agent={doc} />
       </fieldset>
+
+      {/* Floating save bar — the header's controls scroll away on a page this
+          long, and the edit is usually made far below them. */}
+      {isDirty && (
+        <div
+          className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-card/95 px-4 py-3 shadow-lg backdrop-blur"
+          role="region"
+          aria-label={t("editor.dirty", "Unsaved changes")}
+          data-testid="unsaved-bar"
+        >
+          <p className="flex items-center gap-2 text-sm text-foreground">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+            {t("agentDetail.unsavedSections", "Sections with unsaved changes: {{count}}", {
+              count: modifiedSectionCount,
+            })}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowReviewDialog(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              data-testid="review-changes-btn"
+            >
+              <GitCompareArrows className="h-4 w-4" aria-hidden="true" />
+              {t("agentDetail.reviewChanges", "Review changes")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDiscardDialog(true)}
+              disabled={isSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+              data-testid="unsaved-bar-discard"
+            >
+              <Undo2 className="h-4 w-4" aria-hidden="true" />
+              {t("editor.discard", "Discard")}
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveDraft()}
+              disabled={isSaving}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              data-testid="unsaved-bar-save"
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {isSaving ? t("editor.saving", "Saving...") : t("editor.save", "Save")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Review changes — the draft against the saved version */}
+      <AccessibleDialog
+        open={showReviewDialog}
+        onClose={() => setShowReviewDialog(false)}
+        title={t("agentDetail.reviewChangesTitle", "Unsaved changes to version {{version}}", { version: resolvedVersion })}
+        maxWidth="max-w-4xl"
+        testId="review-changes-dialog"
+      >
+        <div className="space-y-4 p-5">
+          <ResourceDiffViewer
+            targetContent={agentJson(agent)}
+            sourceContent={agentJson(draft)}
+            labels={{
+              target: t("agentDetail.savedVersion", "Saved v{{version}}", { version: resolvedVersion }),
+              source: t("agentDetail.yourChanges", "Your changes"),
+            }}
+          />
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            <button
+              type="button"
+              onClick={() => setShowReviewDialog(false)}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {t("editor.keepEditing", "Keep editing")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDiscardDialog(true)}
+              disabled={isSaving}
+              className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50"
+            >
+              {t("editor.discardChanges", "Discard changes")}
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (await saveDraft()) setShowReviewDialog(false);
+              }}
+              disabled={isSaving || !isDirty}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              data-testid="review-save-btn"
+            >
+              <Save className="h-4 w-4" aria-hidden="true" />
+              {isSaving ? t("editor.saving", "Saving...") : t("editor.save", "Save")}
+            </button>
+          </div>
+        </div>
+      </AccessibleDialog>
+
+      {/* Discard confirmation */}
+      <UnsavedChangesDialog
+        open={showDiscardDialog}
+        title={t("editor.discardTitle", "Discard Changes?")}
+        message={t("agentDetail.discardMessage", "Every unsaved change on this page goes back to what version {{version}} holds.", {
+          version: resolvedVersion,
+        })}
+        confirmLabel={t("editor.discard", "Discard")}
+        cancelLabel={t("editor.keepEditing", "Keep editing")}
+        onConfirm={confirmDiscard}
+        onCancel={() => setShowDiscardDialog(false)}
+      />
 
       {/* Undeploy confirmation dialog */}
       <AlertDialog
@@ -858,6 +1215,20 @@ export function AgentDetailPage() {
 
 /* ─── Sub-components ─── */
 
+/** The "Modified" marker the config sections show — see `EditorSection`. */
+function ModifiedPill() {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+      data-testid="section-modified"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      {t("editor.modified", "Modified")}
+    </span>
+  );
+}
+
 function BackLink() {
   const { t } = useTranslation();
   return (
@@ -876,11 +1247,15 @@ function VersionSelect({
   versions,
   current,
   onChange,
+  disabled = false,
 }: {
   versions: { version: number; lastModifiedOn: number }[];
   current: number;
   onChange: (v: number) => void;
+  /** While there are unsaved edits — switching would silently drop them. */
+  disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   if (versions.length <= 1) {
     return (
       <span
@@ -896,7 +1271,9 @@ function VersionSelect({
     <select
       value={current}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+      disabled={disabled}
+      aria-label={t("editor.versionPicker", "Select version")}
+      className="rounded-md border border-input bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50"
       data-testid="version-picker"
     >
       {versions.map((v) => (
@@ -921,6 +1298,7 @@ function EnvironmentBadges({
   onDeploy,
   onUndeploy,
   isBusy,
+  blockedTitle,
 }: {
   agentId: string;
   version: number;
@@ -928,6 +1306,8 @@ function EnvironmentBadges({
   onDeploy: (env: string) => void;
   onUndeploy: (env: string) => void;
   isBusy: boolean;
+  /** Set while deploying is held back (unsaved edits); the reason, as a tooltip. */
+  blockedTitle?: string;
 }) {
   const { t } = useTranslation();
   const envStatusLabels: Record<string, string> = {
@@ -986,14 +1366,15 @@ function EnvironmentBadges({
               </div>
               <button
                 onClick={() => (isUp ? onUndeploy(environment) : onDeploy(environment))}
-                disabled={isBusy}
+                disabled={isBusy || !!blockedTitle}
+                title={blockedTitle}
                 data-testid={`env-toggle-${environment}`}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                   isUp
                     ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
                     : "bg-primary/10 text-primary hover:bg-primary/20",
-                  isBusy && "cursor-not-allowed opacity-50"
+                  (isBusy || blockedTitle) && "cursor-not-allowed opacity-50"
                 )}
               >
                 {isUp ? t("agents.undeploy") : t("agents.deploy")}
@@ -1188,40 +1569,33 @@ function RawConfigSection({ agent }: { agent: Agent }) {
 function A2ASection({
   agent,
   agentId,
+  agentName,
   version,
+  onChange,
+  disabled,
+  modified,
 }: {
+  /** The page's draft of the agent document. */
   agent: Agent;
   agentId: string;
+  /** The agent's name from its descriptor — the document does not carry it. */
+  agentName?: string;
+  /** The agent version being edited. */
   version: number;
+  /** Records an edit in the draft — nothing is saved until the page's Save. */
+  onChange: AgentEdit;
+  disabled: boolean;
+  modified: boolean;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useAgentSectionSave(agentId, version, agent);
   const [skillInput, setSkillInput] = useState("");
-  const [localDesc, setLocalDesc] = useState(agent.description ?? "");
   const [showCard, setShowCard] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
-
-  // Keep localDesc synced when agent data changes (version switch, refetch)
-  useEffect(() => setLocalDesc(agent.description ?? ""), [agent.description]);
 
   const isEnabled = agent.a2aEnabled ?? false;
 
   function handleToggleA2A() {
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, a2aEnabled: !isEnabled },
-    });
-  }
-
-  function handleDescriptionSave() {
-    if (localDesc !== (agent.description ?? "")) {
-      updateAgent.mutate({
-        id: agentId,
-        version,
-        agent: { ...agent, description: localDesc },
-      });
-    }
+    onChange({ ...agent, a2aEnabled: !isEnabled });
   }
 
   function handleAddSkill() {
@@ -1229,21 +1603,13 @@ function A2ASection({
     if (!trimmed) return;
     const current = agent.a2aSkills ?? [];
     if (current.includes(trimmed)) return;
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, a2aSkills: [...current, trimmed] },
-    });
+    onChange({ ...agent, a2aSkills: [...current, trimmed] });
     setSkillInput("");
   }
 
   function handleRemoveSkill(idx: number) {
     const updated = (agent.a2aSkills ?? []).filter((_, i) => i !== idx);
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: { ...agent, a2aSkills: updated },
-    });
+    onChange({ ...agent, a2aSkills: updated });
   }
 
   function copyToClipboard(text: string, label: string) {
@@ -1259,11 +1625,13 @@ function A2ASection({
 
   // Build a preview of the Agent Card (mirrors AgentCardService.java)
   const agentCard = {
-    name: `EDDI Agent ${agentId}`,
+    name: agentName || `EDDI Agent ${agentId}`,
     description: agent.description || "EDDI conversational AI agent",
     url: rpcUrl,
     provider: "EDDI",
-    version: "6.0.0",
+    // The agent version being edited — the card the server serves carries the
+    // platform's own version, which this page does not know.
+    version: String(version),
     capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: true },
     skills: (agent.a2aSkills && agent.a2aSkills.length > 0)
       ? agent.a2aSkills.map((s) => ({
@@ -1275,35 +1643,42 @@ function A2ASection({
   };
 
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
+  const descriptionId = useId();
+  const skillsId = useId();
+  const skillInputId = useId();
 
   return (
     <section className="rounded-xl border bg-card shadow-sm" data-testid="a2a-section">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "flex w-full items-center gap-2 p-5 text-start",
-          isOpen && "border-b border-border"
-        )}
-      >
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-        <Handshake className="h-5 w-5 text-primary" />
-        <h2 className="text-lg font-semibold text-foreground">
+      <h2 className="text-lg font-semibold text-foreground">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-expanded={isOpen}
+          aria-controls={panelId}
+          className={cn(
+            "flex w-full items-center gap-2 p-5 text-start",
+            isOpen && "border-b border-border"
+          )}
+        >
+          {isOpen ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          )}
+          <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
           {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
-        </h2>
-        {isEnabled && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-            <Link2 className="h-3 w-3" />
-            {t("agentDetail.a2aEnabled", "Enabled")}
-          </span>
-        )}
-      </button>
+          {modified && <ModifiedPill />}
+          {isEnabled && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Link2 className="h-3 w-3" aria-hidden="true" />
+              {t("agentDetail.a2aEnabled", "Enabled")}
+            </span>
+          )}
+        </button>
+      </h2>
 
-      {isOpen && <div className="p-5">
+      {isOpen && <div id={panelId} className="p-5">
         {!isEnabled ? (
           /* ── Disabled state: CTA ── */
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1316,7 +1691,7 @@ function A2ASection({
             </p>
             <button
               onClick={handleToggleA2A}
-              disabled={updateAgent.isPending}
+              disabled={disabled}
               className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:opacity-50"
               data-testid="enable-a2a-btn"
             >
@@ -1329,20 +1704,14 @@ function A2ASection({
           <div className="space-y-5">
             {/* Description */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={descriptionId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aDescription", "Agent Description")}
               </label>
               <input
+                id={descriptionId}
                 type="text"
-                value={localDesc}
-                onChange={(e) => setLocalDesc(e.target.value)}
-                onBlur={handleDescriptionSave}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleDescriptionSave();
-                  }
-                }}
+                value={agent.description ?? ""}
+                onChange={(e) => onChange({ ...agent, description: e.target.value })}
                 placeholder={t("agentDetail.a2aDescPlaceholder", "What does this agent do?")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
                 data-testid="a2a-description"
@@ -1354,7 +1723,7 @@ function A2ASection({
 
             {/* Skills */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <label htmlFor={skillInputId} id={skillsId} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aSkills", "A2A Skills")}
               </label>
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1382,6 +1751,7 @@ function A2ASection({
               </div>
               <div className="flex gap-1.5">
                 <input
+                  id={skillInputId}
                   type="text"
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
@@ -1399,18 +1769,20 @@ function A2ASection({
                   type="button"
                   onClick={handleAddSkill}
                   className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+                  aria-label={t("agentDetail.a2aAddSkill", "Add skill")}
+                  data-testid="a2a-add-skill"
                 >
-                  <Plus className="h-3 w-3" />
+                  <Plus className="h-3 w-3" aria-hidden="true" />
                 </button>
               </div>
             </div>
 
             {/* Endpoints */}
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-foreground">
+              <p id={`${panelId}-endpoints`} className="mb-1.5 block text-sm font-medium text-foreground">
                 {t("agentDetail.a2aEndpoints", "Endpoints")}
-              </label>
-              <div className="space-y-1.5">
+              </p>
+              <div className="space-y-1.5" role="group" aria-labelledby={`${panelId}-endpoints`}>
                 {[
                   { method: "GET", url: cardUrl, label: "card" },
                   { method: "POST", url: rpcUrl, label: "rpc" },
@@ -1448,6 +1820,7 @@ function A2ASection({
               <button
                 type="button"
                 onClick={() => setShowCard(!showCard)}
+                aria-expanded={showCard}
                 className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="a2a-card-toggle"
               >

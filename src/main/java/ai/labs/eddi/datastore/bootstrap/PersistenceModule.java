@@ -20,6 +20,9 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import de.undercouch.bson4jackson.BsonFactory;
 import de.undercouch.bson4jackson.BsonParser;
+import jakarta.annotation.PreDestroy;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.mongodb.MongoMetricsConnectionPoolListener;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.Produces;
 import org.bson.BsonInvalidOperationException;
@@ -28,6 +31,7 @@ import org.bson.BsonWriter;
 import org.bson.codecs.*;
 import org.bson.codecs.configuration.CodecRegistry;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -49,22 +53,53 @@ import static org.bson.codecs.configuration.CodecRegistries.*;
 public class PersistenceModule {
 
     private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
+    private static final Logger LOGGER = Logger.getLogger(PersistenceModule.class);
+
+    private volatile MongoClient mongoClient;
 
     @Produces
     @ApplicationScoped
     @DefaultBean
     public MongoDatabase provideMongoDB(@ConfigProperty(name = "mongodb.connectionString") String connectionString,
-                                        @ConfigProperty(name = "mongodb.database") String database) {
+                                        @ConfigProperty(name = "mongodb.database") String database,
+                                        MeterRegistry meterRegistry) {
         BsonFactory bsonFactory = new BsonFactory();
         bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
 
-        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory), DRIVER_INFO);
-        registerMongoClientShutdownHook(client);
+        MongoClient client = MongoClients.create(buildMongoClientOptions(ReadPreference.nearest(), connectionString, bsonFactory, meterRegistry),
+                DRIVER_INFO);
+        this.mongoClient = client;
 
         return client.getDatabase(database);
     }
 
-    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory) {
+    /**
+     * Closes the client when the CDI container shuts down — AFTER every
+     * {@code ShutdownEvent} observer has returned, so the graceful drain
+     * ({@code GracefulShutdownService}) still has a database to finish its turns
+     * against.
+     * <p>
+     * It used to be a JVM shutdown hook. JVM hooks run concurrently with Quarkus'
+     * own, so SIGTERM closed the client at the very moment the drain began: every
+     * turn still running failed with "state should be: open", the drain waited out
+     * its whole timeout for turns that could no longer finish, and a rolling update
+     * turned in-flight requests into 500s.
+     */
+    @PreDestroy
+    void closeMongoClient() {
+        MongoClient client = this.mongoClient;
+        if (client == null) {
+            return;
+        }
+        try {
+            client.close();
+        } catch (RuntimeException e) {
+            LOGGER.warn("MongoClient did not stop as expected", e);
+        }
+    }
+
+    private MongoClientSettings buildMongoClientOptions(ReadPreference readPreference, String connectionString, BsonFactory bsonFactory,
+                                                        MeterRegistry meterRegistry) {
 
         var objectMapper = new ObjectMapper(bsonFactory);
         objectMapper.registerModule(new JavaTimeModule());
@@ -75,21 +110,15 @@ public class PersistenceModule {
                         new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(), new JacksonProvider(objectMapper)));
 
         return MongoClientSettings.builder().applyConnectionString(new ConnectionString(connectionString)).codecRegistry(codecRegistry)
-                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference).build();
-    }
-
-    private void registerMongoClientShutdownHook(final MongoClient mongoClient) {
-        Runtime.getRuntime().addShutdownHook(new Thread("ShutdownHook_MongoClient") {
-            @Override
-            public void run() {
-                try {
-                    mongoClient.close();
-                } catch (Throwable e) {
-                    String message = "MongoClient did not stop as expected.";
-                    System.out.println(message);
-                }
-            }
-        });
+                .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference)
+                // This client is built here, not by the quarkus-mongodb-client
+                // extension, so quarkus.mongodb.metrics.enabled never reached it and
+                // the dashboards' connection-pool panels had no series to show. The
+                // pool listener adds a handful of gauges per server (size,
+                // checked out, wait queue); the per-command listener is left out on
+                // purpose — it adds a timer per command and collection.
+                .applyToConnectionPoolSettings(pool -> pool.addConnectionPoolListener(new MongoMetricsConnectionPoolListener(meterRegistry)))
+                .build();
     }
 
     public static class URIStringCodec implements Codec<URI> {

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -79,9 +80,18 @@ public class ConversationMemory implements IConversationMemory {
      * {@link IConversationMemory#getPersistedStepCount()}.
      */
     private int persistedStepCount = ConversationMemorySnapshot.UNKNOWN_PERSISTED_STEP_COUNT;
+    /** Cluster fencing token of the running turn; transient. */
+    private Long fenceToken;
+    /** The {@code _fence} the document carried when this memory was loaded. */
+    private Long storedFence;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
+
+    /**
+     * Transient — never serialized. The running turn's deadline, set per turn.
+     */
+    private transient TurnDeadline turnDeadline;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -427,6 +437,26 @@ public class ConversationMemory implements IConversationMemory {
         this.persistedStepCount = persistedStepCount;
     }
 
+    @Override
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    @Override
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
+    }
+
+    @Override
+    public Long getStoredFence() {
+        return storedFence;
+    }
+
+    @Override
+    public void setStoredFence(Long storedFence) {
+        this.storedFence = storedFence;
+    }
+
     public List<ConversationOutput> getConversationOutputs() {
         return conversationOutputs;
     }
@@ -444,6 +474,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public ConversationEventSink getEventSink() {
         return eventSink;
+    }
+
+    @Override
+    public TurnDeadline getTurnDeadline() {
+        return turnDeadline;
+    }
+
+    @Override
+    public void setTurnDeadline(TurnDeadline turnDeadline) {
+        this.turnDeadline = turnDeadline;
     }
 
     @Override

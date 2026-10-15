@@ -58,5 +58,27 @@ public record SetupAgentRequest(@JsonProperty(required = true)
          * constructor call site adds new fields at the end so existing argument
          * positions never shift.
          */
-        String vaultKeyName) {
+        String vaultKeyName,
+        /*
+         * Admin opt-in: after creating the agent and BEFORE deploying it, add the new
+         * agent's id to the grant of every RESTRICTED vault secret it references. A
+         * grant lists agent ids, so without this every new agent using a restricted
+         * secret fails its first deploy by construction. Each grant change is audited;
+         * a secret open to every agent ("*") is never touched.
+         *
+         * Refused for any caller who is not eddi-admin. Deliberately NOT exposed on any
+         * MCP tool: an LLM that can grant itself secrets defeats the gate. In-process
+         * callers (McpSetupTools, CreateSubAgentTool) use the overload below, which
+         * passes null.
+         */
+        Boolean grantReferencedSecrets) {
+
+    /** Every field but {@link #grantReferencedSecrets}, which stays off. */
+    public SetupAgentRequest(String agentName, String systemPrompt, String provider, String model, String apiKey, String baseUrl,
+            String introMessage, Boolean enableBuiltInTools, String builtInToolsWhitelist, Boolean enableQuickReplies,
+            Boolean enableSentimentAnalysis, String mcpServerUrls, Boolean deploy, String environment, AgentConfiguration.HitlConfig hitlConfig,
+            String vaultKeyName) {
+        this(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools, builtInToolsWhitelist, enableQuickReplies,
+                enableSentimentAnalysis, mcpServerUrls, deploy, environment, hitlConfig, vaultKeyName, null);
+    }
 }

@@ -34,6 +34,8 @@ services:
       - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./docs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Alerting rules, listed under rule_files in prometheus.yml.
+      - ./docs/monitoring/eddi-alerts.yml:/etc/prometheus/eddi-alerts.yml:ro
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -60,6 +62,9 @@ services:
       # meter EDDI registers. The operations dashboard stays the front door;
       # this is where you go when the KPI you need is not on it.
       - ./docs/monitoring/eddi-full-metrics-dashboard.json:/var/lib/grafana/dashboards/eddi-full-metrics.json:ro
+      # Cluster mode (eddi.messaging.type=nats): leases, fencing, shared KV, events.
+      # Empty on a single in-memory node.
+      - ./docs/monitoring/eddi-cluster-dashboard.json:/var/lib/grafana/dashboards/eddi-cluster.json:ro
       - ./docs/monitoring/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - grafana-data:/var/lib/grafana
@@ -81,8 +86,9 @@ services:
       - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
       - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
       - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+    # No COLLECTOR_OTLP_ENABLED: that switch belongs to Jaeger 1.x. Jaeger 2.x is
+    # built on the OpenTelemetry Collector and its default configuration already
+    # receives OTLP on 4317 (gRPC) and 4318 (HTTP); the variable was read by nothing.
     restart: unless-stopped
 
 volumes:

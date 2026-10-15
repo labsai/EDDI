@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import {
   PropertyInstructionsEditor,
@@ -52,6 +53,18 @@ import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
+import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
+import { ModelSettingsSection } from "./llm/model-settings-section";
+import { ParameterVerdictNote } from "./llm/model-settings/parameter-verdict-note";
+import { numberProblem } from "./llm/model-settings/model-settings-utils";
+import {
+  PARAMETER_CATALOG,
+  catalogKeys,
+  evaluateParameter,
+  findParam,
+  findProvider,
+  rejectedForEveryValue,
+} from "@/lib/llm-parameter-catalog";
 
 // Re-export types so existing imports still work
 export type {
@@ -85,6 +98,9 @@ import {
 
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalog";
+
+/** The Model section edits temperature itself; the settings panel leaves it there. */
+const MODEL_SECTION_KEYS: ReadonlySet<string> = new Set(["temperature"]);
 
 /** Parameter keys whose values should use SecretKeyPicker (case-insensitive match) */
 const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token"]);
@@ -191,6 +207,7 @@ function TaskEditor({
   actionSuggestions?: readonly string[];
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const uid = useId();
   const [expanded, setExpanded] = useState(true);
   const [showPreview, setShowPreview] = useState(false);
@@ -221,8 +238,27 @@ function TaskEditor({
   const modelKey = spec.modelKey;
   const credentialKey = spec.credentialKey;
   const dedicatedKeys = dedicatedParamKeys(task.type);
-  const modelValue = task.parameters?.[modelKey] ?? "";
-  const temperatureValue = task.parameters?.temperature ?? "";
+  // Keys the catalog lists for this provider live in the Model settings panel,
+  // not in the generic grid, so a value has exactly one place to live.
+  const catalogued = findProvider(PARAMETER_CATALOG, task.type) !== undefined;
+  const panelKeys = catalogKeys(PARAMETER_CATALOG, task.type);
+  const inGrid = (key: string) => !HIDDEN_PARAM_KEYS.has(key) && !dedicatedKeys.has(key) && !panelKeys.has(key);
+  const temperatureAnchor = `${uid}-temperature`;
+  const temperatureVerdict = evaluateParameter(PARAMETER_CATALOG, task.type, "temperature", task.parameters ?? {});
+  const temperatureLocked =
+    temperatureVerdict.state === "rejected" &&
+    rejectedForEveryValue(PARAMETER_CATALOG, task.type, "temperature", task.parameters ?? {});
+  // String(): a value typed in the JSON tab can be a number ("temperature": 0.7).
+  const modelValue = String(task.parameters?.[modelKey] ?? "");
+  const temperatureValue = String(task.parameters?.temperature ?? "");
+  // The provider's own range for temperature (Anthropic stops at 1, OpenAI at 2);
+  // without a catalogued range only "is it a non-negative number" is checked.
+  const temperatureRange = findParam(PARAMETER_CATALOG, task.type, "temperature");
+  const temperatureProblem = !isTemperature(temperatureValue)
+    ? "notNumber"
+    : temperatureRange
+      ? numberProblem(temperatureValue, temperatureRange)
+      : null;
   const providerInfo = getProviderConfig(task.type ?? "");
   const modelListId = `${uid}-models`;
 
@@ -470,21 +506,55 @@ function TaskEditor({
                         onChange({ ...task, parameters: next });
                       }}
                       readOnly={readOnly}
+                      disabled={temperatureLocked}
                       placeholder={t("llmEditor.temperaturePlaceholder", "Provider default")}
-                      aria-invalid={isTemperature(temperatureValue) ? undefined : true}
-                      className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      aria-invalid={temperatureProblem ? true : undefined}
+                      className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                       data-testid="llm-temperature"
+                      data-param-anchor={temperatureAnchor}
                     />
-                    {!isTemperature(temperatureValue) && (
-                      <p className="text-[11px] text-destructive" role="alert">
-                        {t("llmEditor.temperatureInvalid", "Enter a number, for example 0.7.")}
+                    {temperatureProblem && (
+                      <p className="text-[11px] text-destructive dark:text-red-400" role="alert" data-testid="llm-temperature-error">
+                        {temperatureProblem === "belowMin"
+                          ? t("llmEditor.modelSettings.belowMin", "Must be at least {{min}}.", { min: temperatureRange?.min })
+                          : temperatureProblem === "aboveMax"
+                            ? t("llmEditor.modelSettings.aboveMax", "Must be at most {{max}}.", { max: temperatureRange?.max })
+                            : t("llmEditor.temperatureInvalid", "Enter a number, for example 0.7.")}
                       </p>
                     )}
+                    <ParameterVerdictNote
+                      verdict={temperatureVerdict}
+                      paramKey="temperature"
+                      configured={temperatureValue.trim() !== ""}
+                      onRemove={() => {
+                        const next = { ...task.parameters };
+                        delete next.temperature;
+                        onChange({ ...task, parameters: next });
+                      }}
+                      readOnly={readOnly}
+                      testId="llm-temperature-verdict"
+                    />
                   </>
                 )}
               </Field>
             </div>
           </EditorSection>
+
+          {/* Model settings — every parameter the catalog knows for this provider,
+              typed and checked against the configured model. */}
+          {catalogued && (
+            <EditorSection label={t("llmEditor.modelSettings.title", "Model settings")}>
+              <ModelSettingsSection
+                type={task.type}
+                parameters={task.parameters}
+                onChange={(parameters) => onChange({ ...task, parameters })}
+                readOnly={readOnly}
+                excludeKeys={MODEL_SECTION_KEYS}
+                externalControls={{ temperature: `[data-param-anchor="${temperatureAnchor}"]` }}
+                testIdPrefix="llm-model-settings"
+              />
+            </EditorSection>
+          )}
 
           {/* System Prompt */}
           <EditorSection
@@ -534,14 +604,28 @@ function TaskEditor({
             )}
           </EditorSection>
 
-          {/* Model Parameters */}
+          {/* Other parameters — keys the catalog does not describe for this
+              provider (endpoint, timeout, logging, vendor extras, leftovers from
+              another provider), so no stored value ever loses its editor. */}
           <EditorSection
-            label={t("llmEditor.modelParams", "Model Parameters")}
+            label={
+              catalogued
+                ? t("llmEditor.otherParams", "Other parameters")
+                : t("llmEditor.modelParams", "Model Parameters")
+            }
             defaultOpen={false}
           >
-            <div className="grid grid-cols-2 gap-2">
+            {catalogued && (
+              <p className="text-[11px] text-muted-foreground" data-testid="llm-other-params-hint">
+                {t(
+                  "llmEditor.otherParamsHint",
+                  "Parameters not listed under Model settings, such as baseUrl, timeout or logRequests, or keys left over from another provider.",
+                )}
+              </p>
+            )}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {Object.entries(task.parameters ?? {})
-                .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k) && !dedicatedKeys.has(k))
+                .filter(([k]) => inGrid(k))
                 .map(([k, v], i) => {
                   const isSensitive = SENSITIVE_LLM_PARAM_KEYS.has(k.toLowerCase());
                   return (
@@ -556,11 +640,7 @@ function TaskEditor({
                         <RenamableKeyInput
                           value={k}
                           readOnly={readOnly}
-                          isAvailable={(next) =>
-                            !HIDDEN_PARAM_KEYS.has(next) &&
-                            !dedicatedKeys.has(next) &&
-                            !hasOwnKey(task.parameters ?? {}, next)
-                          }
+                          isAvailable={(next) => inGrid(next) && !hasOwnKey(task.parameters ?? {}, next)}
                           onRename={(next) =>
                             onChange({
                               ...task,
@@ -577,6 +657,7 @@ function TaskEditor({
                                 credential, and the backend refuses a
                                 connection reference in every model parameter. */}
                             <SecretKeyPicker
+                              agentId={owningAgentId}
                               value={v}
                               onChange={(val) => updateParam(k, val)}
                               readOnly={readOnly}
@@ -1042,6 +1123,7 @@ function TaskEditor({
                               value, and withheld from the agent-card fetch on
                               a per-user or caller-supplied binding. */}
                           <SecretKeyPicker
+                            agentId={owningAgentId}
                             value={agent.apiKey ?? ""}
                             onChange={(v) => {
                               const agents = [...(task.a2aAgents ?? [])];
@@ -1576,6 +1658,9 @@ function TaskEditor({
                   {t("llmEditor.maxToolIterationsHint", "(default 10)")}
                 </span>
               </div>
+
+              {/* Tool-call caps (EDDI 6.6+) — bound calls, where iterations bound rounds */}
+              <TaskToolCallLimits task={task} onChange={onChange} readOnly={readOnly} />
 
               {/* Rate limiting */}
               <div className="border-t border-border pt-3 space-y-2">

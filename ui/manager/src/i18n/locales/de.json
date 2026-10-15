@@ -25,14 +25,20 @@
     "profile": "Profil",
     "guest": "Gast",
     "userMenu": "Benutzermenü",
-    "signedIn": "Angemeldet"
+    "signedIn": "Angemeldet",
+    "authenticating": "Authentifizierung läuft…",
+    "initFailedTitle": "Anmeldung fehlgeschlagen",
+    "initFailedBody": "Der Manager konnte die Anmeldung nicht abschließen. Der Anmeldedienst ist möglicherweise nicht erreichbar oder Ihre Sitzung wurde abgelehnt.",
+    "signInAgain": "Erneut anmelden",
+    "sessionExpiredTitle": "Ihre Sitzung ist abgelaufen.",
+    "sessionExpiredBody": "Nicht gespeicherte Änderungen sind noch auf dieser Seite – kopieren Sie, was Sie brauchen, bevor Sie sich erneut anmelden."
   },
   "nav": {
     "dashboard": "Dashboard",
     "agents": "Agenten",
     "packages": "Workflows",
     "conversations": "Gespräche",
-    "coordinator": "Koordinator",
+    "coordinator": "Cluster",
     "schedules": "Zeitpläne",
     "logs": "Protokolle",
     "orphans": "Verwaist",
@@ -224,7 +230,14 @@
     "versionShort": "v{{version}}",
     "resizePanel": "{{panel}} in der Größe ändern",
     "deletePermanently": "Endgültig löschen",
-    "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden. Ohne diese Option wird das Element nur als gelöscht markiert und bleibt wiederherstellbar, bis es bereinigt wird."
+    "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden. Ohne diese Option wird das Element nur als gelöscht markiert und bleibt wiederherstellbar, bis es bereinigt wird.",
+    "errors": {
+      "network": "EDDI ist nicht erreichbar. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+      "unauthorized": "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an.",
+      "forbidden": "Sie haben keine Berechtigung, dies anzuzeigen.",
+      "notFound": "Nicht gefunden – möglicherweise wurde es gelöscht."
+    },
+    "rename": "Umbenennen"
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -273,7 +286,9 @@
     "deployToProduction": "In Produktion bereitstellen",
     "undeployFromProduction": "Aus Produktion entfernen",
     "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
-    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr."
+    "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr.",
+    "sortLoadingAll": "Alle Agents werden geladen, damit die Sortierung vollständig ist…",
+    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um."
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -306,7 +321,7 @@
     "enableSwd": "Strikte Schreibdisziplin aktivieren",
     "forkingDisabledTooltip": "In einer zukünftigen Version verfügbar",
     "forkingEnabled": "Sitzungs-Forking",
-    "forkingNote": "Der Endpunkt für Sitzungs-Forking (POST /v6/conversations/{{id}}/fork) ist noch nicht verfügbar.",
+    "forkingNote": "Der Endpunkt für Sitzungs-Forking (POST /v6/conversations/:id/fork) ist noch nicht verfügbar.",
     "guardrails": "Schreib-Leitplanken",
     "identity": "Kryptografische Identität",
     "keyExpired": "Abgelaufen",
@@ -355,9 +370,6 @@
     "userMemory": "Nutzerspeicher",
     "userMemoryDesc": "Persistenter Speicher pro Nutzer mit LLM-Tools (merken/abrufen/vergessen). Die grundlegende longTerm-Eigenschaftspersistenz funktioniert unabhängig von diesem Schalter immer.",
     "viewingOldVersion": "Sie sehen Version {{current}}. Neueste ist Version {{latest}}.",
-    "workflowAdded": "Workflow hinzugefügt",
-    "workflowRemoved": "Workflow entfernt",
-    "workflowUpdated": "Workflow auf neueste Version aktualisiert",
     "title": "Agent-Details",
     "backToAgents": "Zurück zu Agents",
     "packages": "Workflows",
@@ -465,7 +477,20 @@
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
     },
-    "copyUrl": "URL kopieren"
+    "copyUrl": "URL kopieren",
+    "liveElsewhere": "Aktiv: v{{live}} · Ansicht v{{viewing}} (nicht bereitgestellt)",
+    "removeWorkflow": "Workflow vom Agent entfernen",
+    "a2aAddSkill": "Skill hinzufügen",
+    "saveConflict": "Dieser Agent wurde seit dem Öffnen an anderer Stelle geändert. Ihre Änderungen bleiben erhalten: prüfen Sie sie und speichern Sie erneut.",
+    "saveBeforeDeploy": "Speichern oder verwerfen Sie Ihre Änderungen vor dem Deployment",
+    "reviewChanges": "Änderungen prüfen",
+    "unsavedSections": "Abschnitte mit ungespeicherten Änderungen: {{count}}",
+    "reviewChangesTitle": "Ungespeicherte Änderungen an Version {{version}}",
+    "savedVersion": "Gespeichert v{{version}}",
+    "yourChanges": "Ihre Änderungen",
+    "discardMessage": "Alle ungespeicherten Änderungen auf dieser Seite werden auf den Stand von Version {{version}} zurückgesetzt.",
+    "deployed": "Agent bereitgestellt",
+    "deployFailedTitle": "Bereitstellung fehlgeschlagen."
   },
   "wizard": {
     "title": "Agent-Assistent"
@@ -636,7 +661,26 @@
     "saved": "Workflow erfolgreich gespeichert",
     "saveError": "Speichern fehlgeschlagen",
     "noTasks": "Keine Aufgaben in diesem Workflow",
-    "addTask": "Aufgabe hinzufügen"
+    "addTask": "Aufgabe hinzufügen",
+    "stepUnsaved": "Noch nicht gespeichert",
+    "saveAndEditHint": "Dieser Schritt ist noch nicht gespeichert. Speichern Sie zuerst den Workflow und bearbeiten Sie dann seine Konfiguration.",
+    "saveAndEdit": "Workflow speichern & bearbeiten",
+    "removeStep": "Aufgabe entfernen",
+    "configCreatedUnsaved": "Konfiguration erstellt — speichern Sie den Workflow, damit sie in der Pipeline bleibt",
+    "configNameFailed": "Konfiguration erstellt, aber ihr Name konnte nicht gespeichert werden. Benennen Sie sie später um.",
+    "newConfigName": "Name für die neue Konfiguration",
+    "newConfigNamePlaceholder": "z. B. Support-Begrüßung",
+    "agentPinsOtherVersion": "Agent-Version {{agentVer}} verwendet diesen Workflow in Version {{found}}, nicht in Version {{version}}; ein Speichern hier würde den Agent also nicht ändern. Es wurde nichts gespeichert. Öffnen Sie Version {{found}} oder lassen Sie den Agent auf Version {{version}} zeigen.",
+    "agentMissingWorkflow": "Agent-Version {{agentVer}} verwendet diesen Workflow nicht; ein Speichern hier würde den Agent also nicht ändern. Es wurde nichts gespeichert.",
+    "noVersionReturned": "Der Server hat die neue Workflow-Version nicht gemeldet.",
+    "agentUpdateFailed": "Workflow als Version {{version}} gespeichert, aber die Aktualisierung des Agents ist fehlgeschlagen: {{error}}",
+    "agentPinMismatch": "Agent-Version {{agentVer}} verwendet diesen Workflow in Version {{found}}. Sie sehen Version {{version}}; ein Speichern hier würde den Agent also nicht ändern.",
+    "switchToPinned": "Version {{version}} öffnen",
+    "pointAgentAt": "Agent auf Version {{version}} zeigen lassen",
+    "createdDeleteFailed_one": "{{count}} bei dieser Bearbeitung erstellte Konfiguration konnte nicht gelöscht werden",
+    "createdDeleteFailed_other": "{{count}} bei dieser Bearbeitung erstellte Konfigurationen konnten nicht gelöscht werden",
+    "discardDeleteCreated_one": "Auch die bei dieser Bearbeitung erstellte Konfiguration löschen ({{count}})",
+    "discardDeleteCreated_other": "Auch die {{count}} bei dieser Bearbeitung erstellten Konfigurationen löschen"
   },
   "conversations": {
     "confirmDeleteSoft": "Standardmäßig ist dies ein weiches Löschen – die Unterhaltung wird aus den Listen ausgeblendet, ihre gespeicherten Daten bleiben aber auf dem Server.",
@@ -700,7 +744,13 @@
     "purgeSuccess_one": "{{count}} beendete Gespräch bereinigt",
     "purgeSuccess_other": "{{count}} beendete Gespräche bereinigt",
     "endStateUnavailable": "Der aktuelle Status der Konversationen konnte nicht erneut geprüft werden, daher wurde nichts beendet. Bitte erneut versuchen.",
-    "endStateChanged": "Eine ausgewählte Konversation wartet jetzt auf Freigabe. Prüfen Sie die Auswahl und bestätigen Sie erneut."
+    "endStateChanged": "Eine ausgewählte Konversation wartet jetzt auf Freigabe. Prüfen Sie die Auswahl und bestätigen Sie erneut.",
+    "noMoreResults": "Keine weiteren Ergebnisse",
+    "backToPreviousPage": "Zurück zur vorherigen Seite",
+    "purgeTitleAll": "Beendete Konversationen bereinigen – alle Agenten",
+    "purgeScopeNote": "Dies ist nicht auf den oben ausgewählten Agenten beschränkt: Es löscht beendete Konversationen jedes Agenten.",
+    "confirmPurgeScope": "Gilt für ALLE Agenten, nicht nur für den oben ausgewählten.",
+    "purgeDaysInvalid": "Gib eine ganze Zahl von Tagen ein (mindestens 1)."
   },
   "conversationDetail": {
     "backToConversations": "Zurück zu Gesprächen",
@@ -718,7 +768,10 @@
     "totalCost": "Gesamtkosten",
     "cacheHitRate": "Cache-Trefferquote",
     "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
-    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}"
+    "waitingForPause": "Warten, bis die Pause gespeichert ist…",
+    "stepAgentVersion": "Beantwortet von Agent-Version {{version}}",
+    "searchTranscriptLabel": "Im Verlauf suchen",
+    "matchCount": "Passende Schritte: {{matches}}"
   },
   "chat": {
     "hide": "Ausblenden",
@@ -799,7 +852,10 @@
     "sendWhileLoading": "Ihre Nachricht wurde nicht gesendet: Die Konversation wird noch geladen. Versuchen Sie es gleich noch einmal.",
     "turnFailed": "Der Agent konnte diese Nachricht nicht beantworten. Den Grund finden Sie im Server-Log oder im Audit-Trail der Konversation.",
     "errorWithReason": "Fehler: {{reason}}",
-    "endConversationFailed": "Die Unterhaltung konnte nicht beendet werden: {{reason}}"
+    "endConversationFailed": "Die Unterhaltung konnte nicht beendet werden: {{reason}}",
+    "searchAgents": "Agenten suchen",
+    "noAgentMatches": "Kein Agent entspricht deiner Suche",
+    "transcript": "Konversation"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -866,7 +922,9 @@
       }
     },
     "emptyDescription": "Erstellen Sie Ihre erste {{type}}, um sie in Workflows zu verwenden.",
-    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …"
+    "descriptionPlaceholder": "Beschreiben Sie diese {{type}}-Konfiguration …",
+    "viewingOldVersion": "Sie sehen Version {{current}}. Die neueste ist Version {{latest}}.",
+    "switchToLatest": "Zur neuesten wechseln"
   },
   "editor": {
     "compare": "Vergleichen",
@@ -912,7 +970,16 @@
     "deployNow": "Bereitstellen",
     "deployStarted": "Bereitstellung gestartet",
     "stay": "Bleiben",
-    "invalidJsonNotSaved": "Nicht gespeichert — das JSON ist ungültig: {{reason}}"
+    "invalidJsonNotSaved": "Nicht gespeichert — das JSON ist ungültig: {{reason}}",
+    "invalidJsonSave": "Nicht gespeichert — das JSON ist ungültig. Korrigieren Sie es im JSON-Tab.",
+    "versionLockedDirty": "Speichern oder verwerfen Sie Ihre Änderungen, um die Version zu wechseln",
+    "savedAsVersion": "Als v{{version}} gespeichert — noch nicht aktiv",
+    "updateAgentAndSave": "Agent aktualisieren und speichern",
+    "keepEditing": "Weiter bearbeiten",
+    "discardChanges": "Änderungen verwerfen",
+    "saveAndLeave": "Speichern & verlassen",
+    "modified": "Geändert",
+    "deployDone": "Bereitgestellt — die Änderung ist aktiv"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1071,7 +1138,8 @@
     "skipNone": "keine – kein Code wird übersprungen",
     "runSkipConflict": "{{codes}} steht auch in der Überspringen-Liste – diese Anweisung wird dafür nie ausgeführt.",
     "httpCodeFilterSkipSet": "Ein leeres „Bei Codes ausführen“ verwendet 200, 201; ein leeres „Bei Codes überspringen“ überspringt nichts.",
-    "useDefaultSkipCodes": "Standard-Überspringliste verwenden"
+    "useDefaultSkipCodes": "Standard-Überspringliste verwenden",
+    "scope": "Gültigkeitsbereich"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "Bei einem Fehler wird die Pipeline fortgesetzt; der Fehler ist verfügbar unter ",
@@ -1129,7 +1197,9 @@
     "argumentType": "Argumenttyp",
     "argumentText": "Text",
     "argumentInvalidJson": "Kein gültiges JSON – der letzte gültige Wert bleibt erhalten",
-    "removeArgument": "Argument entfernen"
+    "removeArgument": "Argument entfernen",
+    "maxResponseSize": "Max. gespeicherte Antwortgröße (Zeichen)",
+    "maxResponseSizeHint": "Ein längeres Tool-Ergebnis wird auf so viele Zeichen gekürzt, bevor es im Konversationsspeicher abgelegt wird (mit einer Warnung im Log). Leer, 0 oder weniger nutzt den Standard von 2.000.000 (etwa 2 MB). Erfordert EDDI 6.6 oder neuer."
   },
   "llmEditor": {
     "addCustomInstruction": "Anweisung hinzufügen",
@@ -1400,6 +1470,12 @@
     "modelType": "Modelltyp",
     "paramName": "Parametername",
     "lastToolHint": "Mindestens ein Werkzeug muss ausgewählt bleiben. Deaktivieren Sie „Integrierte Werkzeuge aktivieren“, um alle zu deaktivieren.",
+    "maxToolCallsPerIteration": "Max. Tool-Aufrufe pro Antwort",
+    "maxToolCallsPerIterationDefault": "(Standard {{n}})",
+    "maxToolCallsPerTurn": "Max. Tool-Aufrufe pro Zug",
+    "maxToolCallsPerTurnDefault": "(Standard {{n}})",
+    "maxToolCallsHint": "Aufrufe über einer Grenze werden nicht ausgeführt: Jeder erhält ein NOT_EXECUTED-Ergebnis, das dem Modell sagt, dass die Grenze erreicht ist, und das Modell antwortet mit dem, was es hat. Abgelehnte Aufrufe erreichen nie die Freigabeprüfung. Die Zählung pro Zug umfasst Aufrufe vor einer Freigabepause. -1 oder 0 hebt eine Grenze auf. Erfordert EDDI 6.6 oder neuer – auf einem älteren Server leer lassen.",
+    "maxToolCallsUncapped": "Eine Grenze ist ausgeschaltet: Das Modell kann dort beliebig viele Tool-Aufrufe ausführen, begrenzt nur durch Max Tool Iterations.",
     "toggleTask": "Aufgabendetails ein- oder ausblenden",
     "noActionsWarning": "Diese Aufgabe hat keine Auslöseaktion und wird daher nie ausgeführt. Fügen Sie die Aktion hinzu, die Ihre Verhaltensregeln ausgeben, z. B. send_message.",
     "model": "Modell",
@@ -1414,7 +1490,80 @@
     "paramValueOf": "Wert von {{key}}",
     "removeParam": "Parameter {{key}} entfernen",
     "accessToken": "Zugriffstoken",
-    "authToken": "Hugging-Face-Token (optional)"
+    "authToken": "Hugging-Face-Token (optional)",
+    "modelSettings": {
+      "title": "Modelleinstellungen",
+      "rejectedBy": "Von {{model}} abgelehnt",
+      "noEffectOn": "Keine Wirkung bei {{model}}",
+      "droppedHint": "EDDI entfernt ihn vor jeder Anfrage, dieser Wert wird also nie gesendet.",
+      "removeKey": "{{key}} entfernen",
+      "remove": "Entfernen",
+      "providerDefault": "Anbieterstandard",
+      "notNumber": "Geben Sie eine Zahl ein.",
+      "notInteger": "Geben Sie eine ganze Zahl ein.",
+      "belowMin": "Muss mindestens {{min}} sein.",
+      "aboveMax": "Darf höchstens {{max}} sein.",
+      "defaultOn": "Standard (an)",
+      "defaultOff": "Standard (aus)",
+      "on": "An",
+      "off": "Aus",
+      "notBoolean": "„{{value}}“ ist weder true noch false; bitte wählen.",
+      "inherited": "Geerbt: {{value}}",
+      "defaultValueOption": "Standard ({{value}})",
+      "optionRejected": "{{value}} (von diesem Modell abgelehnt)",
+      "unknownOption": "„{{value}}“ gehört nicht zu den zulässigen Werten.",
+      "addValueTo": "Wert zu {{label}} hinzufügen",
+      "addValue": "Wert eingeben und Enter drücken",
+      "listInvalid": "Weder ein JSON-Array aus Zeichenketten noch eine kommagetrennte Liste.",
+      "jsonSyntax": "Noch kein gültiges JSON.",
+      "jsonObject": "Muss ein JSON-Objekt sein, etwa { \"name\": \"value\" }.",
+      "jsonArray": "Muss ein JSON-Array sein, etwa [ … ].",
+      "formatJson": "Formatieren",
+      "range": "{{min}} bis {{max}}",
+      "atLeast": "mindestens {{min}}",
+      "atMost": "höchstens {{max}}",
+      "badgeRejected": "Abgelehnt",
+      "badgeNoEffect": "Wirkungslos",
+      "defaultIs": "Standard {{value}}",
+      "docs": "Offizielle Dokumentation",
+      "docsFor": "Offizielle Dokumentation zu {{key}} (öffnet in neuem Tab)",
+      "reset": "Auf Anbieterstandard zurücksetzen",
+      "resetKey": "{{key}} auf den Anbieterstandard zurücksetzen",
+      "noneConfigured": "Keine Einstellungen gesetzt: Es gelten die Standards des Anbieters",
+      "configured_one": "{{count}} Einstellung gesetzt",
+      "configured_other": "{{count}} Einstellungen gesetzt",
+      "dropped_one": "{{count}} wird für {{model}} verworfen",
+      "dropped_other": "{{count}} werden für {{model}} verworfen",
+      "ignored_one": "{{count}} hat bei {{model}} keine Wirkung",
+      "ignored_other": "{{count}} haben bei {{model}} keine Wirkung",
+      "noModel": "Legen Sie ein Modell fest, um zu sehen, welche Einstellungen es akzeptiert",
+      "filterPlaceholder": "Einstellungen filtern…",
+      "filter": "Modelleinstellungen filtern",
+      "clearFilter": "Filter löschen",
+      "noMatch": "Keine Einstellung passt zu „{{filter}}“.",
+      "groupConfigured": "Gesetzt: {{count}}",
+      "groupRejected": "Vom Modell abgelehnt: {{count}}",
+      "groupTotal": "Einstellungen in dieser Gruppe: {{count}}",
+      "unavailable_one": "{{count}} Einstellung, die {{model}} ablehnt oder ignoriert",
+      "unavailable_other": "{{count}} Einstellungen, die {{model}} ablehnt oder ignoriert",
+      "variableModel": "Das Modell ist ein Variablenverweis ({{model}}), daher können die Prüfungen unten es noch nicht kennen; EDDI wendet die modellspezifischen Regeln an, sobald die Variable aufgelöst ist.",
+      "badgeMigrated": "Gesendet als {{key}}",
+      "migratedTo": "Für {{model}} als {{key}} gesendet",
+      "group": {
+        "model": "Modell",
+        "sampling": "Sampling",
+        "output": "Ausgabe",
+        "reasoning": "Reasoning",
+        "tools": "Werkzeuge",
+        "caching": "Caching",
+        "safety": "Sicherheit",
+        "connection": "Verbindung",
+        "advanced": "Erweitert"
+      }
+    },
+    "otherParams": "Weitere Parameter",
+    "otherParamsHint": "Parameter, die nicht unter Modelleinstellungen stehen, etwa baseUrl, timeout oder logRequests, oder Schlüssel, die von einem anderen Anbieter übrig sind.",
+    "cascadeStepModel": "Modell für Schritt {{n}}"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -1649,7 +1798,7 @@
     "stepsCount": "{{count}} Schritte",
     "noConversationsFound": "Keine Konversationen gefunden",
     "useConversationId": "ID verwenden: {{id}}",
-    "searchLogs": "Logs durchsuchen…",
+    "searchLogs": "Geladene Einträge durchsuchen…",
     "errors": "Fehler",
     "warnings": "Warnungen",
     "infos": "Info",
@@ -1661,7 +1810,17 @@
     "stateActive": "Aktiv",
     "stateError": "Fehler",
     "stateEnded": "Beendet",
-    "loadOlder": "Ältere Einträge laden"
+    "loadOlder": "Ältere Einträge laden",
+    "reconnect": "Erneut verbinden",
+    "streamDisconnected": "Die Verbindung zum Log-Stream wurde getrennt.",
+    "errorCount_one": "{{count}} Fehler",
+    "errorCount_other": "{{count}} Fehler",
+    "warnCount_one": "{{count}} Warnung",
+    "warnCount_other": "{{count}} Warnungen",
+    "copied": "Log-Eintrag kopiert",
+    "noMatches": "Keine geladenen Einträge entsprechen Ihrer Suche.",
+    "noMatchesHint": "Die Suche umfasst nur die hier bereits geladenen Einträge. Laden Sie ältere Einträge oder passen Sie die Filter an, um weiter zurückzusuchen.",
+    "searchLogsLabel": "Geladene Log-Einträge durchsuchen"
   },
   "secrets": {
     "loadError": "Secrets konnten nicht geladen werden",
@@ -1844,7 +2003,46 @@
       "reasonUncovered": "{{count}} geladene Einträge älter als der geprüfte Bereich",
       "unverifiedTitle": "Nicht vollständig verifiziert",
       "unverifiedDesc": "Keine Signatur wurde widerlegt, aber nicht alles konnte geprüft werden: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Jede administrative Änderung über die REST-API – Deployments, Konfigurationsänderungen, Importe, Löschungen und abgelehnte Aufrufe – signiert im Audit-Ledger. Request-Bodys werden nie gespeichert, und die ID einer Person, um die es ging, ist pseudonymisiert.",
+      "actor": "Akteur",
+      "actorPlaceholder": "Principal, z. B. alice",
+      "apply": "Anwenden",
+      "method": "Methode",
+      "allMethods": "Alle Methoden",
+      "window": "Zeit",
+      "clear": "Filter zurücksetzen",
+      "noMatch": "Keine administrativen Aktionen entsprechen diesen Filtern",
+      "empty": "Noch keine administrativen Aktionen aufgezeichnet",
+      "noMatchLoadOlder": "Nur die neuesten Zeilen sind geladen – lade ältere, um weiter zurück zu suchen.",
+      "emptyHint": "EDDI zeichnet sie ab Version 6.6 auf, außer eddi.audit.admin-actions.enabled ist false. Ein älterer Server zeigt hier nichts.",
+      "caption": "Administrative Aktionen, neueste zuerst",
+      "colTime": "Zeit",
+      "colActor": "Akteur",
+      "colAction": "Aktion",
+      "colEndpoint": "Endpunkt",
+      "colStatus": "Status",
+      "filterByActor": "Nur die Aktionen dieses Akteurs zeigen",
+      "loadOlderError": "Ältere Zeilen konnten nicht geladen werden.",
+      "loadOlder": "Ältere laden",
+      "forbidden": "Nur Administratoren können administrative Aktionen lesen",
+      "forbiddenHint": "Das Protokoll enthält die Änderungen aller Administratoren, daher braucht das Lesen die Rolle eddi-admin.",
+      "unsupported": "Dieses EDDI zeichnet keine administrativen Aktionen auf",
+      "unsupportedHint": "Sie werden ab EDDI 6.6 aufgezeichnet.",
+      "loadError": "Die administrativen Aktionen konnten nicht geladen werden.",
+      "shown": "{{shown}} von {{loaded}} geladenen Zeilen angezeigt",
+      "windowAny": "Beliebige Zeit",
+      "windowHour": "Letzte Stunde",
+      "windowDay": "Letzte 24 Stunden",
+      "windowWeek": "Letzte 7 Tage",
+      "windowMonth": "Letzte 30 Tage"
+    },
+    "views": "Audit-Ansichten",
+    "tabTrail": "Pipeline-Verlauf",
+    "tabAdminActions": "Administrative Aktionen",
+    "agentsDeployed": "Bereitgestellt",
+    "agentsNotDeployed": "Nicht bereitgestellt"
   },
   "schedules": {
     "cronHelp": "5-Felder-Format: Minute Stunde Tag-des-Monats Monat Wochentag",
@@ -1975,7 +2173,18 @@
     "systemManaged": "System",
     "systemManagedHint": "Von EDDI verwaltet (Wissensbasis-Ingestion, Gedächtniskonsolidierung oder Team-Kadenz). Ändern Sie ihn dort, wo er definiert ist, nicht hier.",
     "persistentConversationIdLocked": "Wird beim Anlegen des Zeitplans festgelegt. Der Server behält die Konversation bei, an die die Ausführungen bisher angehängt wurden.",
-    "failedScheduleGone": "Zeitplan existiert nicht mehr"
+    "failedScheduleGone": "Zeitplan existiert nicht mehr",
+    "disabledByPerson": "Von einer Person deaktiviert. Ein Zeitplan, den ein Undeploy vor EDDI 6.6 ausgeschaltet hat, erscheint ebenfalls so: Aktiviere ihn einmal von Hand.",
+    "disabledUndeployed": "Agent nicht deployt",
+    "disabledUndeployedHint": "Ausgeschaltet, als sein Agent undeployt wurde. Er schaltet sich beim nächsten erfolgreichen Deploy des Agenten von selbst wieder ein – nichts zu tun.",
+    "disabledAccessRevoked": "Zugriff entzogen",
+    "disabledAccessRevokedHint": "Sein Ersteller kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
+    "disabledOtherHint": "Von EDDI aus dem angezeigten Grund ausgeschaltet.",
+    "serverRefusedUpdate": "Der Server hat diese Änderung abgelehnt:",
+    "serverRefusedCreate": "Der Server hat diesen Zeitplan abgelehnt:",
+    "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
+    "finishedOneShot": "Einmaliger Zeitplan: Er wurde ausgeführt und ist abgeschlossen.",
+    "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten)."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -2068,7 +2277,9 @@
     "connected": "Verbunden",
     "disconnected": "Getrennt",
     "logOutput": "Log-Ausgabe",
-    "noMatch": "Keine Logs entsprechen Ihrem Filter"
+    "noMatch": "Keine Logs entsprechen Ihrem Filter",
+    "errorsAnnounce_one": "{{count}} Fehler im Log",
+    "errorsAnnounce_other": "{{count}} Fehler im Log"
   },
   "promptViewer": {
     "error": "Prompt-Daten konnten nicht geladen werden",
@@ -2150,7 +2361,12 @@
     "backToAgent": "Zurück zum Agenten",
     "selectStageHint": "Wählen Sie eine Erweiterung in der Pipeline, um deren Konfiguration direkt zu bearbeiten",
     "noConfig": "Diese Pipeline-Stufe hat keine Konfigurations-URI",
-    "unsupportedType": "Für diesen Erweiterungstyp ist kein Editor verfügbar"
+    "unsupportedType": "Für diesen Erweiterungstyp ist kein Editor verfügbar",
+    "testReady": "Als v{{version}} gespeichert und bereitgestellt — der Chat ist bereit",
+    "workflow": "Workflow",
+    "unsavedTitle": "Ungespeicherte Änderungen in dieser Stufe",
+    "unsavedMessage": "Beim Wechsel der Stufe wird der Editor ersetzt. Speichern Sie Ihre Änderungen zuerst, verwerfen Sie sie oder bleiben Sie auf dieser Stufe.",
+    "discardAndSwitch": "Verwerfen & wechseln"
   },
   "ragEditor": {
     "general": "Allgemein",
@@ -2276,7 +2492,31 @@
     "chunkStrategyLegacy": "{{value}} (wird als Rekursiv gespeichert)",
     "saveBeforeIngest": "Speichern Sie zuerst Ihre Änderungen – Dokumente werden mit dem Speicher und dem Embedding-Modell der gespeicherten Wissensbasis aufgenommen, nicht mit den Änderungen auf dem Bildschirm.",
     "chunkStrategyUnsupported": "{{value}} (nicht unterstützt)",
-    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv."
+    "chunkStrategyUnsupportedHint": "Der Server lehnt diese Strategie beim Speichern ab. Wählen Sie Rekursiv.",
+    "location": {
+      "reference": "Ein Speicherort muss ausgeschrieben werden, keine ${…}-Referenz. Der Ort entscheidet, wessen Dokumente ein Agent liest, und eine Referenz wird erst beim Aufbau des Speichers aufgelöst – nach allen Prüfungen – aus Variablen, die jeder Editor ändern kann; sie könnte also auf den Speicher einer anderen Wissensbasis oder auf SQL zeigen. Eine bereits mit Referenz gespeicherte Wissensbasis nimmt nichts mehr auf und liefert nichts mehr, bis sie einmal mit dem ausgeschriebenen Namen gespeichert wird.",
+      "pgIdentifier": "Eine pgvector-Tabelle muss ein einfacher Name sein, optional mit Schema (Buchstaben, Ziffern, _ und $). Der Speicher setzt ihn unverändert in SQL ein, daher werden Anführungszeichen, Leerzeichen und Satzzeichen abgelehnt.",
+      "refused": "Der Server lehnt {{param}} = {{value}} ab",
+      "reserved": "Namen, die mit {{prefix}} beginnen (in jedem Teil, jede Schreibweise), sind reserviert: EDDI leitet den eigenen Ort jeder Wissensbasis von diesem Präfix ab, daher könnte dieser Name den Speicher einer anderen Wissensbasis ansprechen. Wähle einen anderen Namen oder lass ihn leer, um einen eigenen Ort für diese Wissensbasis zu erhalten.",
+      "savedReference": "Das gespeicherte {{param}} = {{value}} funktioniert nicht mehr",
+      "refusedIfChanged": "{{param}} = {{value}} funktioniert wie gespeichert weiter, aber der Server würde es ablehnen, wenn es geändert würde"
+    },
+    "layout": {
+      "idTitle": "Eigener Speicher (per ID adressiert)",
+      "nameTitle": "Namensbasierter Speicher (6.5-Layout)",
+      "idBody": "Diese Wissensbasis hat einen eigenen Speicher: Jeder Chunk trägt ihre ID, und die Suche sieht nur ihre eigenen Chunks, selbst in einer geteilten Tabelle.",
+      "nameBody": "Vor EDDI 6.6 angelegt: Ihr Speicher wird über den Namen der Wissensbasis gefunden, daher teilt ihn jede andere Wissensbasis mit demselben Namen. Sie funktioniert weiter wie bisher.",
+      "defaultUnsaved": "Ort: eddi_kbid_<id> (Standard, beim Speichern vergeben)",
+      "migrate": "In eigenen Speicher verschieben…",
+      "renameNote": "Das Umbenennen dieser Wissensbasis verschiebt sie auf dieselbe Weise. Erfordert EDDI 6.6 oder neuer.",
+      "migrateTitle": "Diese Wissensbasis in einen eigenen Speicher verschieben?",
+      "migrateBodyExplicit": "Sie behält ihre Tabelle, aber ab jetzt werden nur Chunks mit ihrer ID abgerufen – keiner der vorhandenen Chunks trägt diese Kennung, daher beginnt sie LEER. Ihre Quellen werden beim nächsten Lauf von selbst neu eingelesen; über /ingest hinzugefügte Dokumente müssen erneut eingelesen werden. Nichts wird gelöscht. Die Änderung wirkt beim Speichern und kann nicht rückgängig gemacht werden.",
+      "migrateBody": "Sie zieht in einen neuen, LEEREN eigenen Speicher. Ihre Quellen werden beim nächsten Lauf von selbst neu eingelesen; über /ingest hinzugefügte Dokumente müssen erneut eingelesen werden. Der alte Speicher bleibt unberührt bestehen. Die Änderung wirkt beim Speichern und kann nicht rückgängig gemacht werden.",
+      "migrateConfirm": "Beim Speichern verschieben",
+      "explicit": "Ort: {{value}} (oben gesetzt)",
+      "default": "Ort: {{value}} (Standard)",
+      "legacyDefault": "Ort: abgeleitet vom Namen „{{name}}“ (Standard)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2425,11 +2665,11 @@
         "step3Desc": "Neue Configs fangen Lastspitzen ohne Latenz ab."
       },
       "coordinator": {
-        "title": "Coordinator-Tour",
-        "step1Title": "Ereignisquelle",
-        "step1Desc": "Event-Source-Metriken im Backend einsehen.",
-        "step2Title": "Verarbeitung",
-        "step2Desc": "Abarbeitung von Queue-Aufträgen über Cluster hinweg.",
+        "title": "Cluster-Tour",
+        "step1Title": "Cluster-Zustand",
+        "step1Desc": "Das Urteil — fehlerfrei, eingeschränkt, partitioniert oder einzelner Knoten — mit den Gründen dafür und dem nächsten Schritt.",
+        "step2Title": "Knoten",
+        "step2Desc": "Jedes EDDI-Replikat: Heartbeat, NATS-Umlaufzeit, laufende Turns und Leases sowie ob es entleert oder verloren ist.",
         "step3Title": "Unzustellbare Nachrichten",
         "step3Desc": "Abgestützte Tasks überprüfen, wieder einreihen (replay) oder löschen."
       },
@@ -2472,7 +2712,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Verbindung wird wiederhergestellt…"
+    "reconnecting": "Verbindung wird wiederhergestellt…",
+    "disconnected": "Getrennt"
   },
   "createOrWizard": {
     "title": "Neue {{type}}",
@@ -3058,13 +3299,32 @@
       "humanNeedsName_one": "{{count}} menschliches Mitglied braucht einen Anzeigenamen.",
       "humanNeedsName_other": "{{count}} menschliche Mitglieder brauchen einen Anzeigenamen.",
       "humanNeedsId_one": "{{count}} menschliches Mitglied braucht die Benutzer-ID der Person.",
-      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person."
+      "humanNeedsId_other": "{{count}} menschliche Mitglieder brauchen die Benutzer-ID der Person.",
+      "duplicateMember": "{{ids}} ist mehr als einmal aufgeführt. Ein Mitglied hat einen Platz: Zwei Plätze würden eine Mitgliedskonversation teilen und die Antworten des anderen sehen. Nutze für einen zweiten Platz einen zweiten Agenten."
     },
+    "serverRefused": "Der Server hat diese Gruppe abgelehnt:",
     "versionLookupFailed": "Die aktuelle Version dieser Gruppe konnte nicht ermittelt werden.",
     "deletePermanentlyHint": "Kann nicht rückgängig gemacht werden: Die Gruppe und ihr Arbeitsbereich (Backlog, Rhythmen und deren Zeitpläne) werden endgültig entfernt. Ohne diese Option wird die Gruppe nur als gelöscht markiert und bleibt wiederherstellbar, bis sie bereinigt wird.",
     "deletePermanentlyWithMembersHint": "Kann nicht rückgängig gemacht werden: Die Gruppe, ihr Arbeitsbereich und alle Mitglieds-Agenten werden endgültig entfernt. Ohne diese Option werden sie nur als gelöscht markiert und bleiben wiederherstellbar, bis sie bereinigt werden.",
     "deleteMembersFailedAfterGroup": "Die Gruppe wurde gelöscht, diese Mitglieds-Agenten jedoch nicht: {{ids}}. Löschen Sie sie auf der Seite „Agenten“.",
-    "deleteMembersFailedGroupKept": "Die Gruppe wurde behalten: Diese Mitglieds-Agenten konnten nicht gelöscht werden: {{ids}}. Versuchen Sie es erneut, um den Vorgang abzuschließen."
+    "deleteMembersFailedGroupKept": "Die Gruppe wurde behalten: Diese Mitglieds-Agenten konnten nicht gelöscht werden: {{ids}}. Versuchen Sie es erneut, um den Vorgang abzuschließen.",
+    "transcriptLabel": "Diskussionsverlauf",
+    "announceAwaitingApproval": "Die Diskussion ist pausiert und wartet auf Ihre Freigabe.",
+    "announceAwaitingHuman": "Die Diskussion wartet auf die Antwort eines Mitglieds.",
+    "newMessages": "Neue Nachrichten",
+    "finishEditingFirst": "Speichern oder verwerfen Sie zuerst den Abschnitt, den Sie gerade bearbeiten",
+    "editBasics": "Name, Mitglieder und Einstellungen bearbeiten",
+    "humanTurnResuming": "Ihre Antwort wurde erfasst. Die Diskussion wird fortgesetzt – diese Seite folgt ihr und aktualisiert sich alle paar Sekunden.",
+    "composerMode": "Was soll mit Ihrer Nachricht geschehen?",
+    "composerModeNew": "Neue Diskussion",
+    "composerModeContinue": "Diese Diskussion fortsetzen",
+    "loadMoreDiscussions": "Ältere Diskussionen laden",
+    "confirmDeleteLiveDiscussionDescription": "Diese Diskussion läuft noch. Sie wird gestoppt, und der Verlauf samt allem Inhalt wird dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "discardEditsTitle": "Ungespeicherte Änderungen verwerfen?",
+    "discardEditsDescription": "Ein Abschnitt der Konfiguration wird noch bearbeitet. Wenn Sie das Panel schließen, gehen Ihre Änderungen dort verloren.",
+    "discardEditsConfirm": "Verwerfen",
+    "keepEditing": "Weiter bearbeiten",
+    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -3247,7 +3507,9 @@
     "bulkApply": "Auf alle neuen Agenten anwenden",
     "apiKeyRequired": "{{provider}} benötigt einen API-Schlüssel, bevor dieser Agent erstellt werden kann.",
     "presetsNote": "Das sind Starter-Vorlagen, die diesen Assistenten ausfüllen. Wenn du stattdessen eine vorgefertigte, abgestimmte Diskussion nutzen und deine vorhandenen Agenten ihren Rollen zuweisen möchtest, siehe",
-    "presetsLink": "Gruppenvorlagen"
+    "presetsLink": "Gruppenvorlagen",
+    "agentNotDeployed": "Agent erstellt, aber nicht bereitgestellt",
+    "deployingAgents": "Agenten werden bereitgestellt ..."
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",
@@ -3336,7 +3598,10 @@
     "sourceConversation": "Quell-Gespräch",
     "conflicted": "Widerspruch",
     "deleteEntryTitle": "Diese Erinnerung löschen?",
-    "deleteEntryDesc": "„{{key}}“ wird für diesen Benutzer dauerhaft entfernt. Agenten rufen sie nicht mehr ab. Dies kann nicht rückgängig gemacht werden."
+    "deleteEntryDesc": "„{{key}}“ wird für diesen Benutzer dauerhaft entfernt. Agenten rufen sie nicht mehr ab. Dies kann nicht rückgängig gemacht werden.",
+    "deleteAllDescUser": "Dadurch werden alle {{total}} Speichereinträge des Benutzers „{{userId}}“ dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "toggleDetails": "Details zu {{key}} ein- oder ausblenden",
+    "deleteEntryLabel": "Speichereintrag {{key}} löschen"
   },
   "properties": {
     "title": "Nutzereigenschaften",
@@ -3372,7 +3637,9 @@
     "deleted": "Auslöser gelöscht",
     "deleteTitle": "Auslöser löschen",
     "deleteDesc": "Auslöser für Absicht „{{intent}}“ endgültig löschen?",
-    "searchPlaceholder": "Nach Absicht oder Agenten-ID filtern…"
+    "searchPlaceholder": "Nach Absicht oder Agenten-ID filtern…",
+    "needIntent": "Geben Sie zum Speichern eine Absicht (Intent) ein.",
+    "needAgent": "Wählen Sie zum Speichern mindestens einen Agenten aus."
   },
   "capabilities": {
     "agentCount": "Agenten",
@@ -3389,7 +3656,11 @@
     "registeredSkills": "Registrierte Fähigkeiten",
     "noSkills": "Keine Fähigkeiten gefunden",
     "matchingAgents": "Passende Agenten",
-    "noMatches": "Keine Agenten für diese Fähigkeit gefunden"
+    "noMatches": "Keine Agenten für diese Fähigkeit gefunden",
+    "searchLabel": "Fähigkeiten durchsuchen",
+    "strategyLabel": "Zuordnungsstrategie",
+    "emptyTitle": "Noch keine Fähigkeiten registriert",
+    "emptyDesc": "Agenten erscheinen hier, sobald sie Fähigkeiten (Skills) in ihrer Konfiguration deklarieren. Fügen Sie einem Agenten eine Fähigkeit hinzu, und sie erscheint in dieser Registry."
   },
   "exportDialog": {
     "title": "Agent exportieren",
@@ -3448,6 +3719,8 @@
     "partialCounts": "{{created}} erstellt, {{updated}} aktualisiert, {{failed}} fehlgeschlagen.",
     "schedulesSkipped_one": "{{count}} Zeitplan im Archiv wurde nicht importiert, weil die Auswahl ihn nicht enthielt.",
     "schedulesSkipped_other": "{{count}} Zeitpläne im Archiv wurden nicht importiert, weil die Auswahl sie nicht enthielt.",
+    "mergeScopeDefaultSpace": "deinem Standardbereich",
+    "mergeScope": "Diese Zusammenführung aktualisiert nur Ressourcen, die du in {{space}} bearbeiten darfst. Eine Kopie dieses Agenten in einem anderen Arbeitsbereich wird nie verändert – der Import legt stattdessen deine eigene Kopie an. Wechsle zuerst den Bereich, um die Kopie dort zu aktualisieren.",
     "moveUp": "Nach oben",
     "moveDown": "Nach unten"
   },
@@ -3653,11 +3926,24 @@
     "outcomeUnknown": "Eine vorherige Freigabe wurde mitten in der Ausführung unterbrochen — ihre Wirkung ist unbekannt; vor einem erneuten Versuch extern prüfen.",
     "outcomeUnknownShort": "Ergebnis unbekannt",
     "toolApprovalHint": "Freigeben wendet deine Auswahl je Aufruf an (nicht geänderte Aufrufe werden freigegeben). Ablehnen lehnt den gesamten Stapel ab.",
-    "toolApprovalHintExplicit": "Jeder Aufruf braucht eine eigene Freigabe oder Ablehnung, bevor du den Stapel freigeben kannst. Ablehnen lehnt den gesamten Stapel ab.",
+    "toolApprovalHintExplicit": "Wählen Sie für jeden Aufruf Genehmigen oder Ablehnen und senden Sie dann Ihre Entscheidungen. Ablehnen lehnt den gesamten Stapel ab.",
+    "toolApprovalHintSingle": "Genehmigen führt diesen Aufruf aus. Ablehnen bricht ihn ab.",
+    "submitDecisions": "Entscheidungen senden",
     "explicitReviewMissing": "Prüfe jeden Aufruf oben, bevor du freigibst.",
     "redactionCaveat": "Die unten angezeigten Argumente sind geschwärzt — ein geheimer Wert erscheint als „<REDACTED>“, nicht weggelassen.",
     "gateReason": "Übereinstimmendes Muster",
     "argsTruncated": "Argumente gekürzt",
+    "toolDetailsMissing": "Diese Tool-Aufruf-Pause enthält keine Aufrufe zur Prüfung und kann daher hier nicht genehmigt werden. Ablehnen ist weiterhin sicher.",
+    "argsShowFormatted": "Formatiert anzeigen",
+    "argsShowRaw": "Rohdaten anzeigen",
+    "noticeWaitingFor": "Wartet auf Genehmigung: {{tools}}",
+    "noticeSaving": "Pause wird gespeichert…",
+      "decisionSummaryApproved": "Sie haben diese Anfrage genehmigt",
+      "decisionSummaryRejected": "Sie haben diese Anfrage abgelehnt",
+      "decisionSummaryCallApproved": "genehmigt",
+      "decisionSummaryCallRejected": "abgelehnt",
+      "decisionSummaryAmended": "geändert",
+      "decisionSummaryNote": "Notiz: {{note}}",
     "amendArguments": "Argumente ändern (optional)",
     "amendPlaceholder": "Vollständiges Ersatz-JSON-Objekt, z. B. {\"to\":\"ops@acme.com\"}. Leer lassen, um das Original zu behalten.",
     "amendTruncated": "Ein Aufruf mit gekürzten Argumenten kann nicht geändert werden — unverändert freigeben oder ablehnen.",
@@ -3695,7 +3981,10 @@
     "confirmApproveGroupDescription": "Die gesamte pausierte Phase freigeben und die Diskussion fortsetzen. Jede wartende Aufgabe wird mit freigegeben — für Einzelentscheidungen die Gruppe öffnen.",
     "confirmRejectGroupDescription": "Die gesamte pausierte Phase ablehnen. Jede wartende Aufgabe wird mit abgelehnt, und die Diskussion läuft nicht darüber hinaus weiter — für Einzelentscheidungen die Gruppe öffnen.",
     "pauseChanged": "Diese Anfrage hat sich geändert, seit Sie sie geöffnet haben — es wurde nichts entschieden. Prüfen Sie sie erneut.",
-    "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen."
+    "regularTruncated": "Angezeigt werden die ersten {{limit}} Konversationsfreigaben — weitere stehen aus. Entscheiden Sie einige, um den Rest zu sehen.",
+    "conversationColumn": "Konversation",
+    "groupReviewLoadError": "Die Diskussion konnte nicht geladen werden.",
+    "groupReviewNoEntries": "Es wurde noch nichts gesagt."
   },
   "chatDrawer": {
     "deploying": "Agent wird bereitgestellt…",
@@ -3727,7 +4016,18 @@
     "vaultUp": "Vault bereit",
     "viewLogs": "Protokolle anzeigen",
     "coordAdminOnly": "Koordinator: erfordert Admin",
-    "vaultAdminOnly": "Vault: erfordert Admin"
+    "vaultAdminOnly": "Vault: erfordert Admin",
+    "vaultChecking": "Tresor wird geprüft…",
+    "statsPartial": "Einige Zahlen konnten nicht geladen werden – sie werden als nicht verfügbar angezeigt, nicht als null.",
+    "countUnavailable": "Konnte nicht geladen werden",
+    "convState": {
+      "READY": "Bereit",
+      "IN_PROGRESS": "In Bearbeitung",
+      "ENDED": "Beendet",
+      "EXECUTION_INTERRUPTED": "Unterbrochen",
+      "ERROR": "Fehler",
+      "AWAITING_HUMAN": "Wartet auf Mensch"
+    }
   },
   "errorBoundary": {
     "retry": "Erneut versuchen",
@@ -3785,7 +4085,23 @@
     "conversationsTruncated_other": "Gespräche wurden begrenzt — der Nutzer hat insgesamt {{count}}.",
     "failedConversations_one": "{{count}} Gespräch konnte nicht gelesen werden und fehlt im Paket.",
     "failedConversations_other": "{{count}} Gespräche konnten nicht gelesen werden und fehlen im Paket.",
-    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden."
+    "deleteIncomplete": "Löschung unvollständig — einige Daten dieses Benutzers existieren möglicherweise noch. Nicht als erfüllt melden.",
+    "auditRedacted": "Audit-Einträge geschwärzt",
+    "auditLegacy": "Dieses EDDI ersetzt im Audit-Ledger nur die Benutzer-ID: Die dort gespeicherten Prompts und Antworten bleiben erhalten. EDDI 6.6 und neuer schwärzt sie ebenfalls, außer der Server läuft mit eddi.audit.erasure-mode=pseudonymize.",
+    "auditPseudonymizeMode": "Audit-Inhalte wurden behalten: Dieser Server läuft mit eddi.audit.erasure-mode=pseudonymize (etwa wegen einer rechtlichen Aufbewahrungspflicht), daher wurde im Audit-Ledger nur die Benutzer-ID ersetzt.",
+    "auditRedactionFailed": "Es wurden keine Audit-Inhalte geschwärzt: Der Schwärzungsschritt ist fehlgeschlagen (siehe oben), daher sind die im Ledger gespeicherten Prompts und Antworten noch vorhanden. Führen Sie die Löschung erneut aus.",
+    "auditRedactedExplanation": "Die Audit-Zeilen des Benutzers bleiben zur Nachweisführung erhalten, aber Prompts, Antworten, Modelldetails und Tool-Aufrufe wurden durch eine Schwärzungsmarke ersetzt und die Benutzer-ID pseudonymisiert. Zuvor gültig verifizierte Zeilen wurden neu signiert; eine bereits manipulierte Zeile bleibt als ungültig markiert.",
+    "completeExplanation": "Vollständig bedeutet: Jeder Schritt war erfolgreich, einschließlich einer abschließenden Prüfung, dass keine Audit-Zeile unter der ID dieses Benutzers noch ungeschwärzte Inhalte enthält.",
+    "failedStep": {
+      "auditRedaction": "Einige Audit-Zeilen enthalten noch Prompts oder Antworten dieses Benutzers. Führe die Löschung erneut aus – das ist gefahrlos wiederholbar und betrifft nur das Verbliebene. Schlägt sie weiter fehl, nennt das Server-Log die Ursache unter dem Pseudonym dieser Löschung.",
+      "auditLedger": "Die Benutzer-ID konnte nicht in jeder Audit-Zeile ersetzt werden. Führe die Löschung erneut aus, sobald die Datenbank erreichbar ist.",
+      "databaseLogs": "Datenbank-Logeinträge konnten nicht pseudonymisiert werden. Führe die Löschung erneut aus; die Log-Aufbewahrung entfernt sie mit der Zeit ebenfalls.",
+      "generic": "Dieser Schritt wurde nicht abgeschlossen. Führe die Löschung erneut aus, sobald die Ursache im Server-Log behoben ist – das ist gefahrlos wiederholbar."
+    },
+    "noDataFoundToast": "Keine Daten für diese Benutzer-ID gefunden – es wurde nichts gelöscht.",
+    "noDataFoundTitle": "Keine Daten für diese Benutzer-ID gefunden",
+    "noDataFoundBody": "Für „{{userId}}“ wurde nichts gelöscht. Prüfe die ID auf Tippfehler und versuche es erneut.",
+    "confirmTypeLabel": "Gib zur Bestätigung die Benutzer-ID „{{userId}}“ ein"
   },
   "mockBanner": {
     "message": "Demo-Modus — Es werden Beispieldaten angezeigt. Verbinden Sie ein EDDI-Backend für echte Daten."
@@ -3811,7 +4127,9 @@
     "confirmPurge": "Alle {{count}} verwaisten Ressourcen endgültig löschen? Dies kann nicht rückgängig gemacht werden.",
     "purgeIncompleteScan": "Nichts wurde gelöscht: EDDI konnte nicht vollständig prüfen, welche Ressourcen noch verwendet werden. Scannen Sie erneut und versuchen Sie es noch einmal.",
     "purgeFailed": "Bereinigung fehlgeschlagen",
-    "scanFailed": "Der Scan ist fehlgeschlagen: {{reason}}"
+    "scanFailed": "Der Scan ist fehlgeschlagen: {{reason}}",
+    "reviewHint": "Öffnen Sie vorab eine Ressource aus der Liste, um sie zu prüfen; jede verwaiste Ressource in der Liste wird gelöscht.",
+    "typeToConfirm": "Zur Bestätigung {{count}} eingeben"
   },
   "quotas": {
     "apiCallsMinute": "API-Aufrufe / Minute",
@@ -3838,7 +4156,8 @@
     "tenantId": "Mandanten-ID",
     "title": "Mandanten-Kontingente",
     "limitHintEmpty": "Leer oder -1 = unbegrenzt, 0 = gesperrt",
-    "invalidNumber": "Geben Sie eine Zahl ein oder lassen Sie das Feld für unbegrenzt leer."
+    "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
+    "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer."
   },
   "secretPicker": {
     "clearVault": "Vault-Referenz löschen",
@@ -3864,7 +4183,12 @@
     "connectionForbidden": "Ihre Rolle darf keine Verbindungen auflisten. Wenn Sie den Namen kennen, tippen Sie ${connection:name} von Hand ein.",
     "connectionUnavailable": "Dieses Backend bietet keine Verbindungen an.",
     "connectionFailed": "Verbindungen konnten nicht geladen werden.",
-    "connectionHint": "Fügt ${connection:name} als gesamten Wert ein. EDDI löst ihn bei jeder Anfrage in die Zugangsdaten auf."
+    "connectionHint": "Fügt ${connection:name} als gesamten Wert ein. EDDI löst ihn bei jeder Anfrage in die Zugangsdaten auf.",
+    "restricted_one": "Auf {{count}} Agenten beschränkt",
+    "restricted_other": "Auf {{count}} Agenten beschränkt",
+    "restrictedTooltip": "Freigegeben für: {{agents}}",
+    "notGrantedAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bei der Bereitstellung werden Sie gefragt, ob er hinzugefügt werden soll.",
+    "notGrantedNonAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bitten Sie vor der Bereitstellung einen Administrator um die Freigabe."
   },
   "snippetEditor": {
     "category": "Kategorie",
@@ -4559,7 +4883,8 @@
       "platformBaseUrlUnresolved": "Diese Installation läuft auf einem zufälligen HTTP-Port und hat kein eddi.self.base-url, kann also nicht sagen, wo sie sich selbst erreicht. Tragen Sie die Adresse hier ein.",
       "llmEndpoint": "Modell-Endpunkt",
       "promptBodyDiffers": "Diese Anweisungen weichen vom aktuellen Standard ab — sie wurden bearbeitet oder von einer älteren Version des Managers geschrieben.",
-      "promptBodyReset": "Auf Standard zurücksetzen"
+      "promptBodyReset": "Auf Standard zurücksetzen",
+      "keyRestricted": "„{{key}}“ ist auf bestimmte Agenten beschränkt. Der Operator wird zur Freigabe von {{key}} hinzugefügt — vor der Bereitstellung werden Sie um Bestätigung gebeten."
     },
     "authMode": {
       "none": {
@@ -4581,7 +4906,8 @@
       "done": "Fertig",
       "longWait1": "Der Operator-Agent wird erstellt und bereitgestellt — dies ist der längste Schritt…",
       "longWait2": "Werkzeuge und Freigabe-Gate werden am neuen Agenten eingerichtet…",
-      "longWait3": "Läuft noch — die Bereitstellung kann auf einer ausgelasteten Plattform etwas dauern…"
+      "longWait3": "Läuft noch — die Bereitstellung kann auf einer ausgelasteten Plattform etwas dauern…",
+      "deploying": "Der Operator-Agent wird bereitgestellt — möglicherweise werden Sie gebeten, ihm seinen Modellschlüssel freizugeben…"
     },
     "status": {
       "title": "Operator",
@@ -4670,7 +4996,13 @@
       "blockedGateCarrying": "Diese Anfrage schreibt eine LLM-Konfiguration, die ihr eigenes Freigabe-Gate (toolApprovals) setzt und damit das prüfende Gate ersetzen würde. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und ändern Sie das Gate auf der Seite des Agenten.",
       "blockedGateUnverifiable": "Diese Anfrage schreibt eine LLM-Konfiguration, deren Inhalt nicht vollständig lesbar ist — zu groß für die Anzeige oder kein gültiges JSON —, daher lässt sich nicht bestätigen, dass sie kein Freigabe-Gate überschreibt. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
       "blockedGateUnpinned": "Diese Anfrage schreibt eine LLM-Konfiguration, ist aber nicht fixiert; was tatsächlich ausgeführt wird, kann daher vom hier Gezeigten abweichen und es lässt sich nicht bestätigen, dass kein Freigabe-Gate überschrieben wird. Solange sie enthalten ist, kann der gesamte Stapel nicht freigegeben werden — lehnen Sie ab und nehmen Sie die Änderung auf der Seite des Agenten vor.",
-      "blockedSelfStart": "Der Operator darf sich nicht selbst testen — eine Konversation mit dem eigenen Agenten ({{agentId}}) würde seine Ausgabe als Eingabe zurückführen. Genehmigen ist für den gesamten Stapel gesperrt, solange dieser Aufruf enthalten ist — ablehnen und einen anderen Agenten testen."
+      "blockedSelfStart": "Der Operator darf sich nicht selbst testen — eine Konversation mit dem eigenen Agenten ({{agentId}}) würde seine Ausgabe als Eingabe zurückführen. Genehmigen ist für den gesamten Stapel gesperrt, solange dieser Aufruf enthalten ist — ablehnen und einen anderen Agenten testen.",
+      "blockedGatePatchOp": "Diese Anfrage patcht eine LLM-Konfiguration mit einer Operation, die die Prüfung der Freigabe-Schranke nicht beurteilen kann (alles außer add, replace, remove oder test — copy und move können einen Teil des gespeicherten Dokuments, auch eine Schranken-Überschreibung, an eine andere Stelle übertragen). Solange sie vorhanden ist, kann der gesamte Stapel nicht freigegeben werden — ablehnen und die Änderung als add-, replace- oder remove-Operationen anfordern.",
+      "patchHeading": "Patch für {{type}} {{id}} — angewendet auf Version {{version}}, gespeichert als Version {{next}}",
+      "patchHeadingBare": "Patch-Operationen",
+      "showRawPatch": "Rohen Patch anzeigen",
+      "hideRawPatch": "Rohen Patch ausblenden",
+      "patchWholeDocument": "(gesamtes Dokument)"
     },
     "starters": {
       "whatsDeployed": "Was ist derzeit deployt?",
@@ -4747,6 +5079,30 @@
       "hintAction": "Aktualisieren",
       "keepCurrent": "Aktuellen Text behalten (er lernt nicht, was der neue Standard ergänzt)",
       "title": "Für den Platform Operator ist ein Update verfügbar"
+    },
+    "unregistered": {
+      "title": "Operator-Agenten, die diese Seite nicht verwaltet",
+      "description": "Diese Agenten sehen wie ein Platform Operator aus, aber die Operator-Konfiguration verweist nicht auf sie. Übernehmen Sie einen, um ihn hier zu verwalten, oder entfernen Sie ihn.",
+      "adopt": "Übernehmen",
+      "adopted": "Operator übernommen — diese Seite verwaltet ihn jetzt.",
+      "fixAndDeploy": "Freigabe korrigieren und bereitstellen",
+      "remove": "Entfernen",
+      "removeTitle": "Diesen Operator-Agenten entfernen?",
+      "removeBody": "Der Agent wird außer Betrieb genommen, seine Unterhaltungen werden beendet, und er sowie die für ihn erstellten Ressourcen werden dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+      "removed": "Operator-Agent entfernt",
+      "status": {
+        "READY": "Bereitgestellt",
+        "IN_PROGRESS": "Wird bereitgestellt",
+        "ERROR": "Fehler",
+        "NOT_FOUND": "Nicht bereitgestellt"
+      }
+    },
+    "health": {
+      "missing": "Die Operator-Konfiguration verweist auf den Agenten {{id}}, der nicht mehr existiert.",
+      "cleared": "Operator-Konfiguration gelöscht",
+      "clear": "Konfiguration löschen",
+      "notDeployed": "Der Operator ist eingeschaltet, aber sein Agent ist nicht bereitgestellt.",
+      "deploy": "Erneut bereitstellen"
     }
   },
   "groupWorkspace": {
@@ -5139,7 +5495,9 @@
     "bindingCallerSuppliedBody": "Das aufrufende System übergibt mit der Anfrage die Zugangsdaten des jeweiligen Nutzers, und EDDI speichert nichts. Der Agent kann nur tun, was dieser Nutzer im Zielsystem tun darf, und diese Verbindung wird bei der MCP- und A2A-Erkennung zurückgehalten.",
     "confirmAuthChange": "Ändern, wie sich diese Verbindung authentifiziert?",
     "confirmAuthChangeDesc": "Über diese Verbindung verknüpfte Konten werden nicht mehr aufgelöst – eine Berechtigung gehört zu dem Ablauf, der sie erzeugt hat. EDDI lehnt die Änderung ab, solange noch ein Konto verknüpft ist, und nennt die Anzahl; heben Sie die Verknüpfungen zuerst auf, oder legen Sie eine neue Verbindung an und lassen Sie die Leute stattdessen diese verknüpfen.",
-    "confirmAuthChangeAccept": "Ändern"
+    "confirmAuthChangeAccept": "Ändern",
+    "deleted": "Verbindung \"{{name}}\" gelöscht",
+    "confirmDeleteNamed": "Verbindung \"{{name}}\" löschen?"
   },
   "extensionTypes": {
     "parser": "Eingabe-Parser",
@@ -5358,7 +5716,7 @@
     "workflowChanged": "Workflow {{workflowId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
     "agentChanged": "Agent {{agentId}} wurde anderswo geändert (jetzt Version {{current}}, diese Seite hat Version {{version}}). Laden Sie die Seite neu. Es wurde nichts gespeichert.",
     "workflowMissingResource": "Workflow {{workflowId}} (Version {{version}}) verweist nicht auf {{resource}}, daher würde das Speichern hier den Agenten nicht ändern. Es wurde nichts gespeichert.",
-    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verweist auf Workflow {{workflowId}} in Version {{found}}, nicht in Version {{expected}}. Der Agent wurde geändert, seit diese Seite geöffnet wurde. Laden Sie sie neu. Es wurde nichts gespeichert.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (Version {{version}}) verwendet Workflow {{workflowId}} in Version {{found}}, diese Seite wurde aber in Version {{expected}} geöffnet. Es wurde nichts gespeichert. Aktualisieren Sie den Agent auf die neue Workflow-Version oder öffnen Sie Version {{found}}.",
     "agentMissingWorkflow": "Agent {{agentId}} (Version {{version}}) verweist nicht auf Workflow {{workflowId}}. Es wurde nichts gespeichert."
   },
   "llmProviders": {
@@ -5384,7 +5742,7 @@
     "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
     "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
     "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
-    "generationBadge": "Kompat.-Gen. {{generation}}",
+    "generationBadge": "Generation {{generation}}",
     "generationTooltip": "Kompatibilitätsgeneration {{generation}}: Versionen dieses Agents mit derselben Generation sind kompatibel, sodass eine laufende Unterhaltung bei ihrem nächsten Zug zur neuesten bereitgestellten wechselt. Ein inkompatibles Speichern beginnt eine neue Generation.",
     "impactTitle": "Bereitstellung von v{{version}} in {{environment}} — laufende Unterhaltungen",
     "impactFollow_one": "{{count}} aktive Unterhaltung auf v{{from}} wird auf v{{to}} fortgesetzt",
@@ -5395,6 +5753,23 @@
     "impactReasonLegacy": "älter als die Versionsfolge",
     "impactReasonBreaking": "inkompatible Änderung",
     "switchNotice": "Agent wechselte von v{{from}} zu v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Werttyp",
+    "jsonOnly": "Im JSON-Tab gesetzt",
+    "valueLabel": "Wert",
+    "intRange": "Außerhalb des Integer-Bereichs (±2.147.483.647). Wähle Long-Ganzzahl für diesen Wert.",
+    "unsafeLong": "Jenseits von 9.007.199.254.740.991 kann der Browser diese Ganzzahl nicht exakt halten; bearbeite sie im JSON-Tab.",
+    "needs66": "Long-Ganzzahl und Dezimalzahl erfordern EDDI 6.6 oder neuer.",
+    "conflict": "Diese Zeile setzt {{fields}}. Nur {{winner}} wird verwendet; die Wahl eines Typs hier behält diesen einen Wert und entfernt die übrigen.",
+    "kindString": "Text / Vorlage",
+    "kindInt": "Ganzzahl",
+    "kindLong": "Long-Ganzzahl",
+    "kindDouble": "Dezimalzahl",
+    "kindFloat": "Float (≈7 Stellen)",
+    "kindBoolean": "Boolean",
+    "kindObject": "Objekt (JSON)",
+    "kindList": "Liste (JSON)"
   },
   "notFound": {
     "title": "Seite nicht gefunden",
@@ -5412,5 +5787,398 @@
   "wizardLeave": {
     "title": "Verlassen, ohne zu erstellen?",
     "message": "Dein Team-Setup, einschließlich eingegebener Prompts und API-Schlüssel, wurde noch nicht erstellt und geht verloren."
+  },
+  "cluster": {
+    "verdict": {
+      "healthy": "Fehlerfrei",
+      "degraded": "Eingeschränkt",
+      "partitioned": "Partitioniert",
+      "singleNode": "Einzelner Knoten",
+      "healthyText": "Alle Knoten senden Heartbeats und sind mit NATS verbunden. Turns einer Konversation überschneiden sich nirgends im Cluster, und jeder Schreibvorgang ist durch ein Fencing-Token geschützt.",
+      "degradedNatsText": "Der Knoten, der diese Seite ausliefert, erreicht NATS nicht. Er arbeitet weiter, aber ohne Cluster-Koordination: keine gemeinsamen Leases, kein Fencing, keine clusterweiten Ereignisse.",
+      "degradedText": "NATS ist erreichbar, aber ein Knoten fehlt, ist verspätet oder meldet Probleme. Konversationen, deren Turns er hielt, werden innerhalb der Lease-TTL übergeben.",
+      "partitionedText": "Ein NATS-Server mit einem Replikat eines Streams oder Buckets ist offline: Der NATS-Cluster selbst ist geteilt. Schreibvorgänge laufen weiter, solange ein Quorum besteht.",
+      "singleNodeText": "Diese Bereitstellung betreibt einen einzigen EDDI-Knoten mit dem In-Memory-Koordinator. Zwischen Knoten gibt es nichts zu koordinieren."
+    },
+    "next": {
+      "deadLetters": "Prüfen Sie die wartenden Dead Letters: Spielen Sie jene erneut ab, deren Ursache behoben ist, und verwerfen Sie den Rest.",
+      "singleNode": "Zum Skalieren eddi.messaging.type=nats setzen und weitere Replikate starten — siehe Clustering-Leitfaden.",
+      "partitioned": "Prüfen Sie die unten als offline aufgeführten NATS-Server; JetStream gleicht die Replikate an, sobald sie zurück sind.",
+      "nats": "Stellen Sie die NATS-Erreichbarkeit von diesem Knoten wieder her (Netzwerk, Zugangsdaten, NATS-Pods). Er verbindet und synchronisiert sich selbstständig neu.",
+      "nodeLost": "Prüfen Sie, warum der verlorene Knoten angehalten hat (Absturz, OOM-Kill, Netzwerk). Seine Leases laufen innerhalb der Lease-TTL ab; eine hängende Lease kann zwangsweise freigegeben werden.",
+      "degraded": "Prüfen Sie die unten markierten Knoten und die Aktivitätszeitleiste auf Änderungen."
+    },
+    "reason": {
+      "natsUnreachable": "NATS von diesem Knoten nicht erreichbar",
+      "natsReconnecting": "Verbindung zu NATS wird wiederhergestellt",
+      "nodeLost": "Ein Knoten ging verloren",
+      "nodeStale": "Heartbeat eines Knotens verspätet",
+      "memberDegraded": "Ein Knoten meldet eingeschränkten Modus",
+      "nodeDraining": "Ein Knoten ist entleert",
+      "natsPeerOffline": "Ein NATS-Replikat ist offline",
+      "natsReplicaBehind": "Ein NATS-Replikat holt auf",
+      "localDeadLetters": "Dead Letters auf einem Knoten zurückgehalten",
+      "deadLettersWaiting": "Wartende Dead Letters"
+    },
+    "node": {
+      "live": "Aktiv",
+      "stale": "Heartbeat verspätet",
+      "lost": "Verloren",
+      "left": "Ausgetreten",
+      "self": "antwortend",
+      "leaderHelp": "Führt den HITL-Wiederherstellungslauf nach Abstürzen für den Cluster aus",
+      "leader": "HITL-Leader",
+      "draining": "Entleert",
+      "degraded": "Kein NATS",
+      "lostText": "Sendet seit {{ago}} keine Heartbeats mehr, ohne ausgetreten zu sein — beendet, abgestürzt oder von NATS getrennt. Die gehaltenen Leases ({{leases}}) werden innerhalb von {{ttl}} übernommen.",
+      "leftText": "Vor {{ago}} ordnungsgemäß heruntergefahren, Leases freigegeben.",
+      "heartbeat": "Heartbeat",
+      "uptime": "Laufzeit",
+      "rtt": "NATS-RTT",
+      "inFlight": "Aktive Turns",
+      "leases": "Leases",
+      "queue": "Wartend",
+      "localDeadLetters": "{{n}} Dead Letters lokal zurückgehalten, warten auf NATS",
+      "unknown": "Unbekannt",
+      "unknownText": "Der antwortende Knoten erreicht NATS nicht und kann daher nicht sehen, ob dieser Knoten noch läuft. Dies sind seine letzten bekannten Werte.",
+      "lostExpiredText": "Hat vor {{ago}} ohne Abmeldung aufgehört, Heartbeats zu senden — beendet, abgestürzt oder von NATS getrennt. Seine Leases sind abgelaufen: andere Knoten führen diese Konversationen jetzt aus."
+    },
+    "leaseFlag": {
+      "holderGone": "Inhaber weg",
+      "holderRestarted": "Inhaber neu gestartet",
+      "notRenewed": "Nicht erneuert",
+      "longRunning": "Lang laufend",
+      "contended": "Anderer Knoten wartet",
+      "holderGoneHelp": "Der haltende Knoten hat keinen Präsenzeintrag — er ist ausgefallen oder hat NATS verloren. Die Lease läuft innerhalb der TTL ab.",
+      "holderRestartedHelp": "Der haltende Knoten ist mit einem neuen Boot zurück; er gibt seine alten Leases beim Wiederverbinden frei.",
+      "notRenewedHelp": "Seit zwei Intervallen keine Heartbeat-Erneuerung: Der Halter hängt, ist pausiert oder von NATS getrennt.",
+      "longRunningHelp": "Länger gehalten als das Acquire-Timeout: Dahinter wartende Turns erhalten 409.",
+      "contendedHelp": "Ein Turn auf einem anderen Knoten wartet auf diese Lease."
+    },
+    "dlReason": {
+      "fenced": "Abgewiesener Schreibvorgang",
+      "timeout": "Zeitüberschreitung",
+      "failed": "Fehlgeschlagen",
+      "fencedHelp": "Dieser Knoten hat die Lease der Konversation verloren, während der Turn lief, und inzwischen wurde ein neuerer Turn festgeschrieben. Die Datenbank hat den Schreibvorgang dieses Turns abgewiesen (Token {{token}} < gespeichert {{stored}}), damit er den neueren nicht überschreibt. Die Antwort hat den Benutzer eventuell schon erreicht; der Konversationsverlauf enthält sie nicht.",
+      "timeoutHelp": "Der Turn hat das Zeitlimit überschritten. Prüfen Sie vor dem erneuten Abspielen die Latenz des Modells oder der Tools des Agenten.",
+      "failedHelp": "Der Turn ist nach dem Start fehlgeschlagen. Beheben Sie vor dem erneuten Abspielen die im Fehler angezeigte Ursache.",
+      "leaseLost": "Lease verloren",
+      "leaseLostHelp": "Dieser Knoten hat die Lease der Konversation verloren, während der Turn lief. Der Turn wurde daher gestoppt, bevor sein Ergebnis gespeichert wurde. Der Benutzer hat möglicherweise keine Antwort gesehen. Wiederhole ihn, wenn die Nachricht noch zählen soll.",
+      "otherHelp": "Mit dem Grund „{{reason}}“ erfasst. Der Fehler unten sagt, was passiert ist."
+    },
+    "notReplayable": {
+      "secret": "Nicht erneut abspielbar: Der Client hat die Eingabe als geheim markiert, daher wurde sie nie gespeichert.",
+      "notCaptured": "Nicht erneut abspielbar: Die Eingabeerfassung ist deaktiviert (eddi.coordinator.dead-letter.capture-input=false).",
+      "notATurn": "Nicht erneut abspielbar: Dies war kein Benutzer-Turn (eine HITL-Fortsetzung oder der Turn eines Gruppenmitglieds).",
+      "unknown": "Nicht erneut abspielbar."
+    },
+    "outcome": {
+      "replayed": "Erneut abgespielt",
+      "discarded": "Verworfen",
+      "notFound": "Bereits entfernt",
+      "notReplayable": "Nicht erneut abspielbar",
+      "rejected": "Abgelehnt — behalten",
+      "unavailable": "NATS nicht erreichbar — behalten",
+      "inProgress": "Wird gerade von jemand anderem erneut abgespielt — nicht doppelt ausgeführt"
+    },
+    "activity": {
+      "nodeJoined": "Knoten {{node}} beigetreten",
+      "nodeLeft": "Knoten {{node}} ordnungsgemäß ausgetreten",
+      "nodeLost": "Knoten {{node}} verloren (keine Heartbeats mehr)",
+      "nodeStale": "Heartbeat von Knoten {{node}} verspätet",
+      "degradedOn": "Knoten {{node}} hat NATS verloren — eingeschränkter Modus ({{policy}})",
+      "degradedOff": "Knoten {{node}} wieder mit NATS verbunden",
+      "leaseTakeover": "Lease von {{conversation}} von {{from}} übernommen",
+      "fenceRejected": "Schreibvorgang für {{conversation}} durch Fencing abgewiesen — als Dead Letter abgelegt",
+      "deadLetter": "Turn von {{conversation}} als Dead Letter abgelegt ({{reason}})",
+      "deployment": "Agent {{agent}} v{{version}} {{status}} auf {{origin}} — {{node}} nach {{ms}} ms erreicht",
+      "caches": "{{n}} Cache-Invalidierungen in der letzten Minute",
+      "adminRelease": "{{actor}} hat die Lease von {{conversation}} zwangsweise freigegeben ({{outcome}})",
+      "adminResync": "{{actor}} hat alle Caches neu synchronisiert",
+      "adminReconcile": "{{actor}} hat Bereitstellungen abgeglichen",
+      "adminForward": "{{actor}} hat {{n}} lokale Dead Letters weitergeleitet",
+      "adminReplay": "{{actor}} hat Dead Letters erneut abgespielt ({{ok}} von {{n}})",
+      "adminDiscard": "{{actor}} hat Dead Letters verworfen ({{ok}} von {{n}})",
+      "adminDrain": "{{actor}} hat Knoten {{node}} entleert",
+      "adminUndrain": "{{actor}} hat die Entleerung von Knoten {{node}} aufgehoben",
+      "error": "Fehler",
+      "warning": "Warnung",
+      "info": "Info",
+      "recentTitle": "Letzte Aktivität",
+      "title": "Cluster-Aktivität",
+      "pending": "{{n}} neu während der Pause",
+      "resume": "Fortsetzen",
+      "pause": "Pausieren",
+      "onlyProblems": "Nur Warnungen und Fehler",
+      "loadError": "Der Aktivitätsverlauf konnte nicht geladen werden.",
+      "empty": "Noch keine Ereignisse",
+      "seenBy": "gesehen von {{node}}",
+      "offline": "Der Live-Feed ist nicht verbunden; er versucht es alle 30 Sekunden erneut.",
+      "adminResyncQueued": "{{actor}} hat die Caches von {{node}} neu synchronisiert; die anderen Knoten erhalten es, sobald NATS wieder erreichbar ist"
+    },
+    "activityGroup": {
+      "nodes": "Knoten",
+      "leases": "Leases",
+      "deadLetters": "Dead Letters",
+      "degraded": "Eingeschränkter Modus",
+      "deployments": "Bereitstellungen",
+      "caches": "Caches",
+      "admin": "Admin-Aktionen"
+    },
+    "diagnose": {
+      "ok": "Nicht blockiert",
+      "busy": "Beschäftigt — ein Turn läuft",
+      "stuck": "Blockiert",
+      "attention": "Erfordert Aufmerksamkeit",
+      "notFound": "Nicht gefunden",
+      "title": "Warum ist diese Konversation blockiert?",
+      "run": "Diagnostizieren",
+      "hint": "Fügen Sie die ID einer Konversation ein, die nicht antwortet oder ständig 409 zurückgibt.",
+      "openConversation": "Konversation öffnen",
+      "state": "Status",
+      "steps": "Schritte",
+      "lease": "Lease",
+      "leaseValue": "{{node}}, gehalten seit {{age}}, Token {{rev}}",
+      "noLease": "keine",
+      "suggested": "Empfohlen:"
+    },
+    "finding": {
+      "orphaned": "Die Lease wird von {{node}} gehalten, der weg ist oder sie nicht mehr erneuert (letzte Erneuerung vor {{renewal}}). Neue Turns warten, bis sie abläuft.",
+      "longRunning": "Auf {{node}} läuft seit {{age}} ein Turn — länger als das Acquire-Timeout; dahinter wartende Turns erhalten 409.",
+      "running": "Auf {{node}} läuft ein Turn ({{age}}); seine Lease wird normal erneuert.",
+      "waiting": "Ein Turn auf {{node}} wartet auf diese Lease.",
+      "queued": "Turns warten darauf: {{queues}}.",
+      "awaitingHuman": "Sie ist für eine menschliche Freigabe pausiert — nichts läuft, bis jemand entscheidet.",
+      "inProgress": "Sie ist als in Bearbeitung markiert, aber kein Turn hält ihre Lease oder wartet — vermutlich ist ein Knoten mitten im Turn ausgefallen. Der HITL-Wiederherstellungslauf setzt sie nach ihrem Mindestalter zurück.",
+      "error": "Ihr letzter Turn endete mit einem Fehler. Die nächste Nachricht wird normal verarbeitet.",
+      "deadLettered": "{{n}} ihrer Turns wurden als Dead Letters abgelegt ({{replayable}} erneut abspielbar).",
+      "nats": "NATS ist von diesem Knoten nicht erreichbar, daher kann ihre Lease nicht gelesen werden.",
+      "notFound": "Keine Konversation, Lease oder Dead Letter mit dieser ID.",
+      "idle": "Kein Turn läuft oder wartet. Die Konversation ist inaktiv und nimmt die nächste Nachricht sofort an."
+    },
+    "findingAction": {
+      "wait": "Warten — löst sich von selbst",
+      "release": "Lease zwangsweise freigeben",
+      "replay": "Ihre Dead Letters erneut abspielen oder verwerfen",
+      "approvals": "Freigabe-Warteschlange öffnen",
+      "cancel": "Laufenden Turn auf der Konversationsseite abbrechen"
+    },
+    "access": {
+      "denied": "Diese Ansicht erfordert die Rolle eddi-admin oder eddi-viewer",
+      "deniedText": "Bitten Sie einen Administrator um Zugriff. Ohne eine dieser Rollen wird auf dieser Seite nichts angezeigt.",
+      "readOnly": "Schreibgeschützt",
+      "deadLettersAdmin": "Die Einträge enthalten Benutzereingaben, daher kann nur eddi-admin sie öffnen, erneut abspielen oder verwerfen."
+    },
+    "tab": {
+      "overview": "Übersicht",
+      "leases": "Leases",
+      "deadLetters": "Dead Letters",
+      "activity": "Aktivität",
+      "diagnose": "Blockierte Konversation"
+    },
+    "answeredBy": "Beantwortet von {{node}}",
+    "staleNotice": "Die letzte Aktualisierung ist fehlgeschlagen — dies ist der Stand von vor {{age}}.",
+    "title": "Cluster",
+    "subtitle": "Zustand, Knoten, Leases und fehlgeschlagene Turns aller EDDI-Replikate — und was Sie gefahrlos dagegen tun können",
+    "tabs": "Bereiche der Cluster-Konsole",
+    "single": {
+      "title": "Was der Cluster-Modus bietet",
+      "scale": "Beliebig viele EDDI-Replikate hinter einem einfachen Round-Robin-Load-Balancer, mit gemeinsamer Datenbank und einem NATS-JetStream-Cluster.",
+      "leases": "Konversations-Leases mit Fencing-Tokens: Turns einer Konversation überschneiden sich nirgends, und ein Knoten, der seine Lease verloren hat, kann neuere Turns nicht überschreiben.",
+      "failover": "Failover: Die Konversationen eines abgestürzten Knotens laufen innerhalb der Lease-TTL auf einem anderen Knoten weiter; Dead Letters, Caches, Bereitstellungen und Abbrüche wirken clusterweit.",
+      "docs": "Clustering-Leitfaden lesen"
+    },
+    "metrics": {
+      "text": "Verläufe über die Zeit zeigt das Grafana-Dashboard „EDDI Cluster“ (Metriken eddi_cluster_*).",
+      "reference": "Referenz der Cluster-Metriken",
+      "raw": "Rohmetriken dieses Knotens",
+      "runbook": "Clustering-Runbook"
+    },
+    "dl": {
+      "filters": "Filter",
+      "filterNode": "Knoten",
+      "anyNode": "Alle Knoten",
+      "title": "Dead Letters",
+      "open": "Untersuchen",
+      "none": "Keine wartenden — jeder fehlgeschlagene Turn wurde erneut abgespielt oder verworfen.",
+      "waiting": "{{n}} wartend",
+      "localCount": "{{n}} auf Knoten ohne NATS zurückgehalten",
+      "allDone": "Erledigt: {{ok}} von {{n}}",
+      "someFailed": "{{ok}} von {{n}} erledigt — Ergebnis je Eintrag siehe unten",
+      "explain": "Turns, die nach dem Start fehlgeschlagen sind. Erneutes Abspielen sendet die erfasste Eingabe als NEUEN Turn der Konversation — ihre Nebenwirkungen laufen erneut —, daher erst abspielen, wenn die Ursache behoben ist. Verwerfen ist endgültig.",
+      "filterReason": "Grund",
+      "anyReason": "Alle Gründe",
+      "filterAgent": "Agent-ID",
+      "filterConversation": "Konversations-ID",
+      "filterTime": "Zeit",
+      "anyTime": "Beliebige Zeit",
+      "lastHour": "Letzte Stunde",
+      "lastDay": "Letzte 24 Stunden",
+      "lastWeek": "Letzte 7 Tage",
+      "bulk": "Ausgewählte Einträge",
+      "selected": "{{n}} ausgewählt",
+      "replaySelected": "{{n}} erneut abspielen",
+      "discardSelected": "{{n}} verwerfen",
+      "clearSelection": "Auswahl aufheben",
+      "replayResult": "Erneut abspielen: {{ok}} von {{n}} abgespielt",
+      "discardResult": "Verwerfen: {{ok}} von {{n}} verworfen",
+      "empty": "Keine Dead Letters",
+      "scanned": "Bisher {{n}} Einträge durchsucht",
+      "selectAll": "Alle auf dieser Seite auswählen",
+      "colWhen": "Zeitpunkt",
+      "colReason": "Grund",
+      "colConversation": "Konversation",
+      "colNode": "Knoten",
+      "colError": "Fehler",
+      "select": "Eintrag {{id}} auswählen",
+      "notReplayableShort": "Nicht abspielbar",
+      "prev": "Zurück",
+      "page": "Seite {{n}}",
+      "next": "Weiter",
+      "detailTitle": "Dead Letter #{{id}}",
+      "replayTitle": "{{n}} Dead Letters als neue Turns erneut abspielen?",
+      "discardTitle": "{{n}} Dead Letters endgültig verwerfen?",
+      "replayText": "Jede erfasste Eingabe wird erneut als neuer Turn ihrer Konversation gesendet, in Ihrem Namen, mit gesetztem replayOf. Ihre Tools und Nebenwirkungen laufen erneut. Ein Eintrag wird erst entfernt, wenn sein Turn angenommen wurde; das Ergebnis jedes Eintrags wird anschließend angezeigt.",
+      "discardText": "Die Einträge werden für alle Knoten aus dem gemeinsamen Stream entfernt. Sie können danach nicht mehr erneut abgespielt werden.",
+      "replay": "Erneut abspielen",
+      "discard": "Verwerfen",
+      "colAgent": "Agent",
+      "environment": "Umgebung",
+      "fence": "Fencing-Tokens",
+      "fenceValue": "abgewiesener Schreibvorgang {{token}} < Konversation {{stored}}",
+      "input": "Eingabe des Turns",
+      "secret": "•••••• — vom Client als geheim markiert, nie gespeichert"
+    },
+    "release": {
+      "title": "Lease von {{id}} zwangsweise freigeben?",
+      "text": "Die von {{node}} gehaltene Lease wird gelöscht, und der nächste Turn dieser Konversation kann sofort auf einem beliebigen Knoten mit einem neueren Fencing-Token laufen. Das ist auch dann sicher, wenn {{node}} noch läuft: Das Fencing weist seinen verspäteten Schreibvorgang ab, und der Turn wird als Dead Letter abgelegt, wo Sie ihn erneut abspielen können. Sonst ändert sich nichts.",
+      "renewedTitle": "Der Inhaber ist aktiv — trotzdem freigeben?",
+      "renewedText": "{{node}} hat diese Lease nach Ihrer Ansicht erneuert, sein Turn läuft also noch. Die Freigabe bricht diesen Turn beim nächsten Schritt ab; versucht er dennoch zu schreiben, weist das Fencing den Schreibvorgang ab und der Turn wird zum erneuten Abspielen als Dead Letter abgelegt."
+    },
+    "leases": {
+      "release": "Freigeben",
+      "title": "Konversations-Leases",
+      "count": "{{total}} gehalten · {{suspicious}} verdächtig",
+      "search": "Konversation, Agent oder Knoten…",
+      "onlySuspicious": "Nur verdächtige",
+      "explain": "Eine Lease erlaubt genau einem Knoten, den Turn einer Konversation auszuführen. Ihre Revision ist das Fencing-Token: Die Datenbank weist einen Schreibvorgang mit einem älteren ab.",
+      "empty": "Keine Lease gehalten — kein Turn läuft",
+      "colConversation": "Konversation / Schlüssel",
+      "colAgent": "Agent",
+      "colHolder": "Inhaber",
+      "colAge": "Gehalten seit",
+      "colRenewed": "Erneuert",
+      "colFence": "Fencing",
+      "colFlags": "Markierungen",
+      "releaseAria": "Lease von {{id}} zwangsweise freigeben",
+      "truncated": "Nur die ersten 5.000 Leases wurden gelesen.",
+      "natsDown": "Leases liegen in NATS, das der antwortende Knoten gerade nicht erreicht. Sie erscheinen wieder, sobald er sich neu verbindet."
+    },
+    "health": {
+      "members": "{{live}} von {{total}} Knoten aktiv",
+      "nextStep": "Nächster Schritt:",
+      "reasons": "Gründe"
+    },
+    "degraded": {
+      "title": "Knoten {{node}} ist seit {{duration}} ohne NATS",
+      "titleNow": "Knoten {{node}} ist ohne NATS",
+      "reject": "Richtlinie reject: Dieser Knoten weist jeden Turn mit 409 und Retry-After ab, damit Clients es auf einem Knoten mit NATS erneut versuchen. Nichts läuft ohne Fencing; ein Client, der nur diesen Knoten erreicht, kann gar nicht kommunizieren.",
+      "local": "Richtlinie local: Dieser Knoten antwortet weiter, ordnet Turns nur unter seinen eigenen Anfragen und ohne Fencing. Bearbeitet ein anderer Knoten dieselbe Konversation zwischenzeitlich, verarbeiten sie eventuell beide und kennen den Kontext des anderen nicht — nichts geht verloren, Anfügungen werden zusammengeführt.",
+      "what": "Hier ebenfalls pausiert: Cache-Ereignisse (beim Wiederverbinden in Warteschlange und erneut ausgeliefert), HITL-Wiederherstellung, clusterweiter Abbruch. Signierte Envelopes schlagen sicher fehl. Alles erholt sich selbstständig, sobald NATS zurück ist."
+    },
+    "colActions": "Aktionen",
+    "ago": "vor {{duration}}",
+    "nats": {
+      "peerOffline": "offline",
+      "peerLeader": "Leader",
+      "peerCurrent": "aktuell",
+      "peerBehind": "{{lag}} im Rückstand",
+      "title": "NATS und JetStream",
+      "server": "Verbunden mit",
+      "cluster": "NATS-Cluster",
+      "rtt": "Umlaufzeit",
+      "reconnects": "Neuverbindungen seit Start",
+      "servers": "Bekannte Server",
+      "partial": "Ein Teil der JetStream-Ansicht konnte nicht gelesen werden: {{error}}",
+      "epoch": "Generation des Lease-Buckets: erstes Fencing-Token {{first}}, letztes {{last}}. Ein neu erstellter Bucket beginnt oberhalb aller früheren Tokens, sodass das Fencing den Verlust von NATS-Daten übersteht.",
+      "streams": "Streams",
+      "colName": "Name",
+      "colMessages": "Nachrichten",
+      "colBytes": "Größe",
+      "colLag": "Max. Consumer-Rückstand",
+      "colReplicas": "Replikate (Leader ★)",
+      "buckets": "KV-Buckets",
+      "colValues": "Werte",
+      "colTtl": "TTL",
+      "account": "Kontonutzung: {{storage}} gespeichert, {{memory}} im Speicher, {{streams}} Streams, {{consumers}} Consumer."
+    },
+    "nodes": {
+      "title": "Knoten"
+    },
+    "drain": {
+      "title": "Knoten {{node}} entleeren?",
+      "description": "Der Knoten nimmt keine neuen Turns mehr an: Ein eintreffender Turn erhält 409 mit Retry-After, und der Client versucht es auf einem anderen Knoten. Seine Readiness-Prüfung meldet DOWN, sodass Kubernetes keinen Verkehr mehr dorthin leitet. Laufende Turns werden abgeschlossen. Vor einem Neustart des Knotens verwenden; Aufheben oder ein Neustart beendet den Zustand.",
+      "confirm": "Entleeren"
+    },
+    "undrain": {
+      "title": "Entleerung von Knoten {{node}} aufheben?",
+      "description": "Der Knoten nimmt wieder Turns an und meldet sich als bereit.",
+      "confirm": "Entleerung aufheben"
+    },
+    "action": {
+      "resyncTitle": "Alle Caches im Cluster neu synchronisieren?",
+      "resyncText": "Jeder Knoten leert seine invalidierbaren Caches (Secrets, Variablen, Verbindungen, Bereitstellungen, Trigger, Konversationszustände) und lädt sie neu aus der Datenbank. Es ändern sich keine Daten; rechnen Sie mit einer kurzen Spitze an Datenbank-Lesezugriffen. Verwenden, wenn ein Knoten veraltete Konfiguration ausliefert.",
+      "resync": "Caches neu synchronisieren",
+      "reconcileTitle": "Bereitstellungen jetzt abgleichen?",
+      "reconcileText": "Jeder Knoten führt seinen Bereitstellungsabgleich sofort statt innerhalb von 10 Sekunden aus: Er stellt bereit, was die Datenbank als bereitgestellt führt, und entfernt, was sie nicht mehr führt. Dieselbe Arbeit wie der periodische Abgleich, daher gefahrlos wiederholbar.",
+      "reconcile": "Bereitstellungen abgleichen",
+      "forwardTitle": "Lokal zurückgehaltene Dead Letters weiterleiten?",
+      "forwardText": "Knoten, die NATS nicht erreichten, haben ihre Dead Letters im Arbeitsspeicher behalten, wo ein Neustart sie verlieren würde. Jeder Knoten verschiebt sie jetzt in den gemeinsamen Stream (das geschieht auch automatisch beim Wiederverbinden). Nichts wird erneut abgespielt.",
+      "forward": "Dead Letters weiterleiten",
+      "title": "Wiederherstellungsaktionen",
+      "subtitle": "Gefahrlos wiederholbar und protokolliert. Das zwangsweise Freigeben einer Lease und das Entleeren eines Knotens finden Sie bei der jeweiligen Lease bzw. dem Knoten. Nichts hier kann Daten löschen oder das Fencing umgehen.",
+      "outcomeDone": "Erledigt",
+      "outcomeQueued": "In Warteschlange — wird gesendet, sobald NATS wieder erreichbar ist",
+      "outcomePartial": "Teilweise erledigt",
+      "outcomeStarted": "Gestartet — läuft auf einigen Knoten noch"
+    },
+    "audit": {
+      "title": "Audit-Trail der Wiederherstellungsaktionen",
+      "empty": "Bisher wurde keine Wiederherstellungsaktion ausgeführt.",
+      "hint": "Wird einige Sekunden nach jeder Aktion im manipulationssicheren Audit-Ledger unter dem Trail „cluster-admin“ erfasst.",
+      "bulk": "{{ok}} von {{n}} erledigt"
+    }
+  },
+  "grantRequired": {
+    "title": "Diesem Agenten sind seine Vault-Schlüssel nicht freigegeben",
+    "titleRefused": "Bereitstellung abgelehnt: Vault-Schlüssel nicht freigegeben",
+    "copied": "Anfrage kopiert — senden Sie sie an einen Administrator",
+    "issueWithAgents": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit freigegeben für: {{agents}}.",
+    "issueWithCount_one": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit für {{count}} Agenten freigegeben.",
+    "issueWithCount_other": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, derzeit für {{count}} Agenten freigegeben.",
+    "issue": "„{{agent}}“ verwendet den eingeschränkten Schlüssel „{{key}}“, der nur anderen Agenten freigegeben ist.",
+    "unfixable": "„{{reference}}“ ist keine einfache Vault-Referenz und kann daher hier nicht freigegeben werden. Ändern Sie die Konfiguration des Agenten, sodass sie einen Vault-Schlüssel verwendet, den er nutzen darf.",
+    "questionAll": "Allen Agenten die Nutzung dieser Schlüssel erlauben?",
+    "question": "„{{agent}}“ zur Freigabe hinzufügen?",
+    "allowAll": "Stattdessen allen Agenten die Nutzung dieses Schlüssels erlauben",
+    "allowAllWarning": "Jeder Agent dieser Installation — auch später erstellte — kann ihn dann nutzen. Damit entfällt die einzige Begrenzung der Reichweite dieses Schlüssels.",
+    "nonAdmin": "Nur ein Administrator kann ändern, wer einen Vault-Schlüssel nutzen darf. Bitten Sie einen Administrator, diesen Agenten zur Freigabe hinzuzufügen, und stellen Sie dann erneut bereit.",
+    "copyRequest": "Anfrage für einen Administrator kopieren",
+    "losingAccess": "Diese bereitgestellten Agenten würden den Zugriff auf den Schlüssel verlieren:",
+    "deployAnyway": "Trotzdem bereitstellen",
+    "applyAnyway": "Trotzdem übernehmen und bereitstellen",
+    "allowAllAndDeploy": "Alle erlauben und bereitstellen",
+    "addAndDeploy": "Hinzufügen und bereitstellen",
+    "cancelled": "Nicht bereitgestellt — der Vault-Schlüssel wurde nicht freigegeben.",
+    "fix": "Beheben",
+    "titleMany": "Diesen Agenten sind ihre Vault-Schlüssel nicht freigegeben",
+    "issueMany": "Agenten, die den eingeschränkten Schlüssel \"{{key}}\" verwenden, der nur anderen Agenten freigegeben ist: {{agents}}.",
+    "questionMany": "Alle diese Agenten zur Freigabe hinzufügen?",
+    "nonAdminMany": "Nur ein Administrator kann ändern, wer einen Vault-Schlüssel verwenden darf. Bitten Sie einen, diese Agenten zur Freigabe hinzuzufügen, und stellen Sie sie danach erneut bereit."
+  },
+  "deployMany": {
+    "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
+    "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
+    "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
   }
 }

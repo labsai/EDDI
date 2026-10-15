@@ -1,5 +1,7 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  type ApprovalStatusSummary,
   listPendingApprovals,
   listAllGroupPendingApprovals,
   getApprovalStatus,
@@ -15,6 +17,7 @@ import {
   bindDecisionToPause,
   currentGroupPauseOf,
   currentPauseOf,
+  describesPause,
   isPauseChanged,
   type ShownPause,
 } from "@/lib/hitl-pause-binding";
@@ -84,6 +87,34 @@ export function useAllGroupPendingApprovals(limit = 200) {
   };
 }
 
+/** How long a paused conversation's approval-status may fail to describe the pause before it is an error. */
+const APPROVAL_DETAILS_WINDOW_MS = 10_000;
+/** Poll delays while the stored pause has not caught up with the stream; the last repeats. */
+const APPROVAL_POLL_BACKOFF_MS = [500, 1000, 2000];
+
+export interface ApprovalStatusOptions {
+  /**
+   * The caller KNOWS the conversation is paused (it saw the stream's `done`),
+   * so a response that does not describe that pause is "not stored yet", not an
+   * answer. Turns on fast re-polling and the `detailsPending`/`detailsError`
+   * window, and withholds a non-matching response from `data`. See
+   * `describesPause`.
+   */
+  verifyPause?: boolean;
+  /**
+   * For a READ-ONLY surface that only shows the pause (a chat notice): called
+   * once, when the pause that was seen stored is no longer AWAITING_HUMAN —
+   * decided elsewhere, or auto-decided by its timeout policy. Also keeps polling
+   * (every 5 s) after the pause is described, which a deciding card has no use
+   * for. A not-yet-stored read can never trigger it: only a pause that was
+   * actually seen counts. Requires `verifyPause`.
+   */
+  onResolved?: () => void;
+}
+
+/** How often a watching surface re-reads a pause it has already seen stored. */
+const APPROVAL_WATCH_MS = 5000;
+
 /**
  * Structured approval status of a paused 1:1 conversation — the only source of
  * `pauseDetails` (per-call tool name + redacted arguments for a TOOL_CALL pause,
@@ -100,17 +131,116 @@ export function useAllGroupPendingApprovals(limit = 200) {
  * makes the fresh fetch a cache-model guarantee instead of a removal
  * side-effect.) Callers without a pause timestamp omit it and keep the old
  * behaviour.
+ *
+ * Pass `{ verifyPause: true }` when the pause was announced by a stream: the
+ * `done` event is emitted before the paused memory is persisted, so the first
+ * read can say "not paused". The hook then re-polls (500 ms, backing off to 2 s)
+ * for up to 10 s until the response describes this pause, and exposes
+ * `detailsPending` / `detailsError` / `retry` for the approval card. Never an
+ * endless spinner: past the window it is `detailsError`.
  */
 export function useApprovalStatus(
   conversationId: string | undefined,
   enabled = true,
   pauseKey?: string | null,
+  options?: ApprovalStatusOptions,
 ) {
-  return useQuery({
-    queryKey: ["approval-status", conversationId, pauseKey ?? null],
-    queryFn: () => getApprovalStatus(conversationId!),
-    enabled: enabled && !!conversationId,
+  const verifyPause = options?.verifyPause === true;
+  const active = enabled && !!conversationId;
+  const expectedPausedAt = pauseKey ?? null;
+  // One window per (conversation, pause, retry). It restarts when any of them
+  // changes, so a Retry gets a full window rather than the remainder of the last.
+  const [attempt, setAttempt] = useState(0);
+  const watching = verifyPause && !!options?.onResolved;
+  // The pause was seen stored (so any later non-AWAITING read is a genuine
+  // resolution), and whether that resolution was already reported — for ONE
+  // watched pause. A mounted notice can move on to another conversation or
+  // pause; carried over, "resolved" would silence the new one and "seen" would
+  // read its not-yet-stored READY as a decision. Read and written only from the
+  // async query function and the interval callback, never during render.
+  const watchKey = `${conversationId ?? ""}|${expectedPausedAt ?? ""}`;
+  const watchRef = useRef({ key: watchKey, seen: false, resolved: false });
+  const watchFor = (key: string) => {
+    if (watchRef.current.key !== key) watchRef.current = { key, seen: false, resolved: false };
+    return watchRef.current;
+  };
+  const onResolvedRef = useRef(options?.onResolved);
+  useEffect(() => {
+    onResolvedRef.current = options?.onResolved;
   });
+  const windowId = `${conversationId ?? ""}|${expectedPausedAt ?? ""}|${attempt}`;
+  const [timedOutWindow, setTimedOutWindow] = useState<string | null>(null);
+  const timedOut = verifyPause && timedOutWindow === windowId;
+
+  useEffect(() => {
+    if (!verifyPause || !active) return;
+    const id = setTimeout(() => setTimedOutWindow(windowId), APPROVAL_DETAILS_WINDOW_MS);
+    return () => clearTimeout(id);
+  }, [verifyPause, active, windowId]);
+
+  const query = useQuery({
+    queryKey: ["approval-status", conversationId, pauseKey ?? null],
+    queryFn: async () => {
+      const status = await getApprovalStatus(conversationId!);
+      if (watching) {
+        const watch = watchFor(watchKey);
+        if (describesPause(status, expectedPausedAt)) {
+          watch.seen = true;
+        } else if (watch.seen && !watch.resolved && status.state !== "AWAITING_HUMAN") {
+          watch.resolved = true;
+          onResolvedRef.current?.();
+        }
+      }
+      return status;
+    },
+    // Verifying callers want a fresh read on mount: a cached response from an
+    // earlier pause of this conversation must not stand in for this one.
+    staleTime: verifyPause ? 0 : undefined,
+    enabled: active,
+    // Poll fast until the response describes the pause, then stop. A function,
+    // so the answer is re-derived from each response rather than frozen at the
+    // render that created the query. `timedOut` is read from the closure: it is
+    // state, so flipping it re-renders and the observer picks up the new options.
+    refetchInterval: verifyPause
+      ? (q) => {
+          if (watchFor(watchKey).resolved) return false;
+          if (describesPause(q.state.data, expectedPausedAt)) return watching ? APPROVAL_WATCH_MS : false;
+          if (timedOut) return false;
+          const polls = q.state.dataUpdateCount + q.state.errorUpdateCount;
+          // The interval is re-derived AFTER each response, so the first
+          // response (polls = 1) must already map to the first delay.
+          const step = Math.min(Math.max(polls - 1, 0), APPROVAL_POLL_BACKOFF_MS.length - 1);
+          return APPROVAL_POLL_BACKOFF_MS[step];
+        }
+      : undefined,
+  });
+
+  const { refetch } = query;
+  const retry = useCallback(() => {
+    setAttempt((n) => n + 1);
+    return refetch();
+  }, [refetch]);
+
+  if (!verifyPause) {
+    return { ...query, latest: query.data, detailsPending: active && query.isLoading, detailsError: active && query.isError, retry };
+  }
+
+  const describes = describesPause(query.data, expectedPausedAt);
+  // A failed read is an error only once it has stopped trying: while a Retry is
+  // in flight the card says "loading", not "failed" again.
+  const failed = query.isError && !query.isFetching;
+  return {
+    ...query,
+    // A response that does not describe THIS pause is not shown at all — its
+    // `pauseDetails` is null or belongs to an earlier pause, and passing it on
+    // would render a card with nothing on it to object to.
+    data: describes ? query.data : (undefined as ApprovalStatusSummary | undefined),
+    /** The last response as received, described or not — for a surface that must tell "not stored yet" from "decided". */
+    latest: query.data,
+    detailsPending: active && !describes && !timedOut && !failed,
+    detailsError: active && !describes && (timedOut || failed),
+    retry,
+  };
 }
 
 // ── Mutations ────────────────────────────────────────────────────
@@ -235,11 +365,11 @@ export function useCancelGroupDiscussion() {
 
 /**
  * Submit a HUMAN group member's turn (I6). Unlike the approve/stream resume,
- * this is a plain synchronous REST call — the backend has no `/human-input/stream`
- * variant, so the discussion resumes on the request thread and the response is
- * the settled `GroupConversation` (the next pause point, or COMPLETED). There is
- * no live token-by-token progress to show while it's in flight, only a loading
- * state until it resolves.
+ * this is a plain REST call — the backend has no `/human-input/stream` variant,
+ * so there is no live token-by-token progress to attach to. The call returns
+ * once the turn is recorded; the discussion resumes on the server from there, so
+ * callers follow it by polling the persisted conversation and should say it is
+ * resuming rather than imply it has settled.
  */
 export function useSubmitHumanInput() {
   const qc = useQueryClient();
@@ -255,9 +385,15 @@ export function useSubmitHumanInput() {
       memberId: string;
       content: string;
     }) => submitHumanInput(groupId, gcId, memberId, content),
-    onSuccess: (_data, { groupId }) => {
-      qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+    // Awaited, so the mutation stays pending until the refetched conversation
+    // is in: the backend resumes the discussion asynchronously, and without
+    // this the banner re-enabled for an instant on the stale AWAITING_HUMAN_INPUT
+    // document, with the typed text still in it.
+    onSuccess: async (_data, { groupId }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groupConversations", groupId] }),
+        qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] }),
+      ]);
     },
   });
 }

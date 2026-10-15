@@ -33,6 +33,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -99,6 +100,21 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
+
+    /**
+     * Reads {@code X-EDDI-Turn-Deadline-Ms}. Field-injected and nullable for the
+     * same reason as the guard above: directly constructed unit tests have no
+     * request to read it from.
+     */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
+
+    /**
+     * Reads {@code Idempotency-Key} / {@code X-EDDI-Request-Id}; nullable in unit
+     * tests for the same reason.
+     */
+    @Inject
+    IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
 
     @Inject
     public RestAgentEngine(IConversationService conversationService,
@@ -247,13 +263,36 @@ public class RestAgentEngine implements IRestAgentEngine {
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
+        // The caller's own budget for this turn — read here, on the request thread.
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
+        if (idempotencyKeyHeaderReader != null) {
+            try {
+                idempotencyKeyHeaderReader.apply(inputData);
+            } catch (TurnIdempotencyService.InvalidIdempotencyKeyException e) {
+                response.resume(Response.status(Response.Status.BAD_REQUEST).type(MediaType.APPLICATION_JSON)
+                        .entity(errorBody(new TurnError("INVALID_IDEMPOTENCY_KEY", false, null, e.getMessage()))).build());
+                return;
+            }
+        }
+
         // onSkipped: the queued turn was dropped without consuming the input
         // (pause/busy committed after the request was accepted) — answer honestly
         // with 409 instead of letting the request run into the timeout handler.
         var responseHandler = new ConversationResponseHandler() {
             @Override
             public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                response.resume(snapshot);
+                // A failed turn is still answered with its snapshot (and the status it
+                // always had); the structured reason rides along under `error`, and the
+                // provider's own wait, when it gave one, as Retry-After.
+                TurnError error = snapshot.getError();
+                Long retryAfterSeconds = error != null ? error.retryAfterSeconds() : null;
+                if (retryAfterSeconds != null) {
+                    response.resume(Response.ok(snapshot).header("Retry-After", retryAfterSeconds).build());
+                } else {
+                    response.resume(snapshot);
+                }
             }
 
             @Override
@@ -277,7 +316,13 @@ public class RestAgentEngine implements IRestAgentEngine {
                     reason = "The conversation changed while your message was queued — it was not processed;"
                             + " reload the conversation before sending it again";
                 }
-                response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason).build());
+                var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
+                if (state == ConversationState.IN_PROGRESS) {
+                    // Busy: another turn (in a cluster, possibly on another node) holds the
+                    // conversation. Retrying shortly is exactly right, so say when.
+                    conflict.header("Retry-After", "2");
+                }
+                response.resume(conflict.build());
             }
         };
 
@@ -377,8 +422,16 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(IllegalArgumentExceptionMapper.responseOf(e));
         } catch (Exception e) {
             LOGGER.error(e.getLocalizedMessage(), e);
-            throw new InternalServerErrorException("An internal error occurred");
+            // Still a 500, now with the structured body — and never the exception's text.
+            throw new InternalServerErrorException("An internal error occurred",
+                    Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(MediaType.APPLICATION_JSON)
+                            .entity(errorBody(TurnError.internal("An internal error occurred"))).build());
         }
+    }
+
+    /** {@code {"error": {code, retryable, retryAfterMs, message}}} */
+    static Map<String, TurnError> errorBody(TurnError error) {
+        return Map.of("error", error);
     }
 
     @Override

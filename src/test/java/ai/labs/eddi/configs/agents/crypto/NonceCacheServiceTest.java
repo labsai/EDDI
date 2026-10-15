@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.crypto;
 
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -201,5 +202,26 @@ class NonceCacheServiceTest {
             assertEquals(NonceCacheService.NonceValidation.VALID,
                     nonceCacheService.validate("nonce-b", now));
         }
+    }
+
+    @Test
+    @DisplayName("cluster mode, nonce store unreachable: fail closed (UNAVAILABLE)")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void unavailableFailsClosed() throws Exception {
+        ICache<String, Boolean> down = mock(ICache.class);
+        when(down.putIfAbsent(anyString(), any(Boolean.class))).thenThrow(new ClusterUnavailableException("down"));
+        ICacheFactory factory = mock(ICacheFactory.class);
+        when(factory.getCache(anyString(), any())).thenReturn((ICache) down);
+        var meters = new SimpleMeterRegistry();
+        var service = new NonceCacheService(factory, meters);
+        var maxAge = NonceCacheService.class.getDeclaredField("maxAgeMs");
+        maxAge.setAccessible(true);
+        maxAge.set(service, 300_000L);
+        var skew = NonceCacheService.class.getDeclaredField("clockSkewMs");
+        skew.setAccessible(true);
+        skew.set(service, 30_000L);
+        service.init();
+        assertEquals(NonceCacheService.NonceValidation.UNAVAILABLE, service.validate("n-1", System.currentTimeMillis()));
+        assertEquals(1.0, meters.counter("eddi.agent.nonce.unavailable").count());
     }
 }

@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -44,14 +47,18 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -72,11 +79,13 @@ import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
 import java.util.List;
@@ -176,6 +185,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     ConversationAccessGuard conversationAccessGuard;
 
     /**
+     * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
+     * reason as {@link #attachmentStore}; {@code null} (a directly constructed
+     * instance) means the feature is off.
+     */
+    @Inject
+    TurnIdempotencyService turnIdempotency;
+
+    /**
      * Verifies a {@code groupId} found only on an earlier step before group memory
      * is scoped to it (see {@code ConversationGroups}). Field-injected, so directly
      * constructed tests see {@code null} and only the current step's value counts.
@@ -241,6 +258,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      * log.
      */
     final Counter counterConversationStoreConflict;
+
+    /**
+     * Whether a dead letter records the turn's input and context so an operator can
+     * replay it. Field-injected with its default so the many tests that build this
+     * service with {@code new} keep the documented behaviour.
+     */
+    @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
+    boolean captureDeadLetterInput = true;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -410,6 +435,10 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             IAgent latestAgent = agentFactory.getLatestReadyAgent(environment, agentId);
             if (latestAgent == null) {
+                final String requestedAgent = agentId;
+                latestAgent = awaitClusterDeployment(environment, agentId, () -> agentFactory.getLatestReadyAgent(environment, requestedAgent));
+            }
+            if (latestAgent == null) {
                 String message = "No version of agent (agentId=%s) ready for interaction (environment=%s)!";
                 message = String.format(message, agentId, environment);
                 throw new AgentNotReadyException(message);
@@ -532,6 +561,113 @@ public class ConversationService implements IConversationService, UserErasurePar
         return "inFlightConversations";
     }
 
+    // ─── Cluster control (eddi.messaging.type=nats) ───
+
+    /**
+     * Cluster mode: the lease manager (who runs a conversation's turn) and the node
+     * RPC that reaches that node. Field-injected so the many tests that build this
+     * service with {@code new} keep the single-node behaviour (both null).
+     */
+    @Inject
+    IConversationLeaseManager leaseManager;
+
+    @Inject
+    IClusterRpc clusterRpc;
+
+    @Inject
+    Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /** How long a request waits for an agent another node has just deployed. */
+    static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
+
+    /** A resolution step that may throw, for {@link #awaitClusterDeployment}. */
+    @FunctionalInterface
+    interface AgentLookup<T> {
+        T find() throws Exception;
+    }
+
+    /**
+     * Cluster mode: the agent is not deployed on THIS node yet, though another node
+     * has just deployed it — this node's sweep has not caught up. Deploys it here
+     * on demand and waits (bounded) instead of answering 404. Single node: null at
+     * once.
+     */
+    <T> T awaitClusterDeployment(Environment environment, String agentId, AgentLookup<T> lookup) {
+        if (deploymentManagement == null || !deploymentManagement.isResolvable() || leaseManager == null || !leaseManager.isClustered()) {
+            return null;
+        }
+        try {
+            return deploymentManagement.get().awaitClusterDeployment(environment, agentId, () -> {
+                try {
+                    return lookup.find();
+                } catch (Exception e) {
+                    return null;
+                }
+            }, CLUSTER_DEPLOY_WAIT);
+        } catch (RuntimeException e) {
+            // The deployment store could not be read (or the deploy failed): the caller's
+            // own not-ready handling answers, as it does when nothing is deployed.
+            LOGGER.warnf("On-demand deployment of agent %s failed: %s", sanitize(agentId), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Signals the turn of {@code conversationId} running on THIS node, if any — the
+     * cooperative flag the pipeline checks at task boundaries.
+     *
+     * @return true when a running turn was signalled
+     */
+    public boolean signalLocalInFlight(String conversationId) {
+        var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
+        if (inFlightMemory == null) {
+            return false;
+        }
+        inFlightMemory.setCancelled(true);
+        return true;
+    }
+
+    /**
+     * Cluster mode: when the conversation's turn runs on ANOTHER node (it holds the
+     * lease), asks that node to signal it. Single node: always false.
+     *
+     * @return true when the executing node confirmed it signalled a running turn
+     */
+    boolean signalRemoteInFlight(String conversationId) {
+        if (leaseManager == null || clusterRpc == null || !leaseManager.isClustered() || !clusterRpc.isClustered()) {
+            return false;
+        }
+        var holder = leaseManager.peek(conversationId);
+        if (holder.isEmpty()) {
+            return false;
+        }
+        var reply = clusterRpc.call(holder.get().node(), IClusterRpc.CONVERSATION_CANCEL, Map.of("conversationId", conversationId));
+        boolean signalled = reply.map(r -> Boolean.TRUE.equals(r.get("signalled"))).orElse(false);
+        if (signalled) {
+            LOGGER.infof("Signalled the turn of conversation %s running on node %s", sanitize(conversationId), holder.get().node());
+        }
+        return signalled;
+    }
+
+    /**
+     * GDPR stop on behalf of another node: the erased user arrives as a hash, so
+     * the user id never travels between nodes.
+     */
+    @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        if (userIdHash == null) {
+            return 0;
+        }
+        int signalled = 0;
+        for (IConversationMemory memory : inFlightConversations.values()) {
+            if (memory.getUserId() != null && userIdHash.equals(KvKeys.sha256(memory.getUserId()))) {
+                memory.setCancelled(true);
+                signalled++;
+            }
+        }
+        return signalled;
+    }
+
     /**
      * {@inheritDoc} Signals the turn through
      * {@link ConversationStepRunner#abandonTurn}.
@@ -598,6 +734,9 @@ public class ConversationService implements IConversationService, UserErasurePar
         if (inFlightMemory != null) {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight resume to abort — conversation %s is being ended", conversationId);
+        } else {
+            // Cluster mode: the turn may be running on the node that holds the lease.
+            signalRemoteInFlight(conversationId);
         }
         // Ending a PAUSED conversation terminally resolves its pending approval:
         // disarm the timeout schedule (a stale fire would log spurious errors and
@@ -691,6 +830,54 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * Sets this turn's deadline on the memory: the agent's {@code turnDeadlineMs}
+     * capped by the caller's header, counted from the request's arrival. Always
+     * assigns — a memory reused across turns must not carry the previous turn's
+     * deadline, nor keep one the next request does not ask for.
+     */
+    static void applyTurnDeadline(IConversationMemory memory, IAgent agent, InputData inputData, Clock clock, long arrivalEpochMs) {
+        memory.setTurnDeadline(TurnDeadline.forTurn(clock, arrivalEpochMs, agent.getTurnDeadlineMs(), agent.getTurnDeadlineReserveMs(),
+                inputData != null ? inputData.getRequestedTurnDeadlineMs() : null));
+    }
+
+    /**
+     * What a finished turn tells its caller and its own step: the {@code error}
+     * object when it failed, or the idempotency record when it settled.
+     * <p>
+     * The record is written to the step BEFORE the turn is persisted (this runs
+     * from the pipeline's completion callback, the persist follows), so the key is
+     * durable with the answer it belongs to. A failed turn is deliberately not
+     * recorded: its caller is told to retry, and the retry must run again.
+     */
+    void recordTurnOutcome(IConversationMemory memory, SimpleConversationMemorySnapshot snapshot, InputData inputData) {
+        if (snapshot.getConversationState() == ConversationState.ERROR) {
+            snapshot.setError(turnErrorOf(memory));
+            return;
+        }
+        String key = inputData != null ? inputData.getIdempotencyKey() : null;
+        if (key != null && memory.getCurrentStep() != null && TurnIdempotencyService.isReplayable(snapshot)) {
+            memory.getCurrentStep().storeData(new Data<>(TurnIdempotencyService.STEP_KEY, key));
+        }
+    }
+
+    /**
+     * The reason the turn failed, from the {@code taskErrors} entry the failed task
+     * left in the step's output; a generic error when there is none (strict write
+     * rolled it back, or the failure was not a task's).
+     */
+    static TurnError turnErrorOf(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        Object entries = step == null || step.getConversationOutput() == null ? null : step.getConversationOutput().get(MemoryKeys.TASK_ERRORS);
+        if (entries instanceof List<?> list && !list.isEmpty()) {
+            TurnError found = TurnError.fromTaskError(list.getLast());
+            if (found != null) {
+                return found;
+            }
+        }
+        return new TurnError(TurnError.TURN_FAILED, false, null, "The turn failed");
+    }
+
     @Override
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
@@ -740,6 +927,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     public void pipelineFailed(Exception e) {
                         streamingHandler.onError(e);
                     }
+
+                    @Override
+                    public void leaseLost(SimpleConversationMemorySnapshot snapshot, Long fence) {
+                        // Tokens of the discarded turn may already be on the wire: end the
+                        // stream with an error, not with a done event for a turn that is not stored.
+                        streamingHandler.onError(new ConversationStepRunner.TurnLeaseLostException(conversationId, fence));
+                    }
                 });
     }
 
@@ -762,6 +956,16 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         /** The pipeline failed inside the turn (after admission). */
         default void pipelineFailed(Exception e) {
+        }
+
+        /**
+         * Cluster mode: the turn was stopped because this node lost the conversation's
+         * lease (see {@link #stoppedByLeaseLoss}); the snapshot is marked
+         * {@code IN_PROGRESS}. A plain turn is answered as skipped — busy, 409 with
+         * {@code Retry-After} over REST.
+         */
+        default void leaseLost(SimpleConversationMemorySnapshot snapshot, Long fence) {
+            skipped(snapshot);
         }
     }
 
@@ -799,6 +1003,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onLlmRetry(String reason, int attempt) {
+                streamingHandler.onLlmRetry(reason, attempt);
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }
@@ -830,6 +1039,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             throws Exception {
 
         long startTime = System.nanoTime();
+        final long arrivalEpochMs = System.currentTimeMillis();
         rejectIfShuttingDown();
         // Assigned inside the try; the catch blocks need it, and the lambdas below
         // need an effectively-final alias (processingTurn).
@@ -868,7 +1078,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
-            IAgent agent = resolveConversationAgent(environment, conversationMemory);
+            IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
+            if (resolvedAgent == null) {
+                final IConversationMemory memoryToResolve = conversationMemory;
+                resolvedAgent = awaitClusterDeployment(environment, conversationMemory.getAgentId(),
+                        () -> resolveConversationAgent(environment, memoryToResolve));
+            }
+            IAgent agent = resolvedAgent;
             if (agent != null && !Objects.equals(agent.getAgentVersion(), agentVersion)) {
                 // The turn runs on another, compatible version: log it as that one.
                 loggingContext.put("agentVersion", String.valueOf(agent.getAgentVersion()));
@@ -915,6 +1131,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
+                applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
                 // A streamed turn reports its progress through the sink on memory, which
                 // LifecycleManager and the tasks read.
                 if (listener.eventSink() != null) {
@@ -933,6 +1150,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                             SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(returnConversationMemory,
                                     returnDetailed, returnCurrentStepOnly, returningFields);
                             memorySnapshot.setEnvironment(environment);
+                            if (stoppedByLeaseLoss(conversationId, returnConversationMemory, memorySnapshot)) {
+                                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                                processingTurn.release();
+                                listener.leaseLost(memorySnapshot, returnConversationMemory.getFenceToken());
+                                return;
+                            }
+                            recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -973,7 +1197,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, !rerunOnly, notifySkipped, processingTurn);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -1233,8 +1457,99 @@ public class ConversationService implements IConversationService, UserErasurePar
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
         refuseIfSoftDeleted(conversationId, snapshot);
-        say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                rerunOnly, responseHandler);
+
+        String key = idempotencyKeyOf(inputData, rerunOnly);
+        ConversationResponseHandler handler = responseHandler;
+        if (key != null) {
+            var sink = new TurnIdempotencyService.SnapshotSink() {
+                @Override
+                public void done(SimpleConversationMemorySnapshot answer) {
+                    responseHandler.onComplete(answer);
+                }
+
+                @Override
+                public void skipped(SimpleConversationMemorySnapshot answer) {
+                    responseHandler.onSkipped(answer);
+                }
+            };
+            if (!turnIdempotency.admitOrServe(conversationId, key, inputData.getRequestedTurnDeadlineMs(),
+                    () -> storedOutcome(snapshot, key, returnDetailed, returnCurrentStepOnly, returningFields), sink,
+                    () -> currentSnapshotOf(conversationId, returnDetailed, returnCurrentStepOnly, returningFields),
+                    () -> say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler))) {
+                return;
+            }
+            // First sight of the key: this request runs the turn, and everything it
+            // hands back is remembered for the duplicates.
+            handler = new ConversationResponseHandler() {
+                @Override
+                public void onComplete(SimpleConversationMemorySnapshot answer) {
+                    turnIdempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(answer, false));
+                    responseHandler.onComplete(answer);
+                }
+
+                @Override
+                public void onSkipped(SimpleConversationMemorySnapshot answer) {
+                    turnIdempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(answer, true));
+                    responseHandler.onSkipped(answer);
+                }
+            };
+        }
+        try {
+            say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
+                    rerunOnly, handler);
+        } catch (Exception | Error e) {
+            if (key != null) {
+                turnIdempotency.abandon(conversationId, key, e);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * The request's idempotency key, or {@code null} when none applies: no header,
+     * a rerun (which is not a new input), or the feature switched off.
+     */
+    private String idempotencyKeyOf(InputData inputData, boolean rerunOnly) {
+        if (rerunOnly || inputData == null || turnIdempotency == null || !turnIdempotency.isEnabled()) {
+            return null;
+        }
+        return inputData.getIdempotencyKey();
+    }
+
+    /**
+     * The stored answer to a turn that already ran under {@code key}: the
+     * conversation up to and including the step that recorded it, so a duplicate
+     * that arrives after later turns still gets that turn's answer.
+     */
+    private TurnIdempotencyService.Outcome storedOutcome(ConversationMemorySnapshot snapshot, String key, Boolean returnDetailed,
+                                                         Boolean returnCurrentStepOnly, List<String> returningFields) {
+        int stepIndex = turnIdempotency.findStoredStep(snapshot, key);
+        if (stepIndex < 0) {
+            return null;
+        }
+        var allSteps = snapshot.getConversationSteps();
+        var allOutputs = snapshot.getConversationOutputs();
+        try {
+            if (stepIndex < allSteps.size() - 1) {
+                snapshot.setConversationSteps(new ArrayList<>(allSteps.subList(0, stepIndex + 1)));
+                snapshot.setConversationOutputs(new ArrayList<>(allOutputs.subList(0, Math.min(allOutputs.size(), stepIndex + 1))));
+            }
+            var stored = convertSimpleConversationMemorySnapshot(snapshot, returnDetailed, returnCurrentStepOnly, returningFields);
+            stored.setEnvironment(snapshot.getEnvironment());
+            return new TurnIdempotencyService.Outcome(stored, false);
+        } finally {
+            snapshot.setConversationSteps(allSteps);
+            snapshot.setConversationOutputs(allOutputs);
+        }
+    }
+
+    private SimpleConversationMemorySnapshot currentSnapshotOf(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                                               List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var current = requireSnapshot(conversationId);
+        var simple = convertSimpleConversationMemorySnapshot(current, returnDetailed, returnCurrentStepOnly, returningFields);
+        simple.setEnvironment(current.getEnvironment());
+        return simple;
     }
 
     @Override
@@ -1257,8 +1572,118 @@ public class ConversationService implements IConversationService, UserErasurePar
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
         refuseIfSoftDeleted(conversationId, snapshot);
-        sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                inputData, streamingHandler);
+
+        String key = idempotencyKeyOf(inputData, false);
+        StreamingResponseHandler handler = streamingHandler;
+        if (key != null) {
+            var sink = new TurnIdempotencyService.SnapshotSink() {
+                @Override
+                public void done(SimpleConversationMemorySnapshot answer) {
+                    streamingHandler.onComplete(answer);
+                }
+
+                @Override
+                public void skipped(SimpleConversationMemorySnapshot answer) {
+                    streamingHandler.onSkipped(answer);
+                }
+            };
+            // A duplicate has no tokens to replay: it is answered with the final
+            // snapshot, as the stream's terminal event.
+            if (!turnIdempotency.admitOrServe(conversationId, key, inputData.getRequestedTurnDeadlineMs(),
+                    () -> storedOutcome(snapshot, key, returnDetailed, returnCurrentStepOnly, returningFields), sink,
+                    () -> currentSnapshotOf(conversationId, returnDetailed, returnCurrentStepOnly, returningFields),
+                    () -> sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, streamingHandler))) {
+                return;
+            }
+            handler = new IdempotentStreamingHandler(streamingHandler, turnIdempotency, conversationId, key);
+        }
+        try {
+            sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
+                    inputData, handler);
+        } catch (Exception | Error e) {
+            if (key != null) {
+                turnIdempotency.abandon(conversationId, key, e);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Forwards every event to the caller's stream and reports the terminal one to
+     * the idempotency registry, so duplicates of this turn can be answered.
+     */
+    private static final class IdempotentStreamingHandler implements StreamingResponseHandler {
+        private final StreamingResponseHandler delegate;
+        private final TurnIdempotencyService idempotency;
+        private final String conversationId;
+        private final String key;
+
+        IdempotentStreamingHandler(StreamingResponseHandler delegate, TurnIdempotencyService idempotency, String conversationId, String key) {
+            this.delegate = delegate;
+            this.idempotency = idempotency;
+            this.conversationId = conversationId;
+            this.key = key;
+        }
+
+        @Override
+        public void onTaskStart(TaskId taskId, String taskType, int index) {
+            delegate.onTaskStart(taskId, taskType, index);
+        }
+
+        @Override
+        public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
+            delegate.onTaskComplete(taskId, taskType, durationMs, summary);
+        }
+
+        @Override
+        public void onToken(String token) {
+            delegate.onToken(token);
+        }
+
+        @Override
+        public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+            delegate.onCascadeStepStart(stepIndex, modelType, modelName, totalSteps);
+        }
+
+        @Override
+        public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+            delegate.onCascadeEscalation(fromStep, toStep, confidence, threshold, reason, durationMs);
+        }
+
+        @Override
+        public void onLlmRetry(String reason, int attempt) {
+            delegate.onLlmRetry(reason, attempt);
+        }
+
+        @Override
+        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+            idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, false));
+            delegate.onComplete(snapshot);
+        }
+
+        @Override
+        public void onError(Throwable error) {
+            // A no-op when onComplete already settled the key (the pipeline reports the
+            // failed turn's snapshot first, then the error).
+            idempotency.abandon(conversationId, key, error);
+            delegate.onError(error);
+        }
+
+        @Override
+        public void onTaskFailed(TaskId taskId, String taskType, long durationMs, String errorType, String errorSummary) {
+            delegate.onTaskFailed(taskId, taskType, durationMs, errorType, errorSummary);
+        }
+
+        @Override
+        public void onToolCall(String toolName) {
+            delegate.onToolCall(toolName);
+        }
+
+        @Override
+        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, true));
+            delegate.onSkipped(snapshot);
+        }
     }
 
     /**
@@ -1769,10 +2194,71 @@ public class ConversationService implements IConversationService, UserErasurePar
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
                                                      boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
-                                                     ProcessingTurn processingTurn)
+                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
-                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn);
+                loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn,
+                describeTurn(environment, conversationMemory, conversationId, inputData, rerun));
+    }
+
+    /**
+     * What a dead letter of this turn records, so an operator can replay it as a
+     * new turn: the conversation, agent and environment, the user, and — unless
+     * {@code eddi.coordinator.dead-letter.capture-input=false} — the input and its
+     * context.
+     */
+    Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
+                                     boolean rerun) {
+        Map<String, Object> turn = new LinkedHashMap<>();
+        turn.put("conversationId", conversationId);
+        turn.put("agentId", memory.getAgentId());
+        turn.put("agentVersion", memory.getAgentVersion());
+        turn.put("environment", environment == null ? null : environment.toString());
+        turn.put("userId", memory.getUserId());
+        turn.put("rerun", rerun);
+        if (captureDeadLetterInput && inputData != null) {
+            if (isSecretInput(inputData)) {
+                // A turn the client flagged secretInput: its input must not sit in a dead
+                // letter for days. Recorded as such, without input or context — so it can
+                // be discarded but not replayed.
+                turn.put("secretInput", true);
+                return turn;
+            }
+            turn.put("input", inputData.getInput());
+            if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
+                turn.put("context", inputData.getContext());
+            }
+        }
+        return turn;
+    }
+
+    private static boolean isSecretInput(InputData inputData) {
+        var context = inputData.getContext();
+        Context flag = context == null ? null : context.get("secretInput");
+        return flag != null && "true".equals(String.valueOf(flag.getValue()));
+    }
+
+    /**
+     * Cluster mode: the turn was stopped because this node lost the conversation's
+     * lease while it ran. It is never stored (another node holds the conversation)
+     * and is dead-lettered, so its caller must not get the reply of a turn that
+     * will not exist: it is answered as not processed, busy (409 with
+     * {@code Retry-After} over REST), like a turn that never got the lease; a
+     * stream ends with an error event instead of {@code done}. The snapshot is
+     * marked {@code IN_PROGRESS} for that, and the conversation state is not cached
+     * from it.
+     */
+    boolean stoppedByLeaseLoss(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
+        if (!memory.isCancelled() || !conversationStepRunner.isLeaseLost(conversationId)) {
+            return false;
+        }
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+        return true;
+    }
+
+    /** A turn's write was refused by the cluster fence (cluster mode only). */
+    void counterFenceRejected() {
+        meterRegistry.counter("eddi.cluster.fence.rejected").increment();
     }
 
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,

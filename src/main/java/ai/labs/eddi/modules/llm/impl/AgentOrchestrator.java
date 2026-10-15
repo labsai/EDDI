@@ -47,6 +47,8 @@ import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -446,11 +448,24 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            the tool calls the loop executed and their results, in order
      *            (never the history it started from, never the final answer). Never
      *            null; empty when no tool ran or the path does not record it.
+     * @param resumeTranscript
+     *            set only by a HITL resume: the complete message list the
+     *            continuation sent the model for its final answer (the frozen
+     *            system prompt and history, every tool exchange before and after
+     *            the pause, without the final answer itself) — what a same-model
+     *            re-ask of that answer starts from. Empty on every other path, and
+     *            when the resume did not record it.
      */
     record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata,
-            List<ChatMessage> toolExchange) {
+            List<ChatMessage> toolExchange, List<ChatMessage> resumeTranscript) {
         ExecutionResult {
             toolExchange = toolExchange != null ? List.copyOf(toolExchange) : List.of();
+            resumeTranscript = resumeTranscript != null ? List.copyOf(resumeTranscript) : List.of();
+        }
+
+        /** Convenience constructor — no resume transcript recorded. */
+        ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata, List<ChatMessage> toolExchange) {
+            this(response, trace, responseMetadata, toolExchange, List.of());
         }
 
         /** Convenience constructor — no tool exchange recorded. */
@@ -565,6 +580,40 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
         return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
                 transcriptMaxBytes, jsonPolicy, exchangeRecorder);
+    }
+
+    /**
+     * @see IAgentOrchestrator#reaskFinalAnswer
+     */
+    @Override
+    public ExecutionResult reaskFinalAnswer(ChatModel chatModel, List<ChatMessage> transcript, Integer maxOutputTokens,
+                                            LlmConfiguration.Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy)
+            throws LifecycleException {
+        List<ToolSpecification> specs = buildToolSetup(task, memory).toolSpecs();
+        ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(transcript);
+        if (!specs.isEmpty()) {
+            requestBuilder.toolSpecifications(specs);
+        }
+        if (jsonPolicy != null) {
+            var responseFormat = jsonPolicy.resolve(!specs.isEmpty());
+            if (responseFormat != null) {
+                requestBuilder.responseFormat(responseFormat);
+            }
+        }
+        if (maxOutputTokens != null) {
+            requestBuilder.maxOutputTokens(maxOutputTokens);
+        }
+        ChatRequest request = requestBuilder.build();
+        ChatResponse response = AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(request), task, "Agent final-answer re-ask");
+        // A tool request is never executed here (that is the point): an answer that
+        // asks for one is simply an unusable reply.
+        AiMessage answer = response.aiMessage();
+        String text = answer != null && !answer.hasToolExecutionRequests() && answer.text() != null ? answer.text() : "";
+        Map<String, Object> metadata = new HashMap<>();
+        if (response.metadata() != null && response.metadata().tokenUsage() != null) {
+            metadata.put("tokenUsage", tokenUsageMap(response.metadata().tokenUsage()));
+        }
+        return new ExecutionResult(text, List.of(), metadata);
     }
 
     /**

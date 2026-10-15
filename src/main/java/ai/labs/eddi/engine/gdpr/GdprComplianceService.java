@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.engine.runtime.IConversationCoordinator;
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -46,8 +49,8 @@ import java.util.*;
  * <p>
  * <strong>Deletion:</strong> Cascades erasure across all stores containing user
  * PII. User memories and conversations are permanently deleted. Audit ledger
- * and database logs are pseudonymized (userId → SHA-256 hash) under GDPR Art.
- * 17(3)(e).
+ * rows are kept, but their content is redacted and the user id pseudonymized
+ * ({@link AuditLedgerService#eraseUser}); database logs are pseudonymized.
  * <p>
  * <strong>Export:</strong> Aggregates all user data into a single
  * JSON-serializable bundle (GDPR Art. 15/20 — Right of Access / Data
@@ -120,6 +123,16 @@ public class GdprComplianceService {
      */
     @Inject
     Instance<IGdprParticipant> participantInstances;
+
+    /**
+     * Cluster mode: stops the user's work on the other nodes and purges dead
+     * letters. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    IClusterRpc clusterRpc;
+
+    @Inject
+    IConversationCoordinator conversationCoordinator;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -375,7 +388,9 @@ public class GdprComplianceService {
      * <li>Delete all OAuth connection grants of the user</li>
      * <li>Re-sweep user memories written while the cascade ran</li>
      * <li>Pseudonymize database log entries</li>
-     * <li>Pseudonymize audit ledger entries</li>
+     * <li>Redact the content of the user's audit ledger entries and pseudonymize
+     * their user id (content is kept under
+     * {@code eddi.audit.erasure-mode=pseudonymize})</li>
      * </ol>
      * <p>
      * Conversation IDs are resolved once before step 2 and reused across steps 2–4.
@@ -419,6 +434,29 @@ public class GdprComplianceService {
                 inFlightWorkStopped += participant.stopInFlightWork(userId);
             } catch (Exception e) {
                 recordFailure(failedSteps, participant.erasureStepName(), e, pseudonym);
+            }
+        }
+        // 0b. Cluster mode: the same stop on every other node, where the user's turns
+        // and discussions may be running. The user travels as a hash. A node that does
+        // not answer is named in the log (its running work still cannot recreate what
+        // is deleted below: the stores refuse to resurrect a deleted conversation).
+        if (clusterRpc != null && clusterRpc.isClustered()) {
+            try {
+                var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, Map.of("userIdHash", KvKeys.sha256(userId)));
+                for (var reply : replies.entrySet()) {
+                    if (reply.getValue().get("stopped") instanceof Number stopped) {
+                        inFlightWorkStopped += stopped.intValue();
+                    }
+                    if (reply.getValue().get("error") != null) {
+                        // A node could not stop all of the user's work: the cascade still runs,
+                        // but reports the step incomplete rather than a clean erasure.
+                        recordFailure(failedSteps, "clusterStop",
+                                new IllegalStateException("node " + reply.getKey() + ": " + reply.getValue().get("error")), pseudonym);
+                    }
+                }
+                LOGGER.infof("[GDPR] Cluster stop answered by node(s) %s [%s]", replies.keySet(), pseudonym);
+            } catch (RuntimeException e) {
+                recordFailure(failedSteps, "clusterStop", e, pseudonym);
             }
         }
         if (inFlightWorkStopped > 0) {
@@ -491,6 +529,23 @@ public class GdprComplianceService {
             }
         } catch (Exception e) {
             recordFailure(failedSteps, "attachments", e, pseudonym);
+        }
+
+        // 2b. Remove the dead letters of the user's conversations: a dead letter
+        // carries the failed turn's input (in cluster mode on the shared stream every
+        // node reads).
+        if (conversationCoordinator != null) {
+            int deadLettersPurged = 0;
+            for (String convId : conversationIds) {
+                try {
+                    deadLettersPurged += conversationCoordinator.purgeDeadLetters(convId);
+                } catch (Exception e) {
+                    recordFailure(failedSteps, "deadLetters", e, pseudonym);
+                }
+            }
+            if (deadLettersPurged > 0) {
+                LOGGER.infof("[GDPR] Purged %d dead letter(s) [%s]", deadLettersPurged, pseudonym);
+            }
         }
 
         // 3. Delete HITL tool execution journal entries for user conversations.
@@ -726,10 +781,36 @@ public class GdprComplianceService {
             recordFailure(failedSteps, "databaseLogs", e, pseudonym);
         }
 
-        // 7. Pseudonymize audit ledger (retained under Art. 17(3)(e))
+        // 7a. Redact the audit ledger. The rows are retained (EU AI Act
+        // record-keeping),
+        // but not with this user's prompts, responses and tool calls in them: the
+        // ledger flushes its write queue first — entries still queued used to land
+        // after this step and be missed — then replaces each row's content with a
+        // redaction marker and re-signs the rows that verified. Skipped under
+        // eddi.audit.erasure-mode=pseudonymize.
         long auditPseudonymized = 0;
+        long auditRedacted = 0;
         try {
-            auditPseudonymized = auditStore.pseudonymizeByUserId(userId, pseudonym);
+            AuditLedgerService.ErasureResult redaction = auditLedgerService.eraseUser(userId);
+            if (redaction != null) {
+                auditRedacted = redaction.redacted();
+                auditPseudonymized += redaction.pseudonymized();
+                if (!redaction.complete()) {
+                    recordFailure(failedSteps, "auditRedaction",
+                            new IllegalStateException(redaction.failed() + " audit entries could not be redacted"), pseudonym);
+                }
+                LOGGER.infof("[GDPR] Redacted %d audit entries (%d re-signed, %d kept unverified) [%s]", auditRedacted, redaction.resealed(),
+                        redaction.keptUnverified(), pseudonym);
+            }
+        } catch (Exception e) {
+            recordFailure(failedSteps, "auditRedaction", e, pseudonym);
+        }
+
+        // 7b. Pseudonymize what is left in the audit ledger under the raw id — every
+        // row in pseudonymize mode, the rows the redaction could not reach otherwise.
+        try {
+            long remaining = auditStore.pseudonymizeByUserId(userId, pseudonym);
+            auditPseudonymized += remaining;
             LOGGER.infof("[GDPR] Pseudonymized %d audit entries [%s]",
                     auditPseudonymized, pseudonym);
         } catch (Exception e) {
@@ -756,7 +837,8 @@ public class GdprComplianceService {
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted);
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted,
+                auditRedacted);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -790,6 +872,7 @@ public class GdprComplianceService {
         auditDetails.put("inFlightWorkStopped", inFlightWorkStopped);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
+        auditDetails.put("auditRedacted", auditRedacted);
         additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());
