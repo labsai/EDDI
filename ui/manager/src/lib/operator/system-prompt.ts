@@ -320,7 +320,8 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   A \`storeType\` of \`in-memory\` (the default) is dev/test only: it loses every
   document when EDDI restarts, when the knowledge base moves to a new store (see
   storeNamespace below), and when it changes its embedding provider, model,
-  endpoint or dimensions; each ingestion source re-embeds on its next run, but
+  Azure deployment name, endpoint or dimensions; each ingestion source
+  re-embeds on its next run, but
   documents sent to /ingest must be sent again. All in-memory knowledge bases
   share a cap, eddi.rag.in-memory.max-segments (default 50000); past it a run
   fails naming that setting. Flag in-memory as the likely cause of "it worked
