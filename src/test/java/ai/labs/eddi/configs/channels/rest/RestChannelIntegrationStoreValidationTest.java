@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -499,6 +500,78 @@ class RestChannelIntegrationStoreValidationTest {
             target.setTriggers(List.of("helper"));
             config.setTargets(List.of(target));
 
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+    }
+
+    // ─── Webhook channel type ───────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Webhook channel type")
+    class WebhookType {
+
+        private ChannelIntegrationConfiguration webhook(Map<String, String> platformConfig) {
+            var cfg = validConfig();
+            cfg.setChannelType("webhook");
+            cfg.setPlatformConfig(platformConfig);
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("is a registered type and accepts a vault-referenced secret")
+        void accepted() {
+            assertDoesNotThrow(() -> store.validateConfiguration(webhook(Map.of("signingSecret", "${vault:hook}"))));
+            assertDoesNotThrow(() -> store.validateConfiguration(webhook(Map.of("signingSecret", "${vault:hook}",
+                    "signatureScheme", "github", "conversationStrategy", "correlate", "correlationKeyPath", "/data/number"))));
+        }
+
+        @Test
+        @DisplayName("without a signing secret → BadRequest")
+        void missingSecret() {
+            var ex = assertThrows(BadRequestException.class, () -> store.validateConfiguration(webhook(Map.of())));
+            assertTrue(ex.getMessage().contains("signingSecret"));
+        }
+
+        @Test
+        @DisplayName("with a plaintext signing secret → BadRequest")
+        void plaintextSecret() {
+            var ex = assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(webhook(Map.of("signingSecret", "hunter2"))));
+            assertTrue(ex.getMessage().contains("vault reference"));
+        }
+
+        @Test
+        @DisplayName("unknown scheme, bad pointer or correlate without key path → BadRequest")
+        void badSettings() {
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(
+                    webhook(Map.of("signingSecret", "${vault:hook}", "signatureScheme", "md5"))));
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(
+                    webhook(Map.of("signingSecret", "${vault:hook}", "eventTypePath", "data.type"))));
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(
+                    webhook(Map.of("signingSecret", "${vault:hook}", "conversationStrategy", "correlate"))));
+            assertThrows(BadRequestException.class, () -> store.validateConfiguration(
+                    webhook(Map.of("signingSecret", "${vault:hook}", "signatureScheme", "generic-hmac", "signatureEncoding", "rot13"))));
+        }
+
+        @Test
+        @DisplayName("observeMode target → BadRequest")
+        void observerRejected() {
+            var cfg = webhook(Map.of("signingSecret", "${vault:hook}"));
+            var observer = new ChannelTarget();
+            observer.setName("watcher");
+            observer.setTargetId("agent-xyz");
+            observer.setObserveMode(true);
+            var targets = new ArrayList<>(cfg.getTargets());
+            targets.add(observer);
+            cfg.setTargets(targets);
+            var ex = assertThrows(BadRequestException.class, () -> store.validateConfiguration(cfg));
+            assertTrue(ex.getMessage().contains("webhook"));
+        }
+
+        @Test
+        @DisplayName("a Slack integration with a plaintext secret still only warns (unchanged)")
+        void slackUnaffected() {
+            config.setPlatformConfig(Map.of("channelId", "C123", "signingSecret", "plaintext"));
             assertDoesNotThrow(() -> store.validateConfiguration(config));
         }
     }
