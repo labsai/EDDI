@@ -3,6 +3,7 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantsAgentCascade,
   grantedPatchEndpoints,
   grantsConversationTesting,
   grantsGroupDiscussion,
@@ -166,6 +167,9 @@ You can:
   who changed, deployed, imported, erased or was refused what, and when. A GDPR
   erasure keeps a user's audit rows but replaces their content with a
   "gdprRedaction" marker; that is expected, not damage.
+- Look up which EDDI version and git commit this deployment is running. Always
+  call the version tool rather than answering from memory: the deployment can be
+  upgraded after you were set up, so anything you remember may be out of date.
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
@@ -885,6 +889,81 @@ const BODY_MAKING_CHANGES = `When you change something:
   by writing a reference into a request. If a value is genuinely unknown, say
   so and ask; a guess is never acceptable.`;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Batched changes — plan, then batch the independent writes, then cascade.
+// (Kept as one delimited block: parallel prompt work edits the sections around it.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Appended whenever any write is granted.
+ *
+ * Every gated call pauses for a human, and a multi-step change used to cost one
+ * approval per step. Two engine facts make fewer possible, and both are stated
+ * here because the operator cannot see either:
+ *
+ * - Several tool calls a model emits in ONE turn pause together, as one batch the
+ *   approver decides in one sitting (docs/hitl.md: "per batch, strictest wins").
+ * - Approval is bound to the exact resolved request ("request pinning"), so a call
+ *   whose arguments depend on an earlier call's RESULT cannot be pre-approved —
+ *   it can only be proposed after that result exists.
+ *
+ * The plan comes first. After a request to look, check or verify (read-only) it is
+ * a PROPOSAL and the user's agreement releases the first write; for a change asked
+ * for outright it is stated and the first call follows in the same turn, because the
+ * approval pause is the confirmation (safety rule 2). Both compose with the rules
+ * in the preamble rather than restating them.
+ */
+const BODY_BATCHED_CHANGES = `Planning and batching changes:
+- For a change that takes more than one write, set out the WHOLE plan before the
+  first gated call: every step in order, which steps will go out together as one
+  approval, and how many approvals the user should expect. If the change came out
+  of a request to look, check or verify, a plan is a proposal: wait for the
+  user's agreement before the first write. If they asked for the change outright,
+  say the plan and make the first call in the same turn — the approval pause is
+  the confirmation, as the rules above say.
+- When several writes do not depend on each other's results, issue them as
+  parallel tool calls in the same turn, so they are reviewed in one approval
+  instead of one each. The approver can still accept or reject each call in the
+  batch separately.
+- A write that needs another write's RESULT — a version number or id the earlier
+  call returns — cannot go in the same batch: approval is bound to the exact
+  request, so it can only be proposed once the earlier one has run. Never guess a
+  version number to batch a call ahead of the step it depends on.
+- If one call in a batch is rejected, say which and why you think so, and do not
+  re-send it in a different form. If a write fails, say why before trying anything
+  else.`;
+
+/**
+ * Appended only when `grantsAgentCascade`: teaches the one-call tail and the two
+ * plan shapes that follow from it. The knowledge-base shape is spelled out because
+ * it is the long chain that motivated batching — five calls, five approvals,
+ * before this.
+ */
+const BODY_BATCHED_CASCADE = `- Landing an edit is ONE call, not three: once the config edits are done and you
+  hold the new versions they returned, call cascadeAgentChanges once instead of
+  separate workflow-repoint, agent-repoint and deploy calls. It takes the agent id
+  and its current version, and a body of \`resourceMappings\` (a list of pairs,
+  each an \`oldUri\` — the exact URI the agent's workflow holds today — and a
+  \`newUri\`, the new version of the same resource), \`redeploy\`, \`environment\`
+  and \`compatible\`. If you also wrote the workflow, add the pair for the workflow
+  itself (the agent's current workflow URI to the new workflow version), so the
+  new workflow is picked up rather than overwritten. It saves each document once
+  and answers with the new agent and workflow versions and the deployment
+  status. A 400 means a pair did not match what the agent holds and NOTHING was
+  written: re-read the agent and its workflow and use the exact URIs.
+- Typical plans: changing one config is two approvals — the config edit, then
+  the cascade. Connecting a knowledge base is also two — batch 1 is the config
+  edits (the LLM config naming the knowledge base, and the workflow gaining the
+  rag step), each made as the editing rules above describe and issued as parallel
+  calls in one turn, and batch 2 is one cascade carrying both new versions plus
+  the redeploy. Say "2 approvals" up front; a plan that needs more should say why.`;
+
+function buildBatchingSection(endpoints: readonly string[]): string {
+  const lines = [BODY_BATCHED_CHANGES];
+  if (grantsAgentCascade(endpoints)) lines.push(BODY_BATCHED_CASCADE);
+  return lines.join("\n");
+}
+
 /** Default editable body for a granted endpoint set — the role and style. */
 export function buildOperatorPromptBody(endpoints: readonly string[]): string {
   // The model catalogue is included for every scope, not just the
@@ -908,7 +987,9 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     BODY_STYLE,
     BODY_HOW_TO_WORK,
   ];
-  if (grantsWriteCapability(endpoints)) sections.push(buildAuthoringSection(endpoints), BODY_MAKING_CHANGES);
+  if (grantsWriteCapability(endpoints)) {
+    sections.push(buildAuthoringSection(endpoints), buildBatchingSection(endpoints), BODY_MAKING_CHANGES);
+  }
   return sections.join("\n\n");
 }
 

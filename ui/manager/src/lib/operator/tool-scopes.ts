@@ -208,6 +208,10 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /administration/cluster/dead-letters/summary",
   "GET /administration/logs",
   "GET /administration/quotas",
+  // Which build is running (version + git commit). A live read of the process, so
+  // the operator can answer "what version am I on?" correctly after an upgrade —
+  // the system prompt cannot, because it was written at activation.
+  "GET /administration/version",
   // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
   // precisely so an OpenAPI-generated agent picks it up as ordinary tools
   // (`DocsService`; see `docs/mcp-server.md` → "The same docs over REST" in the
@@ -446,6 +450,30 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // inert (the agent still references the old version); it is precisely THIS
   // endpoint, aimed at its own agent, that would close the loop.
   "PUT /agentstore/agents/{id}/updateResourceUri",
+  // The same hop done for the WHOLE edit at once: `{ resourceMappings:[{oldUri,
+  // newUri}], redeploy, environment, compatible }` swaps resource references
+  // through the agent's workflows and into the agent, saving each document once,
+  // and optionally redeploys. It replaces the repoint-workflow / repoint-agent /
+  // deploy tail (three approvals and an intermediate version per hop) with ONE
+  // approval, and a mapping can name a workflow itself so that a workflow
+  // patched in the same batch is picked up rather than overwritten.
+  //
+  // Safe for the same structural reason `updateResourceUri` is, and tested the
+  // same way: the body is pairs of URI strings and nothing else, so it cannot
+  // carry a `hitlConfig` or any other agent setting. The backend rewrites only
+  // `workflowStep.config.uri` and the agent's workflow list; the agent is the
+  // stored document written back with that list replaced, so the gate is carried
+  // forward untouched (`AgentCascadeServiceTest` pins this field-by-field). Each
+  // pair must be versioned, name the SAME kind of resource, and match a reference
+  // the agent really holds, or nothing is written — it cannot retarget a step at
+  // a different type of document. The redeploy goes through the normal deploy
+  // endpoint, so quota and the vault-grant check apply as for `deploy`.
+  //
+  // It is the same self-ungating hinge as `updateResourceUri`, aimed at the same
+  // target, and is covered the same way: the agent id is a path segment, so
+  // `self-guard.ts` blocks it against the operator's own agent. Gated like every
+  // write by `http.post:*`.
+  "POST /agentstore/agents/{id}/cascade",
   ...WRITABLE_EXTENSION_STORES.flatMap((store) => [`PUT /${store}/{id}`, `POST /${store}`]),
   // Credential-safe partial edits — see PATCHABLE_EXTENSION_STORES. Gated like
   // every other write (`http.patch:*`), and for llmstore only ever approvable
@@ -615,6 +643,19 @@ export function grantsAgentModification(endpoints: readonly string[]): boolean {
     set.has("PUT /workflowstore/workflows/{id}") ||
     WRITABLE_EXTENSION_STORES.some((store) => set.has(`PUT /${store}/{id}`))
   );
+}
+
+/**
+ * Whether the granted endpoints can land a whole edit in one call — swap resource
+ * references through an agent's workflows, repoint the agent and optionally
+ * redeploy (`cascadeAgentChanges`).
+ *
+ * Exact membership: the prompt names this tool and tells the operator to use it
+ * instead of the separate repoint and deploy calls, so it may only say so when
+ * the tool was generated.
+ */
+export function grantsAgentCascade(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("POST /agentstore/agents/{id}/cascade");
 }
 
 /**

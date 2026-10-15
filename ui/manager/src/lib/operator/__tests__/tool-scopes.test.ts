@@ -10,6 +10,7 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantsAgentCascade,
   grantsKnowledgeBaseReads,
   grantsIngestionStatusReads,
   grantsIngestionRunReads,
@@ -55,6 +56,10 @@ describe("tool-scopes", () => {
         "GET /administration/{environment}/deploymentstatus/{agentId}",
       );
       expect(READ_ENDPOINTS).toContain("GET /administration/logs");
+    });
+
+    it("can look up which EDDI build is running", () => {
+      expect(READ_ENDPOINTS).toContain("GET /administration/version");
     });
 
     it("can see the schedule it might later be asked to disable", () => {
@@ -206,6 +211,7 @@ describe("tool-scopes", () => {
         "PUT /workflowstore/workflows/{id}",
         "POST /workflowstore/workflows",
         "PUT /agentstore/agents/{id}/updateResourceUri",
+        "POST /agentstore/agents/{id}/cascade",
         "PUT /llmstore/llms/{id}",
         "POST /llmstore/llms",
         "PUT /rulestore/rulesets/{id}",
@@ -251,8 +257,26 @@ describe("tool-scopes", () => {
       // a hitlConfig. A full PUT can, and stays out.
       expect(WRITE_ENDPOINTS).not.toContain("PUT /agentstore/agents/{id}");
       expect(WRITE_ENDPOINTS).not.toContain("POST /agentstore/agents");
+      // Both agent-store writes are pointer changes: a bare URI, or a list of
+      // {oldUri, newUri} pairs. Neither has a field that could carry a document.
       const agentWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/agentstore/"));
-      expect(agentWrites).toEqual(["PUT /agentstore/agents/{id}/updateResourceUri"]);
+      expect(agentWrites).toEqual([
+        "PUT /agentstore/agents/{id}/updateResourceUri",
+        "POST /agentstore/agents/{id}/cascade",
+      ]);
+    });
+
+    it("grants the one-pass cascade as a gated write, and the predicate that lets the prompt name it follows the grant", () => {
+      expect(WRITE_ENDPOINTS).toContain("POST /agentstore/agents/{id}/cascade");
+      // POST, so `buildToolApprovals`' `http.post:*` gates it the moment it is
+      // allow-listed — there is no separate list to forget to update.
+      expect(buildToolApprovals().requireApproval).toContain("http.post:*");
+      expect(buildToolApprovals().exempt).not.toContain("http.post:*");
+      expect(grantsAgentCascade(endpointsForScope("read_write"))).toBe(true);
+      // Not a read, and not in a read-only operator.
+      expect(READ_ENDPOINTS).not.toContain("POST /agentstore/agents/{id}/cascade");
+      expect(grantsAgentCascade(endpointsForScope("read_only"))).toBe(false);
+      expect(grantsAgentCascade(["PUT /agentstore/agents/{id}/updateResourceUri"])).toBe(false);
     });
 
     it("can create a whole new agent (both shapes), but never touch an existing agent's own document", () => {
@@ -263,9 +287,9 @@ describe("tool-scopes", () => {
       // comment on WRITE_ENDPOINTS), so that stays out categorically.
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup");
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup-api");
-      // The only agent-store write is the bare-URI repoint, asserted above.
+      // The only agent-store writes are the pointer changes, asserted above.
       const fullDocumentWrites = WRITE_ENDPOINTS.filter(
-        (e) => e.includes("/agentstore/") && !e.endsWith("/updateResourceUri"),
+        (e) => e.includes("/agentstore/") && !e.endsWith("/updateResourceUri") && !e.endsWith("/cascade"),
       );
       expect(fullDocumentWrites).toEqual([]);
     });

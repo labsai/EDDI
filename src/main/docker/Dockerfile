@@ -108,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:70b19e9729eb38dae0952370aea062c5a78c684b38485c52387b740a9486d4a1 AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:5161ac11d66c3c998387192d7f6fc22ac7d25792a172eb0b93b718d0ef38cc65 AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -119,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:70b19e9729eb38dae0952370aea062c5a78c684b38485c52387b740a9486d4a1
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:5161ac11d66c3c998387192d7f6fc22ac7d25792a172eb0b93b718d0ef38cc65
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.
@@ -127,6 +127,11 @@ FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:70b19e9729e
 # which used to certify an image carrying whatever this literal happened to say.
 ARG EDDI_VERSION=dev
 ARG EDDI_RELEASE=1
+# The git commit this image was built from. Surfaced at runtime as
+# eddi.build.commit (GET /administration/version, the get_eddi_version MCP tool),
+# so an operator can tell which build is running even after an upgrade. A sentinel
+# default: BuildInfo reports `unknown` for anything that is not a hex commit.
+ARG EDDI_COMMIT=unknown
 
 LABEL name="labsai/eddi" \
       vendor="LABS.AI" \
@@ -141,11 +146,12 @@ LABEL name="labsai/eddi" \
       maintainer="LABS.AI GmbH <contact@labs.ai>" \
       url="https://eddi.labs.ai" \
       org.opencontainers.image.source="https://github.com/labsai/EDDI" \
+      org.opencontainers.image.revision="${EDDI_COMMIT}" \
       io.k8s.display-name="EDDI AI Platform" \
       io.k8s.description="Multi-Agent AI Orchestration Middleware" \
       io.openshift.tags="ai,conversational-ai,llm,chatbot,multi-agent,quarkus"
 
-ENV LANG='C.utf8' LANGUAGE='C.utf8'
+ENV LANG='C.utf8' LANGUAGE='C.utf8' EDDI_BUILD_COMMIT="${EDDI_COMMIT}"
 
 USER root
 

@@ -55,7 +55,7 @@ class McpToolFilterCoverageTest {
     private static final List<Class<?>> TOOL_CLASSES = List.of(
             McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class,
-            McpGdprTools.class, McpDocTools.class);
+            McpGdprTools.class, McpDocTools.class, McpVersionTools.class);
 
     private static Set<String> declaredToolNames() {
         var names = new TreeSet<String>();

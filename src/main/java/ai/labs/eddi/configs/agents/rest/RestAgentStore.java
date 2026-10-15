@@ -4,15 +4,19 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
+import ai.labs.eddi.configs.agents.model.AgentCascadeRequest;
+import ai.labs.eddi.configs.agents.model.AgentCascadeResult;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -33,6 +37,8 @@ import org.jboss.logging.Logger;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
@@ -64,6 +70,7 @@ public class RestAgentStore implements IRestAgentStore {
     private final CapabilityRegistryService capabilityRegistryService;
     private final IDeploymentStore deploymentStore;
     private final AgentSigningService agentSigningService;
+    private final AgentCascadeService agentCascadeService;
     private final IAgentFactory agentFactory;
     private final String defaultTenantId;
 
@@ -76,7 +83,9 @@ public class RestAgentStore implements IRestAgentStore {
             ResourceAccessGuard resourceAccessGuard,
             AgentSigningService agentSigningService,
             IAgentFactory agentFactory,
-            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId) {
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            AgentCascadeService agentCascadeService) {
+        this.agentCascadeService = agentCascadeService;
         this.agentFactory = agentFactory;
         this.resourceAccessGuard = resourceAccessGuard;
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore, resourceAccessGuard);
@@ -222,6 +231,51 @@ public class RestAgentStore implements IRestAgentStore {
             // from an AGENT id, which no resource has.
             URI uri = RestUtilities.createURI(IRestAgentStore.resourceURI, id, versionQueryParam, version);
             return Response.status(BAD_REQUEST).entity(uri).type(MediaType.TEXT_PLAIN).build();
+        }
+    }
+
+    /**
+     * A 400 in the JSON shape the other client-error mappers use
+     * ({@code {"error":"bad_request","message":…}}), so the operator and the
+     * Manager read a cascade refusal the same way as any other malformed request.
+     * Carrying an entity, it passes through {@code ClientErrorExceptionMapper}
+     * untouched.
+     */
+    private static BadRequestException cascadeBadRequest(String message) {
+        return new BadRequestException(message, ErrorResponses.badRequest(message));
+    }
+
+    @Override
+    public AgentCascadeResult cascadeAgentChanges(String id, Integer version, AgentCascadeRequest request) {
+        if (request == null) {
+            throw cascadeBadRequest("A request body with resourceMappings is required");
+        }
+        if (version == null) {
+            throw cascadeBadRequest("version is required");
+        }
+        // The agent's own EDIT check first, for the reason updateAgent gives: what
+        // follows answers "exists / does not exist" for the agent and its workflows.
+        restVersionInfo.requireEditAccess(id);
+        Deployment.Environment environment;
+        try {
+            environment = Deployment.Environment.parseStrict(request.environment());
+        } catch (IllegalArgumentException e) {
+            throw cascadeBadRequest(e.getMessage());
+        }
+        try {
+            return agentCascadeService.cascade(id, version, request.resourceMappings(), Boolean.TRUE.equals(request.redeploy()), environment,
+                    Boolean.TRUE.equals(request.compatible()));
+        } catch (AgentCascadeService.CascadeException e) {
+            switch (e.kind()) {
+                case NOT_FOUND :
+                    throw new NotFoundException(e.getMessage());
+                case CONFLICT :
+                    throw new ClientErrorException(e.getMessage(), Response.Status.CONFLICT);
+                case FAILED :
+                    throw new InternalServerErrorException(e.getMessage(), e);
+                default :
+                    throw cascadeBadRequest(e.getMessage());
+            }
         }
     }
 

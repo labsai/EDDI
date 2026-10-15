@@ -22,7 +22,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (84)
+## Available Tools (85)
 
 ### Argument contract
 
@@ -76,7 +76,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `update_resource`      | Update any resource config by type and ID. Returns the new version URI              |
 | `create_resource`      | Create a new resource. Returns the new resource ID and URI                          |
 | `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete)        |
-| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change  |
+| `apply_agent_changes`  | Batch-cascade URI changes through package → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change. An `oldUri` the agent does not hold, or a pair naming different kinds of resource, is refused and nothing is written. The same operation is available over REST as `POST /agentstore/agents/{id}/cascade` ([details](deployment-management-of-agents.md#landing-resource-changes-in-one-pass))  |
 | `list_agent_resources` | Walk agent → packages → extensions to get a complete resource inventory in one call |
 
 ### Diagnostic Tools (2)
@@ -148,6 +148,14 @@ Read EDDI's own documentation over MCP **tools** — the counterpart to the `edd
 | ----------- | ------------------------------------------------------------------------------------------------------------- |
 | `list_docs` | List the documentation pages this deployment serves (one name per line, no `.md` suffix). Read this first — the runtime set is smaller than the repository's |
 | `read_docs` | Read one page as markdown by name, e.g. `architecture`. Distinguishes an invalid name from an absent page      |
+
+### Version Tool (1)
+
+Which build of EDDI is running. Read live from the process, so it stays correct across an upgrade; the same answer as `GET /administration/version`. `eddi-admin` only.
+
+| Tool               | Description                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `get_eddi_version` | Version and git commit of the running EDDI (`version`, `commit`, `commitShort`). `commit` is `unknown` if the build recorded none |
 
 ### HITL Tools (10)
 
@@ -644,7 +652,7 @@ quarkus.mcp.server.support-langchain4j-annotations=false
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 84 intended tools — conversation, admin/resource/schedule/channel, setup, group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 85 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), and **docs** (`McpDocTools`).
 
 To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
@@ -765,7 +773,7 @@ These are the **actual Keycloak role strings** the tools check (not aliases). Ev
 | **Converse** — every tool ownership-guarded | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer` | `create_conversation`, `talk_to_agent`, `chat_with_agent`, `chat_managed`, `read_conversation`, `read_conversation_log`, `list_conversations`, `discover_agents`; the group discussions (`describe_discussion_styles`, `discuss_with_group`, `start_group_discussion`, `read_group_conversation`, `list_group_conversations`, `followup_with_member`, `continue_group_discussion`, `close_group_conversation`, `delete_group_conversation`); the memory reads (`list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `count_user_memories`) | `/agents/*` and `/groups/*/conversations` — admin, editor, user. `eddi-viewer` is the addition: the MCP read-and-converse role, which only ever reaches the caller's own conversations and memories. The memory reads also admit `eddi-editor`, which the REST memory store (`eddi-admin`, `eddi-user`) does not — for the caller's own `userId` only |
 | **Observe** — ownership-guarded | `eddi-admin`, `eddi-viewer` | `read_audit_trail`, and `read_agent_logs` *with* a `conversationId` | `/auditstore`, `/administration/logs` — admin only. An audit entry carries the LLM request (system prompt, tool calls and their arguments), which `eddi-user` cannot read over REST, so this tier is not the conversation tier: next to the admin it admits only `eddi-viewer`, the MCP observer role that has always held these two tools. An editor who needs them is granted `eddi-viewer` |
 | **Author** | `eddi-admin`, `eddi-editor` | `list_agents`, `list_agent_configs`, `get_agent`; deployment (`deploy_agent`, `undeploy_agent`, `get_deployment_status`); agent, workflow and resource CRUD (`create_agent`, `update_agent`, `delete_agent`, `list_workflows`, `read_workflow`, `read_resource`, `create_resource`, `update_resource`, `delete_resource`, `list_agent_resources`, `apply_agent_changes`); triggers (`*_agent_trigger`); channels (`*_channel_integration`); group configuration (`list_groups`, `read_group`, `create_group`, `update_group`, `delete_group`, `create_group_from_template`, `list_group_templates`, `add_team_task`, `list_team_backlog`) | the configuration stores, `/administration/{env}/deploy…`, `/agenttriggerstore`, `/channelstore`, `/groupstore` |
-| **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/administration/gdpr`, `/administration/logs`. **Deliberately narrower than REST** for schedules and memory writes: these tools act on any user's schedule or memory directly, without the per-owner scoping the REST endpoints apply to editors and users |
+| **Admin** | `eddi-admin` | `setup_agent`, `create_api_agent`, `get_eddi_version`; the schedule tools (`create_schedule`, `list_schedules`, `read_schedule`, `delete_schedule`, `fire_schedule_now`, `retry_failed_schedule`); memory writes (`upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`); GDPR (`delete_user_data`, `export_user_data`); `read_agent_logs` *without* a `conversationId` (the shared server log) | `/administration/agents/setup(-api)`, `/administration/gdpr`, `/administration/logs`. **Deliberately narrower than REST** for schedules and memory writes: these tools act on any user's schedule or memory directly, without the per-owner scoping the REST endpoints apply to editors and users |
 | **HITL** | decided per conversation by `HitlAccessGuard`: the owner, `eddi-admin`, `eddi-approver` | `resume_conversation`, `cancel_conversation`, `get_approval_status`, `list_pending_approvals`, and the group counterparts | the REST HITL endpoints — see [HITL](hitl.md#who-may-decide) |
 
 > **Higher roles include the read tiers.** A role check is a literal `hasRole`, so each tier enumerates its roles rather than relying on a hierarchy — which gives `eddi-admin ⊇ eddi-editor ⊇ eddi-viewer` for the conversation tools and `eddi-admin ⊇ eddi-viewer` for the Observe tier. An admin no longer needs `eddi-viewer` as well, and an editor needs it only for `read_audit_trail` and conversation-scoped `read_agent_logs` (up to 6.5.0 an account without `eddi-viewer` was refused all 27 read tools, `list_agents` included). The tiers are defined once, in `McpRoles`.
