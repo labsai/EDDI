@@ -505,8 +505,17 @@ public final class McpApiToolBuilder {
         if (operation.getRequestBody() != null && operation.getRequestBody().getContent() != null) {
             var content = operation.getRequestBody().getContent();
             MediaType jsonMedia = content.get("application/json");
+            // An RFC 6902 patch is declared as application/json-patch+json ONLY, so
+            // looking for application/json alone dropped its body entirely and left a
+            // PATCH tool with nothing to send. Plain JSON still wins when both are
+            // declared; no other +json type is mapped.
+            String bodyContentType = "application/json";
+            if (jsonMedia == null && content.get(JSON_PATCH_MEDIA_TYPE) != null) {
+                jsonMedia = content.get(JSON_PATCH_MEDIA_TYPE);
+                bodyContentType = JSON_PATCH_MEDIA_TYPE;
+            }
             if (jsonMedia != null) {
-                request.setContentType("application/json");
+                request.setContentType(bodyContentType);
                 // One level of $ref resolution, HERE and deliberately not resolveFully():
                 // the parser leaves component references unresolved, so a body
                 // declared as $ref: InputData reached describeBodySchema as a
@@ -518,7 +527,7 @@ public final class McpApiToolBuilder {
                 // Nested property refs stay unresolved: the top-level field
                 // names and requiredness are what the model needs to write a
                 // correct body.
-                var body = buildBodyTemplate(resolveComponentRef(jsonMedia.getSchema(), openAPI));
+                var body = buildBodyTemplate(resolveComponentRef(jsonMedia.getSchema(), openAPI), JSON_PATCH_MEDIA_TYPE.equals(bodyContentType));
                 // The body template's variables must be declared as tool parameters,
                 // or the model has no documented way to fill them: the tool schema is
                 // built from getParameters() alone (AgentOrchestrator), and with
@@ -736,6 +745,9 @@ public final class McpApiToolBuilder {
     /** Name of the whole-body variable used when the schema has no properties. */
     static final String WHOLE_BODY_VARIABLE = "requestBody";
 
+    /** The media type of an RFC 6902 JSON Patch request body. */
+    static final String JSON_PATCH_MEDIA_TYPE = "application/json-patch+json";
+
     /**
      * Resolves a top-level {@code $ref: #/components/schemas/X} to its component
      * schema, one level deep. Anything else — no ref, unknown name, no components —
@@ -757,6 +769,20 @@ public final class McpApiToolBuilder {
         }
         Schema<?> resolved = openAPI.getComponents().getSchemas().get(ref.substring(prefix.length()));
         return resolved != null ? resolved : schema;
+    }
+
+    private static BodyTemplate buildBodyTemplate(Schema<?> schema, boolean jsonPatch) {
+        BodyTemplate template = buildBodyTemplate(schema);
+        if (!jsonPatch) {
+            return template;
+        }
+        // Say what the array IS: the schema alone ("a JSON array") does not tell the
+        // model it is a diff, and a model that does not know sends the whole document.
+        var described = new LinkedHashMap<String, String>();
+        template.variables().forEach((name, description) -> described.put(name, description
+                + " An RFC 6902 JSON Patch: operations with op (add, replace, remove or test), path (a JSON Pointer) and, for add/replace/test,"
+                + " value. Send only what changes, never the document you read."));
+        return new BodyTemplate(template.template(), described);
     }
 
     private static BodyTemplate buildBodyTemplate(Schema<?> schema) {

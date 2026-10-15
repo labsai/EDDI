@@ -4982,7 +4982,13 @@
       "blockedGateCarrying": "此请求写入的 LLM 配置会设置它自己的审批门（toolApprovals），从而取代正在审核它的审批门。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上修改审批门。",
       "blockedGateUnverifiable": "此请求写入的 LLM 配置内容无法完整读取——过大而无法显示，或不是有效的 JSON——因此无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。",
       "blockedGateUnpinned": "此请求写入 LLM 配置，但未被固定，因此实际执行的内容可能与此处显示的不同，无法确认其中不含审批门覆盖设置。只要它存在，整批请求都无法批准——请拒绝，并在该代理自己的页面上进行此更改。",
-      "blockedSelfStart": "操作员不能测试自己 — 与自己的智能体（{{agentId}}）开始对话会将其输出作为输入循环回来。存在此调用时整批无法批准 — 请拒绝并测试其他智能体。"
+      "blockedSelfStart": "操作员不能测试自己 — 与自己的智能体（{{agentId}}）开始对话会将其输出作为输入循环回来。存在此调用时整批无法批准 — 请拒绝并测试其他智能体。",
+      "blockedGatePatchOp": "此请求用一个审批关卡检查无法判断的操作来修补 LLM 配置（除 add、replace、remove、test 之外的任何操作——copy 和 move 可以把已存储文档的一部分，包括关卡覆盖设置，复制到别处）。只要它存在，整批请求都无法批准——请拒绝，并要求改用 add、replace 或 remove 操作来完成修改。",
+      "patchHeading": "对 {{type}} {{id}} 的补丁——应用于版本 {{version}}，保存为版本 {{next}}",
+      "patchHeadingBare": "补丁操作",
+      "showRawPatch": "显示原始补丁",
+      "hideRawPatch": "隐藏原始补丁",
+      "patchWholeDocument": "(整个文档)"
     },
     "starters": {
       "whatsDeployed": "现在部署了哪些内容？",

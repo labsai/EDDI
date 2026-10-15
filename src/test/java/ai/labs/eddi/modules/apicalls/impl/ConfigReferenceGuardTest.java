@@ -271,4 +271,35 @@ class ConfigReferenceGuardTest {
                         Map.of("modelName", "${vars:model}"), Set.of(), "LLM", DATA, VAULTED));
         assertTrue(e.getMessage().contains("${vars:model}"), e.getMessage());
     }
+
+    /**
+     * The operator edits stored configurations through generated tools whose body
+     * is the single template {@code {requestBody}}, filled by the model. A
+     * reference in that body was never written by the configuration, so it is "from
+     * data" — and that is the control that keeps a PATCH from INTRODUCING a
+     * credential reference.
+     */
+    @Test
+    @DisplayName("a JSON Patch body that introduces a reference is refused (generated tool: body template is {requestBody})")
+    void patchIntroducingAReferenceIsRefused() {
+        String patch = "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/apiKey\",\"value\":\"${vault:someone-elses-key}\"}]";
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", patch, "a request body", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("${vault:someone-elses-key}"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a JSON Patch body with no reference passes — an edit that never mentions a credential needs no exemption")
+    void patchWithoutReferencesPasses() {
+        String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/knowledgeBases\",\"value\":[{\"name\":\"eddi-docs\"}]}]";
+        assertDoesNotThrow(() -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", patch, "a request body", DATA, VAULTED));
+    }
+
+    @Test
+    @DisplayName("echoing a document that holds a reference is still refused — the guard has no 'unchanged from the stored document' exemption")
+    void echoedDocumentIsStillRefused() {
+        String echoed = "{\"tasks\":[{\"parameters\":{\"apiKey\":\"${vault:anthropic-api-key}\"}}]}";
+        assertThrows(IllegalArgumentException.class,
+                () -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", echoed, "a request body", DATA, VAULTED));
+    }
 }
