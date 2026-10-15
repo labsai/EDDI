@@ -244,7 +244,6 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * @return the id of the entry recorded
      */
     protected final String recordLocalDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
-        String id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
         String error = failure.getMessage() != null ? failure.getMessage() : "unknown";
         long timestamp = System.currentTimeMillis();
         String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId, error.replace("\"", "\\\""),
@@ -259,7 +258,12 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
         // size() on a ConcurrentLinkedDeque is O(n), so the excess is computed once.
         Map<String, Object> turn = describe(task);
         DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure, turn);
+        String id;
         synchronized (deadLetterLock) {
+            // Numbered under the lock, so the ring holds its entries in id order:
+            // paging by id (ClusterConversationCoordinator) would otherwise skip an
+            // entry that was numbered before, but added after, a concurrent one.
+            id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
             deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload, turn,
                     classification.reason(), localNodeId(), classification.fence()));
             if (maxDeadLetters >= 0) {

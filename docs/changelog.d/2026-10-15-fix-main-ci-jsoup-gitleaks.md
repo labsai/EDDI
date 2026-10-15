@@ -55,3 +55,5 @@
 The `.trivyignore` entry is the last resort, taken because there is no fixed jinjava,
 no override can reach a relocated copy, and dropping jinjava would remove the `jlama`
 provider. Remove the entry when a jinjava release shades jsoup >= 1.23.2.
+
+**Node-local dead letters kept in id order.** `ClusterConversationCoordinatorTest.localDeadLettersPage` failed once in CI on this branch, and the cause was real. `AbstractQueuedConversationCoordinator.recordLocalDeadLetter` numbered an entry before taking the ring's lock. Two conversations failing at once could therefore add `local-3` before `local-2`, and the cluster coordinator's paging, which skips every local entry numbered at or below the cursor, then dropped `local-2` from the next page. The number is now taken inside the lock. `InMemoryConversationCoordinatorTest.localDeadLettersAreHeldInIdOrderUnderConcurrentFailures` forces that interleaving and fails without the fix.
