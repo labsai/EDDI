@@ -5,7 +5,7 @@
  * the agent wizard offer the same suggestions from one source.
  */
 
-import { COMPATIBLE_PROVIDERS } from "@/lib/llm-provider-catalog";
+import { COMPATIBLE_PROVIDERS, SELF_HOSTED_PROVIDER_ID } from "@/lib/llm-provider-catalog";
 
 /** Popular model suggestions per provider — users can still type any custom model */
 export const MODEL_SUGGESTIONS: Record<string, string[]> = {
@@ -215,7 +215,8 @@ export function supportsBaseUrl(providerId: string): boolean {
  * then thrown away.
  */
 export function isBaseUrlRequired(providerId: string): boolean {
-  return providerId === "ollama";
+  // openai-compatible: a self-hosted server has no default URL at all.
+  return providerId === "ollama" || providerId === SELF_HOSTED_PROVIDER_ID;
 }
 
 /**
@@ -233,6 +234,16 @@ const NOT_PROVISIONABLE_BY_SETUP = new Set(["gemini-vertex"]);
 /** Whether the setup endpoints can provision a working agent on this provider. */
 export function isProvisionableBySetup(providerId: string): boolean {
   return !NOT_PROVISIONABLE_BY_SETUP.has(providerId);
+}
+
+/**
+ * What the team builder may offer: what setup can provision, minus providers
+ * that need a base URL the member form has no field for. Ollama stays — the
+ * backend falls back to `eddi.ollama.default-base-url` — but a self-hosted
+ * OpenAI-compatible endpoint has no default to fall back on.
+ */
+export function isProvisionableByTeamSetup(providerId: string): boolean {
+  return isProvisionableBySetup(providerId) && providerId !== SELF_HOSTED_PROVIDER_ID;
 }
 
 /**
@@ -257,4 +268,13 @@ const OPTIONAL_TOKEN_PROVIDERS = new Set(["jlama"]);
 /** Whether a provider accepts an optional token in place of the API key. */
 export function acceptsOptionalToken(providerId: string): boolean {
   return OPTIONAL_TOKEN_PROVIDERS.has(providerId);
+}
+
+/**
+ * Providers whose API key is optional: a self-hosted OpenAI-compatible server
+ * checks one only when it was started with one (vLLM `--api-key`, a LiteLLM
+ * virtual key). Left blank, the backend sends no Authorization header at all.
+ */
+export function acceptsOptionalApiKey(providerId: string): boolean {
+  return providerId === SELF_HOSTED_PROVIDER_ID;
 }

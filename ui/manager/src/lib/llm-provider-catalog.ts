@@ -10,6 +10,21 @@
 
 export type ProviderGroup = "frontier" | "compatible" | "cloud" | "local";
 
+/**
+ * The generic self-hosted type (vLLM, llama-server, TGI, KServe, LiteLLM, ...).
+ * Deliberately NOT a catalog row: it has no fixed URL or model, and the backend
+ * catalog's validator requires both. It lives in the "local" group of
+ * `LLM_PROVIDERS`; its capability flags (jsonMode, jsonModeWithTools, vision)
+ * are ordinary model-settings parameters.
+ */
+export const SELF_HOSTED_PROVIDER_ID = "openai-compatible";
+
+/** Placeholders shown for the self-hosted type, which has no defaults of its own. */
+export const SELF_HOSTED_EXAMPLES = {
+  baseUrl: "http://vllm.inference.svc:8000/v1",
+  model: "ibm-granite/granite-4.0-h-small",
+} as const;
+
 export interface ProviderRegion {
   /**
    * Region id: `intl`, `cn` or `us`. The wizard and the operator form send the

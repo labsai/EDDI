@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { getProviderRegions } from "@/lib/llm-provider-catalog";
+import { SELF_HOSTED_EXAMPLES, SELF_HOSTED_PROVIDER_ID, getProviderRegions } from "@/lib/llm-provider-catalog";
 import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import {
   MODEL_SUGGESTIONS,
+  acceptsOptionalApiKey,
   isBaseUrlRequired,
   isProvisionableBySetup,
   provisionableProviderOr,
@@ -100,6 +101,8 @@ export function OperatorActivation({
 
   const providerConfig = getProviderConfig(provider);
   const needsKey = providerConfig?.needsKey ?? true;
+  // A self-hosted server takes a key only if it checks one: offered, never required.
+  const optionalKey = acceptsOptionalApiKey(provider);
   const baseUrlRequired = isBaseUrlRequired(provider);
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
   const vaultDown = vaultHealth != null && vaultHealth.available === false;
@@ -351,7 +354,7 @@ export function OperatorActivation({
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
+                  placeholder={provider === SELF_HOSTED_PROVIDER_ID ? SELF_HOSTED_EXAMPLES.baseUrl : "http://localhost:11434"}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   id="operator-base-url"
                   data-testid="operator-base-url"
@@ -359,9 +362,13 @@ export function OperatorActivation({
               </Field>
             )}
 
-            {needsKey && (
+            {(needsKey || optionalKey) && (
               <Field
-                label={t("operator.activation.apiKey", "Model API key")}
+                label={
+                  optionalKey
+                    ? t("operator.activation.apiKeyOptional", "Model API key (optional)")
+                    : t("operator.activation.apiKey", "Model API key")
+                }
                 hint={t("operator.activation.apiKeyHint", "The key for your LLM provider. This is not an EDDI credential.")}
                 asGroup
               >

@@ -9,7 +9,7 @@ import { AgentPicker } from "@/components/shared/agent-picker";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import { ProviderSelect } from "@/components/shared/provider-select";
-import { isProvisionableBySetup } from "@/lib/model-suggestions";
+import { isProvisionableByTeamSetup } from "@/lib/model-suggestions";
 import {
   memberIssue,
   effectiveLlm,
@@ -107,8 +107,9 @@ function LlmFields({
           }}
           className={cn(inputClass, "border-input")}
           // Setup cannot configure every provider (Vertex AI needs a project
-          // and location it has no field for).
-          include={isProvisionableBySetup}
+          // and location it has no field for), and a member has no base URL
+          // field, which a self-hosted endpoint cannot do without.
+          include={isProvisionableByTeamSetup}
           // Only a per-advisor field can be left blank (to inherit); the
           // defaults block always names a provider, since a blank one would
           // just be anthropic on the server anyway.

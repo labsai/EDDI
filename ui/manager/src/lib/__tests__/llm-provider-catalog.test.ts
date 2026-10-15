@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   COMPATIBLE_PROVIDERS,
+  SELF_HOSTED_PROVIDER_ID,
   getApiKeyUrl,
   getDefaultBaseUrl,
   getKeyPlaceholder,
@@ -71,6 +72,27 @@ describe("llm-provider-catalog parity with the backend catalog", () => {
     for (const p of COMPATIBLE_PROVIDERS) {
       expect(p.suggestions).toContain(p.defaultModel);
     }
+  });
+});
+
+describe("the self-hosted openai-compatible type", () => {
+  const PARAMS_JSON = resolve(__dirname, "../../../../../src/main/resources/llm/model-parameters.json");
+  const backendTypes = Object.keys(
+    (JSON.parse(readFileSync(PARAMS_JSON, "utf-8")) as { providers: Record<string, unknown> }).providers,
+  );
+
+  it("is a backend LLM type, listed in the local group, with no key required", () => {
+    expect(backendTypes).toContain(SELF_HOSTED_PROVIDER_ID);
+    const listed = LLM_PROVIDERS.find((p) => p.id === SELF_HOSTED_PROVIDER_ID);
+    expect(listed?.group).toBe("local");
+    expect(listed?.needsKey).toBe(false);
+    expect(listed?.name).toBe("Self-hosted (OpenAI-compatible)");
+  });
+
+  it("is not a named catalog provider (no fixed URL or model to mirror)", () => {
+    expect(backend.map((p) => p.id)).not.toContain(SELF_HOSTED_PROVIDER_ID);
+    expect(COMPATIBLE_PROVIDERS.map((p) => p.id)).not.toContain(SELF_HOSTED_PROVIDER_ID);
+    expect(getDefaultBaseUrl(SELF_HOSTED_PROVIDER_ID)).toBeUndefined();
   });
 });
 

@@ -69,6 +69,8 @@ const BACKEND_KEYLESS_PROVIDERS = new Set([
   "jlama",
   "bedrock",
   "oracle-genai",
+  // A self-hosted OpenAI-compatible server: the key is optional.
+  "openai-compatible",
 ]);
 
 /**
