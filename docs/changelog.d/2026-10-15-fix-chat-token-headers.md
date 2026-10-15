@@ -84,9 +84,12 @@ the Chat UI tests, [`chat-ui-embedding.md`](../chat-ui-embedding.md),
   everywhere else.
 
 ```decision-log
-| 2026-10-15 | The Chat UI's `?token=` is an operator opt-in (`eddi.chat.url-token.enabled`, default off); CSP filters use negative Vert.x orders so they run before the `/q` sub-router; `force-https-scheme` defaults to `false` and the advertised MCP resource scheme follows the request | Security review M6, L11, L3 |
+| 2026-10-15 | The Chat UI's `?token=` is an operator opt-in, `eddi.chat.url-token.enabled`, default off; served to the widget as a script global before the bundle | Security review M6: a token in the URL is login CSRF and is logged by the first request | Keeping it on and documenting the risk; a fetched JSON config, which would race the `?token=` read |
+| 2026-10-15 | All three CSP filters use negative Vert.x orders so they run before the `/q` sub-router mount | Security review L11: at order 20 the Swagger filter never ran, and Quarkus passes the order to Vert.x unchanged, ascending | Moving Swagger UI off the sub-router, or a Java `Filters` observer — both heavier than three numbers |
+| 2026-10-15 | `quarkus.oidc.resource-metadata.force-https-scheme` defaults to `false`; the advertised MCP resource scheme follows the request | Security review L3: a plain-http instance with auth on advertised an https identifier nothing served | Keeping `true` (wrong on every plain-http instance); deriving it from `quarkus.http.proxy.*` (no config signal separates plain http from a TLS proxy without forwarded headers) |
 ```
 
 ```regression-note
-| 2026-10-15 | An embedding that relied on `?token=` stops authenticating until the operator sets `eddi.chat.url-token.enabled=true`; the widget says so in the browser console. A deployment behind a TLS-terminating proxy that set neither `quarkus.http.proxy.proxy-address-forwarding` nor an absolute `quarkus.oidc.resource-metadata.resource` now advertises an `http` MCP resource identifier — set one of them, or `force-https-scheme=true` |
+| 2026-10-15 | An embedding that relied on `?token=` stops authenticating | The parameter is now ignored unless `eddi.chat.url-token.enabled=true` (M6); the widget says so in the browser console | Set the property, or move to the `postMessage` hand-off | a136e09 |
+| 2026-10-15 | A deployment behind a TLS-terminating proxy with neither `quarkus.http.proxy.proxy-address-forwarding` nor an absolute `quarkus.oidc.resource-metadata.resource` advertises an `http` MCP resource identifier | `force-https-scheme` now defaults to `false` (L3) | Set one of those two, or `force-https-scheme=true` | a136e09 |
 ```
