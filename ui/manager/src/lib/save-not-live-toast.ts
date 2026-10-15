@@ -2,7 +2,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
-import { deployAgent } from "@/lib/api/agents";
+import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
+import { reportDeployOutcome } from "@/lib/deploy-outcome";
 
 /**
  * One id for every "saved — not yet live" toast, so only the most recent save's
@@ -47,11 +48,19 @@ export function showSavedNotLiveToast(opts: {
               // The action always targets production; say so.
               label: t("agents.deployToProduction", "Deploy to production"),
               onClick: () => {
-                deployAgent("production", agentId, version)
-                  .then(() => {
-                    queryClient.invalidateQueries({ queryKey: ["agents"] });
-                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
-                    toast.success(t("editor.deployStarted", "Deployment started"));
+                // Through the grant flow, and waited: a restricted vault key this
+                // agent is not granted is asked about BEFORE the deploy, and a
+                // refusal says why — instead of "Deployment started" for a deploy
+                // the backend then refused.
+                const options = { agentId, version, environment: "production" };
+                const refresh = () => {
+                  void queryClient.invalidateQueries({ queryKey: ["agents"] });
+                  void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                };
+                runDeployWithGrants(options)
+                  .then((outcome) => {
+                    refresh();
+                    reportDeployOutcome(outcome, options, t, t("editor.deployDone", "Deployed — the change is live"), refresh);
                   })
                   .catch((err) => toast.error(getErrorMessage(err)));
               },

@@ -587,10 +587,14 @@ describe("credential references in tool-call bodies", () => {
     expect(flat).toContain("You cannot read the vault, so never claim a key exists");
   });
 
-  it("says the new agent must be granted the secret, that it cannot grant, and the deploy-false route", () => {
-    expect(flat).toContain("must be granted that secret (the Secrets page, `allowedAgents`");
-    expect(flat).toContain("You cannot grant secrets");
-    expect(flat).toContain("create it with `deploy` false");
+  it("says a new agent's first deploy is refused until an administrator grants it, and never to set grantReferencedSecrets", () => {
+    // Amends the vault-grant guidance of #983 instead of repeating it: no deploy:false
+    // detour any more, because the manager's grant dialog adds and deploys in one step.
+    expect(flat).toContain("its first deploy is refused with `VAULT_GRANT_MISSING`");
+    expect(flat).toContain("Granting is the administrator's decision");
+    expect(flat).toContain("never set it");
+    expect(flat).toContain("`grantReferencedSecrets`");
+    expect(flat).not.toContain("create it with `deploy` false");
   });
 
   it("tells it to explain and retry with the name — not to send the admin off to do it by hand", () => {

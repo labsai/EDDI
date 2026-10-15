@@ -489,7 +489,9 @@
     "reviewChangesTitle": "Alterações não salvas na versão {{version}}",
     "savedVersion": "Salvo v{{version}}",
     "yourChanges": "Suas alterações",
-    "discardMessage": "Todas as alterações não salvas nesta página voltam ao que a versão {{version}} contém."
+    "discardMessage": "Todas as alterações não salvas nesta página voltam ao que a versão {{version}} contém.",
+    "deployed": "Agente implantado",
+    "deployFailedTitle": "A implantação falhou."
   },
   "wizard": {
     "title": "Assistente de Agent"
@@ -991,7 +993,8 @@
     "keepEditing": "Continuar editando",
     "discardChanges": "Descartar alterações",
     "saveAndLeave": "Salvar e sair",
-    "modified": "Modificado"
+    "modified": "Modificado",
+    "deployDone": "Implantado — a alteração já está ativa"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -3777,7 +3780,9 @@
     "bulkApply": "Aplicar a todos os agentes novos",
     "apiKeyRequired": "{{provider}} precisa de uma chave de API antes que este agente possa ser criado.",
     "presetsNote": "São modelos iniciais que preenchem este assistente. Para usar uma discussão pré-ajustada e atribuir seus agentes existentes às funções dela, veja",
-    "presetsLink": "Modelos de grupo"
+    "presetsLink": "Modelos de grupo",
+    "agentNotDeployed": "Agente criado, mas não implantado",
+    "deployingAgents": "Implantando os agentes..."
   },
   "groupTemplates": {
     "advisoryBoard": "Conselho consultivo",
@@ -4214,7 +4219,13 @@
     "connectionForbidden": "A sua função não pode listar ligações. Se souber o nome, escreva ${connection:name} à mão.",
     "connectionUnavailable": "Este backend não oferece ligações.",
     "connectionFailed": "Não foi possível carregar as ligações.",
-    "connectionHint": "Insere ${connection:name} como valor completo. O EDDI resolve-o na credencial em cada pedido."
+    "connectionHint": "Insere ${connection:name} como valor completo. O EDDI resolve-o na credencial em cada pedido.",
+    "restricted_one": "Restrita a {{count}} agente",
+    "restricted_many": "Restrita a {{count}} agentes",
+    "restricted_other": "Restrita a {{count}} agentes",
+    "restrictedTooltip": "Autorizada para: {{agents}}",
+    "notGrantedAdmin": "Este agente ainda não tem acesso a esta chave. Será pedido que o adicione ao implantar.",
+    "notGrantedNonAdmin": "Este agente ainda não tem acesso a esta chave. Peça a um administrador que a autorize antes de implantar."
   },
   "snippetEditor": {
     "category": "Categoria",
@@ -4912,7 +4923,8 @@
       "platformBaseUrlUnresolved": "Esta instalação usa uma porta HTTP aleatória e não tem eddi.self.base-url, por isso não consegue indicar onde se alcança a si própria. Introduza o endereço aqui.",
       "llmEndpoint": "Endpoint do modelo",
       "promptBodyDiffers": "Estas instruções diferem da predefinição atual — foram editadas ou escritas por uma versão anterior do Manager.",
-      "promptBodyReset": "Repor a predefinição"
+      "promptBodyReset": "Repor a predefinição",
+      "keyRestricted": "\"{{key}}\" está restrita a agentes específicos. O operador será adicionado à autorização de {{key}} — será pedida a sua confirmação antes da implantação."
     },
     "authMode": {
       "none": {
@@ -4934,7 +4946,8 @@
       "done": "Concluído",
       "longWait1": "O agente operador está sendo criado e implantado — esta é a etapa mais longa…",
       "longWait2": "Configurando as ferramentas e o portão de aprovação no novo agente…",
-      "longWait3": "Ainda em andamento — a implantação pode demorar em uma plataforma ocupada…"
+      "longWait3": "Ainda em andamento — a implantação pode demorar em uma plataforma ocupada…",
+      "deploying": "A implantar o agente operador — poderá ser-lhe pedido que autorize a sua chave de modelo…"
     },
     "status": {
       "title": "Operador",
@@ -5104,6 +5117,30 @@
       "hintAction": "Atualizar",
       "keepCurrent": "Manter o texto atual (não aprenderá o que a nova predefinição acrescenta)",
       "title": "Há uma atualização disponível para o Platform Operator"
+    },
+    "unregistered": {
+      "title": "Agentes operadores que este ecrã não gere",
+      "description": "Estes agentes parecem um Platform Operator, mas a configuração do operador não aponta para eles. Adote um para o gerir aqui, ou remova-o.",
+      "adopt": "Adotar",
+      "adopted": "Operador adotado — este ecrã passa a geri-lo.",
+      "fixAndDeploy": "Corrigir a autorização e implantar",
+      "remove": "Remover",
+      "removeTitle": "Remover este agente operador?",
+      "removeBody": "O agente é retirado da implantação, as suas conversas são encerradas e ele e os recursos criados para ele são eliminados de forma permanente. Não é possível desfazer.",
+      "removed": "Agente operador removido",
+      "status": {
+        "READY": "Implantado",
+        "IN_PROGRESS": "A implantar",
+        "ERROR": "Erro",
+        "NOT_FOUND": "Não implantado"
+      }
+    },
+    "health": {
+      "missing": "A configuração do operador aponta para o agente {{id}}, que já não existe.",
+      "cleared": "Configuração do operador limpa",
+      "clear": "Limpar a configuração",
+      "notDeployed": "O operador está ligado, mas o seu agente não está implantado.",
+      "deploy": "Implantar novamente"
     }
   },
   "groupWorkspace": {
@@ -5799,5 +5836,38 @@
   "wizardLeave": {
     "title": "Sair sem criar?",
     "message": "A configuração da sua equipe, incluindo os prompts e as chaves de API informados, ainda não foi criada e será perdida."
+  },
+  "grantRequired": {
+    "title": "Este agente não tem acesso às suas chaves do cofre",
+    "titleRefused": "Implantação recusada: chave do cofre não autorizada",
+    "copied": "Pedido copiado — envie-o a um administrador",
+    "issueWithAgents": "\"{{agent}}\" usa a chave restrita \"{{key}}\", atualmente autorizada para: {{agents}}.",
+    "issueWithCount_one": "\"{{agent}}\" usa a chave restrita \"{{key}}\", atualmente autorizada para {{count}} agente.",
+    "issueWithCount_many": "\"{{agent}}\" usa a chave restrita \"{{key}}\", atualmente autorizada para {{count}} agentes.",
+    "issueWithCount_other": "\"{{agent}}\" usa a chave restrita \"{{key}}\", atualmente autorizada para {{count}} agentes.",
+    "issue": "\"{{agent}}\" usa a chave restrita \"{{key}}\", que só está autorizada para outros agentes.",
+    "unfixable": "\"{{reference}}\" não é uma referência simples ao cofre, por isso não pode ser autorizada aqui. Altere a configuração do agente para usar uma chave que ele possa usar.",
+    "questionAll": "Permitir que todos os agentes usem estas chaves?",
+    "question": "Adicionar \"{{agent}}\" à autorização?",
+    "allowAll": "Em vez disso, permitir que todos os agentes usem esta chave",
+    "allowAllWarning": "Todos os agentes desta instalação — incluindo os criados mais tarde — poderão usá-la. Isso remove o único limite ao alcance desta chave.",
+    "nonAdmin": "Só um administrador pode mudar quem pode usar uma chave do cofre. Peça a um que adicione este agente à autorização e implante novamente.",
+    "copyRequest": "Copiar o pedido para um administrador",
+    "losingAccess": "Estes agentes implantados perderiam o acesso à chave:",
+    "deployAnyway": "Implantar mesmo assim",
+    "applyAnyway": "Aplicar mesmo assim e implantar",
+    "allowAllAndDeploy": "Permitir a todos e implantar",
+    "addAndDeploy": "Adicionar e implantar",
+    "cancelled": "Não implantado — a chave do cofre não foi autorizada.",
+    "fix": "Corrigir",
+    "titleMany": "Estes agentes não têm concedidas as suas chaves do cofre",
+    "issueMany": "Agentes que usam a chave restrita \"{{key}}\", concedida apenas a outros agentes: {{agents}}.",
+    "questionMany": "Adicionar todos estes agentes à concessão?",
+    "nonAdminMany": "Apenas um administrador pode alterar quem pode usar uma chave do cofre. Peça a um que adicione estes agentes à concessão e depois implante-os novamente."
+  },
+  "deployMany": {
+    "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
+    "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
+    "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
   }
 }

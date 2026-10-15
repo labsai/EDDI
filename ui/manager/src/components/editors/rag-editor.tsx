@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
 import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
@@ -248,6 +249,7 @@ function KeyValueEditor({
   testIdPrefix?: string;
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const pairs = Object.entries(entries);
 
   const addEntry = () => {
@@ -304,6 +306,7 @@ function KeyValueEditor({
                   {/* No `connections` here: embedding models and vector stores
                       need a bare credential and refuse ${connection:…}. */}
                   <SecretKeyPicker
+                    agentId={owningAgentId}
                     value={value}
                     onChange={(v) => updateValue(key, v)}
                     readOnly={readOnly}

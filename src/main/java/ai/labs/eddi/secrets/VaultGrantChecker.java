@@ -387,6 +387,23 @@ public class VaultGrantChecker {
     }
 
     /**
+     * The grant metadata of {@code secret}, or {@code null} when the vault is off
+     * or the metadata cannot be read. Never a value: {@link SecretMetadata} has no
+     * field for one.
+     */
+    public SecretMetadata metadataOf(SecretReference secret) {
+        if (secret == null || !secretProvider.isAvailable()) {
+            return null;
+        }
+        try {
+            return secretProvider.getMetadata(secret);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read grant metadata for %s (%s)", sanitize(secret.toReferenceString()), e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    /**
      * Whether {@code agentId} may use {@code reference}. Absent, empty and wildcard
      * grant lists all allow — those are the shapes that mean "not restricted", and
      * the wizard writes the wildcard for every key it vaults.

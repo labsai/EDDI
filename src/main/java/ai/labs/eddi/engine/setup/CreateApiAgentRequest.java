@@ -106,5 +106,28 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          *
          * Appended last for the same positional-constructor reason as llmBaseUrl.
          */
-        String apiAuthHeader) {
+        String apiAuthHeader,
+        /*
+         * Admin opt-in: after creating the agent and BEFORE deploying it, add the new
+         * agent's id to the grant of every RESTRICTED vault secret it references. A
+         * grant lists agent ids, so without this every new agent using a restricted
+         * secret fails its first deploy by construction. Each grant change is audited;
+         * a secret open to every agent ("*") is never touched.
+         *
+         * Refused for any caller who is not eddi-admin. Deliberately NOT exposed on any
+         * MCP tool: an LLM that can grant itself secrets defeats the gate. In-process
+         * callers (McpSetupTools, CreateSubAgentTool) use the overload below, which
+         * passes null.
+         */
+        Boolean grantReferencedSecrets) {
+
+    /** Every field but {@link #grantReferencedSecrets}, which stays off. */
+    public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
+            String apiBaseUrl, String apiAuth, String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy,
+            String environment, String llmBaseUrl, AgentConfiguration.HitlConfig hitlConfig, String mcpServerUrls, Integer maxToolIterations,
+            String vaultKeyName, String apiAuthHeader) {
+        this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
+                enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
+                null);
+    }
 }

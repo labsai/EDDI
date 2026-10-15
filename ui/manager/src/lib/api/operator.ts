@@ -10,13 +10,14 @@ import {
 import {
   deleteAgent,
   undeployAgent,
-  deployAgent,
   getDeploymentStatus,
   getAgent,
   getAgentCurrentVersion,
   type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
+import { markOperatorDescriptor } from "./operator-marker";
+import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import {
   buildEndpointFilter,
   buildToolApprovals,
@@ -295,7 +296,18 @@ export interface ProvisionOperatorParams {
 }
 
 /**
- * Create and deploy the operator agent.
+ * Create the operator agent — WITHOUT deploying it — and mark it as the operator.
+ *
+ * Not deployed here, deliberately (plan decision 5.3). A vault grant names
+ * agent ids, so an operator whose model key is restricted is on no grant the
+ * moment it is created, and a deploy in the same call was refused by
+ * construction — every time, including on every retry, each of which created
+ * another agent. Activation deploys it afterwards through the grant flow, where
+ * an admin can add THIS agent to the key's grant first.
+ *
+ * The descriptor is stamped with `OPERATOR_DESCRIPTOR_MARKER`, so an operator
+ * the config does not point at (a kept agent, a deleted variable) can still be
+ * found and managed from the operator screen.
  *
  * `apiBaseUrl` is `config.apiBaseUrl`, which the caller must already have
  * resolved with {@link resolveOperatorApiBaseUrl}: the address EDDI can reach
@@ -308,7 +320,7 @@ export async function provisionOperator(
 ): Promise<SetupResult> {
   const { agentName, config, apiKey, baseUrl, spec } = params;
 
-  return createApiAgent({
+  const result = await createApiAgent({
     agentName,
     // Same scope as the endpoint filter below, so the preamble describes the
     // boundary the agent is actually behind.
@@ -324,7 +336,7 @@ export async function provisionOperator(
     llmBaseUrl: baseUrl || undefined,
     apiAuth: apiAuthForMode(config.authMode),
     endpoints: buildEndpointFilter(config.scope),
-    deploy: true,
+    deploy: false,
     environment: config.environment,
     // Sent unconditionally — including for read_only. See buildToolApprovals:
     // installing the real gate now, on v1, is what verifyGateInstalled proves
@@ -344,25 +356,31 @@ export async function provisionOperator(
     // approval no matter how many rounds remain.
     maxToolIterations: OPERATOR_MAX_TOOL_ITERATIONS,
   });
+  if (result.agentId && result.agentId !== "unknown") {
+    const location = (result.resources as { agentLocation?: unknown } | undefined)?.agentLocation;
+    const version = typeof location === "string" ? parseVersionFromLocation(location) : null;
+    await markOperatorDescriptor(result.agentId, version ?? 1);
+  }
+  return result;
 }
 
 /**
- * Reject a provisioning result that did not actually produce a live operator.
+ * Reject a provisioning result that did not produce a manageable agent.
  *
- * `setup-api` answers 201 even when the deploy step failed, and falls back to
- * the literal id `"unknown"` when it cannot read the created agent's location.
- * Persisting either as `enabled: true` would leave the UI claiming a running
+ * `setup-api` falls back to the literal id `"unknown"` when it cannot read the
+ * created agent's location. Persisting that would leave the UI claiming an
  * operator whose status and undeploy calls address a nonexistent agent.
+ *
+ * Only the id. It used to reject `deployed: false` too, and it ran BEFORE the
+ * rollback below it — so a failed deploy threw past the cleanup and left the
+ * created operator behind, invisible, while a retry made a second one.
+ * Provisioning no longer deploys at all (`deploy: false`); activation deploys
+ * afterwards, inside the part that rolls back.
  */
 export function assertProvisioned(result: SetupResult): void {
   if (!result.agentId || result.agentId === "unknown") {
     throw new Error(
       "EDDI created the operator but did not return its agent id, so it cannot be managed. Check the platform logs and try again.",
-    );
-  }
-  if (result.deployed === false || result.deploymentStatus === "ERROR") {
-    throw new Error(
-      `The operator agent was created but failed to deploy (status: ${result.deploymentStatus ?? "unknown"}).`,
     );
   }
 }
@@ -926,7 +944,8 @@ function looksLikeAuthFailure(result: string | undefined): boolean {
 /** Deployment status for the configured operator agent. */
 export async function readOperatorStatus(config: OperatorConfig) {
   if (!config.agentId || config.version == null) return null;
-  return getDeploymentStatus(config.environment, config.agentId, config.version);
+  // Detailed, so an ERROR says why (a refused vault grant, most often).
+  return getDeploymentStatus(config.environment, config.agentId, config.version, { detailed: true });
 }
 
 /**
@@ -943,7 +962,26 @@ export async function reactivateOperator(
   if (!config.agentId || config.version == null) {
     throw new Error("The operator has no provisioned agent to re-enable.");
   }
-  await deployAgent(config.environment, config.agentId, config.version);
+  // Through the grant flow, like activation: an operator whose model key is
+  // restricted needs its agent on the grant to come back up, and a plain deploy
+  // here used to fail (or be refused) with no way to fix it from this screen.
+  const outcome = await runDeployWithGrants({
+    agentId: config.agentId,
+    version: config.version,
+    environment: config.environment,
+  });
+  if (outcome.kind === "cancelled") {
+    throw new Error(
+      "The Platform Operator was not enabled: its vault key was not granted to the agent. Nothing was changed - enable it again to grant the key.",
+    );
+  }
+  if (outcome.kind === "failed") {
+    throw new Error(
+      outcome.message
+        ? `The Platform Operator could not be enabled: ${outcome.message}`
+        : `The Platform Operator could not be enabled (status: ${outcome.result.status}).`,
+    );
+  }
   const next: OperatorConfig = { ...config, enabled: true };
   await writeOperatorConfig(next);
   return next;

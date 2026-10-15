@@ -48,7 +48,6 @@ import {
   useAgent,
   useDeploymentStatus,
   useDeploymentStatuses,
-  useDeployAgent,
   useUndeployAgent,
   useDeleteAgent,
   useDuplicateAgent,
@@ -75,7 +74,9 @@ import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CompatibilityGenerationBadge } from "@/components/agents/compatibility-generation-badge";
 import { DeploymentImpactPanel } from "@/components/agents/deployment-impact-panel";
 import { useWorkflowDescriptors } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
+import { parseResourceUri, type EnvironmentStatus, type Agent } from "@/lib/api/agents";
+import { useDeployWithGrants, isGrantFailure } from "@/hooks/use-deploy-with-grants";
+import { deployFailureMessage, fixGrantAndRedeploy, reportDeployOutcome } from "@/lib/deploy-outcome";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
@@ -185,7 +186,7 @@ export function AgentDetailPage() {
    */
   const isChatReachable = liveEnvironments.length > 0;
 
-  const deployMutation = useDeployAgent();
+  const { deploy: deployWithGrants, isRunning: isDeploying } = useDeployWithGrants();
   const undeployMutation = useUndeployAgent();
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
@@ -215,7 +216,9 @@ export function AgentDetailPage() {
         })
       : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = deployMutation.isPending || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
+  const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
   // Derive agent display name from the version descriptor (the full agent
   // config returned by useAgent does NOT include name/description).
@@ -329,13 +332,28 @@ export function AgentDetailPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isDirty, isSaving, saveDraft]);
 
-  function handleDeploy() {
-    deployMutation.mutate(
-      { agentId: id!, version: resolvedVersion },
-      {
-        onSuccess: () => toast.success(t("agents.deploySuccess", "Deployment started")),
-        onError: (err) => toast.error(getErrorMessage(err)),
-      }
+  /**
+   * Grant-aware, waited deploy: a restricted vault key this agent is not
+   * granted is settled in the grant dialog first, and a refusal toasts the
+   * backend's reason (with Fix for a grant refusal) instead of "started".
+   */
+  function handleDeploy(environment: string = "production") {
+    const options = { agentId: id!, version: resolvedVersion, agentName: agentDisplayName, environment };
+    deployWithGrants(options)
+      .then((outcome) =>
+        reportDeployOutcome(outcome, options, t, t("agentDetail.deployed", "Agent deployed"), () => {
+          void queryClient.invalidateQueries({ queryKey: ["agents"] });
+        }),
+      )
+      .catch((err) => toast.error(getErrorMessage(err)));
+  }
+
+  function handleFixDeployment() {
+    if (!isGrantFailure(deploymentFailure)) return;
+    void fixGrantAndRedeploy(
+      { agentId: id!, version: resolvedVersion, agentName: agentDisplayName, environment: "production", failure: deploymentFailure },
+      t,
+      () => void queryClient.invalidateQueries({ queryKey: ["agents"] }),
     );
   }
 
@@ -585,7 +603,7 @@ export function AgentDetailPage() {
 
             {/* Deploy/Undeploy */}
             <button
-              onClick={isDeployed ? () => openUndeployDialog("production") : handleDeploy}
+              onClick={isDeployed ? () => openUndeployDialog("production") : () => handleDeploy()}
               disabled={isBusy || isDirty}
               title={deployBlockedTitle}
               className={cn(
@@ -617,20 +635,27 @@ export function AgentDetailPage() {
                   drawerStore.open(id!, agentDisplayName, "production");
                   drawerStore.setStep("deploying");
                   try {
-                    await deployAgent("production", id!, resolvedVersion);
-                    let ready = false;
-                    for (let i = 0; i < 15; i++) {
-                      await new Promise(r => setTimeout(r, 2000));
-                      const s = await getDeploymentStatus("production", id!, resolvedVersion);
-                      if (s.status === "READY") {
-                        ready = true;
-                        break;
-                      }
-                      if (s.status === "ERROR") throw new Error(t("agents.deployError", "Deploy failed"));
+                    const deployOptions = {
+                      agentId: id!,
+                      version: resolvedVersion,
+                      agentName: agentDisplayName,
+                      environment: "production",
+                    };
+                    const outcome = await deployWithGrants(deployOptions);
+                    if (outcome.kind === "cancelled") {
+                      drawerStore.setStep(
+                        "error",
+                        t("grantRequired.cancelled", "Not deployed — the vault key was not granted."),
+                      );
+                      return;
                     }
-                    // Starting a conversation on an agent that never came up
-                    // fails further on with a message about something else.
-                    if (!ready) throw new Error(t("chatDrawer.timeout", "Deploy timed out"));
+                    if (outcome.kind === "failed") {
+                      // The reason, not a bare "Deploy failed" — and a toast
+                      // with Fix when it is a grant refusal.
+                      drawerStore.setStep("error", deployFailureMessage(outcome, t));
+                      reportDeployOutcome(outcome, deployOptions, t);
+                      return;
+                    }
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
@@ -766,16 +791,40 @@ export function AgentDetailPage() {
         </div>
       )}
 
+      {/* A deployment in ERROR says why — the detailed status carries the
+          backend's reason for a caller who may edit the agent. A grant refusal
+          gets the Fix that reopens the grant dialog. */}
+      {deploymentFailure && (
+        <div
+          className="flex flex-wrap items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+          data-testid="deployment-failure"
+        >
+          <span className="flex-1">
+            <strong className="font-medium">{t("agentDetail.deployFailedTitle", "Deployment failed.")}</strong>{" "}
+            {deploymentFailure.message}
+          </span>
+          {isGrantFailure(deploymentFailure) && access.canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFixDeployment}
+              disabled={isBusy}
+              data-testid="deployment-failure-fix"
+            >
+              {t("grantRequired.fix", "Fix")}
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
           agentId={id!}
           version={resolvedVersion}
           statuses={envStatuses}
-          onDeploy={(env) => deployMutation.mutate(
-            { environment: env, agentId: id!, version: resolvedVersion },
-            { onError: (err) => toast.error(getErrorMessage(err)) }
-          )}
+          onDeploy={(env) => handleDeploy(env)}
           onUndeploy={(env) => openUndeployDialog(env)}
           isBusy={isBusy}
           blockedTitle={deployBlockedTitle}

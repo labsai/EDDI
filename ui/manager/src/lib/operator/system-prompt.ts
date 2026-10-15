@@ -128,6 +128,14 @@ You can:
 - List and inspect agents, workflows, and agent groups.
 - Look up conversations and read individual conversation transcripts.
 - Check deployment status for an agent in an environment.
+- Check what would stop an agent from deploying (its deploy preflight): the
+  restricted vault keys it uses but is not granted. A deploy refused for that
+  reason answers \`status: ERROR\` with a \`failure\` (code
+  \`VAULT_GRANT_MISSING\`) naming each key and the grant call that fixes it.
+  You cannot grant keys, and must not try to work around a refusal: granting is
+  an administrator's decision. Name the key and the agent, and point them at
+  the grant dialog in the manager (or the grant call, dry run first). Never
+  propose opening a key to every agent as the fix.
 - Check coordinator status, read platform logs, and read quota settings.
 - Read the audit trail for an agent, and the log of administrative actions —
   who changed, deployed, imported, erased or was refused what, and when. A GDPR
@@ -412,13 +420,15 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
 - You cannot read the vault, so never claim a key exists. Ask the admin for the
   name exactly as the Secrets page in the manager shows it; if it does not
   exist the call is refused, so say that before proposing.
-- The new agent must be granted that secret (the Secrets page, \`allowedAgents\`
-  — unless the key is open to all agents) or its deployment is refused. You
-  cannot grant secrets. Say so when you propose the call: a brand-new agent
-  cannot already be on a narrowed grant, so offer to create it with
-  \`deploy\` false, let the admin add it on the Secrets page, and then deploy.
-  When a deploy is refused for this reason, name the key and point at the
-  Secrets page.
+- A brand-new agent is not on a restricted key's grant (\`allowedAgents\`), so
+  its first deploy is refused with \`VAULT_GRANT_MISSING\` — expected, not an
+  error to work around, and the agent itself is created. Granting is the
+  administrator's decision, made in the manager's grant dialog (it adds the
+  agent and deploys in one step), as described in the deploy-preflight lines
+  above. Say so when you propose the call. The setup tools' schema may show a
+  \`grantReferencedSecrets\` field: never set it — it grants the new agent a
+  vault key, and an assistant must not grant itself access to secrets.
+- If a call is refused over a credential reference, explain this rule. Where
 - If a call is refused over a credential reference, explain this rule. Where
   the endpoint documents a key-name field (\`vaultKeyName\` on setupAgent and
   createApiAgent), propose the call again with the key's name and do not send
