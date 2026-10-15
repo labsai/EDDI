@@ -437,6 +437,22 @@ class EmbeddingStoreFactoryInMemoryTest {
             assertTrue(factory.dropSupersededInMemoryStore(KB_ID, withParameters(Map.of("model", "m-1")),
                     withParameters(Map.of("model", "m-1", "baseUrl", "http://llm.internal:8080/v1"))));
         }
+
+        @Test
+        @DisplayName("a global variable that changes the model replaces the store on the next write")
+        void resolvedModelChangeReplacesTheStore() {
+            var viaVariable = withParameters(Map.of("model", "${vars:embedding-model}"));
+            when(globalVariableResolver.resolveAll(any())).thenReturn(Map.of("model", "text-embedding-3-small"));
+            var store = factory.getOrCreateForIngestion(KB_ID, viaVariable);
+            addSegments(store, 1);
+
+            // The configured text is unchanged; the variable now names another model.
+            when(globalVariableResolver.resolveAll(any())).thenReturn(Map.of("model", "text-embedding-3-large"));
+            var written = factory.getOrCreateForIngestion(KB_ID, viaVariable);
+
+            assertNotSame(store, written, "vectors of the old model must not be mixed with the new one's");
+            assertTrue(EmbeddingStoreFactory.isRetired(store));
+        }
     }
 
     @Nested

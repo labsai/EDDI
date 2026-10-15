@@ -52,6 +52,17 @@ pipeline skips a page whose content hash is unchanged, and the hashes outlived t
   The factory now retires such a store; a later write throws `InMemoryStoreRetiredException` under
   the cap's lock, and the run stops `FAILED` saying the store was replaced or removed. The next run
   re-embeds into the current store, because its epoch no longer matches. (Raised in review.)
+  A drop retires the store inside the registry's own atomic removal (`computeIfPresent`), so no
+  write lands between "the cap stops counting it" and "it refuses writes"; holding the write lock
+  around `remove()` instead would invert the lock order of the replacement path and could deadlock.
+- **A run is bound to the store it checked.** The run takes its write store once, at the start,
+  and compares that instance's fingerprint (`EmbeddingStoreFactory.fingerprintOf`). A later lookup
+  could have returned a newer, empty store after a mid-run drop, with every document passing as
+  "unchanged". A run whose bound store was retired by the end reports `FAILED` even if it wrote
+  nothing.
+- **The embedding signature compares resolved values.** `${vars:…}` references are resolved as
+  `EmbeddingModelFactory` resolves them, so a global variable that switches the model replaces the
+  in-memory store on the next write instead of mixing two models' vectors.
 
 ### Design decisions
 

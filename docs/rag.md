@@ -977,8 +977,9 @@ parameter rather than ignoring it.
 >   every other store type (see [Knowledge base isolation](#knowledge-base-isolation)) — **moves to
 >   another `storeType`**, or **changes how its vectors are made**: another embedding provider,
 >   model (`model` and `modelName` count as one setting), Azure `deploymentName`, endpoint
->   (`baseUrl`/`endpoint`) or `dimensions`/`outputDimensionality`. The old vectors are unreachable
->   or meaningless. A new version that only changes chunking, retrieval settings or sources keeps
+>   (`baseUrl`/`endpoint`) or `dimensions`/`outputDimensionality`. These are compared after
+>   `${vars:…}` references are resolved, so a global variable that names a new model counts too.
+>   The old vectors are unreachable or meaningless. A new version that only changes chunking, retrieval settings or sources keeps
 >   the data, and so do rotating the embedding API key and renaming a knowledge base in the id
 >   layout.
 >

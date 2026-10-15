@@ -1824,6 +1824,35 @@ class IngestionPipelineTest {
             assertNotEquals(IngestionReport.Outcome.FAILED, next.outcome());
             assertTrue(segmentsIn(storeFactory) > 0, "the next run re-embeds into the current store");
         }
+
+        @Test
+        @DisplayName("an all-unchanged run whose checked store is dropped mid-run does not report success over an empty store")
+        void unchangedRunOverADroppedStoreIsNotASuccess() {
+            storeFactory = restartedProcess();
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .page(SITE + "/leaf", pageWith("Content."));
+            IngestionReport first = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+            assertNotEquals(IngestionReport.Outcome.FAILED, first.outcome());
+
+            // Same content, so every document reads "unchanged" against the store whose
+            // fingerprint the run checked, and the run never writes. The store is
+            // dropped after that check.
+            PageFetcher dropsTheStoreMidRun = command -> {
+                if (command.url().endsWith("/leaf")) {
+                    storeFactory.dropInMemoryStore(KB_RESOURCE_ID, knowledgeBase());
+                }
+                return site.fetch(command);
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(dropsTheStoreMidRun), new HtmlToMarkdownConverter(), stateStore,
+                    fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome(),
+                    "its documents are not in the current store, which is empty");
+            assertTrue(report.message().contains("replaced or removed"), report.message());
+            assertEquals(0, segmentsIn(storeFactory));
+        }
     }
 
     private static IngestionSource.IngestionSettings tombstoneAfter(int runs) {

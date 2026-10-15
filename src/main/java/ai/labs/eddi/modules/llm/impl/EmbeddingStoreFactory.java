@@ -341,7 +341,29 @@ public class EmbeddingStoreFactory {
             return null;
         }
         requireId(ragConfigId);
-        return FINGERPRINT_EPOCH_PREFIX + inMemoryStoreForWrite(ragConfigId, config).store().epoch();
+        return fingerprintOf(inMemoryStoreForWrite(ragConfigId, config).store());
+    }
+
+    /**
+     * The fingerprint of this very store instance, as {@link #ingestionFingerprint}
+     * reports it; {@code null} for an external store. Lets a run check the store it
+     * actually holds: a run takes its write store once, from
+     * {@link #getOrCreateForIngestion}, and compares <em>that</em> instance's
+     * fingerprint. Looking the fingerprint up separately could describe another
+     * store if the knowledge base were dropped or remodelled in between, and the
+     * run would then judge every document "unchanged" against the wrong state.
+     */
+    public static String fingerprintOf(EmbeddingStore<TextSegment> store) {
+        return store instanceof CappedInMemoryEmbeddingStore capped ? FINGERPRINT_EPOCH_PREFIX + capped.epoch() : null;
+    }
+
+    /**
+     * Whether {@code store} is an in-memory store that was replaced or dropped and
+     * now refuses writes. A run bound to such a store did not write to the
+     * knowledge base's current one, whatever else it reports.
+     */
+    public static boolean isRetired(EmbeddingStore<TextSegment> store) {
+        return store instanceof CappedInMemoryEmbeddingStore capped && capped.isRetired();
     }
 
     /**
@@ -355,7 +377,7 @@ public class EmbeddingStoreFactory {
         }
         requireId(ragConfigId);
         InMemoryKnowledgeBase existing = inMemoryStores.get(inMemoryKey(ragConfigId, config));
-        if (existing == null || !existing.embeddingSignature().equals(embeddingSignature(config))) {
+        if (existing == null || !existing.embeddingSignature().equals(signatureOf(config))) {
             return FINGERPRINT_NO_STORE;
         }
         return FINGERPRINT_EPOCH_PREFIX + existing.store().epoch();
@@ -375,11 +397,20 @@ public class EmbeddingStoreFactory {
             return false;
         }
         String key = inMemoryKey(ragConfigId, config);
-        InMemoryKnowledgeBase dropped = inMemoryStores.remove(key);
+        InMemoryKnowledgeBase[] removed = new InMemoryKnowledgeBase[1];
+        // Retired before it leaves the registry, inside the map's own atomic step: a
+        // run that took this store must not keep writing into it (nothing reads it any
+        // more), and no write may land between "the cap stops counting it" and "it
+        // refuses writes". Taking inMemoryWriteLock around remove() instead would
+        // invert the lock order of the replacement in inMemoryStoreForWrite, which
+        // retires under the map's lock, and could deadlock against it.
+        inMemoryStores.computeIfPresent(key, (k, existing) -> {
+            existing.store().retire();
+            removed[0] = existing;
+            return null;
+        });
+        InMemoryKnowledgeBase dropped = removed[0];
         if (dropped != null) {
-            // A run that took this store before the drop must not keep writing into
-            // it: nothing reads it any more, and the cap no longer counts it.
-            dropped.store().retire();
             LOGGER.infof("Dropped the in-memory vector store of knowledge base %s (%d segments)", sanitize(key),
                     dropped.store().size());
         }
@@ -401,7 +432,7 @@ public class EmbeddingStoreFactory {
             return false;
         }
         boolean sameStore = isInMemory(updated) && inMemoryKey(ragConfigId, previous).equals(inMemoryKey(ragConfigId, updated))
-                && embeddingSignature(previous).equals(embeddingSignature(updated));
+                && signatureOf(previous).equals(signatureOf(updated));
         return !sameStore && dropInMemoryStore(ragConfigId, previous);
     }
 
@@ -450,12 +481,40 @@ public class EmbeddingStoreFactory {
      * Credentials, timeouts, retries and task types are left out — rotating a key
      * does not change a vector.
      * <p>
-     * Compared on the configured text: a value given as a global-variable reference
-     * is compared as the reference, so a change to the variable's value is not seen
-     * here.
+     * This form compares the configured text: a value given as a global-variable
+     * reference is compared as the reference. The factory compares
+     * {@linkplain #signatureOf resolved} values instead.
      */
     public static String embeddingSignature(RagConfiguration config) {
-        Map<String, String> params = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
+        return embeddingSignature(config, config.getEmbeddingParameters());
+    }
+
+    /**
+     * {@link #embeddingSignature(RagConfiguration)} over the parameters as the
+     * embedding model is actually built from them: {@code ${vars:...}} references
+     * resolved, exactly as {@code EmbeddingModelFactory} resolves them. A global
+     * variable that changes the model therefore changes the signature, and the next
+     * write replaces the store instead of adding another model's vectors to it. If
+     * a reference cannot be resolved, the configured text is compared, as before.
+     */
+    String signatureOf(RagConfiguration config) {
+        Map<String, String> params = config.getEmbeddingParameters();
+        if (params != null && !params.isEmpty()) {
+            try {
+                Map<String, String> resolved = globalVariableResolver.resolveAll(params);
+                if (resolved != null) {
+                    params = resolved;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Comparing the configured embedding parameters: global variables could not be resolved (%s)",
+                        sanitize(e.getMessage()));
+            }
+        }
+        return embeddingSignature(config, params);
+    }
+
+    private static String embeddingSignature(RagConfiguration config, Map<String, String> embeddingParameters) {
+        Map<String, String> params = embeddingParameters != null ? embeddingParameters : Map.of();
         String provider = config.getEmbeddingProvider() == null ? "" : config.getEmbeddingProvider().trim();
         return String.join("|", String.valueOf(config.getStoreType()), provider,
                 EmbeddingParameters.modelName(params, ""),
@@ -483,7 +542,7 @@ public class EmbeddingStoreFactory {
     }
 
     private InMemoryKnowledgeBase inMemoryStoreForWrite(String ragConfigId, RagConfiguration config) {
-        String signature = embeddingSignature(config);
+        String signature = signatureOf(config);
         return inMemoryStores.compute(inMemoryKey(ragConfigId, config), (key, existing) -> {
             if (existing == null) {
                 return newInMemoryStore(config, key);
@@ -514,7 +573,7 @@ public class EmbeddingStoreFactory {
                 reserveInMemorySegments(knowledgeBaseId, incoming);
             }
         };
-        return new InMemoryKnowledgeBase(new CappedInMemoryEmbeddingStore(key, guard), embeddingSignature(config));
+        return new InMemoryKnowledgeBase(new CappedInMemoryEmbeddingStore(key, guard), signatureOf(config));
     }
 
     private void reserveInMemorySegments(String knowledgeBaseId, int incoming) {

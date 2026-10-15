@@ -277,6 +277,14 @@ public class IngestionPipeline {
             // already counted.
             collector.tombstoned += reconcileDeletions(source, sourceKey, runId, mode, sourceRun, collector);
 
+            // A run that wrote nothing (every document unchanged) never meets the
+            // retired store's refusal, yet its documents are not in the knowledge
+            // base's current store: report that rather than success.
+            if (mode == Mode.INGEST && collector.storeRefused == null && collector.store != null
+                    && EmbeddingStoreFactory.isRetired(collector.store)) {
+                collector.storeRefused = new InMemoryStoreRetiredException(knowledgeBaseId).getMessage();
+            }
+
             IngestionReport report = collector.toReport(summary, null, startedAt);
             finish(mode, runId, sourceKey, report, statusFor(collector));
             return report;
@@ -344,9 +352,17 @@ public class IngestionPipeline {
                                            String knowledgeBaseId, IngestionSource source, String sourceKey,
                                            Collector collector) {
 
-        String current = mode == Mode.INGEST
-                ? embeddingStoreFactory.ingestionFingerprint(ragConfigId, knowledgeBase)
-                : embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);
+        String current;
+        if (mode == Mode.INGEST) {
+            // Bound for the whole run: the fingerprint checked here must describe the
+            // store the run writes to. A later lookup could return a newer, empty store
+            // if the knowledge base were dropped or remodelled meanwhile, and every
+            // document would then pass as "unchanged" against the old store's state.
+            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+            current = EmbeddingStoreFactory.fingerprintOf(collector.store);
+        } else {
+            current = embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);
+        }
         if (current == null) {
             return;
         }

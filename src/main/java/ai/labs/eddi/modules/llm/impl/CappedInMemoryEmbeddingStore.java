@@ -71,6 +71,13 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
         }
     }
 
+    /** Whether {@link #retire()} has been called. */
+    boolean isRetired() {
+        synchronized (guard.lock()) {
+            return retired;
+        }
+    }
+
     /** Called with {@code guard.lock()} held. */
     private void admit(int incoming) {
         if (retired) {
