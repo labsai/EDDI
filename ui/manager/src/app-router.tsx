@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ThemedToaster } from "@/components/layout/themed-toaster";
 import { AuthProvider } from "@/components/auth/auth-provider";
 import { App } from "@/app";
+import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
 
 /**
  * The browser router for the app.
@@ -25,6 +26,8 @@ export function createAppRouter(queryClient: QueryClient) {
             <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
               <App />
               <ThemedToaster />
+              {/* The one vault-grant dialog every deploy flow asks through. */}
+              <GrantRequiredDialogHost />
             </ThemeProvider>
           </QueryClientProvider>
         </AuthProvider>

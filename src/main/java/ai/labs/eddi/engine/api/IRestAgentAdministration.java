@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.DeploymentImpact;
+import ai.labs.eddi.engine.model.DeploymentPreflight;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import jakarta.ws.rs.*;
@@ -32,7 +33,8 @@ public interface IRestAgentAdministration {
     @Operation(summary = "Deploy an agent", description = "Deploys the specified agent version to the given environment. "
             + "Subject to the tenant's maxAgentsPerTenant quota, which counts distinct agent ids — "
             + "redeploying an agent or bumping its version never consumes additional capacity.")
-    @APIResponse(responseCode = "200", description = "Agent deployed (or accepted if async).")
+    @APIResponse(responseCode = "200", description = "Agent deployed (or accepted if async). With waitForCompletion=true the body "
+            + "carries status; a deployment in ERROR also carries `error` and `failure` (see GET …/deploymentstatus/{agentId}?format=detailed).")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     @APIResponse(responseCode = "429", description = "Tenant agent quota exceeded; undeploy an agent before deploying another.")
     // @formatter:off
@@ -81,9 +83,29 @@ public interface IRestAgentAdministration {
 
     @GET
     @NoCache
+    @Path("/{environment}/deploy/{agentId}/preflight")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Check what would stop a deploy, before deploying",
+               description = "Runs the vault-grant check a deploy runs and lists every restricted secret the agent uses but is not "
+                       + "granted. A grant lists agent ids, so a NEWLY created agent is never on one: run this right after creating "
+                       + "an agent and add it to each listed secret's grant (POST /secretstore/secrets/{tenantId}/{keyName}/grant/"
+                       + "agents/{agentId}, eddi-admin) before the first deploy. ready=false means the deploy would be refused "
+                       + "(eddi.vault.grant-enforcement=enforce). Read-only; never returns a secret value. The ids on a grant "
+                       + "(allowedAgents) are returned to administrators only.")
+    @APIResponse(responseCode = "200", description = "What the deploy would run into.")
+    @APIResponse(responseCode = "403", description = "The caller may not edit (and so may not deploy) this agent.")
+    @APIResponse(responseCode = "404", description = "Agent version not found.")
+    DeploymentPreflight preflightDeployment(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
+                                            @Parameter(name = "version", required = true, example = "1")
+                                            @QueryParam("version") Integer version);
+
+    @GET
+    @NoCache
     @Path("/{environment}/deploymentstatus/{agentId}")
     @Produces({MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN})
-    @Operation(summary = "Get deployment status", description = "Returns JSON by default. Use ?format=text for plain text (deprecated).")
+    @Operation(summary = "Get deployment status", description = "Returns JSON by default. Use ?format=text for plain text (deprecated). "
+            + "?format=detailed adds `failure` for a deployment in ERROR — its code (VAULT_GRANT_MISSING or DEPLOYMENT_FAILED), "
+            + "message, and for a missing grant the secrets and the grant call that fixes it — to a caller who may edit the agent.")
     @APIResponse(responseCode = "200", description = "Deployment status.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     Response getDeploymentStatus(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,

@@ -15,7 +15,8 @@ import {
   provisionableProviderOr,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
-import { useVaultHealth } from "@/hooks/use-secrets";
+import { useSecrets, useVaultHealth } from "@/hooks/use-secrets";
+import { grantsAllAgents } from "@/lib/api/secrets";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformSelfUrl } from "@/hooks/use-operator";
 import {
@@ -102,6 +103,17 @@ export function OperatorActivation({
   const baseUrlRequired = isBaseUrlRequired(provider);
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
   const vaultDown = vaultHealth != null && vaultHealth.available === false;
+  /*
+   * The picked model key, when its grant is narrowed. The operator agent is
+   * created by activation, so it cannot be on that grant yet — said up front,
+   * so the grant question that follows is expected rather than a surprise.
+   */
+  const { data: vaultSecrets } = useSecrets("default");
+  const pickedKeyName = extractVaultKeyName(apiKey);
+  const pickedKeyRestricted = Boolean(
+    pickedKeyName &&
+      vaultSecrets?.some((secret) => secret.keyName === pickedKeyName && !grantsAllAgents(secret.allowedAgents)),
+  );
   const oidcEnabled = method === "keycloak";
   const busy = stage !== "idle" && stage !== "done";
 
@@ -364,6 +376,14 @@ export function OperatorActivation({
                   placeholder={t("operator.activation.apiKeyPlaceholder", "Paste your API key, or pick a vault key")}
                   testId="operator-api-key"
                 />
+                {pickedKeyRestricted && (
+                  <Notice tone="info" icon={Lock} testId="operator-key-restricted">
+                    {t("operator.activation.keyRestricted", {
+                      key: pickedKeyName,
+                      defaultValue: "\"{{key}}\" is restricted to specific agents. The operator will be added to the grant of {{key}} — you will be asked to confirm before it is deployed.",
+                    })}
+                  </Notice>
+                )}
               </Field>
             )}
 
