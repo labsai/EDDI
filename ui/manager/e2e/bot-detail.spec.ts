@@ -30,7 +30,8 @@ test.describe("Agent Detail", () => {
 
   test("shows environments section with environment names", async ({ page }) => {
     await expect(page.getByText("Environments")).toBeVisible();
-    await expect(page.getByText("Production")).toBeVisible();
+    // Exact: with both environments live the header button reads "Undeploy from production".
+    await expect(page.getByText("Production", { exact: true })).toBeVisible();
   });
 
   test("shows Agent-to-Agent section", async ({ page }) => {

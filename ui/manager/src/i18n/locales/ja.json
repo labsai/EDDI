@@ -236,7 +236,8 @@
       "unauthorized": "セッションの有効期限が切れました。もう一度サインインしてください。",
       "forbidden": "これを表示する権限がありません。",
       "notFound": "見つかりません。削除された可能性があります。"
-    }
+    },
+    "rename": "名前を変更"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -285,7 +286,9 @@
     "deployToProduction": "本番にデプロイ",
     "undeployFromProduction": "本番から削除",
     "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
-    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。"
+    "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。",
+    "sortLoadingAll": "並べ替えを完全にするため、すべてのエージェントを読み込んでいます…",
+    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -318,7 +321,7 @@
     "enableSwd": "厳格な書き込み規律を有効化",
     "forkingDisabledTooltip": "将来のリリースで利用可能",
     "forkingEnabled": "セッションフォーク",
-    "forkingNote": "セッションフォークのエンドポイント (POST /v6/conversations/{{id}}/fork) はまだ利用できません。",
+    "forkingNote": "セッションフォークのエンドポイント (POST /v6/conversations/:id/fork) はまだ利用できません。",
     "guardrails": "書き込みガードレール",
     "identity": "暗号アイデンティティ",
     "keyExpired": "期限切れ",
@@ -367,9 +370,6 @@
     "userMemory": "ユーザーメモリ",
     "userMemoryDesc": "LLM ツール（remember/recall/forget）を備えたユーザーごとの永続メモリ。基本的な longTerm プロパティの永続化は、このトグルに関係なく常に機能します。",
     "viewingOldVersion": "バージョン {{current}} を表示しています。最新はバージョン {{latest}} です。",
-    "workflowAdded": "ワークフローを追加しました",
-    "workflowRemoved": "ワークフローを削除しました",
-    "workflowUpdated": "ワークフローを最新バージョンに更新しました",
     "title": "Agent 詳細",
     "backToAgents": "Agents に戻る",
     "packages": "ワークフロー",
@@ -477,7 +477,18 @@
       "noticePlaceholder": "このエージェントとの会話は、改善のために管理者が閲覧する場合があります。",
       "versionNote": "この変更で作成されるバージョン以降の会話が対象です — それ以前の会話は対象外です。Slack、Teams、API クライアントでは通知を表示できません。利用者がそこからこのエージェントを使う場合は、あいさつ文でお知らせください。"
     },
-    "copyUrl": "URL をコピー"
+    "copyUrl": "URL をコピー",
+    "liveElsewhere": "稼働中: v{{live}} · 表示中: v{{viewing}}（未デプロイ）",
+    "removeWorkflow": "エージェントからワークフローを削除",
+    "a2aAddSkill": "スキルを追加",
+    "saveConflict": "開いた後にこのエージェントが別の場所で変更されました。編集内容は保持されています。確認してから再度保存してください。",
+    "saveBeforeDeploy": "デプロイする前に変更を保存または破棄してください",
+    "reviewChanges": "変更を確認",
+    "unsavedSections": "未保存の変更があるセクション: {{count}}",
+    "reviewChangesTitle": "バージョン {{version}} への未保存の変更",
+    "savedVersion": "保存済み v{{version}}",
+    "yourChanges": "あなたの変更",
+    "discardMessage": "このページの未保存の変更はすべて、バージョン {{version}} の内容に戻ります。"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -648,7 +659,26 @@
     "saved": "Workflow が正常に保存されました",
     "saveError": "ワークフローの保存に失敗しました",
     "noTasks": "このワークフローにはタスクがありません",
-    "addTask": "タスクを追加"
+    "addTask": "タスクを追加",
+    "stepUnsaved": "未保存",
+    "saveAndEditHint": "このステップはまだ保存されていません。先にワークフローを保存してから、設定を編集してください。",
+    "saveAndEdit": "ワークフローを保存して編集",
+    "removeStep": "タスクを削除",
+    "configCreatedUnsaved": "設定を作成しました — パイプラインに残すにはワークフローを保存してください",
+    "configNameFailed": "設定は作成されましたが、名前を保存できませんでした。後で名前を変更してください。",
+    "newConfigName": "新しい設定の名前",
+    "newConfigNamePlaceholder": "例: サポートの挨拶",
+    "agentPinsOtherVersion": "エージェントのバージョン {{agentVer}} はこのワークフローのバージョン {{found}} を使用しており、バージョン {{version}} ではないため、ここで保存してもエージェントは変わりません。何も保存されていません。バージョン {{found}} を開くか、エージェントをバージョン {{version}} に向けてください。",
+    "agentMissingWorkflow": "エージェントのバージョン {{agentVer}} はこのワークフローを使用していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
+    "noVersionReturned": "サーバーが新しいワークフローのバージョンを返しませんでした。",
+    "agentUpdateFailed": "ワークフローをバージョン {{version}} として保存しましたが、エージェントの更新に失敗しました: {{error}}",
+    "agentPinMismatch": "エージェントのバージョン {{agentVer}} はこのワークフローのバージョン {{found}} を使用しています。表示中はバージョン {{version}} のため、ここで保存してもエージェントは変わりません。",
+    "switchToPinned": "バージョン {{version}} を開く",
+    "pointAgentAt": "エージェントをバージョン {{version}} に向ける",
+    "createdDeleteFailed_one": "この編集中に作成された {{count}} 件の設定を削除できませんでした",
+    "createdDeleteFailed_other": "この編集中に作成された {{count}} 件の設定を削除できませんでした",
+    "discardDeleteCreated_one": "この編集中に作成された {{count}} 件の設定も削除する",
+    "discardDeleteCreated_other": "この編集中に作成された {{count}} 件の設定も削除する"
   },
   "conversations": {
     "confirmDeleteSoft": "デフォルトではソフト削除です。会話は一覧から非表示になりますが、保存データはサーバーに残ります。",
@@ -889,7 +919,9 @@
       }
     },
     "emptyDescription": "最初の {{type}} を作成してワークフローで使用しましょう。",
-    "descriptionPlaceholder": "この {{type}} 設定を説明してください…"
+    "descriptionPlaceholder": "この {{type}} 設定を説明してください…",
+    "viewingOldVersion": "バージョン {{current}} を表示しています。最新はバージョン {{latest}} です。",
+    "switchToLatest": "最新に切り替え"
   },
   "editor": {
     "compare": "比較",
@@ -935,7 +967,15 @@
     "deployNow": "デプロイ",
     "deployStarted": "デプロイを開始しました",
     "stay": "とどまる",
-    "invalidJsonNotSaved": "保存されていません — JSON が無効です：{{reason}}"
+    "invalidJsonNotSaved": "保存されていません — JSON が無効です：{{reason}}",
+    "invalidJsonSave": "保存されていません — JSON が無効です。JSON タブで修正してください。",
+    "versionLockedDirty": "バージョンを切り替えるには、変更を保存または破棄してください",
+    "savedAsVersion": "v{{version}} として保存しました — まだ反映されていません",
+    "updateAgentAndSave": "エージェントを更新して保存",
+    "keepEditing": "編集を続ける",
+    "discardChanges": "変更を破棄",
+    "saveAndLeave": "保存して移動",
+    "modified": "変更あり"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1094,7 +1134,8 @@
     "skipNone": "なし — スキップするコードはありません",
     "runSkipConflict": "{{codes}} はスキップリストにも含まれているため、この命令はそのコードでは実行されません。",
     "httpCodeFilterSkipSet": "「実行するコード」が空なら 200, 201 を使い、「スキップするコード」が空なら何もスキップしません。",
-    "useDefaultSkipCodes": "既定のスキップリストを使用"
+    "useDefaultSkipCodes": "既定のスキップリストを使用",
+    "scope": "スコープ"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "失敗してもパイプラインは続行します。エラーの公開先: ",
@@ -1152,7 +1193,9 @@
     "argumentType": "引数の型",
     "argumentText": "テキスト",
     "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
-    "removeArgument": "引数を削除"
+    "removeArgument": "引数を削除",
+    "maxResponseSize": "保存する応答の最大サイズ（文字数）",
+    "maxResponseSizeHint": "これより長いツール結果は、会話メモリに保存される前にこの文字数に切り詰められます（警告がログに記録されます）。空欄、0 以下ではデフォルトの 2,000,000（約 2 MB）が使われます。EDDI 6.6 以降が必要です。"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1423,6 +1466,12 @@
     "modelType": "モデルタイプ",
     "paramName": "パラメーター名",
     "lastToolHint": "少なくとも 1 つのツールを選択したままにする必要があります。すべて無効にするには「組み込みツールを有効にする」のチェックを外してください。",
+    "maxToolCallsPerIteration": "1 応答あたりの最大ツール呼び出し数",
+    "maxToolCallsPerIterationDefault": "（デフォルト {{n}}）",
+    "maxToolCallsPerTurn": "1 ターンあたりの最大ツール呼び出し数",
+    "maxToolCallsPerTurnDefault": "（デフォルト {{n}}）",
+    "maxToolCallsHint": "上限を超えた呼び出しは実行されません。各呼び出しには上限に達したことをモデルに伝える NOT_EXECUTED の結果が返され、モデルは手元の情報で回答します。拒否された呼び出しが承認ゲートに届くことはありません。ターンごとのカウントには承認待ちの前の呼び出しも含まれます。-1 または 0 で上限を解除します。EDDI 6.6 以降が必要です。古いサーバーでは空欄のままにしてください。",
+    "maxToolCallsUncapped": "上限が無効になっています。モデルはそこで任意の数のツール呼び出しを実行でき、制限は Max Tool Iterations のみです。",
     "toggleTask": "タスクの詳細を表示または非表示",
     "noActionsWarning": "このタスクにはトリガーとなるアクションがないため、実行されません。振る舞いルールが出力するアクション（例: send_message）を追加してください。",
     "model": "モデル",
@@ -1437,7 +1486,80 @@
     "paramValueOf": "{{key}} の値",
     "removeParam": "パラメーター {{key}} を削除",
     "accessToken": "アクセストークン",
-    "authToken": "Hugging Face トークン（任意）"
+    "authToken": "Hugging Face トークン（任意）",
+    "modelSettings": {
+      "title": "モデル設定",
+      "rejectedBy": "{{model}} では拒否されます",
+      "noEffectOn": "{{model}} では効果がありません",
+      "droppedHint": "EDDI はリクエストのたびにこれを削除するため、この値は送信されません。",
+      "removeKey": "{{key}} を削除",
+      "remove": "削除",
+      "providerDefault": "プロバイダーの既定値",
+      "notNumber": "数値を入力してください。",
+      "notInteger": "整数を入力してください。",
+      "belowMin": "{{min}} 以上にしてください。",
+      "aboveMax": "{{max}} 以下にしてください。",
+      "defaultOn": "既定（オン）",
+      "defaultOff": "既定（オフ）",
+      "on": "オン",
+      "off": "オフ",
+      "notBoolean": "「{{value}}」は true でも false でもありません。どちらかを選んでください。",
+      "inherited": "継承: {{value}}",
+      "defaultValueOption": "既定（{{value}}）",
+      "optionRejected": "{{value}}（このモデルでは拒否）",
+      "unknownOption": "「{{value}}」は使用できる値ではありません。",
+      "addValueTo": "{{label}} に値を追加",
+      "addValue": "値を入力して Enter キーを押します",
+      "listInvalid": "文字列の JSON 配列でもカンマ区切りのリストでもありません。",
+      "jsonSyntax": "まだ有効な JSON ではありません。",
+      "jsonObject": "JSON オブジェクトである必要があります（例: { \"name\": \"value\" }）。",
+      "jsonArray": "JSON 配列である必要があります（例: [ … ]）。",
+      "formatJson": "整形",
+      "range": "{{min}}〜{{max}}",
+      "atLeast": "{{min}} 以上",
+      "atMost": "{{max}} 以下",
+      "badgeRejected": "拒否",
+      "badgeNoEffect": "効果なし",
+      "defaultIs": "既定 {{value}}",
+      "docs": "公式ドキュメント",
+      "docsFor": "{{key}} の公式ドキュメント（新しいタブで開きます）",
+      "reset": "プロバイダーの既定値に戻す",
+      "resetKey": "{{key}} をプロバイダーの既定値に戻す",
+      "noneConfigured": "設定はありません。プロバイダーの既定値が使われます",
+      "configured_one": "{{count}} 件の設定",
+      "configured_other": "{{count}} 件の設定",
+      "dropped_one": "{{count}} 件は {{model}} 向けに破棄されます",
+      "dropped_other": "{{count}} 件は {{model}} 向けに破棄されます",
+      "ignored_one": "{{count}} 件は {{model}} で効果がありません",
+      "ignored_other": "{{count}} 件は {{model}} で効果がありません",
+      "noModel": "モデルを設定すると、使える設定を確認できます",
+      "filterPlaceholder": "設定を絞り込む…",
+      "filter": "モデル設定を絞り込む",
+      "clearFilter": "絞り込みを解除",
+      "noMatch": "「{{filter}}」に一致する設定はありません。",
+      "groupConfigured": "設定済み: {{count}}",
+      "groupRejected": "モデルが拒否: {{count}}",
+      "groupTotal": "このグループの設定: {{count}}",
+      "unavailable_one": "{{model}} が拒否または無視する設定 {{count}} 件",
+      "unavailable_other": "{{model}} が拒否または無視する設定 {{count}} 件",
+      "variableModel": "モデルが変数参照（{{model}}）のため、以下のチェックではまだモデルを判別できません。変数が解決されると EDDI がモデル固有のルールを適用します。",
+      "badgeMigrated": "{{key}} として送信",
+      "migratedTo": "{{model}} には {{key}} として送信",
+      "group": {
+        "model": "モデル",
+        "sampling": "サンプリング",
+        "output": "出力",
+        "reasoning": "推論",
+        "tools": "ツール",
+        "caching": "キャッシュ",
+        "safety": "安全性",
+        "connection": "接続",
+        "advanced": "詳細"
+      }
+    },
+    "otherParams": "その他のパラメーター",
+    "otherParamsHint": "モデル設定にないパラメーター（baseUrl、timeout、logRequests など）や、別のプロバイダーから残ったキーです。",
+    "cascadeStepModel": "ステップ {{n}} のモデル"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -1878,6 +2000,43 @@
       "unverifiedTitle": "完全には検証されていません",
       "unverifiedDesc": "否定された署名はありませんが、すべてを確認できたわけではありません: {{reasons}}。"
     },
+    "adminActions": {
+      "description": "REST API を通じて行われたすべての管理変更（デプロイ、設定の書き込み、インポート、消去、拒否された呼び出し）が監査台帳に署名付きで記録されます。リクエスト本文は記録されず、対象となった人物の ID は仮名化されます。",
+      "actor": "実行者",
+      "actorPlaceholder": "プリンシパル（例: alice）",
+      "apply": "適用",
+      "method": "メソッド",
+      "allMethods": "すべてのメソッド",
+      "window": "期間",
+      "clear": "フィルターをクリア",
+      "noMatch": "このフィルターに一致する管理操作はありません",
+      "empty": "記録された管理操作はまだありません",
+      "noMatchLoadOlder": "読み込まれているのは最新の行だけです。さらに遡るには古い行を読み込んでください。",
+      "emptyHint": "EDDI はバージョン 6.6 以降で記録します（eddi.audit.admin-actions.enabled が false の場合を除く）。古いサーバーではここには何も表示されません。",
+      "caption": "管理操作（新しい順）",
+      "colTime": "日時",
+      "colActor": "実行者",
+      "colAction": "操作",
+      "colEndpoint": "エンドポイント",
+      "colStatus": "ステータス",
+      "filterByActor": "この実行者の操作だけを表示",
+      "loadOlderError": "古い行を読み込めませんでした。",
+      "loadOlder": "古い行を読み込む",
+      "forbidden": "管理操作を閲覧できるのは管理者だけです",
+      "forbiddenHint": "このログにはすべての管理者の変更が記録されるため、閲覧には eddi-admin ロールが必要です。",
+      "unsupported": "この EDDI は管理操作を記録しません",
+      "unsupportedHint": "EDDI 6.6 以降で記録されます。",
+      "loadError": "管理操作を読み込めませんでした。",
+      "shown": "読み込み済み {{loaded}} 行のうち {{shown}} 行を表示",
+      "windowAny": "すべての期間",
+      "windowHour": "直近 1 時間",
+      "windowDay": "直近 24 時間",
+      "windowWeek": "直近 7 日間",
+      "windowMonth": "直近 30 日間"
+    },
+    "views": "監査ビュー",
+    "tabTrail": "パイプライン記録",
+    "tabAdminActions": "管理操作",
     "agentsDeployed": "デプロイ済み",
     "agentsNotDeployed": "未デプロイ"
   },
@@ -2011,6 +2170,16 @@
     "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
     "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
     "failedScheduleGone": "スケジュールはもう存在しません",
+    "disabledByPerson": "人が無効化しました。EDDI 6.6 より前のアンデプロイで停止したスケジュールもこう表示されます。一度手動で有効にしてください。",
+    "disabledUndeployed": "エージェントがアンデプロイ済み",
+    "disabledUndeployedHint": "エージェントがアンデプロイされたときに停止しました。エージェントの次のデプロイが成功すると自動的に再開されます。操作は不要です。",
+    "disabledAccessRevoked": "アクセスが取り消されました",
+    "disabledAccessRevokedHint": "作成者がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
+    "disabledOtherHint": "表示された理由により EDDI が停止しました。",
+    "serverRefusedUpdate": "サーバーがこの変更を拒否しました:",
+    "serverRefusedCreate": "サーバーがこのスケジュールを拒否しました:",
+    "disabledAccessRevokedHintBy": "作成者（{{user}}）がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
+    "finishedOneShot": "1 回限りのスケジュール：実行済みで完了しています。",
     "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。"
   },
   "cascadeTrace": {
@@ -2188,7 +2357,12 @@
     "backToAgent": "エージェント詳細に戻る",
     "selectStageHint": "パイプライン内の拡張を選択して、設定をインラインで表示・編集",
     "noConfig": "このパイプラインステージには設定URIがありません",
-    "unsupportedType": "この拡張タイプのエディターは利用できません"
+    "unsupportedType": "この拡張タイプのエディターは利用できません",
+    "testReady": "v{{version}} として保存・デプロイしました — チャットの準備ができました",
+    "workflow": "ワークフロー",
+    "unsavedTitle": "このステージに未保存の変更があります",
+    "unsavedMessage": "ステージを切り替えるとエディタが置き換えられます。先に変更を保存するか、破棄するか、このステージにとどまってください。",
+    "discardAndSwitch": "破棄して切り替え"
   },
   "ragEditor": {
     "general": "一般",
@@ -2314,7 +2488,31 @@
     "chunkStrategyLegacy": "{{value}}（再帰として保存）",
     "saveBeforeIngest": "まず変更を保存してください。ドキュメントは画面上の編集内容ではなく、保存済みナレッジベースのストアと埋め込みモデルで取り込まれます。",
     "chunkStrategyUnsupported": "{{value}}（非対応）",
-    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。"
+    "chunkStrategyUnsupportedHint": "保存時にサーバーがこの戦略を拒否します。再帰を選んでください。",
+    "location": {
+      "reference": "ストアの場所は ${…} 参照ではなく、名前をそのまま書く必要があります。場所はエージェントが誰のドキュメントを読むかを決め、参照はストア構築時（すべてのチェックの後）に、どの編集者でも変更できる変数から解決されるため、別のナレッジベースのストアや SQL を指してしまう可能性があります。参照付きで保存済みのナレッジベースは、名前をそのまま書いて一度保存し直すまで、取り込みと検索を停止します。",
+      "pgIdentifier": "pgvector のテーブル名は、スキーマ修飾も可能な単純な名前（英字、数字、_ と $）でなければなりません。ストアはそれをそのまま SQL に入れるため、引用符、空白、句読点は拒否されます。",
+      "refused": "サーバーは {{param}} = {{value}} を拒否します",
+      "reserved": "{{prefix}} で始まる名前（どの部分でも、大文字小文字を問わず）は予約されています。EDDI は各ナレッジベース固有の場所をこの接頭辞から導くため、この名前は別のナレッジベースのストアを指す可能性があります。別の名前を選ぶか、空欄にしてこのナレッジベース専用の場所を使ってください。",
+      "savedReference": "保存済みの {{param}} = {{value}} は使えなくなりました",
+      "refusedIfChanged": "{{param}} = {{value}} は保存どおりなら引き続き動作しますが、変更するとサーバーに拒否されます"
+    },
+    "layout": {
+      "idTitle": "専用ストア（ID で指定）",
+      "nameTitle": "名前ベースのストア（6.5 レイアウト）",
+      "idBody": "このナレッジベースには専用のストアがあります。各チャンクにはその ID が付き、共有テーブルであっても検索では自身のチャンクしか見えません。",
+      "nameBody": "EDDI 6.6 より前に作成: ストアはナレッジベースの名前で見つけられるため、同じ名前の他のナレッジベースと共有されます。このままでも動作します。",
+      "defaultUnsaved": "場所: eddi_kbid_<id>（デフォルト、保存時に割り当て）",
+      "migrate": "専用ストアへ移動…",
+      "renameNote": "このナレッジベースの名前を変更しても同じように移動します。EDDI 6.6 以降が必要です。",
+      "migrateTitle": "このナレッジベースを専用ストアへ移動しますか？",
+      "migrateBodyExplicit": "テーブルはそのままですが、今後はその ID が付いたチャンクだけが検索されます。既存のチャンクにはこの印がないため、空の状態から始まります。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。何も削除されません。変更は保存時に適用され、元に戻せません。",
+      "migrateBody": "新しい空の専用ストアへ移動します。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。古いストアはそのまま残ります。変更は保存時に適用され、元に戻せません。",
+      "migrateConfirm": "保存時に移動",
+      "explicit": "場所: {{value}}（上で設定）",
+      "default": "場所: {{value}}（デフォルト）",
+      "legacyDefault": "場所: 名前「{{name}}」から導出（デフォルト）"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -3097,8 +3295,10 @@
       "humanNeedsName_one": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsName_other": "{{count}} 名の人間メンバーに表示名が必要です。",
       "humanNeedsId_one": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
-      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。"
+      "humanNeedsId_other": "{{count}} 名の人間メンバーに本人のユーザー ID が必要です。",
+      "duplicateMember": "{{ids}} が複数回指定されています。メンバー 1 人につき席は 1 つです。2 つの席は 1 つのメンバー会話を共有し、互いの回答が見えてしまいます。2 つ目の席には別のエージェントを使ってください。"
     },
+    "serverRefused": "サーバーがこのグループを拒否しました:",
     "versionLookupFailed": "このグループの現在のバージョンを取得できませんでした。",
     "deletePermanentlyHint": "元に戻せません：グループとそのワークスペース（バックログ、ケイデンスとそのスケジュール）が完全に削除されます。オフの場合、グループは削除済みとしてマークされるだけで、パージされるまで復元できます。",
     "deletePermanentlyWithMembersHint": "元に戻せません：グループ、そのワークスペース、すべてのメンバーエージェントが完全に削除されます。オフの場合、削除済みとしてマークされるだけで、パージされるまで復元できます。",
@@ -3294,6 +3494,8 @@
     "partialCounts": "{{created}} 件作成、{{updated}} 件更新、{{failed}} 件失敗。",
     "schedulesSkipped_other": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
     "schedulesSkipped_one": "アーカイブ内の {{count}} 件のスケジュールは、選択に含まれていなかったためインポートされませんでした。",
+    "mergeScopeDefaultSpace": "デフォルトのスペース",
+    "mergeScope": "このマージで更新されるのは、{{space}} であなたが編集できるリソースだけです。別のワークスペースにあるこのエージェントのコピーは決して変更されず、代わりにあなた自身のコピーが作成されます。そこにあるコピーを更新するには、先にスペースを切り替えてください。",
     "moveUp": "上へ移動",
     "moveDown": "下へ移動"
   },
@@ -3865,6 +4067,18 @@
     "conversationsTruncated_one": "会話は上限で打ち切られました — このユーザーの総数は {{count}} 件です。",
     "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。",
+    "auditRedacted": "マスクされた監査エントリ",
+    "auditLegacy": "この EDDI は監査台帳のユーザー ID を置き換えるだけで、記録されたプロンプトと応答は残ります。EDDI 6.6 以降はそれらもマスクします（サーバーが eddi.audit.erasure-mode=pseudonymize で動作している場合を除く）。",
+    "auditPseudonymizeMode": "監査内容は保持されました。このサーバーは eddi.audit.erasure-mode=pseudonymize で動作しているため（法的保存など）、監査台帳のユーザー ID だけが置き換えられました。",
+    "auditRedactionFailed": "監査内容はマスクされませんでした。マスク処理が失敗したため（上記参照）、台帳に記録されたプロンプトと応答はそのまま残っています。消去をもう一度実行してください。",
+    "auditRedactedExplanation": "ユーザーの監査行は記録保持のために残りますが、プロンプト、応答、モデルの詳細、ツール呼び出しはマスク用のマーカーに置き換えられ、ユーザー ID は仮名化されました。以前に検証できていた行は再署名され、すでに改ざんされていた行は無効のままです。",
+    "completeExplanation": "「完了」とは、このユーザーの ID の監査行にマスクされていない内容が残っていないことの最終確認を含め、すべてのステップが成功したことを意味します。",
+    "failedStep": {
+      "auditRedaction": "一部の監査行にこのユーザーのプロンプトや応答がまだ残っています。消去をもう一度実行してください。安全に繰り返せ、残っている部分だけが対象です。失敗が続く場合は、サーバーログにこの消去の仮名で原因が記録されています。",
+      "auditLedger": "すべての監査行のユーザー ID を置き換えられませんでした。データベースに接続できるようになったら、消去をもう一度実行してください。",
+      "databaseLogs": "データベースのログエントリを仮名化できませんでした。消去をもう一度実行してください。ログの保持期間によっても時間とともに削除されます。",
+      "generic": "このステップは完了しませんでした。サーバーログに示された原因を解消してから、消去をもう一度実行してください。安全に繰り返せます。"
+    },
     "noDataFoundToast": "このユーザー ID のデータは見つかりませんでした。何も削除されていません。",
     "noDataFoundTitle": "このユーザー ID のデータは見つかりませんでした",
     "noDataFoundBody": "「{{userId}}」に対して削除されたものはありません。ID に誤りがないか確認してから、もう一度お試しください。",
@@ -5452,7 +5666,7 @@
     "workflowChanged": "ワークフロー {{workflowId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
     "agentChanged": "エージェント {{agentId}} は別の場所で変更されました（現在はバージョン {{current}}、このページはバージョン {{version}}）。ページを再読み込みしてください。何も保存されていません。",
     "workflowMissingResource": "ワークフロー {{workflowId}}（バージョン {{version}}）は {{resource}} を参照していないため、ここで保存してもエージェントは変わりません。何も保存されていません。",
-    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を参照しており、バージョン {{expected}} ではありません。このページを開いた後にエージェントが変更されました。再読み込みしてください。何も保存されていません。",
+    "agentWorkflowMismatch": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} のバージョン {{found}} を使用していますが、このページはバージョン {{expected}} で開かれています。何も保存されていません。エージェントを新しいワークフローバージョンに更新するか、バージョン {{found}} を開いてください。",
     "agentMissingWorkflow": "エージェント {{agentId}}（バージョン {{version}}）はワークフロー {{workflowId}} を参照していません。何も保存されていません。"
   },
   "llmProviders": {
@@ -5478,7 +5692,7 @@
     "compatibleHint": "進行中の会話を壊さない変更（プロンプトの言い回しや別のモデルなど）の場合のみ。プロパティ、アクション、ワークフローのステップを名前変更または削除した場合はチェックしないでください。",
     "compatibleLegacyNote": "現在のバージョンはバージョン追従より前のものなので、すでに実行中の会話はそのまま残ります。次の互換保存からチェーンがつながります。",
     "compatibleUnknownNote": "バージョン追従より前のバージョンの会話はそのバージョンに残ります。",
-    "generationBadge": "互換世代 {{generation}}",
+    "generationBadge": "世代 {{generation}}",
     "generationTooltip": "互換世代 {{generation}}：同じ世代を持つこのエージェントのバージョンは互換性があるため、進行中の会話は次のターンで最新のデプロイ済みバージョンに移ります。互換性のない保存は新しい世代を開始します。",
     "impactTitle": "v{{version}} を{{environment}}にデプロイ — 進行中の会話",
     "impactFollow_other": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
@@ -5489,6 +5703,23 @@
     "switchNotice": "エージェントが v{{from}} から v{{to}} に移行しました",
     "impactFollow_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{to}} で続行されます",
     "impactStay_one": "v{{from}} のアクティブな会話 {{count}} 件は v{{from}} に残ります"
+  },
+  "propertyValue": {
+    "typeLabel": "値の型",
+    "jsonOnly": "JSON タブで設定",
+    "valueLabel": "値",
+    "intRange": "Integer の範囲（±2,147,483,647）外です。この値には長整数を選んでください。",
+    "unsafeLong": "9,007,199,254,740,991 を超えると、ブラウザーはこの整数を正確に保持できません。JSON タブで編集してください。",
+    "needs66": "長整数と小数には EDDI 6.6 以降が必要です。",
+    "conflict": "この行は {{fields}} を設定しています。使われるのは {{winner}} だけです。ここで型を選ぶと、その 1 つの値を残して他は削除されます。",
+    "kindString": "テキスト / テンプレート",
+    "kindInt": "整数",
+    "kindLong": "長整数",
+    "kindDouble": "小数",
+    "kindFloat": "Float（約 7 桁）",
+    "kindBoolean": "真偽値",
+    "kindObject": "オブジェクト（JSON）",
+    "kindList": "リスト（JSON）"
   },
   "notFound": {
     "title": "ページが見つかりません",

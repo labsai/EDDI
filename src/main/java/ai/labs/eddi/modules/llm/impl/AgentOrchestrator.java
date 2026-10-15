@@ -448,11 +448,24 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            the tool calls the loop executed and their results, in order
      *            (never the history it started from, never the final answer). Never
      *            null; empty when no tool ran or the path does not record it.
+     * @param resumeTranscript
+     *            set only by a HITL resume: the complete message list the
+     *            continuation sent the model for its final answer (the frozen
+     *            system prompt and history, every tool exchange before and after
+     *            the pause, without the final answer itself) — what a same-model
+     *            re-ask of that answer starts from. Empty on every other path, and
+     *            when the resume did not record it.
      */
     record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata,
-            List<ChatMessage> toolExchange) {
+            List<ChatMessage> toolExchange, List<ChatMessage> resumeTranscript) {
         ExecutionResult {
             toolExchange = toolExchange != null ? List.copyOf(toolExchange) : List.of();
+            resumeTranscript = resumeTranscript != null ? List.copyOf(resumeTranscript) : List.of();
+        }
+
+        /** Convenience constructor — no resume transcript recorded. */
+        ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata, List<ChatMessage> toolExchange) {
+            this(response, trace, responseMetadata, toolExchange, List.of());
         }
 
         /** Convenience constructor — no tool exchange recorded. */

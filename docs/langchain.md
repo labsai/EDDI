@@ -110,7 +110,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | Parameter                  | Type    | Description                                           | Default           |
 | -------------------------- | ------- | ----------------------------------------------------- | ----------------- |
 | **Core Parameters**        |         |                                                       |                   |
-| `apiKey`                   | string  | API key for the LLM provider                          | Required          |
+| `apiKey`                   | string  | API key for providers that authenticate with one: `openai`, `anthropic`, `gemini`, `mistral`, `azure-openai` and the OpenAI-compatible types. Prefer a `${vault:...}` reference over a plaintext key. Other providers authenticate differently and take no `apiKey`: `ollama` needs none, `bedrock` uses the AWS credential chain, `gemini-vertex` uses Google application default credentials, `oracle-genai` an OCI config profile (`configProfile`), `huggingface` an `accessToken` and `jlama` an optional `authToken` | Provider-specific |
 | `modelName`                | string  | Model identifier (e.g., "gpt-4o", "Claude")           | Provider-specific |
 | `systemMessage`            | string  | System message for LLM context                        | ""                |
 | `prompt`                   | string  | Override user input (if not set, uses actual input)   | ""                |
@@ -134,6 +134,15 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 > **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
+
+### More Parameters, and Which Model Accepts Them
+
+Beyond the table above every provider reads many more settings: sampling (`topP`, `topK`, `seed`, `stopSequences`, penalties), reasoning (`reasoningEffort`, `thinkingType`, `thinkingBudgetTokens`, `thinkingLevel`, `effort`), caching (`cacheSystemMessages`, `promptCacheKey`), safety (`safetySettings`, Bedrock guardrails), connection (`customHeaders`, `customQueryParams`) and `customParameters`, an escape hatch that adds extra top-level fields to the request body of OpenAI, the OpenAI-compatible providers and Anthropic. The full per-provider list, with value formats, ranges and the model versions that reject or ignore each one, is the generated **[LLM Parameters Reference](llm-parameters.md)**; the Manager shows it as typed controls under **Model settings**.
+
+All values are strings. Lists are a JSON array (`"[\"END\"]"`) or a comma list; maps (`customHeaders`, `metadata`, `safetySettings`) are JSON objects. A value that cannot be parsed is ignored with a warning and the provider default stays.
+
+**Model-aware.** Parameters are not valid for every model of a provider: OpenAI reasoning models reject `temperature` and `topP`, newer Claude models reject non-default sampling settings and manual thinking budgets, newer Gemini models ignore sampling settings. EDDI keeps a catalog of this (`model-parameters.json`) and, when a model is first built, **removes parameters the configured model would reject** (one warning naming the parameter, the model and the reason) instead of letting every turn fail with an HTTP 400. Parameters with no effect are kept and warned about. Set `eddi.llm.parameter-catalog.drop-rejected=false` to only warn. Where vendor documentation is silent or contradictory no rule is written, so an unknown model is never restricted. On Azure OpenAI set `baseModel` (never sent) to name the underlying model, because the deployment name does not identify it.
+
 ### Output Token Limits
 
 The `maxTokens` parameter controls the **maximum number of output tokens** the LLM can generate per response. This is a ceiling, not a target — the model generates only what it needs and stops. Setting it higher does not increase cost unless the model actually produces more tokens; the `timeout` parameter is the real cost safety net.
@@ -147,8 +156,9 @@ The `maxTokens` parameter controls the **maximum number of output tokens** the L
 |----------|------------|----------------------|--------------------------|-------|
 | **Anthropic** | `maxTokens` | 8,192 (standard) / 128,000 (with extended thinking) | **16,384** | Required by API. Set higher for thinking models |
 | **Gemini** | `maxOutputTokens` | 65,536 | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
-| **OpenAI** | `maxTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | |
-| **Azure OpenAI** | `maxTokens` | Same as OpenAI | Provider SDK default | |
+| **Vertex AI Gemini** | `maxOutputTokens` | Model-dependent | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
+| **OpenAI** | `maxTokens`, or `maxCompletionTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | Reasoning models (o-series, GPT-5 and later) reject `maxTokens`: use `maxCompletionTokens`. The cap also covers hidden reasoning tokens |
+| **Azure OpenAI** | `maxTokens`, or `maxCompletionTokens` | Same as OpenAI | Provider SDK default | Same rule as OpenAI |
 | **Bedrock** | `maxTokens` | Model-dependent | Provider SDK default | |
 | **Mistral** | `maxTokens` | 32,768 | Provider SDK default | |
 | **Oracle GenAI** | `maxTokens` | Model-dependent | Provider SDK default | |
@@ -247,7 +257,6 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
         "maxTokens": "16384",
         "timeout": "60000",
         "systemMessage": "You are a helpful assistant",
-        "includeFirstAgentMessage": "false",
         "addToOutput": "true"
       }
     }
@@ -255,8 +264,9 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 }
 ```
 
-> **`includeFirstAgentMessage` is deprecated and no longer needed for Anthropic.** This example keeps
-> `"false"` only because countless existing configs carry it. The advice it used to
+> **No `includeFirstAgentMessage` needed.** Older Anthropic examples set
+> `"includeFirstAgentMessage": "false"`; the parameter is deprecated (see
+> [Deprecated parameters](#deprecated-parameters)) and has no replacement. The advice it used to
 > illustrate — "Anthropic doesn't allow the first message to be from the agent, so set
 > this to `false`" — described a restriction the
 > [Messages API](https://platform.claude.com/docs/en/api/messages) no longer documents,
@@ -1259,6 +1269,11 @@ When `maxContextTokens` is -1 (default), the existing `conversationHistoryLimit`
 
 ### Retry Configuration
 
+> **The whole picture** — failure classes, the order in which the engine recovers, every setting with its
+> default, a recipe for an agent behind a 60-second caller, and how to read the trace, metrics and log lines
+> afterwards — is in [LLM Turn Resilience](llm-resilience.md). This section and the ones below are the field
+> reference.
+
 `retry` on an LLM task bounds how the engine re-attempts a failed model call. Only errors the
 engine classifies as retriable are retried — transport faults, rate limits and 5xx responses —
 never a malformed request, an authentication failure or a spent quota.
@@ -1360,6 +1375,64 @@ is not supported". A timeout, rate limit or 5xx (500 included) is rethrown inste
 self-hosted OpenAI-compatible gateway that answers an unsupported `response_format` with a **5xx**
 rather than a 4xx therefore fails the turn instead of falling back; set `jsonResponseFormat: "off"`
 on that task (see the provider matrix below) so the format is never sent.
+
+### Turn Deadline
+
+Retries, cascade steps and HTTP calls each have their own timeouts, and they multiply: three
+attempts of a 25-second model, a two-step cascade and a retried HTTP call can add up to minutes. A
+caller with a 60-second timeout then gives up while the engine is still working, and the late answer
+is never seen. A **turn deadline** makes every layer spend from one budget instead.
+
+```json
+{
+  "turnDeadlineMs": 55000,
+  "turnDeadlineReserveMs": 1500
+}
+```
+
+Both are **agent-level** settings (on the agent configuration, not on an LLM task). Unset
+`turnDeadlineMs` — the default — means no deadline: every layer applies only its own timeouts,
+exactly as before.
+
+| Setting                 | Description                                                                                                                  | Default |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `turnDeadlineMs`        | Wall-clock budget of one turn, counted from the request's arrival (time spent queued behind another turn counts)             | unset   |
+| `turnDeadlineReserveMs` | Kept back for the fallback answer and for persisting the turn; no model or HTTP work is started that would eat into it        | 1500    |
+
+**Per request.** A caller can send `X-EDDI-Turn-Deadline-Ms: <milliseconds>` on a conversation
+`say`, on the managed-conversation endpoint and on the OpenAI-compatible `/v1` chat endpoint. When
+the agent sets `turnDeadlineMs`, the header can only *shorten* it. When the agent sets none, the
+header alone enables a deadline, capped at 10 minutes. A missing, non-numeric or non-positive value
+is ignored (the request is never rejected over it). Only the `say`/`rerun` turn paths read it; a
+HITL resume starts a turn without one.
+
+**What spends from it**
+
+- **Model attempts** (`retry`): the first attempt always starts while any time remains; a *retry* only
+  starts when at least 3 seconds plus the reserve are left. Each attempt is bounded by what is left
+  after the reserve, and an attempt that overruns is abandoned and its call cancelled. A backoff —
+  or a provider `Retry-After` — that would leave no room for the next attempt is **not slept**: the
+  loop stops and the failure goes up, so a [model cascade](model-cascade.md) escalates, or the turn
+  falls back, while there is still time.
+- **Cascade**: `maxTotalDurationMs` is `min(configured, remaining - reserve)`, step timeouts are
+  clamped to the remaining budget, and no further step starts when under 3 seconds (plus reserve)
+  remain. Time already spent by earlier tasks is already gone from the remaining budget.
+- **HTTP calls** ([httpcalls](httpcalls.md)): each call's timeout is clamped to the remaining budget,
+  and `retryApiCallInstruction` retries that cannot fit (backoff plus a call of at least
+  `min(timeout, 3 s)`) are skipped. The first call is never skipped unless the deadline has already
+  passed, in which case the call fails fast with a clear message.
+
+Streaming (SSE) model calls keep their own streaming timeout and are not yet bounded by the turn
+deadline.
+
+**Metrics.** `eddi.llm.turn.deadline.exceeded{stage}` counts every time a layer stopped because of
+the deadline; `eddi.llm.cancelled{scope}` counts attempts and cascade steps abandoned on timeout.
+
+**Deploy-time warnings.** When an agent is loaded, the engine logs (once, never blocking) a warning
+if a task's model `timeout` is longer than its cascade step's `timeoutMs`, if `convertToObject` has no
+fallback path (no `responseValidation` fallback and no `onError` fallback), and — for agents that set
+`turnDeadlineMs` — if the static worst case (every LLM retry running to its timeout, plus the slowest
+httpcall of each httpcalls step with its retries) exceeds the deadline minus the reserve.
 
 ### Rolling Conversation Summary
 
@@ -2054,7 +2127,7 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 
 **The model never sees the fallback.** When the next turn's history is built for the model, the assistant message of a fallback turn is left out; the user's question stays. To keep the roles alternating (some providers reject two user messages in a row) the following user message is merged into it. The conversation log and the UI still show the fallback, and an output item the task itself adds under `addToOutput` carries `"fallback": true`. The rolling summary and the recall tool still see the turn.
 
-**Not covered:** the resume path after a human-in-the-loop tool approval does not apply `onError`; a failure there fails the turn as before.
+**Resume after a human-in-the-loop approval.** The resumed model phase runs under the same `onError` guard: a failure of the final answer serves the fallback instead of failing the turn (the approved tool calls already ran exactly once, so only the answer is replaced). A pause, a cancel and a refused approval still propagate. See [LLM Turn Resilience](llm-resilience.md#after-a-human-approval-resume) for what does and does not apply on resume.
 
 ### Recovery policies: retry where it helps
 
@@ -2098,7 +2171,9 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 
 **Cost.** Every attempt's tokens are summed into the turn's token usage and cost, so re-asks show up in the audit ledger and in `maxCostPerRun`. The step records `llm:retry:<taskId>` = `{reasks, unresolved}`. Metrics: `eddi.llm.recovery{action=retry|escalate, outcome, trigger}` (see [metrics](metrics.md)).
 
-**Not covered:** the resume path after a human-in-the-loop tool approval gets the parser's local repair but no re-asks. A model that keeps failing the same way is taken out by the [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing), which also switches off the same-model re-ask of invalid output.
+**Resume after a human-in-the-loop approval.** A resumed turn re-asks its **final answer** on the same model for an empty, invalid-JSON or schema-mismatch reply (one model call over the resumed transcript; no tool runs again) and applies the `responseValidation` actions. Truncation and context-too-long re-asks are not available there, and the circuit breaker and the cascade are not consulted: the resume continues on the model whose tool loop paused. A resume that recorded no transcript cannot re-ask and goes to `fallbackAction`.
+
+**One log line per recovery.** Each repair, re-ask, escalation, circuit skip and served fallback writes exactly one INFO line, `LLM recovery conversationId=… agentId=… class=… action=… outcome=… attempt=… durationMs=…` (see [LLM Turn Resilience](llm-resilience.md#in-the-log)). A model that keeps failing the same way is taken out by the [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing), which also switches off the same-model re-ask of invalid output.
 
 ### Circuit breaker: skip a model that keeps failing
 
@@ -2274,6 +2349,8 @@ This means:
 ---
 
 ## See Also
+
+- [LLM Turn Resilience](llm-resilience.md) - failure taxonomy, recovery order, configuration surface and how to read the trace, metrics and logs
 
 - [Behavior Rules](behavior-rules.md) - Triggering LLM tasks conditionally
 - [HTTP Calls](httpcalls.md) - Creating custom HTTP call tools for agents

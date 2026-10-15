@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.impl.builder.AnthropicLanguageModelBuilder;
+import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -72,6 +73,7 @@ import java.util.Set;
 final class FormatRetryRunner {
 
     private static final Logger LOGGER = Logger.getLogger(FormatRetryRunner.class);
+    private static final ModelParameterCatalog MODEL_PARAMETER_CATALOG = ModelParameterCatalog.defaultCatalog();
 
     /**
      * Longest bad reply echoed back as the assistant turn of a corrective re-ask.
@@ -144,6 +146,14 @@ final class FormatRetryRunner {
         };
 
         void onReask(Trigger trigger, int attempt);
+
+        /**
+         * Called once the re-ask has finished: {@code outcome} is {@code recovered},
+         * {@code still_invalid} or {@code failed}. The structured recovery log line
+         * (R11) is written from here, where the duration is known.
+         */
+        default void onReaskDone(Trigger trigger, int attempt, String outcome, long durationMs) {
+        }
     }
 
     /**
@@ -295,13 +305,16 @@ final class FormatRetryRunner {
             current = smaller;
             LOGGER.warnf("Prompt exceeded the model's context window; re-asking once with the history window halved (%d -> %d messages)",
                     messages.size(), smaller.size());
+            long started = System.nanoTime();
             try {
                 first = asker.ask(current, null);
             } catch (LifecycleException second) {
                 count("retry", "failed", Trigger.CONTEXT_TOO_LONG);
+                listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "failed", elapsedMs(started));
                 throw second;
             }
             count("retry", "recovered", Trigger.CONTEXT_TOO_LONG);
+            listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "recovered", elapsedMs(started));
         }
         return resolve(policy, first, current, asker, budget, gate, listener, reasks);
     }
@@ -364,7 +377,7 @@ final class FormatRetryRunner {
             reasks++;
             truncationReasked |= trigger == Trigger.TRUNCATION;
             listener.onReask(trigger, reasks);
-            LOGGER.infof("Re-asking the same model (%s, re-ask %d of %d)", trigger.label(), reasks, policy.maxRetries());
+            long started = System.nanoTime();
             Attempt next;
             try {
                 next = asker.ask(request, maxTokens);
@@ -373,6 +386,7 @@ final class FormatRetryRunner {
                     throw e;
                 }
                 count("retry", "failed", trigger);
+                listener.onReaskDone(trigger, reasks, "failed", elapsedMs(started));
                 LOGGER.warnf("Re-ask (%s) failed: %s — keeping the earlier reply", trigger.label(), e.getMessage());
                 return new Outcome(withUsage(attempt, totalUsage), trigger, detection.reason(), reasks, messages);
             }
@@ -380,8 +394,14 @@ final class FormatRetryRunner {
             CascadingModelExecutor.mergeTokenUsage(retryUsage, tokenUsage(next));
             attempt = next;
             Detection after = detect(policy, attempt, !truncationReasked && raisedCap(policy) != null);
-            count("retry", after == null ? "recovered" : "still_invalid", trigger);
+            String result = after == null ? "recovered" : "still_invalid";
+            count("retry", result, trigger);
+            listener.onReaskDone(trigger, reasks, result, elapsedMs(started));
         }
+    }
+
+    private static long elapsedMs(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 
     /**
@@ -497,10 +517,22 @@ final class FormatRetryRunner {
 
     /**
      * The base output-token cap a model runs with, from its parameters
-     * ({@code maxTokens}, or {@code maxOutputTokens} for Gemini), the provider's
-     * documented default where it has one, else null.
+     * ({@code maxTokens}, or {@code maxOutputTokens} for Gemini and Vertex), the
+     * provider's documented default where it has one, else null.
+     * <p>
+     * The parameters are first put through the model-parameter catalog, so a cap
+     * the model would reject is not counted: the re-ask carries its raised cap as
+     * {@code ChatRequest.maxOutputTokens}, which the OpenAI client sends as
+     * {@code max_tokens}, and a reasoning model answers that with an HTTP 400. For
+     * those models (configured through {@code maxCompletionTokens}) there is no
+     * base cap to raise and the truncation re-ask is skipped, as for any task
+     * without a configured cap. This lookup always applies the catalog, whatever
+     * {@code eddi.llm.parameter-catalog.drop-rejected} says: it only decides
+     * whether a re-ask can be sized, and sizing it from a cap the model rejects
+     * would fail.
      */
-    static Integer resolveBaseMaxOutputTokens(Map<String, String> params, String modelType) {
+    static Integer resolveBaseMaxOutputTokens(Map<String, String> configured, String modelType) {
+        Map<String, String> params = configured == null ? null : MODEL_PARAMETER_CATALOG.adapt(modelType, configured, true).parameters();
         if (params != null) {
             for (String key : List.of("maxTokens", "maxOutputTokens")) {
                 String value = params.get(key);
