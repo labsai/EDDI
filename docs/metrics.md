@@ -416,7 +416,10 @@ they count only what is dispatched through Vert.x.
 Turns are bounded by `eddi.conversation.max-in-flight-turns` instead of by
 threads: past it a turn is refused with 503 `capacity_exceeded` and counted in
 `eddi_turn_rejected_total{reason="in_flight_limit"}` (alert
-`EddiTurnCapacityReached`), against `eddi_processing_conversation_count`.
+`EddiTurnCapacityReached`). A turn holds its place until its task has ended,
+persistence included, and a new conversation's start turn counts too, so the
+limit is reached slightly before `eddi_processing_conversation_count` shows it:
+that gauge drops as soon as the client has its answer.
 
 ### Pipeline Metrics
 

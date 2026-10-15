@@ -246,7 +246,9 @@ class ConversationStepRunner {
                     // it) — the caller's response/stream must terminate exactly once.
                     // deliver() is one-shot too.
                     flushDeferredDelivery(processingTurn, conversationId);
-                    processingTurn.release();
+                    // finish(), not release(): this is where the task ends, so the
+                    // in-flight permit is returned here, after the turn was persisted.
+                    processingTurn.finish();
                 }
             }
 
@@ -283,8 +285,9 @@ class ConversationStepRunner {
                 } finally {
                     // Belt and braces: release() is one-shot, so this is a no-op when
                     // the skip notifier already released — but a null or throwing
-                    // notifier must not leak the reference.
-                    processingTurn.release();
+                    // notifier must not leak the reference. finish(): the task never
+                    // runs, so this is also where its in-flight permit comes back.
+                    processingTurn.finish();
                 }
             }
         };

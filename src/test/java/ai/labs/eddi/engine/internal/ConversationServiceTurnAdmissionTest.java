@@ -250,6 +250,7 @@ class ConversationServiceTurnAdmissionTest {
     @DisplayName("concurrent admissions never overshoot the limit")
     void concurrentAdmissionsNeverOvershoot() throws Exception {
         final int limit = 5;
+        AtomicInteger gauge = new AtomicInteger();
         AtomicInteger counter = new AtomicInteger();
         AtomicInteger highest = new AtomicInteger();
         AtomicInteger refusals = new AtomicInteger();
@@ -262,10 +263,10 @@ class ConversationServiceTurnAdmissionTest {
                     start.await();
                     for (int i = 0; i < 2000; i++) {
                         try {
-                            ConversationService.ProcessingTurn turn = ConversationService.ProcessingTurn.admit(counter, limit);
+                            ConversationService.ProcessingTurn turn = ConversationService.ProcessingTurn.admit(gauge, counter, limit);
                             highest.accumulateAndGet(counter.get(), Math::max);
-                            turn.release();
-                            turn.release(); // idempotent: a second release must not free a second permit
+                            turn.finish();
+                            turn.finish(); // idempotent: a second finish must not free a second permit
                         } catch (TurnCapacityExceededException e) {
                             refusals.incrementAndGet();
                         }
@@ -282,5 +283,62 @@ class ConversationServiceTurnAdmissionTest {
         }
         assertTrue(highest.get() <= limit, "observed " + highest.get() + " turns in flight with a limit of " + limit);
         assertEquals(0, counter.get(), "every permit must be back");
+        assertEquals(0, gauge.get(), "and the gauge with them");
+    }
+
+    /**
+     * The client gets its answer before the turn is persisted (the completion
+     * consumer runs first, persistence after it on the same thread). The gauge
+     * drops then; the permit must not, or new turns run while earlier ones are
+     * still writing and the node exceeds its limit.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("the client-visible release leaves the permit held until the turn task finishes")
+    void clientCompletionDoesNotReturnThePermit() {
+        AtomicInteger gauge = new AtomicInteger();
+        AtomicInteger permits = new AtomicInteger();
+        ConversationService.ProcessingTurn turn = ConversationService.ProcessingTurn.admit(gauge, permits, 1);
+
+        turn.release(); // completeTurn: the answer is out
+        assertEquals(0, gauge.get(), "the gauge follows the client-visible completion");
+        assertThrows(TurnCapacityExceededException.class, () -> ConversationService.ProcessingTurn.admit(gauge, permits, 1),
+                "the turn is still persisting, so its permit is still held");
+
+        turn.finish(); // the turn task's finally
+        assertEquals(0, permits.get());
+        ConversationService.ProcessingTurn.admit(gauge, permits, 1).finish();
+        assertEquals(0, gauge.get());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a new conversation's start turn is refused at the limit and spends no conversation quota")
+    void startConversationCountsAgainstTheLimit() throws Exception {
+        conversationService.maxInFlightTurns = 1;
+        say();
+        when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mock(IAgent.class));
+
+        assertThrows(TurnCapacityExceededException.class,
+                () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new HashMap<>()));
+        verify(tenantQuotaService, never()).acquireConversationSlot();
+        assertEquals(1.0, rejected());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a start turn gives its permit back however it ends")
+    void startConversationReturnsItsPermit() throws Exception {
+        conversationService.maxInFlightTurns = 1;
+        IAgent agent = mock(IAgent.class);
+        when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(agent);
+        when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
+        when(agent.startConversation(any(), any(), any(), any())).thenThrow(new IllegalStateException("start pipeline failed"));
+
+        assertThrows(IllegalStateException.class,
+                () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new HashMap<>()));
+
+        assertEquals(0.0, inFlight());
+        assertDoesNotThrow(this::say, "the failed start must not keep the only permit");
     }
 }

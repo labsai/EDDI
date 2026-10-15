@@ -20,11 +20,16 @@ than as a rejection.
   parser endpoint stay on the pool. New gauge series:
   `eddi_runtime_executor_{active,queued}{pool="turn"}`.
 - **Admission control: `eddi.conversation.max-in-flight-turns` (default `1000`).** The C11
-  `ProcessingTurn` token is the permit. It is admitted with one CAS against the counter behind
-  `eddi_processing_conversation_count`, so concurrent admissions cannot overshoot, and it is given
-  back by the release that already fires exactly once on every exit path. It is admitted after
-  idempotency admission (a duplicate key answered from the stored result takes no permit) and
-  **before the tenant quota slot**, so a capacity refusal does not spend quota. The refusal,
+  `ProcessingTurn` token carries the permit. It is taken with one CAS against a permit counter,
+  so concurrent admissions cannot overshoot, and given back exactly once by `finish()`. Only the
+  turn's own exits call `finish()`: the turn task's `finally`, its discard hook, and the
+  pre-submission rollback. The gauge's existing `release()` still fires as soon as the client
+  has its answer, but persistence runs after that on the same thread, so the permit stays held
+  until then. Releasing it with the gauge let the node run past its limit (1029 active at 1000
+  in the load test below). The permit is admitted after idempotency admission (a duplicate key
+  answered from the stored result takes no permit) and **before the tenant quota slot**, so a
+  capacity refusal does not spend quota. `startConversation` admits its CONVERSATION_START turn
+  the same way, because that turn runs inline and can call an LLM. The refusal,
   `TurnCapacityExceededException`, extends `RejectedExecutionException`, so every surface
   answers it with the existing 503 `capacity_exceeded` + `Retry-After`. It is counted in
   `eddi_turn_rejected_total{reason="in_flight_limit"}`.
@@ -48,6 +53,9 @@ than as a rejection.
 
 Before, at 500 conversations, the managed pool was pinned at 199 active with up to 198 queued.
 After, it stays at 0: turns peaked at 1029 active on `pool="turn"` with 326 live JVM threads.
+That build still released the permit with the client's answer. The overshoot past 1000 is the
+persistence tail that review moved inside the permit, and the numbers were not re-measured
+after that change.
 MongoDB operations per successful turn are unchanged (≈ 22.7). A refused turn still costs its
 conversation loads, because admission sits after them. That is WS3a's single-load work.
 

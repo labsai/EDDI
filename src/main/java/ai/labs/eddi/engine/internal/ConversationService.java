@@ -297,6 +297,13 @@ public class ConversationService implements IConversationService, UserErasurePar
     private final AtomicInteger processingConversationCount = new AtomicInteger();
 
     /**
+     * Turns holding an {@code eddi.conversation.max-in-flight-turns} permit: the
+     * gauge's count plus the turns already answered but still persisting. See
+     * {@link ProcessingTurn#finish()}.
+     */
+    private final AtomicInteger inFlightTurnPermits = new AtomicInteger();
+
+    /**
      * Live memories of conversations currently executing on THIS pod, keyed by
      * conversationId. Lets {@link #cancelConversation} set the cooperative
      * {@code cancelled} flag that {@code LifecycleManager} checks at task
@@ -382,48 +389,88 @@ public class ConversationService implements IConversationService, UserErasurePar
      * paths the turn takes — completion, skip, watchdog timeout, pipeline error or
      * a pre-submission throw. Idempotent, so the turn callable's {@code finally}
      * can act as a safety net behind the normal completion path.
+     * <p>
+     * It also carries the turn's {@code eddi.conversation.max-in-flight-turns}
+     * permit, which has its own, later release. {@link #release()} fires as soon as
+     * the client has its answer, but the turn is still running then: it is
+     * persisted afterwards, on the same thread. Releasing the permit there let new
+     * turns in while earlier ones were still writing, so the node ran past its
+     * limit (1029 active at a limit of 1000 in the load test). The permit is
+     * returned by {@link #finish()}, which only the turn's own exits call: the turn
+     * task's {@code finally}, its discard hook and the pre-submission rollback.
      */
     static final class ProcessingTurn {
         private final AtomicInteger counter;
+        private final AtomicInteger capacity;
         private final AtomicBoolean released = new AtomicBoolean(false);
+        private final AtomicBoolean finished = new AtomicBoolean(false);
         /**
          * The client-visible completion of a turn that ended AWAITING_HUMAN, held back
          * until the pause is persisted — see {@link DeferredDelivery}.
          */
         final DeferredDelivery deferredDelivery = new DeferredDelivery();
 
-        /** The counter has already been incremented for this turn. */
+        /**
+         * A token outside any limit (tests build it reflectively). The counter has
+         * already been incremented for this turn.
+         */
         private ProcessingTurn(AtomicInteger counter) {
+            this(counter, new AtomicInteger(1));
+        }
+
+        /** Both counters have already been incremented for this turn. */
+        private ProcessingTurn(AtomicInteger counter, AtomicInteger capacity) {
             this.counter = counter;
+            this.capacity = capacity;
         }
 
         /**
          * Admits a turn against the in-flight limit, or refuses it. The limit is
-         * checked and the counter taken in one CAS, so concurrent admissions can never
+         * checked and the permit taken in one CAS, so concurrent admissions can never
          * overshoot it (unlike the coordinator's deliberately soft conversation cap).
-         * The permit IS this token: {@link #release()} gives it back exactly once on
-         * every exit path, which is what C11 already guarantees for the gauge.
          *
+         * @param counter
+         *            backs {@code eddi_processing_conversation_count}; released early
+         *            by {@link #release()}
+         * @param capacity
+         *            the permits; held until {@link #finish()}
          * @param limit
          *            {@code eddi.conversation.max-in-flight-turns}; {@code <= 0} admits
          *            everything
          */
-        static ProcessingTurn admit(AtomicInteger counter, int limit) {
+        static ProcessingTurn admit(AtomicInteger counter, AtomicInteger capacity, int limit) {
             while (true) {
-                int current = counter.get();
+                int current = capacity.get();
                 if (limit > 0 && current >= limit) {
                     throw new TurnCapacityExceededException("This node is already running " + limit
                             + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
                 }
-                if (counter.compareAndSet(current, current + 1)) {
-                    return new ProcessingTurn(counter);
+                if (capacity.compareAndSet(current, current + 1)) {
+                    counter.incrementAndGet();
+                    return new ProcessingTurn(counter, capacity);
                 }
             }
         }
 
+        /**
+         * The client-visible end of the turn: takes it off the gauge. The capacity
+         * permit stays held — see {@link #finish()}.
+         */
         void release() {
             if (released.compareAndSet(false, true)) {
                 counter.decrementAndGet();
+            }
+        }
+
+        /**
+         * The turn task is done — run, skipped, discarded or never submitted. Releases
+         * the gauge if that has not happened yet and gives the capacity permit back,
+         * both exactly once.
+         */
+        void finish() {
+            release();
+            if (finished.compareAndSet(false, true)) {
+                capacity.decrementAndGet();
             }
         }
     }
@@ -465,6 +512,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             context = new LinkedHashMap<>();
         }
 
+        ProcessingTurn startTurn = null;
         try {
             // GDPR Art. 18 — processing restriction check
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
@@ -483,6 +531,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                 message = String.format(message, agentId, environment);
                 throw new AgentNotReadyException(message);
             }
+
+            // The CONVERSATION_START turn runs inline below and can call an LLM like any
+            // other turn, so it takes an in-flight permit too — before the quota slot, as
+            // say() does, so a capacity refusal spends no quota. Finished in the finally.
+            startTurn = admitTurn("(new conversation of agent " + agentId + ")");
 
             // Tenant quota — atomic slot acquisition AFTER cheap validations
             // (avoids burning quota on GDPR-restricted or agent-not-ready failures)
@@ -560,6 +613,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
         } finally {
+            releaseTurn(startTurn);
             recordMetrics(timerConversationStart, counterConversationStart, startTime);
         }
     }
@@ -1289,9 +1343,13 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * The pre-submission rollback: the turn task never ran, so this is its end —
+     * gauge and capacity permit both.
+     */
     static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
-            turn.release();
+            turn.finish();
         }
     }
 
@@ -1305,7 +1363,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     ProcessingTurn admitTurn(String conversationId) {
         try {
-            return ProcessingTurn.admit(processingConversationCount, maxInFlightTurns);
+            return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, maxInFlightTurns);
         } catch (TurnCapacityExceededException e) {
             meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
             LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
