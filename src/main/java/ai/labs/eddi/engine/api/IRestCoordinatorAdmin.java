@@ -33,23 +33,31 @@ public interface IRestCoordinatorAdmin {
     @Path("/status")
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Get coordinator status", description = "Returns coordinator type, connection state, queue depths, and processing stats.")
+    @Operation(summary = "Get coordinator status", description = "Returns coordinator type, connection state, queue depths, and processing stats. "
+            + "In cluster mode also nodeId and a cluster section (members, leases held, NATS state, degraded); "
+            + "scope=cluster adds every member's queue depths.")
     @APIResponse(responseCode = "200", description = "Coordinator status.")
-    CoordinatorStatus getStatus();
+    CoordinatorStatus getStatus(@QueryParam("scope") String scope);
 
     @GET
     @Path("/dead-letters")
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "List dead-letter entries", description = "Returns all dead-letter entries from the coordinator.")
+    @Operation(summary = "List dead-letter entries", description = "Dead-letter entries, oldest first. In cluster mode the shared stream "
+            + "every node reads; page with limit and after (the last id of the previous page).")
     @APIResponse(responseCode = "200", description = "List of dead-letter entries.")
-    List<DeadLetterEntry> getDeadLetters();
+    List<DeadLetterEntry> getDeadLetters(@QueryParam("limit")
+    @DefaultValue("100") int limit, @QueryParam("after") String after);
 
     @POST
     @Path("/dead-letters/{entryId}/replay")
-    @Operation(summary = "Replay a dead-letter entry", description = "Re-injects a dead-letter entry into the processing pipeline.")
-    @APIResponse(responseCode = "200", description = "Entry replayed.")
+    @Operation(summary = "Replay a dead-letter entry", description = "Submits the failed turn's captured input as a NEW turn of its "
+            + "conversation (context replayOf=<id>), as the calling admin, and removes the entry once the turn was accepted. "
+            + "The failed task itself is never re-run.")
+    @APIResponse(responseCode = "204", description = "Replay submitted; entry removed.")
     @APIResponse(responseCode = "404", description = "Entry not found.")
+    @APIResponse(responseCode = "409", description = "Not replayable (no captured input) or the conversation cannot take a turn; "
+            + "the entry is kept.")
     void replayDeadLetter(@PathParam("entryId") String entryId);
 
     @DELETE
@@ -70,7 +78,7 @@ public interface IRestCoordinatorAdmin {
     @GET
     @Path("/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
-    @Operation(summary = "Stream coordinator events via SSE", description = "Live-tail of coordinator events: task_submitted, "
-            + "task_completed, task_failed, task_dead_lettered.")
+    @Operation(summary = "Stream coordinator status via SSE", description = "Emits a 'status' event — the same object as GET /status — "
+            + "on connect and every 2 seconds.")
     void streamEvents(@Context SseEventSink eventSink, @Context Sse sse);
 }
