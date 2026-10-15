@@ -64,6 +64,13 @@ class MetricsDashboardCoverageTest {
     private static final Path METRICS_REFERENCE = Path.of("docs", "metrics.md");
 
     /**
+     * The cluster meters (registered only with {@code eddi.messaging.type=nats})
+     * are charted on their own dashboard rather than the Full Metrics Reference;
+     * either one satisfies the coverage check.
+     */
+    private static final Path CLUSTER_DASHBOARD = MONITORING.resolve("eddi-cluster-dashboard.json");
+
+    /**
      * Meters that are registered but deliberately not on the Full dashboard, as
      * {@code meter → why}.
      * <p>
@@ -82,8 +89,10 @@ class MetricsDashboardCoverageTest {
         // eddi_tool_cache_hits_by_tool_total, and a meter named only in a panel
         // description is not charted.
         var queried = new TreeSet<String>();
-        for (String expr : expressions(dashboard(root.resolve(FULL_DASHBOARD)))) {
-            queried.addAll(metricNames(expr));
+        for (Path file : List.of(FULL_DASHBOARD, CLUSTER_DASHBOARD)) {
+            for (String expr : expressions(dashboard(root.resolve(file)))) {
+                queried.addAll(metricNames(expr));
+            }
         }
 
         var uncharted = new TreeSet<String>();

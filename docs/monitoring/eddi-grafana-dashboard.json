@@ -591,7 +591,7 @@
         "y": 50
       },
       "id": 400,
-      "title": "NATS Messaging (when enabled)",
+      "title": "Cluster mode (when eddi.messaging.type=nats)",
       "type": "row",
       "panels": [
         {
@@ -612,20 +612,22 @@
             "y": 51
           },
           "id": 11,
-          "title": "NATS Publish / Consume Latency",
+          "title": "Lease wait / KV latency",
           "type": "timeseries",
           "targets": [
             {
-              "expr": "rate(eddi_nats_publish_duration_seconds_sum[5m]) / rate(eddi_nats_publish_duration_seconds_count[5m])",
-              "legendFormat": "Publish Avg",
+              "expr": "rate(eddi_cluster_lease_acquire_seconds_sum[5m]) / rate(eddi_cluster_lease_acquire_seconds_count[5m])",
+              "legendFormat": "lease wait",
+              "refId": "A",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               }
             },
             {
-              "expr": "rate(eddi_nats_consume_duration_seconds_sum[5m]) / rate(eddi_nats_consume_duration_seconds_count[5m])",
-              "legendFormat": "Consume Avg",
+              "expr": "sum(rate(eddi_cluster_kv_seconds_sum[5m])) / sum(rate(eddi_cluster_kv_seconds_count[5m]))",
+              "legendFormat": "KV call",
+              "refId": "B",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -648,28 +650,31 @@
             "y": 51
           },
           "id": 12,
-          "title": "NATS Throughput & Dead Letters",
+          "title": "Cluster events & dead letters",
           "type": "timeseries",
           "targets": [
             {
-              "expr": "rate(eddi_nats_publish_count_total[5m]) or on() vector(0)",
-              "legendFormat": "Published/s",
+              "expr": "sum(rate(eddi_cluster_events_published_total[5m])) or on() vector(0)",
+              "legendFormat": "events published/s",
+              "refId": "A",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               }
             },
             {
-              "expr": "rate(eddi_nats_consume_count_total[5m]) or on() vector(0)",
-              "legendFormat": "Consumed/s",
+              "expr": "sum(rate(eddi_cluster_events_consumed_total[5m])) or on() vector(0)",
+              "legendFormat": "events consumed/s",
+              "refId": "B",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
               }
             },
             {
-              "expr": "sum(rate(eddi_nats_dead_letter_count_total[5m])) or on() vector(0)",
-              "legendFormat": "Dead letters / s",
+              "expr": "sum(rate(eddi_coordinator_dead_lettered_total[5m])) or on() vector(0)",
+              "legendFormat": "dead letters/s",
+              "refId": "C",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"

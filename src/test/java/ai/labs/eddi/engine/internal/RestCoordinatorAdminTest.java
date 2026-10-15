@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import java.util.Optional;
+import jakarta.ws.rs.WebApplicationException;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.model.CoordinatorStatus;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -46,7 +49,7 @@ class RestCoordinatorAdminTest {
             var status = new CoordinatorStatus("in-memory", true, "OK", 5, 100L, 0L, Map.of());
             when(coordinator.getStatus()).thenReturn(status);
 
-            CoordinatorStatus result = restCoordinatorAdmin.getStatus();
+            CoordinatorStatus result = restCoordinatorAdmin.getStatus(null);
 
             assertEquals("in-memory", result.coordinatorType());
             assertTrue(result.connected());
@@ -69,7 +72,7 @@ class RestCoordinatorAdminTest {
             var entries = List.of(new DeadLetterEntry("1", "c1", "err", 0, ""));
             when(coordinator.getDeadLetters()).thenReturn(entries);
 
-            List<DeadLetterEntry> result = restCoordinatorAdmin.getDeadLetters();
+            List<DeadLetterEntry> result = restCoordinatorAdmin.getDeadLetters(100, null);
 
             assertEquals(1, result.size());
             assertEquals(entries, result);
@@ -82,18 +85,51 @@ class RestCoordinatorAdminTest {
     class ReplayDeadLetter {
 
         @Test
-        @DisplayName("should succeed when coordinator returns true")
-        void success() {
-            when(coordinator.replayDeadLetter("dl-1")).thenReturn(true);
+        @DisplayName("submits the captured input as a NEW turn and only then removes the entry")
+        void success() throws Exception {
+            var conversationService = mock(IConversationService.class);
+            restCoordinatorAdmin.conversationService = conversationService;
+            var entry = new DeadLetterEntry("dl-1", "conv-1", "boom", 1L, "{}", Map.of("input", "hello", "agentId", "a1"));
+            when(coordinator.getDeadLetter("dl-1")).thenReturn(Optional.of(entry));
 
             assertDoesNotThrow(() -> restCoordinatorAdmin.replayDeadLetter("dl-1"));
-            verify(coordinator).replayDeadLetter("dl-1");
+
+            var order = inOrder(conversationService, coordinator);
+            order.verify(conversationService).say(eq("conv-1"), eq(false), eq(true), anyList(),
+                    argThat(input -> "hello".equals(input.getInput()) && input.getContext().containsKey("replayOf")), eq(false), any());
+            order.verify(coordinator).replayDeadLetter("dl-1");
+        }
+
+        @Test
+        @DisplayName("refuses (409) an entry without captured input and keeps it")
+        void notReplayable() {
+            restCoordinatorAdmin.conversationService = mock(IConversationService.class);
+            when(coordinator.getDeadLetter("dl-2")).thenReturn(Optional.of(new DeadLetterEntry("dl-2", "conv-1", "boom", 1L, "{}")));
+
+            var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-2"));
+            assertEquals(409, e.getResponse().getStatus());
+            verify(coordinator, never()).replayDeadLetter(anyString());
+        }
+
+        @Test
+        @DisplayName("keeps the entry (409) when the conversation refuses the turn")
+        void refusedTurnKeepsEntry() throws Exception {
+            var conversationService = mock(IConversationService.class);
+            restCoordinatorAdmin.conversationService = conversationService;
+            when(coordinator.getDeadLetter("dl-3"))
+                    .thenReturn(Optional.of(new DeadLetterEntry("dl-3", "conv-1", "boom", 1L, "{}", Map.of("input", "x", "agentId", "a"))));
+            doThrow(new IConversationService.ConversationEndedException("ended")).when(conversationService)
+                    .say(anyString(), any(), any(), anyList(), any(), anyBoolean(), any());
+
+            var e = assertThrows(WebApplicationException.class, () -> restCoordinatorAdmin.replayDeadLetter("dl-3"));
+            assertEquals(409, e.getResponse().getStatus());
+            verify(coordinator, never()).replayDeadLetter(anyString());
         }
 
         @Test
         @DisplayName("should throw NotFoundException when entry not found")
         void notFound() {
-            when(coordinator.replayDeadLetter("dl-missing")).thenReturn(false);
+            when(coordinator.getDeadLetter("dl-missing")).thenReturn(Optional.empty());
 
             assertThrows(NotFoundException.class,
                     () -> restCoordinatorAdmin.replayDeadLetter("dl-missing"));
