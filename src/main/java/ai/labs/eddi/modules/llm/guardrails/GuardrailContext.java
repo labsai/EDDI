@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails;
 
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import dev.langchain4j.data.message.ChatMessage;
 
 import java.util.LinkedHashMap;
@@ -27,19 +28,34 @@ import java.util.Map;
  *            templated
  * @param messages
  *            what the model sees (input) or saw (output), read-only — for a
- *            guardrail that needs context such as retrieved documents
+ *            guardrail that needs context such as the user's question
+ * @param retrievedContext
+ *            the RAG context retrieved for this turn (output phase), or null —
+ *            for a groundedness check by a model-backed guardrail
+ * @param deadline
+ *            the turn's deadline, or null when the turn has none — a guardrail
+ *            that makes a network call must not outlive it
  */
 public record GuardrailContext(GuardrailPhase phase, String taskId, String conversationId, String agentId, Map<String, String> parameters,
-        List<ChatMessage> messages) {
+        List<ChatMessage> messages, String retrievedContext, TurnDeadline deadline) {
 
     public GuardrailContext {
         parameters = parameters != null ? Map.copyOf(withoutNulls(parameters)) : Map.of();
         messages = messages != null ? List.copyOf(messages) : List.of();
     }
 
-    /** This context for another phase, parameter set and message list. */
+    /** A context without retrieved context or deadline. */
+    public GuardrailContext(GuardrailPhase phase, String taskId, String conversationId, String agentId, Map<String, String> parameters,
+            List<ChatMessage> messages) {
+        this(phase, taskId, conversationId, agentId, parameters, messages, null, null);
+    }
+
+    /**
+     * This context for another phase, parameter set and message list; the retrieved
+     * context and the deadline are kept.
+     */
     public GuardrailContext with(GuardrailPhase newPhase, Map<String, String> newParameters, List<ChatMessage> newMessages) {
-        return new GuardrailContext(newPhase, taskId, conversationId, agentId, newParameters, newMessages);
+        return new GuardrailContext(newPhase, taskId, conversationId, agentId, newParameters, newMessages, retrievedContext, deadline);
     }
 
     /** A parameter, or {@code fallback} when it is unset or blank. */

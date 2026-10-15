@@ -243,18 +243,20 @@ public class GuardrailService {
                 continue;
             }
             GuardrailAction action = GuardrailAction.parse(config.getAction());
-            GuardrailVerdict verdict = evaluate(guardrail, text, context.with(GuardrailPhase.INPUT, config.getParameters(), context.messages()));
-            if (verdict == null) {
+            Evaluation evaluation = evaluate(guardrail, text, context.with(GuardrailPhase.INPUT, config.getParameters(), context.messages()));
+            if (evaluation.failed()) {
+                cost += evaluation.failureCostUsd();
                 // A block guardrail that cannot check the message refuses it (fail closed,
                 // Pillar 4) unless its author chose failMode=open.
                 if (failsClosed(config, action)) {
-                    var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.BLOCK, REASON_ERROR, 0);
+                    var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.BLOCK, evaluation.failureReason(), 0);
                     emit(onOutcome, outcome);
                     return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost);
                 }
-                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, REASON_ERROR, 0));
+                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, evaluation.failureReason(), 0));
                 continue;
             }
+            GuardrailVerdict verdict = evaluation.verdict();
             cost += verdict.costUsd();
             if (!verdict.triggered()) {
                 continue;
@@ -321,8 +323,10 @@ public class GuardrailService {
                 if (guardrail == null || !guardrail.screensHistory()) {
                     continue;
                 }
-                GuardrailVerdict verdict = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
-                if (verdict == null) {
+                Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
+                GuardrailVerdict verdict = evaluation.verdict();
+                if (evaluation.failed()) {
+                    cost += evaluation.failureCostUsd();
                     // Fail closed: an earlier message that cannot be checked is withheld.
                     if (failsClosed(config, action)) {
                         screened = HISTORY_PLACEHOLDER;
@@ -405,17 +409,20 @@ public class GuardrailService {
                     continue;
                 }
                 GuardrailAction action = GuardrailAction.parse(config.getAction());
-                GuardrailVerdict verdict = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
+                Evaluation evaluation = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
                         context.messages()));
-                if (verdict == null) {
+                if (evaluation.failed()) {
+                    cost += evaluation.failureCostUsd();
                     // A block or reprompt guardrail that cannot verify the answer withholds it
                     // (fail closed, Pillar 4) unless its author chose failMode=open.
                     if (failsClosed(config, action)) {
-                        return blocked(config, REASON_ERROR, attempts, reprompts, cost, onOutcome);
+                        return blocked(config, evaluation.failureReason(), attempts, reprompts, cost, onOutcome);
                     }
-                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, REASON_ERROR, attempts));
+                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
+                            attempts));
                     continue;
                 }
+                GuardrailVerdict verdict = evaluation.verdict();
                 cost += verdict.costUsd();
                 if (!verdict.triggered()) {
                     continue;
@@ -549,21 +556,39 @@ public class GuardrailService {
     }
 
     /**
-     * The verdict, or null when the guardrail threw or returned none (logged, never
-     * propagated); see {@link #failsClosed}.
+     * One evaluation: a verdict, or — when the guardrail threw, returned none, or
+     * reported that it could not decide — the reason to record and what the failed
+     * attempt cost.
      */
-    private GuardrailVerdict evaluate(ContentGuardrail guardrail, String text, GuardrailContext context) {
+    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd) {
+        boolean failed() {
+            return verdict == null;
+        }
+    }
+
+    /**
+     * Evaluates one guardrail without ever propagating its failure (logged); what a
+     * failure does is {@link #failsClosed}'s decision.
+     */
+    private Evaluation evaluate(ContentGuardrail guardrail, String text, GuardrailContext context) {
         try {
             GuardrailVerdict verdict = guardrail.evaluate(text, context);
             if (verdict == null) {
                 LOGGER.warnf("Guardrail '%s' returned no verdict on %s for task '%s' — treated as a guardrail error", guardrail.type(),
                         context.phase().label(), context.taskId());
+                return new Evaluation(null, REASON_ERROR, 0.0);
             }
-            return verdict;
+            return new Evaluation(verdict, null, 0.0);
+        } catch (GuardrailUndecidedException e) {
+            String reason = e.reason() != null && !e.reason().isBlank() ? e.reason() : REASON_ERROR;
+            LOGGER.infof("Guardrail '%s' could not decide on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
+                    context.phase().label(), context.taskId(), reason);
+            double cost = Double.isFinite(e.costUsd()) && e.costUsd() > 0.0 ? e.costUsd() : 0.0;
+            return new Evaluation(null, reason, cost);
         } catch (RuntimeException e) {
-            LOGGER.warnf("Guardrail '%s' failed on %s for task '%s' (%s) — recorded as a warning, the text passes", guardrail.type(),
+            LOGGER.warnf("Guardrail '%s' failed on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
                     context.phase().label(), context.taskId(), e.getClass().getSimpleName());
-            return null;
+            return new Evaluation(null, REASON_ERROR, 0.0);
         }
     }
 
