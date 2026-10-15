@@ -138,6 +138,11 @@ public sealed interface RequestBody permits RequestBody.Empty, RequestBody.Strin
             public Part {
                 Objects.requireNonNull(name, "name");
                 Objects.requireNonNull(content, "content");
+                // Written unquoted as a part header: a line break would end it and let
+                // the value add headers, or a whole forged part, to the body.
+                if (contentType != null && (contentType.indexOf('\r') >= 0 || contentType.indexOf('\n') >= 0)) {
+                    throw new IllegalArgumentException("part content type must not contain line breaks");
+                }
             }
 
             public static Part field(String name, String value) {

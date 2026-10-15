@@ -320,7 +320,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
 | **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | New outbound HTTP code. Callers are migrating onto it (`planning/http-client-consolidation-plan.md`); until then `SafeHttpClient` is a deprecated adapter over it with unchanged behaviour. |
-| **`SafeHttpClient`** | SSRF-safe HTTP wrapper — `Redirect.NEVER` + per-hop validated redirects, configurable timeout | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in tool code. |
+| **`SafeHttpClient`** | Deprecated JDK-typed adapter over `OutboundHttp` (`DEFAULT` profile), behaviour unchanged | Existing callers only, until they migrate. New code — tools included — injects `OutboundHttp`. Never create `HttpClient.newBuilder()` in tool code. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -452,20 +452,21 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 
 #### Tool Security
 
-- **Use `SafeHttpClient`** (`@Inject SafeHttpClient`) for ALL outbound HTTP — never create `HttpClient.newBuilder()` directly
-- **Always validate URLs** with `UrlValidationUtils.validateUrl(url)` before fetching user-controlled input
+- **Use `OutboundHttp`** (`@Inject OutboundHttp`) for new outbound HTTP — never create `HttpClient.newBuilder()` directly. `SafeHttpClient` is a deprecated adapter kept for existing callers only
+- **Validate user-controlled URLs** — `SsrfPolicy.STRICT` (the `DEFAULT` profile's default) checks the initial URL and every redirect hop; never weaken it for a URL a user or model chose
 - **Only allow `http`/`https`** — never `file://`, `ftp://`, etc.
-- **Block private/internal addresses** — handled automatically by `SafeHttpClient.sendValidated()`
+- **Block private/internal addresses** — handled by the SSRF policy in `OutboundHttp`; cap every body with a `BodyMode`
 - **Never use `ScriptEngine`** — use a recursive-descent parser (e.g. `SafeMathParser`, a static inner class of `CalculatorTool` — inject `CalculatorTool`, not the parser)
 
 ```java
-@Inject SafeHttpClient httpClient;
+@Inject OutboundHttp http;
 
 @Tool("Fetches data from a URL")
 public String fetchData(@P("URL (http or https)") String url) {
     try {
-        var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
-        var response = httpClient.sendValidated(request, HttpResponse.BodyHandlers.ofString());
+        // DEFAULT profile: SsrfPolicy.STRICT on the URL and every redirect hop
+        var request = OutboundRequest.get(Profile.DEFAULT, URI.create(url)).build();
+        var response = http.send(request, BodyMode.string(1_000_000, BodyMode.OnOverflow.TRUNCATE));
         return response.body();
     } catch (Exception e) {
         return "Error fetching URL: " + e.getMessage();
@@ -534,7 +535,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |
-| `src/main/java/.../engine/httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper |
+| `src/main/java/.../engine/httpclient/outbound/OutboundHttp.java` | The outbound HTTP facade — SSRF, redirects, header stripping, deadlines, body caps (`SafeHttpClient` is its deprecated adapter) |
 | `src/main/java/.../engine/security/AuthStartupGuard.java` | Production auth enforcement guard |
 | `.env.example` | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
 

@@ -561,6 +561,15 @@ class OutboundHttpTest {
             assertTrue(wire.contains("filename=\"a%22b.wav\"\r\nContent-Type: audio/wav\r\n\r\n"), wire);
             assertTrue(wire.endsWith("--BOUNDARY--\r\n"), wire);
         }
+
+        @Test
+        @DisplayName("a part content type with a line break is refused — it would inject part headers")
+        void multipartContentTypeInjection() {
+            assertThrows(IllegalArgumentException.class, () -> RequestBody.MultipartBody.Part.file("file", "a.wav",
+                    "audio/wav\r\n\r\n--BOUNDARY\r\nContent-Disposition: form-data; name=\"forged\"", new byte[]{1}));
+            assertThrows(IllegalArgumentException.class,
+                    () -> RequestBody.MultipartBody.Part.file("file", "a.wav", "audio/wav\nX-Injected: 1", new byte[]{1}));
+        }
     }
 
     @Test

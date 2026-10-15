@@ -453,6 +453,9 @@ public class OutboundHttp {
                 closeQuietly(body);
                 value = null;
             }
+            // Ownership passes to the caller with the response: closing it here would
+            // hand back a dead stream. BodyMode.stream documents that the caller closes
+            // it; until then the cap and the read budget still bound it.
             case STREAM -> value = new GuardedInputStream(body, mode.maxBytes(), mode.readBudget(), watchdog, uri);
             case FILE -> value = writeFile(profile, body, headers, mode.target(), mode.maxBytes(), budget, uri);
             case STRING, BYTES -> {
