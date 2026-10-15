@@ -515,7 +515,7 @@ class ConversationStepRunner {
             abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
                     registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn);
         } finally {
-            registration.release(abandoned);
+            registration.release(abandoned, processingTurn);
         }
         return null;
     }
@@ -584,6 +584,13 @@ class ConversationStepRunner {
         private final AtomicInteger bodyState = new AtomicInteger(PENDING);
         private final AtomicBoolean settled = new AtomicBoolean();
         private volatile boolean dispatcherGaveUp;
+        /**
+         * The turn's in-flight permit, handed over when the dispatcher gives up on a
+         * body that is still running; returned by {@link #settle()} once that body
+         * stops. Written before {@link #dispatcherGaveUp}, so a body that sees the flag
+         * sees it.
+         */
+        private volatile ConversationService.ProcessingTurn heldPermit;
 
         private InFlightRegistration(String conversationId, IConversationMemory memory) {
             this.conversationId = conversationId;
@@ -615,8 +622,11 @@ class ConversationStepRunner {
          * @param abandoned
          *            {@code true} when the dispatcher gave up on a turn that may still
          *            be running (watchdog timeout, interrupted wait)
+         * @param processingTurn
+         *            the turn's token, or {@code null}; an abandoned body that is still
+         *            running keeps its in-flight permit until it stops
          */
-        private void release(boolean abandoned) {
+        private void release(boolean abandoned, ConversationService.ProcessingTurn processingTurn) {
             if (!abandoned) {
                 unregister();
                 return;
@@ -624,6 +634,13 @@ class ConversationStepRunner {
             // Counted before the flag is published, so settle() — reachable only once the
             // flag is set — always has an increment to pair with.
             abandonedTurnsRunning.incrementAndGet();
+            // Handed over before the flag is published, for the same reason: whichever side
+            // settles must find the permit. The turn task's finish() runs after this on the
+            // same thread, and from here on returns only the gauge.
+            if (processingTurn != null) {
+                processingTurn.handPermitToBody();
+                heldPermit = processingTurn;
+            }
             // Order matters: publish the flag first, then read the body state. The body
             // does the reverse (state first, then the flag), so at least one side sees
             // the other's write and the entry is never stranded.
@@ -639,6 +656,10 @@ class ConversationStepRunner {
             if (settled.compareAndSet(false, true)) {
                 unregister();
                 abandonedTurnsRunning.decrementAndGet();
+                ConversationService.ProcessingTurn permit = heldPermit;
+                if (permit != null) {
+                    permit.returnPermit();
+                }
             }
         }
 

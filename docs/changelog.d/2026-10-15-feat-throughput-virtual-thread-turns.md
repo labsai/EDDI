@@ -29,7 +29,11 @@ than as a rejection.
   in the load test below). The permit is admitted after idempotency admission (a duplicate key
   answered from the stored result takes no permit) and **before the tenant quota slot**, so a
   capacity refusal does not spend quota. `startConversation` admits its CONVERSATION_START turn
-  the same way, because that turn runs inline and can call an LLM. The refusal,
+  the same way, because that turn runs inline and can call an LLM. A turn the watchdog abandons
+  while its body keeps running (a swallowed interrupt) keeps its permit until that body really
+  stops: the in-flight registration that already tracks such zombies returns it on `settle()`.
+  A zombie that never ends therefore holds its permit, which `eddi_conversation_abandoned_running`
+  shows. The refusal,
   `TurnCapacityExceededException`, extends `RejectedExecutionException`, so every surface
   answers it with the existing 503 `capacity_exceeded` + `Retry-After`. It is counted in
   `eddi_turn_rejected_total{reason="in_flight_limit"}`.

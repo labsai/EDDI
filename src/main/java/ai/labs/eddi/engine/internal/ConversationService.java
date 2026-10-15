@@ -404,6 +404,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         private final AtomicInteger capacity;
         private final AtomicBoolean released = new AtomicBoolean(false);
         private final AtomicBoolean finished = new AtomicBoolean(false);
+        /** Set when an abandoned body that is still running took over the permit. */
+        private final AtomicBoolean permitHeldByBody = new AtomicBoolean(false);
         /**
          * The client-visible completion of a turn that ended AWAITING_HUMAN, held back
          * until the pause is persisted — see {@link DeferredDelivery}.
@@ -469,6 +471,25 @@ public class ConversationService implements IConversationService, UserErasurePar
          */
         void finish() {
             release();
+            if (!permitHeldByBody.get()) {
+                returnPermit();
+            }
+        }
+
+        /**
+         * The watchdog gave up on a turn whose body is still running (its interrupt was
+         * swallowed). That body is still doing work — model calls, tool calls, writes —
+         * so it keeps the permit: {@link #finish()} then only drops the gauge, and the
+         * body returns the permit through {@link #returnPermit()} when it really stops.
+         * Otherwise repeated timeouts would admit new turns on top of work that never
+         * stopped. Must be called before the turn task's {@code finish()}.
+         */
+        void handPermitToBody() {
+            permitHeldByBody.set(true);
+        }
+
+        /** Gives the capacity permit back, exactly once. */
+        void returnPermit() {
             if (finished.compareAndSet(false, true)) {
                 capacity.decrementAndGet();
             }
