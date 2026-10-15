@@ -46,20 +46,24 @@ COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_tot
 COMMAND_TIMEOUT_S = 900
 
 
-def sh(*cmd, check=False, capture=True, env=None, timeout=COMMAND_TIMEOUT_S):
+def sh(*cmd, check=False, capture=True, env=None, timeout=COMMAND_TIMEOUT_S, on_timeout=None):
     # An argument list, never a shell string: the callers pass `docker compose …` and `git …` with this
     # script's own file paths and the operator's CLI options, so nothing is interpreted by a shell.
     try:
         r = subprocess.run(cmd, capture_output=capture, text=True, env=env, encoding="utf-8", errors="replace",  # nosec B603
                            timeout=timeout)
     except subprocess.TimeoutExpired:
+        # Killing the CLI does not stop what it started (a `docker compose run` container keeps
+        # running), so the caller gets to clean up before the run ends.
+        if on_timeout is not None:
+            on_timeout()
         raise SystemExit(f"command did not finish within {timeout} s: {' '.join(cmd[:4])} …")
     if check and r.returncode != 0:
         raise SystemExit(f"command failed ({r.returncode}): {' '.join(cmd)}\n{r.stdout}\n{r.stderr}")
     return r
 
 
-def compose(args, *cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S):
+def compose(args, *cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S, on_timeout=None):
     files = ["-f", os.path.join(HERE, "docker-compose.loadtest.yml")]
     env = dict(os.environ)
     state = load_state()
@@ -70,7 +74,8 @@ def compose(args, *cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S):
     image = getattr(args, "image", None) or state.get("image")
     if image:
         env["LOADTEST_EDDI_IMAGE"] = image
-    return sh("docker", "compose", *files, *cmd, check=check, capture=capture, env=env, timeout=timeout)
+    return sh("docker", "compose", *files, *cmd, check=check, capture=capture, env=env, timeout=timeout,
+              on_timeout=on_timeout)
 
 
 def http(method, url, body=None, timeout=30):
@@ -259,7 +264,10 @@ def cmd_run(args, label=None):
     k6 = ["run", "--rm", "-e", f"AGENT_ID={agent}", "-e", f"SCENARIO={args.scenario}", "-e", f"VUS={args.vus}",
           "-e", f"TURNS={args.turns}", "-e", f"THINK_MS={args.think_ms}", "-e", f"OUT={name}.k6.json",
           "-e", f"RAMP={args.ramp}", "-e", f"HOLD={args.hold}", "k6", "run", "--quiet", "/scripts/turns.js"]
-    r = compose(args, "--profile", "k6", *k6, check=False, capture=False, timeout=args.k6_timeout)
+    # On a timeout the one-off k6 container would keep loading EDDI after the driver gave up, so it is
+    # stopped and removed by service name before the run ends.
+    r = compose(args, "--profile", "k6", *k6, check=False, capture=False, timeout=args.k6_timeout,
+                on_timeout=lambda: compose(args, "--profile", "k6", "rm", "--stop", "--force", "k6", check=False, timeout=120))
     elapsed = time.time() - t0
     sampler.stop.set()
     sampler.join(5)
