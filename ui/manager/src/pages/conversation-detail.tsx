@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, useLocation } from "react-router-dom";
 import {
   ArrowLeft,
   MessageSquare,
@@ -86,6 +86,7 @@ export function ConversationDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deletePermanent, setDeletePermanent] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const listPath = useListPath();
 
   // i18n labels
   const stateLabels: Record<ConversationState, string> = {
@@ -102,7 +103,7 @@ export function ConversationDetailPage() {
   const cancelMutation = useCancelConversation();
 
   const { data: conversation, isLoading, isError, refetch } =
-    useSimpleConversation(id!, true, false);
+    useSimpleConversation(id!, true, false, true);
 
   // Structured pause details (incl. TOOL_CALL per-call tool names + redacted
   // arguments) — fetched only while the conversation is actually paused.
@@ -163,7 +164,7 @@ export function ConversationDetailPage() {
               ? t("conversations.permanentDeleteSuccess", "Permanently deleted")
               : t("conversations.softDeleteSuccess", "Conversation deleted")
           );
-          navigate("/manage/conversations");
+          navigate(listPath);
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
@@ -184,8 +185,13 @@ export function ConversationDetailPage() {
     conversation.conversationSteps?.forEach((step, i) => {
       const input = displayUserInput(extractInput(step));
       const output = extractOutput(conversation.conversationOutputs?.[i]);
-      if (input) lines.push(`**User**: ${input}`, "");
-      if (output) lines.push(`**Agent**: ${output}`, "");
+      // A step's timestamp: its own, else the earliest data entry's.
+      const stamp =
+        step.timestamp ??
+        step.conversationStep?.find((d) => d.timestamp)?.timestamp;
+      const when = stamp ? ` _(${stamp})_` : "";
+      if (input) lines.push(`**User**${when}: ${input}`, "");
+      if (output) lines.push(`**Agent**${when}: ${output}`, "");
     });
     const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -229,6 +235,16 @@ export function ConversationDetailPage() {
   const StateIcon = config.icon;
   const stateLabel = stateLabels[state];
   const stepCount = conversation.conversationSteps?.length ?? 0;
+  const stepMatches = (step: SimpleConversationStep, index: number) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const input = extractInput(step)?.toLowerCase() ?? "";
+    const output = extractOutput(conversation.conversationOutputs?.[index])?.toLowerCase() ?? "";
+    return input.includes(q) || output.includes(q);
+  };
+  const matchCount = searchQuery
+    ? (conversation.conversationSteps ?? []).filter(stepMatches).length
+    : stepCount;
 
   return (
     <div className="space-y-6">
@@ -274,8 +290,9 @@ export function ConversationDetailPage() {
             onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
             data-testid="delete-conversation-btn"
+            aria-label={t("conversations.deleteConversation", "Delete conversation")}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
           </button>
 
           {/* Continue in Chat */}
@@ -460,8 +477,17 @@ export function ConversationDetailPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t("conversationDetail.searchTranscript", "Search…")}
                 className="h-8 w-48 rounded-lg border border-input bg-background ps-8 pe-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                aria-label={t("conversationDetail.searchTranscriptLabel", "Search the transcript")}
                 data-testid="transcript-search"
               />
+              {searchQuery.trim() && (
+                <span className="sr-only" role="status" data-testid="transcript-match-count">
+                  {t("conversationDetail.matchCount", {
+                    matches: matchCount,
+                    defaultValue: "Matching steps: {{matches}}",
+                  })}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -481,12 +507,7 @@ export function ConversationDetailPage() {
 
           {conversation.conversationSteps?.map((step, index) => {
             // Filter by search query
-            if (searchQuery) {
-              const q = searchQuery.toLowerCase();
-              const input = extractInput(step)?.toLowerCase() ?? "";
-              const output = extractOutput(conversation.conversationOutputs?.[index])?.toLowerCase() ?? "";
-              if (!input.includes(q) && !output.includes(q)) return null;
-            }
+            if (!stepMatches(step, index)) return null;
             return (
               <ChatBubbleStep
                 key={index}
@@ -542,11 +563,22 @@ export function ConversationDetailPage() {
   );
 }
 
+/** The list the user came from (filters and page intact), when they came from
+ *  the conversations list; otherwise the bare list. */
+function useListPath(): string {
+  const location = useLocation();
+  const from = (location.state as { from?: unknown } | null)?.from;
+  return typeof from === "string" && from.startsWith("/manage/conversations")
+    ? from
+    : "/manage/conversations";
+}
+
 function BackLink() {
   const { t } = useTranslation();
+  const listPath = useListPath();
   return (
     <Link
-      to="/manage/conversations"
+      to={listPath}
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
       <ArrowLeft className="h-4 w-4" />

@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useLayoutEffect } from "react";
+import { createRoot } from "react-dom/client";
 import {
   render,
   screen,
@@ -7,7 +9,7 @@ import {
   act,
   within,
 } from "@testing-library/react";
-import { ChatInput } from "./ChatInput";
+import { ChatInput, discardAttachment, DISCARD_RETRY_MS } from "./ChatInput";
 import { ChatProvider, useChatState } from "@/store/chat-store";
 import {
   uploadAttachment,
@@ -131,6 +133,173 @@ describe("ChatInput — attachments", () => {
 
     await screen.findByTestId("attachment-chip");
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("drops an upload that settles in the gap between the commit and passive effects", async () => {
+    // CodeRabbit on #948: with the ref synced in useEffect, a conversation
+    // change rendered at default priority commits first and runs its passive
+    // effects in a later task. An upload settling in between still saw the
+    // old id and staged its file into the new conversation. The probe below
+    // settles the upload from inside the very commit that switches to
+    // conv-new (a microtask queued by a layout effect), which lands exactly in
+    // that gap. Rendered with createRoot outside act(), because act() flushes
+    // passive effects synchronously and would close the gap.
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previousActEnv = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+    vi.mocked(uploadAttachment).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    function SettleOnCommit({ conversationId }: { conversationId: string }) {
+      useLayoutEffect(() => {
+        if (conversationId !== "conv-new") return;
+        queueMicrotask(() =>
+          finish({
+            storageRef: "ref-gap",
+            fileName: "gap.pdf",
+            mimeType: "application/pdf",
+            sizeBytes: 3,
+            forwardableInline: true,
+          }),
+        );
+      }, [conversationId]);
+      return null;
+    }
+    const ui = (conversationId: string) => (
+      <ChatProvider>
+        <ChatInput onSend={vi.fn()} conversationId={conversationId} />
+        <SettleOnCommit conversationId={conversationId} />
+      </ChatProvider>
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      root.render(ui("conv-old"));
+      await vi.waitFor(() =>
+        expect(container.querySelector('[data-testid="chat-file-input"]')).not.toBeNull(),
+      );
+      const input = container.querySelector('[data-testid="chat-file-input"]') as HTMLInputElement;
+      Object.defineProperty(input, "files", { value: [pdf("gap.pdf")], configurable: true });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await vi.waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith("conv-old", expect.anything()));
+
+      // The first delete fails transiently: the late path must go through
+      // discardAttachment, which tries once more, not a bare fire-and-forget.
+      vi.mocked(deleteAttachment).mockRejectedValueOnce(new Error("offline"));
+      root.render(ui("conv-new"));
+
+      await vi.waitFor(
+        () => expect(vi.mocked(deleteAttachment).mock.calls).toEqual([
+          ["conv-old", "ref-gap"],
+          ["conv-old", "ref-gap"],
+        ]),
+        { timeout: DISCARD_RETRY_MS + 2_000 },
+      );
+      expect(container.querySelector('[data-testid="attachment-chip"]')).toBeNull();
+    } finally {
+      root.unmount();
+      container.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = previousActEnv;
+    }
+  });
+
+  describe("an upload that settles while the composer is unmounted", () => {
+    // ChatWidget swaps ChatInput out for SecretInput while an agent's input
+    // field is open, and mounts a fresh ChatInput afterwards (CodeRabbit on
+    // #948, round 2).
+    function Harness({ show, conversationId }: { show: boolean; conversationId: string }) {
+      return (
+        <ChatProvider>
+          {show ? (
+            <ChatInput onSend={vi.fn()} conversationId={conversationId} />
+          ) : (
+            <p data-testid="secret-input-stand-in" />
+          )}
+        </ChatProvider>
+      );
+    }
+
+    async function startHeldUpload(conversationId: string) {
+      let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+      vi.mocked(uploadAttachment).mockImplementationOnce(
+        () => new Promise((resolve) => { finish = resolve; }),
+      );
+      const view = render(<Harness show conversationId={conversationId} />);
+      fireEvent.change(screen.getByTestId("chat-file-input"), {
+        target: { files: [pdf("held.pdf")] },
+      });
+      await waitFor(() => expect(uploadAttachment).toHaveBeenCalledWith(conversationId, expect.anything()));
+      return {
+        ...view,
+        settle: () =>
+          act(async () => {
+            finish({
+              storageRef: "ref-held",
+              fileName: "held.pdf",
+              mimeType: "application/pdf",
+              sizeBytes: 3,
+              forwardableInline: true,
+            });
+          }),
+      };
+    }
+
+    it("keeps it when the composer returns to the same conversation", async () => {
+      // Clearing the ref on unmount, as suggested, would delete a file the
+      // user attached to the conversation they are still in.
+      const { rerender, settle } = await startHeldUpload("conv-1");
+      rerender(<Harness show={false} conversationId="conv-1" />);
+      await settle();
+      rerender(<Harness show conversationId="conv-1" />);
+
+      expect(await screen.findByTestId("attachment-chip")).toHaveTextContent("held.pdf");
+      expect(deleteAttachment).not.toHaveBeenCalled();
+    });
+
+    it("discards it when the composer returns for a new conversation", async () => {
+      // A ref owned by the unmounted instance stayed on conv-1 for good, so
+      // the old upload was staged into conv-2's composer.
+      const { rerender, settle } = await startHeldUpload("conv-1");
+      rerender(<Harness show={false} conversationId="conv-1" />);
+      rerender(<Harness show conversationId="conv-2" />);
+      await settle();
+
+      await waitFor(() => expect(deleteAttachment).toHaveBeenCalledWith("conv-1", "ref-held"));
+      expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not stage an upload that finishes after the conversation changed", async () => {
+    let finish!: (r: Awaited<ReturnType<typeof uploadAttachment>>) => void;
+    vi.mocked(uploadAttachment).mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    const onSend = vi.fn();
+    const ui = (conversationId: string) => (
+      <ChatProvider>
+        <ChatInput onSend={onSend} conversationId={conversationId} />
+        <Transcript />
+      </ChatProvider>
+    );
+    const { rerender } = render(ui("conv-old"));
+    fireEvent.change(screen.getByTestId("chat-file-input"), {
+      target: { files: [pdf("late.pdf")] },
+    });
+    rerender(ui("conv-new"));
+    finish({
+      storageRef: "ref-late",
+      fileName: "late.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 3,
+      forwardableInline: true,
+    });
+
+    await vi.waitFor(() =>
+      expect(deleteAttachment).toHaveBeenCalledWith("conv-old", "ref-late"),
+    );
+    expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument();
   });
 
   it("shows the staged file name as a removable chip", async () => {
@@ -497,5 +666,57 @@ describe("ChatInput — attachments", () => {
       expect(screen.queryByTestId("attachment-chip")).not.toBeInTheDocument(),
     );
     expect(screen.getByTestId("chat-attach-btn")).toHaveFocus();
+  });
+});
+
+describe("discardAttachment — background delete of an attachment nobody will send", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(deleteAttachment).mockReset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.mocked(deleteAttachment).mockReset();
+    vi.mocked(deleteAttachment).mockImplementation(async () => {});
+  });
+
+  it("retries a transient failure once, and stays quiet when the retry succeeds", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(deleteAttachment)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(undefined);
+
+    discardAttachment("conv-old", "ref-1");
+    await vi.advanceTimersByTimeAsync(DISCARD_RETRY_MS + 1);
+
+    expect(deleteAttachment).toHaveBeenCalledTimes(2);
+    expect(deleteAttachment).toHaveBeenLastCalledWith("conv-old", "ref-1");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("logs, without retrying again, when the retry fails too", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(deleteAttachment).mockRejectedValue(new ApiError(503, "", "Failed to remove attachment"));
+
+    discardAttachment("conv-old", "ref-2");
+    await vi.advanceTimersByTimeAsync(DISCARD_RETRY_MS * 5);
+
+    expect(deleteAttachment).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain("ref-2");
+    warn.mockRestore();
+  });
+
+  it("does not retry a 4xx — the file is gone or not ours to delete", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(deleteAttachment).mockRejectedValue(new ApiError(404, "", "Failed to remove attachment"));
+
+    discardAttachment("conv-old", "ref-3");
+    await vi.advanceTimersByTimeAsync(DISCARD_RETRY_MS * 5);
+
+    expect(deleteAttachment).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

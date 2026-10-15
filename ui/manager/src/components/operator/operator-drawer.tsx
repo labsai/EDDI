@@ -124,7 +124,13 @@ export function OperatorDrawer() {
     }
     wasOpen.current = true;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      // Not ours when something else already took it: a handler that consumed
+      // the key, or a dialog opened over the drawer (an approval confirmation,
+      // an attachment preview) whose own close is what Escape was for.
+      if (e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      close();
     };
     window.addEventListener("keydown", onKeyDown);
     // rAF so the panel has been laid out before we look for something to focus.
@@ -275,6 +281,8 @@ export function OperatorDrawer() {
                 isResolvingPause={chat.isResolvingPause}
                 resolveError={chat.resolveError}
                 pauseSurface="compact"
+                draft={chat.draft}
+                onDraftChange={chat.setDraft}
               />
               </>
             ) : (

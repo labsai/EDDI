@@ -51,6 +51,73 @@ applies in dev mode only.
 
 ---
 
+## Settings operators set first
+
+The settings a new deployment needs before anything else are mostly **not**
+`eddi.*` properties: they belong to Quarkus or to EDDI's MongoDB client, so the
+tables further down do not list them. The defaults below are the ones in
+`src/main/resources/application.properties`; the environment-variable spelling
+follows the same mechanical rule as above (`quarkus.http.cors.origins` →
+`QUARKUS_HTTP_CORS_ORIGINS`).
+
+### Datastore
+
+EDDI uses **one** datastore per deployment: MongoDB (the default) or
+PostgreSQL.
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `mongodb.connectionString` | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000` (`mongodb://localhost:27017/…` in dev mode) | MongoDB connection string, credentials included (`docker-compose.yml` passes one with `authSource=admin`). Read by `PersistenceModule` |
+| `mongodb.database` | `MONGODB_DATABASE` | `eddi` | The database EDDI uses. This, not the path in the connection string, selects the database |
+| `quarkus.profile` | `QUARKUS_PROFILE` | *(none — MongoDB)* | `postgres` switches the deployment to PostgreSQL: the profile sets `eddi.datastore.type=postgres` and activates the JDBC datasource, which is inactive (`quarkus.datasource.active=false`) otherwise |
+| `quarkus.datasource.jdbc.url` | `QUARKUS_DATASOURCE_JDBC_URL` | *(unset)* | PostgreSQL only, e.g. `jdbc:postgresql://postgres:5432/eddi`. Required whenever the `postgres` profile is active — there is no default, and datasource Dev Services are disabled (`quarkus.datasource.devservices.enabled=false`) |
+| `quarkus.datasource.username` | `QUARKUS_DATASOURCE_USERNAME` | *(unset)* | PostgreSQL only. Required with the `postgres` profile |
+| `quarkus.datasource.password` | `QUARKUS_DATASOURCE_PASSWORD` | *(unset)* | PostgreSQL only. Required with the `postgres` profile |
+
+`docker-compose.postgres-only.yml` is a worked example of the PostgreSQL
+settings.
+
+### Authentication (OIDC)
+
+Authentication is off until you turn it on. With it off, a production boot
+fails unless you opt out explicitly (see the escape hatches below).
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `quarkus.oidc.tenant-enabled` | `QUARKUS_OIDC_TENANT_ENABLED` | `false` | The master switch. `true` turns on bearer-token validation, and `authorization.enabled` follows it, so `@RolesAllowed` is enforced exactly when this is on |
+| `quarkus.oidc.auth-server-url` | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8180/realms/eddi` | The issuer EDDI validates tokens against (for Keycloak, the realm URL) |
+| `quarkus.oidc.client-id` | `QUARKUS_OIDC_CLIENT_ID` | `eddi-backend` | EDDI's own client in the identity provider |
+| `quarkus.oidc.token.audience` | `QUARKUS_OIDC_TOKEN_AUDIENCE` | `eddi-backend` | Required `aud` of an access token. A token minted for another client is refused unless that client adds this audience (the shipped realm's clients do). The literal `any` disables the audience check |
+| `quarkus.oidc.roles.role-claim-path` | `QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH` | `realm_access/roles` | Where EDDI reads roles from in the token. Leave it unless your provider puts roles elsewhere: the Quarkus default (the `groups` claim) replaces a grouped user's roles with group paths, and every role-protected endpoint then answers 403 |
+
+The three opt-outs for running without authentication outside dev mode are all
+`false` by default and are described under [Security &
+authentication](#security--authentication):
+`EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (`eddi.security.allow-unauthenticated`,
+checked by `AuthStartupGuard`), and, separately for the two surfaces
+`HighValueSurfaceGuard` protects, `EDDI_MCP_ALLOW_UNAUTHENTICATED`
+(`eddi.mcp.allow-unauthenticated`) and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED`
+(`eddi.secretstore.allow-unauthenticated`). The first does not imply the other
+two.
+
+### HTTP
+
+| Property | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `quarkus.http.port` | `QUARKUS_HTTP_PORT` | `7070` | HTTP port (`quarkus.http.ssl-port` is `7443`) |
+| `quarkus.http.host` | `QUARKUS_HTTP_HOST` | Quarkus default: `localhost` in dev and test, `0.0.0.0` otherwise | Bind address. The container image sets `-Dquarkus.http.host=0.0.0.0` in `JAVA_OPTS_APPEND`, and a system property outranks an environment variable, so in the image change it through `JAVA_OPTS_APPEND`, not `QUARKUS_HTTP_HOST` |
+| `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:3000,http://localhost:7070,https://localhost:7443` | Origins allowed to call the API from a browser. Add the origin of every page that embeds the Chat UI or calls EDDI from another host. CORS itself is on (`quarkus.http.cors.enabled=true`); the allowed methods and headers are set next to it in `application.properties` |
+| `quarkus.http.limits.max-body-size` | `QUARKUS_HTTP_LIMITS_MAX_BODY_SIZE` | `60M` | The absolute ceiling on any request body, enforced before EDDI sees the request. Only a knowledge base's file upload may use all of it; every other endpoint is held to `eddi.http.limits.default-max-body-size` (below) |
+
+### Secrets and external configuration
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `EDDI_VAULT_MASTER_KEY` (`eddi.vault.master-key`) | *(empty — vault inactive)* | The master key the secrets vault derives its key-encryption key from. Set it before storing any secret, and keep it: secrets encrypted under a lost key cannot be recovered. A weak or known key fails a production boot. Details under [Secrets vault](#secrets-vault) and in [secrets-vault.md](secrets-vault.md) |
+| `QUARKUS_CONFIG_LOCATIONS` (`quarkus.config.locations`) | *(unset)* | Comma-separated list of extra properties files to load, for keeping secrets in a mounted file instead of environment variables. The `k8s/` manifests mount `/etc/eddi/secrets/application-secrets.properties` this way. Set as an environment variable, the listed file is loaded at environment-variable priority and its value wins over an environment variable that sets the same key, so keep each key in one place |
+
+---
+
 ## Data store & messaging
 
 | Property | Default | Description |
@@ -81,6 +148,7 @@ applies in dev mode only.
 | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` | `90` | Idle conversations are ended after this many days without a turn. A daily sweep does it, first run five minutes after boot; it only changes the state to `ENDED` and deletes nothing, and a conversation paused for human approval is never ended. **`-1` (or `0`) disables it**: no conversation is ended for idleness, and startup logs that it is off. The same sweep still undeploys an old agent version once no conversation on it is active, whatever this is set to |
 | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` | `365` | Ended conversations are permanently deleted after this many days since their last interaction. Soft-deleted conversations (deleted without `deletePermanently`) are ended and follow the same clock |
 | `eddi.conversations.max-input-chars` | `200000` | Longest turn input, in characters, a caller may send to an existing conversation. Longer input is refused before anything reaches the model: **413** `input_too_large` on the REST and streaming conversation endpoints, **400** `input_too_large` on the OpenAI-compatible API, invalid params over A2A; other surfaces built on those entry points report the refusal as an error. `0` or negative disables the limit. Turns the engine drives itself for group members and sub-agents are exempt |
+| `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
 | `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds` and `delegationDepth` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations |
@@ -88,8 +156,8 @@ applies in dev mode only.
 
 ### Graceful shutdown
 
-Tuned for Kubernetes rolling updates: EDDI reports itself not-ready first, waits
-for the load balancer to notice, then drains in-flight conversations.
+Tuned for Kubernetes pod replacement (an upgrade, an eviction, a reschedule): EDDI reports itself
+not-ready first, waits for the load balancer to notice, then drains in-flight conversations.
 
 | Property | Default | Description |
 |---|---|---|
@@ -103,6 +171,7 @@ for the load balancer to notice, then drains in-flight conversations.
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
+| `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
 
 ---
 
@@ -155,6 +224,7 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.api-docs.http-policy` | `eddi-api-docs-reader` | Quarkus HTTP policy for the API description — `/openapi`, `/q/openapi`, `/q/swagger-ui`. The default admits a token carrying one of `eddi.api-docs.roles-allowed`; `authenticated` admits any token, `permit` anyone. See [security.md → Deny by default](security.md#deny-by-default-and-what-a-role-less-token-reaches) |
 | `eddi.api-docs.roles-allowed` | `eddi-admin,eddi-editor,eddi-user,eddi-approver,eddi-viewer` | The realm roles the default API-description policy admits — any EDDI role. The Manager reads `/openapi` for the backend version, and the Platform Operator for its tool list |
 | `eddi.chat.frame-ancestors` | `'none'` | CSP `frame-ancestors` for the Chat UI at `/chat` — the origins allowed to embed it in an `<iframe>`, space-separated (`https://www.example.com https://*.example.org`). The default refuses every embedder; the rest of EDDI always sends `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
+| `eddi.chat.img-sources` | `https:` | Sources appended to the Chat UI's CSP `img-src` (after `'self' data: blob:`), so the image output items an agent designer configures can be shown from wherever they are hosted. Markdown images in model-written text are never rendered as `<img>`, whatever this says. `https:` allows any https host, which also lets markup injected by some other flaw send data to any host through an `<img>`; list your image hosts (`https://cdn.example.com`) to keep that narrow, or set `'self'` to allow none beyond EDDI (an empty value falls back to the default). See [the Chat UI embedding contract](chat-ui-embedding.md) |
 | `eddi.csp.extra-connect-sources` | *(empty)* | Sources appended to the Manager's CSP `connect-src`. Needed only for the agent wizard's "fetch the OpenAPI spec from a URL", the one browser request to a host nobody chose in advance — list the spec hosts you use. `https:` allows any host, and with it lets any injected script send data anywhere |
 
 ### Workspaces & resource sharing
@@ -204,7 +274,8 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 
 Full guide: [audit-ledger.md](audit-ledger.md). Note there is **no retention
 property** — the ledger is append-only by design; see
-[gdpr-compliance.md](gdpr-compliance.md).
+[gdpr-compliance.md](gdpr-compliance.md). A GDPR erasure keeps the user's rows
+but redacts their content (`eddi.audit.erasure-mode`).
 
 | Property | Default | Description |
 |---|---|---|
@@ -216,6 +287,8 @@ property** — the ledger is append-only by design; see
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
+| `eddi.audit.erasure-mode` | `redact` | What `DELETE /admin/gdpr/{userId}` does to the user's ledger rows. `redact`: the user id is pseudonymized **and** the recorded content (`input`, `output`, `llmDetail`, `toolCalls`) is replaced by a redaction marker; rows that verified are re-signed, so they still verify, and the chain stays intact. `pseudonymize`: the user id only — prompts, responses and tool calls are **kept**; for a legal hold that requires the content, and logged as a WARN at startup. Any other value means `redact`. See [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion) |
+| `eddi.audit.admin-actions.enabled` | `true` | Record every mutating REST request outside the chat APIs — caller, method, path, endpoint, status; never the body — in the ledger. See [audit-ledger.md](audit-ledger.md#administrative-actions) |
 | `eddi.audit.hmac-previous-keys` | *(empty)* | Comma-separated retired `eddi.audit.hmac-key` values (or retired vault master keys) that old entries were signed with. Verification only. An entry naming a key the deployment recorded as having signed, but that nobody lists, reports `UNKNOWN_KEY`; an id that was never recorded reports `INVALID` |
 
 ---
@@ -242,6 +315,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
+| `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
 | `eddi.hitl.crash-recovery.enabled` | `true` | Restore paused conversations after a restart |
 | `eddi.hitl.crash-recovery.recover-in-progress` | `true` | Also recover turns that were mid-execution |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
@@ -256,6 +330,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
 | `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
+| `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |
+| `eddi.tools.web-scraper.parse-timeout-ms` | `10000` | Deadline for parsing one page and evaluating one selector; past it the call is reported to the model as a failure |
 | `eddi.tools.pdf-reader.max-download-bytes` | `26214400` (25 MB) | Cap on the PDF the PDF-reader tool downloads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.websearch.provider` | `duckduckgo` | `duckduckgo` (no key) or `google` |
 | `eddi.tools.websearch.google.api-key` | *(empty)* | Required for the `google` provider |
@@ -282,6 +358,8 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
+| `eddi.attachments.max-per-user` | `0` (off) | Attachments per user across all of their conversations, counted against the conversation's owner. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
+| `eddi.attachments.max-total-bytes-per-user` | `0` (off) | Aggregate bytes per user across all of their conversations |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
@@ -303,12 +381,13 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.backup.export.sweep-interval` | `15m` | How often the retention sweep runs on its own, independently of exports |
 | `eddi.backup.import.max-entries` | `10000` | Most entries (files and directories) an imported or synced agent archive may hold. A larger archive is refused with `413` |
 | `eddi.backup.import.max-entry-bytes` | `33554432` (32 MiB) | Most bytes one archive entry may inflate to, counted from what is actually decompressed rather than from the entry header. The importer reads each entry whole into memory, so this also bounds the heap one import can take per file |
-| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import` |
+| `eddi.backup.import.max-uncompressed-bytes` | `268435456` (256 MiB) | Most bytes a whole archive may inflate to. Together with the two above this stops a small upload that decompresses to gigabytes from filling the disk under `tmp/import`. It also bounds the archive's own (compressed) size: this value plus 1 KiB per allowed entry (`max-entries`) — anything larger is refused with `413` while it streams, whoever supplies the stream |
 | `eddi.backup.sync.require-https` | `true` | Whether live sync refuses a plain `http://` source. The caller's `X-Source-Authorization` bearer travels to that host, so HTTP hands it to anyone on the path — turn this off only between instances on a network you trust |
 | `eddi.backup.sync.allow-private-targets` | `false` | Whether live sync accepts a loopback, RFC 1918, ULA, CGNAT or link-local source. Off by default because a caller who can reach the sync endpoint could otherwise use this deployment to probe hosts behind it; on for a single-tenant deployment whose other instances are internal |
 | `eddi.backup.sync.allowed-sources` | *(empty)* | Comma-separated exact origins (`scheme://host[:port]`) that live sync accepts whatever the two settings above say. The narrow way to reach one internal staging instance without opening the endpoint to every internal address — **prefer this** |
+| `eddi.backup.sync.max-response-bytes` | `16777216` (16 MiB) | Most bytes live sync accepts in one JSON response from the source instance (descriptor listings, configs). A larger declared `Content-Length` is refused before reading, an undeclared body is cut off at the cap, and the sync fails with `502`. Bounds how much heap a compromised or misbehaving source can make one sync take. The archive a first-time sync downloads has its own fixed 256 MiB cap |
 
-> These three decide what `POST /backup/import/sync*` will read an agent **from**.
+> `require-https`, `allow-private-targets` and `allowed-sources` decide what `POST /backup/import/sync*` will read an agent **from**.
 > The strict default is why two instances on one private network — staging and
 > production as neighbouring services — could not sync at all before 6.4.1.
 > Dev and test mode accept `http://` whatever `require-https` says, so a
@@ -347,7 +426,8 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
-| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a peer's `tasks/send` may wait for the turn. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |
+| `eddi.a2a.max-concurrent-requests` | `64` | How many A2A turns may run at once, across all peers and agents. The excess is refused with HTTP `503`, `Retry-After: 1` and a JSON-RPC error, before any conversation is started. A slot is held for the turn (a `returnImmediately` send and a stream keep it until the turn settles) and released at the latest task timeout + 30 s after it was taken |
 
 ### Slack
 
@@ -378,7 +458,9 @@ Full guide: [open-webui-integration.md](open-webui-integration.md).
 | `eddi.openai-compat.adopt-legacy-header-mappings` | `false` | Let an `openwebui:<id>` caller adopt a chat mapped under the raw header id from before namespacing. Enable only if `/v1` never ran with `http-policy=authenticated` — such a mapping may belong to an OIDC principal. Adopted conversations stay owned by the raw id: address both ids in GDPR export/erasure |
 | `eddi.openai-compat.model-cache-seconds` | `30` | How long `/v1/models` is cached |
 | `eddi.openai-compat.max-concurrent-requests` | `64` | Concurrency ceiling for the adapter |
-| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout |
+| `eddi.openai-compat.request-timeout-seconds` | `120` | Per-request timeout. A stream that runs out of it ends with an OpenAI error event (`code: timeout`) and one `[DONE]` |
+| `eddi.openai-compat.chat-key-fallback` | `history` | How a request that names no chat (`X-OpenWebUI-Chat-Id`, `X-EDDI-Chat-Id`, `metadata.chat_id` or `user`) is mapped: `history` keys it by a hash of its first system and first user message, so each client-side chat gets its own conversation; `shared` keeps one conversation per user and agent, as earlier releases did. See [open-webui-integration.md](open-webui-integration.md#session-mapping) |
+| `eddi.openai-compat.max-conversation-steps` | `0` (off) | Steps after which an idle mapped conversation is ended and the chat continues in a fresh one, bounding the size of one conversation document. The agent no longer sees the earlier history; the ended conversation stays readable |
 
 ### Connections
 
@@ -431,8 +513,25 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.logs.db-enabled` | `true` | Also persist logs to the database |
 | `eddi.logs.db-flush-interval-seconds` | `5` | Persistence batch cadence |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level persisted. Lowering this to `DEBUG` in production will fill the database quickly |
+| `eddi.logs.db-retention-days` | `-1` | Delete persisted log entries older than this many days. `-1` (or `0`) keeps them until deleted by hand. Persisted entries carry the user id (pseudonymized on GDPR erasure) and the message text, so set this wherever a data-retention policy applies. Applies to entries already stored even after `eddi.logs.db-enabled=false` |
+| `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
+| `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
 | `eddi.docs.enabled` | `true` | Serve EDDI's own docs at `/administration/docs`, as MCP resources (`eddi://docs/*`) and as the `list_docs`/`read_docs` MCP tools. One switch covers all three. The content is the public repository documentation, so this is an exposure policy, not a secrecy control |
 | `eddi.docs.path` | `docs` | Directory the above is served from |
+
+---
+
+## Metrics & tracing
+
+`eddi.metrics.http-policy` (who may read `/q/metrics`) is under [Security & authentication](#security--authentication). The rest of the telemetry configuration is Quarkus' own; these are the settings EDDI ships or that an operator usually changes. The alert rules and dashboards that read the metrics are described in [monitoring-guide.md](monitoring/monitoring-guide.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `quarkus.otel.sdk.disabled` | `true` | Tracing is off until a collector exists. Set `false` (env `QUARKUS_OTEL_SDK_DISABLED=false`) together with the endpoint below; `docker-compose.monitoring.yml` and the Helm chart's `tracing.otlpEndpoint` value (under `eddi:`) do both |
+| `quarkus.otel.exporter.otlp.endpoint` | `http://localhost:4317` | OTLP gRPC endpoint spans are exported to |
+| `quarkus.micrometer.binder.http-server.max-uri-tags` | see `application.properties` | Distinct `uri` tag values `http_server_requests_seconds_*` may carry; requests past the cap are not measured. `http.server.requests` publishes no histogram buckets on purpose — buckets would multiply every one of these series — so the dashboards chart HTTP latency as mean and peak |
+| `quarkus.datasource.metrics.enabled` | `true` | Build-time. Publishes the Agroal pool meters (`agroal_*`) for the PostgreSQL datastore; on the MongoDB datastore the datasource is inactive and nothing is registered. MongoDB pool meters (`mongodb_driver_pool_*`) come from a listener on EDDI's own client and need no setting |
+| `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
 

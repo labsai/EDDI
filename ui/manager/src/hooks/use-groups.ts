@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DISCUSSION_STYLES,
@@ -83,22 +83,43 @@ export function useGroup(id: string, version?: number) {
  *
  * `undefined` while the lookup is in flight, so callers leave `useGroup`
  * disabled instead of fetching version 1 in the meantime. A failed lookup falls
- * back to 1, the old behaviour, rather than blocking the page on it.
+ * back to 1, the old behaviour, rather than blocking the page on it — pages
+ * that edit or delete the group use {@link useGroupVersionLookup} instead and
+ * show the failure.
  */
 export function useResolvedGroupVersion(
   groupId: string | undefined,
   urlVersion: string | null,
 ): number | undefined {
+  const { version, lookupFailed } = useGroupVersionLookup(groupId, urlVersion);
+  if (version !== undefined) return version;
+  return lookupFailed ? 1 : undefined;
+}
+
+/**
+ * As {@link useResolvedGroupVersion}, but a failed current-version lookup is
+ * reported (`lookupFailed`, with `retry`) instead of being turned into version
+ * 1. Loading version 1 of a group that is on version 4 shows a stale document,
+ * and every save or delete from it 409s — a page that writes must say the
+ * lookup failed and offer a retry, not guess.
+ */
+export function useGroupVersionLookup(
+  groupId: string | undefined,
+  urlVersion: string | null,
+): { version: number | undefined; lookupFailed: boolean; retry: () => void } {
   const explicit = urlVersion != null && /^[1-9]\d*$/.test(urlVersion) ? Number(urlVersion) : undefined;
-  const { data, isError } = useQuery({
+  const { data, isError, refetch } = useQuery({
     queryKey: [...GROUPS_KEY, groupId, "currentVersion"],
     queryFn: () => getGroupCurrentVersion(groupId!),
     enabled: !!groupId && explicit === undefined,
     staleTime: 30_000,
   });
-  if (explicit !== undefined) return explicit;
-  if (typeof data === "number" && data > 0) return data;
-  return isError ? 1 : undefined;
+  const retry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+  if (explicit !== undefined) return { version: explicit, lookupFailed: false, retry };
+  if (typeof data === "number" && data > 0) return { version: data, lookupFailed: false, retry };
+  return { version: undefined, lookupFailed: isError, retry };
 }
 
 export function useDiscussionStyles() {
@@ -240,6 +261,11 @@ export function useGroupConversations(groupId: string, limit = 20, index = 0) {
     queryKey: [...GROUP_CONVERSATIONS_KEY, groupId, { limit, index }],
     queryFn: () => listGroupConversations(groupId, limit, index),
     enabled: !!groupId,
+    // Asking for a longer list ("load more") keeps the shorter one on screen
+    // until it lands, instead of blanking to a skeleton — but only within the
+    // SAME group: another group's list must never stand in for this one.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === groupId ? previous : undefined,
     // Keep the list live while any discussion is still running, so its state
     // badge flips on its own instead of needing a manual reload.
     refetchInterval: (query) =>

@@ -392,9 +392,16 @@ describe("Onboarding — Guided Tour", () => {
     document.body.removeChild(target);
   });
 
-  it("Escape key skips the active tour", () => {
+  it("Escape key skips the active tour", async () => {
+    // The tour only listens while its target is on screen.
+    const target = document.createElement("div");
+    target.setAttribute("data-testid", "sidebar");
+    target.appendChild(document.createElement("nav"));
+    document.body.appendChild(target);
+
     useOnboarding.getState().startChapter("dashboard");
     render(<GuidedTour />, { wrapper: createWrapper() });
+    await screen.findByTestId("tour-tooltip");
 
     // Escape is a non-user-initiated DOM event, fireEvent is acceptable
     fireEvent.keyDown(document, { key: "Escape" });
@@ -403,5 +410,6 @@ describe("Onboarding — Guided Tour", () => {
     expect(
       useOnboarding.getState().completedChapters.has("dashboard")
     ).toBe(true);
+    document.body.removeChild(target);
   });
 });

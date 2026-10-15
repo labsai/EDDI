@@ -10,13 +10,18 @@ This document describes the security measures applied to EDDI's AI Agent Tooling
 
 **Version: ≥6.0.0**
 
-EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) using the Quarkus OIDC extension. Authentication is **disabled by default** — the system runs open (no login required) unless explicitly enabled.
+EDDI authenticates requests via [Keycloak](https://www.keycloak.org/) (or another OIDC provider) using the Quarkus OIDC extension. Enforcement is switched by `quarkus.oidc.tenant-enabled`, which defaults to `false` — but EDDI does **not** silently run open in production. In production launch mode (the packaged jar and the Docker image; `quarkus:dev` and tests are exempt) two startup guards refuse to boot an unauthenticated instance:
+
+- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR at startup and repeats a WARN every hour.
+- **`HighValueSurfaceGuard`** fails startup when `authorization.enabled` is false (it follows `quarkus.oidc.tenant-enabled`) unless each of the two most sensitive surfaces is opted out on its own: `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` for `/mcp` and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` for `/secretstore`. The general opt-out above does not cover them.
+
+The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick start works, and binds EDDI to `127.0.0.1` for that reason. For anything reachable from another machine, remove them and set `QUARKUS_OIDC_TENANT_ENABLED=true` instead.
 
 ### Architecture
 
 EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
 
-The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` handshake from an allow-listed parent origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. With `?tokenOrigin=` set, the widget announces `{"type":"eddi-chat-ready"}` to each allowed origin by name (never `*`), holds the start of the conversation until the host answers with `{"type":"eddi-chat-token","token":"…"}` (up to 5 seconds, then it starts without a token), and accepts the token only from its own parent window; the full handshake is in the [Chat UI README](https://github.com/labsai/EDDI/blob/main/ui/chat/README.md#passing-a-token-from-the-embedding-page). A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
 
 ```
 Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
@@ -111,6 +116,13 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            labsai/eddi:latest
 ```
 
+> **A misconfigured start is refused first.** With OIDC off in production and no explicit
+> opt-out (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED`, and for `/mcp` and `/secretstore` their own
+> `EDDI_MCP_ALLOW_UNAUTHENTICATED` / `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED`), EDDI stops with
+> the guard's message before any startup step touches the database. Earlier releases ran the
+> vault and index setup first, so a start that also had no reachable database spent its
+> server-selection timeout on MongoDB and exited with a MongoDB error instead of the reason.
+
 ### The Token Must Name the User
 
 EDDI files conversations, memories and approvals under the principal name.
@@ -165,7 +177,7 @@ When OIDC is enabled, the following permission rules apply (see `application.pro
 | `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points. The Manager loads and handles Keycloak login via keycloak-js; the Chat UI widget has no login flow and takes its Bearer token from its host (config / `postMessage`) |
 | `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
 | `/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource${quarkus.mcp.server.http.root-path}` | **Permit** (GET/HEAD) — the RFC 9728 document that tells an MCP client where to authenticate. Two exact paths, never a `/*` under the prefix, and the second interpolates the MCP root path so the rule follows the endpoint rather than stranding the document behind the catch-all if that path moves. It must be anonymously readable or discovery cannot start, and it discloses only the public Keycloak URL, which `/manage/__auth_config__.js` already serves unauthenticated. See [MCP Server](mcp-server.md#connecting-to-an-authenticated-instance) |
-| `/.well-known/agent.json`, `/a2a/agents/*/agent.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
+| `/.well-known/agent-card.json`, `/.well-known/agent.json`, `/a2a/agents/*/agent.json`, `/a2a/agents/*/.well-known/agent-card.json` | **Permit** (GET) — A2A Agent Card discovery: a peer agent fetches these before it has any credential |
 | `/.well-known/capabilities`, `/.well-known/capabilities/skills` | **Permit** (GET) — A2A capability discovery, and additionally gated by `eddi.a2a.capabilities.public` (default `false`, which answers 404) |
 | `/mcp`, `/mcp/*`, `/secretstore`, `/secretstore/*` | **Authenticated** — named explicitly rather than inheriting the catch-all, so a future permit rule cannot open them by accident; `HighValueSurfaceGuard` refuses a production boot if either is reachable unauthenticated |
 | `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |

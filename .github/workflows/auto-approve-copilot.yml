@@ -79,10 +79,98 @@ jobs:
             // Only auto-approve PRs from authors already trusted with the repo — this
             // is a PUBLIC repo, so external contributors must never be auto-approved.
             const TRUSTED_ASSOCIATION = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
-            // Require Copilot's latest review to carry no INLINE (line) comments — i.e.
-            // it found nothing to flag. A summary-only review body is treated as clean
-            // by design; set false to approve regardless of Copilot's comments.
+            // Require Copilot's latest review to have found nothing: no INLINE (line)
+            // comments AND a benign body (copilotBodyIsClean below). Copilot folds
+            // low-confidence findings into the review BODY ("Comments suppressed due to
+            // low confidence"), where no review thread and no inline comment exists, so
+            // counting inline comments alone read such a review as clean. Set false to
+            // approve regardless of Copilot's findings.
             const REQUIRE_CLEAN_COPILOT = true;
+
+            // --- policy:copilot-body (exercised by AutoApproveCopilotPolicyTest) ---
+            // Copilot has written two body formats, and a body is benign only when it
+            // affirmatively says, in the format it is written in, that nothing was found:
+            //   overview v2 (`<!-- ccr-overview-v2 -->`, "## Copilot review overview";
+            //   the format since 2026-09): the verdict is "Approval recommended" and
+            //   the line "**Findings:** None" is present;
+            //   legacy ("## Pull request overview"): Copilot "generated no comments" /
+            //   "generated no new comments".
+            // In both, the body must also carry no findings of its own. Copilot folds
+            // low-confidence findings into a collapsed section of the body — legacy
+            // `<summary>Suppressed comments (2)</summary>`, older "Comments suppressed
+            // due to low confidence"; v2 lists every UNRESOLVED finding, earlier
+            // reviews' included, under `<summary>Open (3)</summary>` — where no inline
+            // comment exists for the inline-comment count to see. So ANY collapsed
+            // section with a count above zero is a finding, except the two that only
+            // describe the diff ("Files not reviewed (n)", "Show a summary per file").
+            // A could-not-review notice ("wasn't able to review") is never clean. The
+            // overview prose, the per-file table and the tip are ignored. Fail closed:
+            // an EMPTY body, or one in neither format, is NOT clean, so a format change
+            // on Copilot's side costs a human review, never a silent approval.
+            function copilotBodyIsClean(body) {
+              const text = (body || '').trim();
+              if (text === '') return false;
+              if (/suppressed comments?|comments? suppressed/i.test(text)) return false;
+              if (/(?:wasn[’']?t|was not|unable to|not able to)\s+(?:able to\s+)?review/i.test(text)) return false;
+              for (const m of text.matchAll(/<summary>(?:\s*<strong>)?([^<]*)\((\d+)\)/gi)) {
+                if (Number(m[2]) > 0 && !/^\s*files not reviewed\s*$/i.test(m[1])) return false;
+              }
+              if (/<!--\s*ccr-overview-v\d+\s*-->|^#+\s*Copilot review overview/im.test(text)) {
+                return /Approval recommended/i.test(text)
+                  && !/Changes (?:recommended|requested)/i.test(text)
+                  && /\*\*Findings:?\*\*:?\s*None\b/i.test(text);
+              }
+              return /generated no (?:new )?comments/i.test(text);
+            }
+            // --- end policy:copilot-body ---
+
+            // --- policy:protected-paths (exercised by AutoApproveCopilotPolicyTest) ---
+            // Never auto-approve a PR that touches anything which builds, tests, ships
+            // or deploys EDDI: a change there can weaken the very gates this job trusts
+            // (the required-checks list, a test the build skips, a base image, the
+            // installer users pipe into bash) while every check stays green. Globs:
+            // `*` stays inside one path segment, `**` crosses segments, and a leading
+            // `**/` also matches at the repository root.
+            const PROTECTED_GLOBS = [
+              '.github/**', '.githooks/**', 'scripts/**',
+              '**/pom.xml', '.mvn/**', 'mvnw*', 'checkstyle.xml', 'eclipse-formatter.xml',
+              'src/main/docker/**', '**/Dockerfile*', 'mcp-sidecar/**', '.clusterfuzzlite/**',
+              'helm/**', 'k8s/**', 'gcp/**', 'keycloak/**', '**/docker-compose*.yml',
+              'install.sh', 'install.ps1', '**/mise.toml', '.gitleaksignore', '.trivyignore',
+              'ui/*/package*.json', 'ui/*/.npmrc', 'ui/*/scripts/**',
+              // What the UI checks run, and what they check against: an excluded test
+              // in vitest.config, a disabled lint rule, a loosened tsconfig or a
+              // narrowed Playwright project turns a red UI job green.
+              'ui/*/vite.config.*', 'ui/*/vitest.config.*', 'ui/*/playwright.config.*',
+              'ui/*/eslint.config.*', 'ui/*/tsconfig*.json', 'ui/*/stryker.config.*',
+              // What goes into the image the Dockerfile builds.
+              '**/.dockerignore', '**/*.dockerignore',
+            ];
+            function globToRegExp(glob) {
+              let re = '';
+              for (let i = 0; i < glob.length; i++) {
+                const c = glob[i];
+                if (c === '*') {
+                  if (glob[i + 1] === '*') {
+                    if (glob[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
+                  } else {
+                    re += '[^/]*';
+                  }
+                } else if ('\\^$.|?+()[]{}'.includes(c)) {
+                  re += '\\' + c;
+                } else {
+                  re += c;
+                }
+              }
+              return new RegExp('^' + re + '$');
+            }
+            const PROTECTED_PATTERNS = PROTECTED_GLOBS.map(g => ({ glob: g, re: globToRegExp(g) }));
+            function protectedGlobFor(path) {
+              if (typeof path !== 'string') return null;
+              const hit = PROTECTED_PATTERNS.find(p => p.re.test(path));
+              return hit ? hit.glob : null;
+            }
+            // --- end policy:protected-paths ---
 
             if (!BOT_LOGIN) { core.info('AUTO_APPROVE_BOT_LOGIN not set; skipping.'); return; }
             const { owner, repo } = context.repo;
@@ -180,6 +268,11 @@ jobs:
                     core.info(`PR #${number}: Copilot left ${reviewComments.length} inline comment(s); not auto-approving.`);
                     continue;
                   }
+                  if (!copilotBodyIsClean(latestCopilot.body)) {
+                    core.info(`PR #${number}: Copilot's review body carries findings, or does not state that it `
+                      + `generated no comments; not auto-approving.`);
+                    continue;
+                  }
                 }
 
                 // CI: every check-run on the head commit (except this job) must be
@@ -224,30 +317,34 @@ jobs:
                   continue;
                 }
 
-                // Never auto-approve a PR that touches CI/CD or any workflow config.
-                // A change under .github/** can weaken the very gates this job trusts
-                // (the required-checks list, branch protection wiring) or edit this
-                // file to approve itself, and the checks above would still be green.
-                // These need a human reviewer regardless of Copilot + CI status.
+                // Never auto-approve a PR that touches CI/CD, the build or the deploy
+                // artifacts (PROTECTED_GLOBS above). A change under .github/** can edit
+                // this file to approve itself; a change to pom.xml, a script, a
+                // Dockerfile or the installer can weaken what CI checks or what users
+                // run, and the checks above would still be green. These need a human
+                // reviewer regardless of Copilot + CI status.
                 const changedFiles = await github.paginate(github.rest.pulls.listFiles, {
                   owner, repo, pull_number: number, per_page: 100,
                 });
-                // previous_filename too: a rename reports only its DESTINATION in
-                // `filename`, so moving a workflow out of .github/ (which disables it)
-                // would otherwise read as a change outside CI config entirely.
-                const touchesGithub = f => [f.filename, f.previous_filename]
-                  .some(p => typeof p === 'string' && p.startsWith('.github/'));
                 // The files endpoint stops at 3,000 entries, in no guaranteed order.
-                // At that size the list may be missing the very .github/** path the
+                // At that size the list may be missing the very protected path the
                 // check below looks for, so fail closed instead of trusting it.
                 const LIST_FILES_CAP = 3000;
                 if (changedFiles.length >= LIST_FILES_CAP) {
                   core.info(`PR #${number}: ${changedFiles.length} changed files reaches the list-files cap `
-                    + `(${LIST_FILES_CAP}); the .github/** check cannot be trusted. Leaving to a human reviewer.`);
+                    + `(${LIST_FILES_CAP}); the protected-path check cannot be trusted. Leaving to a human reviewer.`);
                   continue;
                 }
-                if (changedFiles.some(touchesGithub)) {
-                  core.info(`PR #${number}: modifies .github/** (CI/workflow config); leaving to a human reviewer.`);
+                // previous_filename too: a rename reports only its DESTINATION in
+                // `filename`, so moving a workflow out of .github/ (which disables it)
+                // would otherwise read as a change outside CI config entirely.
+                const protectedHit = changedFiles
+                  .flatMap(f => [f.filename, f.previous_filename])
+                  .map(p => ({ path: p, glob: protectedGlobFor(p) }))
+                  .find(h => h.glob !== null);
+                if (protectedHit) {
+                  core.info(`PR #${number}: modifies ${protectedHit.path} (protected by '${protectedHit.glob}': `
+                    + `CI, build or deploy config); leaving to a human reviewer.`);
                   continue;
                 }
 

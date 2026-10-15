@@ -18,6 +18,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,5 +111,27 @@ class GroupWorkspaceStorePostgresContainerTest extends PostgresTestBase {
         assertTrue(store.casRevision(first));
         assertFalse(store.casRevision(stale),
                 "the \"or missing\" branch must not let a stale writer past a stamped revision");
+    }
+
+    @Test
+    @DisplayName("concurrent creators of a real group get ONE workspace, keyed by the group id, and no write is lost")
+    void concurrentCreate_convergesOnOneDocument_andKeepsEveryWrite() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            String realGroupId = UUID.randomUUID().toString();
+
+            var outcome = WorkspaceCreateRace.run(store, realGroupId, 8);
+
+            assertEquals(Set.of(realGroupId), outcome.idsReturned(), "every caller got the canonical document");
+            assertEquals(8, outcome.writesCounted(), "a write that reported success must be in the workspace reads return");
+            try (Connection conn = dataSource.getConnection();
+                    PreparedStatement count = conn.prepareStatement(
+                            "SELECT count(*) FROM resources WHERE collection_name = 'groupworkspaces' AND data ->> 'groupId' = ?")) {
+                count.setString(1, realGroupId);
+                try (ResultSet rs = count.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(1, rs.getInt(1));
+                }
+            }
+        }
     }
 }

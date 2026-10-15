@@ -1,6 +1,6 @@
 # Implementation Plan — SaaS Connectors & Outbound Integration Hardening
 
-**Status:** Planning
+**Status:** Implemented through Phase 5 (changelog 2026-08-21, plus the `CALLER_SUPPLIED` binding on 2026-08-25); user documentation is [`docs/connections.md`](../docs/connections.md), whose limitations section lists what is still open (no dynamic client registration, Slack's own `botToken`, no `${connection:}` in LLM/embedding/vector-store configs). Phase 6 is not built. Kept as the design record.
 **Created:** 2026-08-11
 **Scope:** Backend (EDDI repo), plus EDDI-Manager surfaces in Phases 0.2 and 5
 **Verified:** 2026-08-11 against `main` @ `00420daa5` (post-#668) — §2 claims spot-checked against source

@@ -759,7 +759,7 @@ export function ApprovalBanner({
           // Per-call review is itself the confirmation for a multi-call batch, so
           // its submit goes straight through; everything else confirms first.
           onClick={() => (perCallReview ? handleSubmit("APPROVED") : setConfirmAction("APPROVED"))}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           data-testid="approve-button"
         >
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />

@@ -9,8 +9,21 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.caching.TestCaches;
 import ai.labs.eddi.engine.caching.TestCaches.FakeTicker;
 import ai.labs.eddi.modules.llm.tools.impl.ArtifactTools;
+import ai.labs.eddi.modules.llm.tools.impl.CalculatorTool;
+import ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool;
+import ai.labs.eddi.modules.llm.tools.impl.DateTimeTool;
+import ai.labs.eddi.modules.llm.tools.impl.DiscoverToolsTool;
+import ai.labs.eddi.modules.llm.tools.impl.FetchToolResponsePageTool;
 import ai.labs.eddi.modules.llm.tools.impl.GroupTaskTools;
+import ai.labs.eddi.modules.llm.tools.impl.PdfReaderTool;
+import ai.labs.eddi.modules.llm.tools.impl.ReadAttachmentTool;
+import ai.labs.eddi.modules.llm.tools.impl.TextSummarizerTool;
+import ai.labs.eddi.modules.llm.tools.impl.WeatherTool;
+import ai.labs.eddi.modules.llm.tools.impl.WebScraperTool;
+import ai.labs.eddi.modules.llm.tools.impl.WebSearchTool;
 import dev.langchain4j.agent.tool.Tool;
+import dev.langchain4j.service.tool.DefaultToolExecutor;
+import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HashMap;
@@ -38,43 +52,60 @@ import static org.mockito.Mockito.*;
 class ToolCacheServiceTest {
 
     @Nested
-    @DisplayName("isCacheable")
-    class IsCacheable {
+    @DisplayName("isConversationBound")
+    class IsConversationBound {
+
+        /** Every tool class that is built per turn with one conversation's state. */
+        private static final Class<?>[] PER_CONVERSATION_TOOLS = {ArtifactTools.class, GroupTaskTools.class, CreateSubAgentTool.class,
+                ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class, FindAgentsByCapabilityTool.class,
+                UserMemoryTool.class, ConversationRecallTool.class, ReadAttachmentTool.class, DiscoverToolsTool.class};
+
+        /** Every shared CDI bean among the built-ins. */
+        private static final Class<?>[] SHARED_BEAN_TOOLS = {CalculatorTool.class, DateTimeTool.class, DataFormatterTool.class,
+                WebSearchTool.class, WebScraperTool.class, WeatherTool.class, PdfReaderTool.class, TextSummarizerTool.class,
+                FetchToolResponsePageTool.class};
 
         @Test
-        @DisplayName("the artifact tools behind the E2E defect are not cacheable")
-        void artifactToolsAreNotCacheable() {
-            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("listArtifacts")));
-            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("createArtifact")));
-            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("readArtifact")));
-            assertFalse(ToolCacheService.isCacheable(ToolInvocation.of("proposeArtifactUpdate")));
+        @DisplayName("ReadAttachmentTool — the class the hand-kept list forgot — is conversation-bound")
+        void readAttachmentToolIsConversationBound() throws Exception {
+            Method listAttachments = ReadAttachmentTool.class.getMethod("listAttachments");
+            ToolExecutor executor = new DefaultToolExecutor(mock(ReadAttachmentTool.class), listAttachments);
+
+            assertTrue(ToolCacheService.isConversationBound(executor));
         }
 
         @Test
-        @DisplayName("every @Tool method of every stateful tool class is covered")
-        void everyStatefulToolMethodIsCovered() {
-            for (Class<?> toolClass : new Class<?>[]{ArtifactTools.class, GroupTaskTools.class, CreateSubAgentTool.class,
-                    ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class, FindAgentsByCapabilityTool.class,
-                    UserMemoryTool.class, ConversationRecallTool.class}) {
-                long toolMethods = 0;
-                for (var method : toolClass.getMethods()) {
-                    if (method.isAnnotationPresent(Tool.class)) {
-                        toolMethods++;
-                        assertFalse(ToolCacheService.isCacheable(ToolInvocation.of(method.getName())),
-                                toolClass.getSimpleName() + "#" + method.getName() + " must not be cacheable");
-                    }
-                }
-                assertTrue(toolMethods > 0, toolClass.getSimpleName() + " declares no @Tool methods — the list is stale");
+        @DisplayName("every per-conversation tool class is bound, every shared bean is not")
+        void classificationFollowsTheBeanScope() {
+            for (Class<?> toolClass : PER_CONVERSATION_TOOLS) {
+                assertTrue(ToolCacheService.isConversationBound(toolClass), toolClass.getSimpleName() + " must not be cached");
+            }
+            for (Class<?> toolClass : SHARED_BEAN_TOOLS) {
+                assertFalse(ToolCacheService.isConversationBound(toolClass), toolClass.getSimpleName() + " should stay cacheable");
             }
         }
 
         @Test
-        @DisplayName("pure tools stay cacheable, by dispatch name and by slug")
-        void pureToolsStayCacheable() {
-            assertTrue(ToolCacheService.isCacheable(new ToolInvocation("searchWeb", "websearch", null)));
-            assertTrue(ToolCacheService.isCacheable(new ToolInvocation("calculate", "calculator", null)));
-            assertTrue(ToolCacheService.isCacheable(ToolInvocation.of("someMcpTool")));
-            assertFalse(ToolCacheService.isCacheable(null));
+        @DisplayName("a class with no scope annotation at all counts as per-conversation (fails closed)")
+        void unannotatedClassIsBound() {
+            assertTrue(ToolCacheService.isConversationBound(UnscopedTool.class));
+            assertFalse(ToolCacheService.isConversationBound((Class<?>) null));
+        }
+
+        @Test
+        @DisplayName("executors with no reflected method (http/mcp/a2a lambdas) are left to mayCache")
+        void lambdaExecutorsAreNotClassified() {
+            ToolExecutor lambda = (request, memoryId) -> "x";
+            assertFalse(ToolCacheService.isConversationBound(lambda));
+            assertFalse(ToolCacheService.isConversationBound((ToolExecutor) null));
+        }
+    }
+
+    /** A tool object that is not a CDI bean — constructed per call. */
+    static class UnscopedTool {
+        @Tool("noop")
+        public String noop() {
+            return "noop";
         }
     }
 

@@ -207,10 +207,17 @@ describe("GroupDetailPage — New Discussion", () => {
     await waitFor(() => {
       expect(screen.getByTestId(`discussion-item-${ids[0]}`)).toHaveAttribute("aria-current", "true");
     });
-    // A continuation cannot carry files, so the affordance is absent here.
-    // Wait for the composer to settle into continue mode first: the detail
-    // query resolves a tick after the selection, and asserting before it lands
-    // would pass against the bug.
+    // The auto-selected newest discussion is only being SHOWN: the composer
+    // starts a new discussion until the user picks one to continue.
+    await waitFor(() => {
+      expect(screen.getByTestId("composer-mode-toggle")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("discussion-attach-btn")).toBeInTheDocument();
+    // A continuation cannot carry files, so the affordance is absent once the
+    // user picks "continue". Wait for the composer to settle into continue mode
+    // first: the detail query resolves a tick after the selection, and
+    // asserting before it lands would pass against the bug.
+    await userEvent.click(screen.getByTestId("composer-mode-continue"));
     await waitFor(() => {
       expect(screen.getByPlaceholderText(/Continue this discussion/i)).toBeInTheDocument();
     });

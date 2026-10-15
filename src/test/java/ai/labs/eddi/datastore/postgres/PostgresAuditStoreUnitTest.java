@@ -21,9 +21,12 @@ import java.sql.*;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.*;
 
 class PostgresAuditStoreUnitTest {
@@ -54,6 +57,10 @@ class PostgresAuditStoreUnitTest {
         lenient().when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
 
         store = new PostgresAuditStore(dataSourceInstance, jsonSerialization);
+        // The late indexes are built on a background thread in production; here it
+        // would interleave its statements with the ones these tests verify.
+        store.indexBuildLauncher = task -> {
+        };
     }
 
     // ─── appendEntry ───
@@ -184,16 +191,19 @@ class PostgresAuditStoreUnitTest {
 
     /**
      * Finding 09: GDPR export and erasure both select on {@code user_id}, and the
-     * ledger is the largest never-pruned table in the system.
+     * ledger is the largest never-pruned table in the system. The index is built
+     * concurrently, off the audit-writer thread (see the late-index tests below).
      */
     @Test
     void ensureSchema_indexesUserIdForTheGdprScans() throws Exception {
         when(jsonSerialization.serialize(any())).thenReturn("{}");
         when(preparedStatement.executeUpdate()).thenReturn(1);
+        store.indexBuildLauncher = Runnable::run;
+        stubIndexState(true, null, true);
 
         store.appendEntry(createEntry());
 
-        verify(statement).execute("CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)");
+        verify(statement).execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)");
     }
 
     /**
@@ -520,6 +530,42 @@ class PostgresAuditStoreUnitTest {
         verify(preparedStatement).setString(1, "anon-123");
     }
 
+    // ─── GDPR: redactEntry ───
+
+    @Test
+    void redactEntry_rewritesOnlyTheErasureColumns_conditionalOnTheHmac() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{\"input\":{}}");
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        AuditEntry redacted = new AuditEntry("6f1c1a52-58f2-4b3c-9a9f-2f7bb0a7f1d1", "conv-1", "agent-1", 1, "gdpr-erased:k1:abc", "production",
+                0, "ai.labs.llm", "llm", 0, 5L, Map.of("gdprRedaction", Map.of("reason", "x")), null, null, null, List.of("reply"), 0.0,
+                Instant.now(), "v5:new", null, 2L);
+
+        assertTrue(store.redactEntry(redacted, "v5:old"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String update = sql.getAllValues().getLast();
+        assertTrue(update.startsWith("UPDATE audit_ledger SET user_id = ?, data = ?::jsonb, hmac = ?, agent_signature = ?"), update);
+        assertTrue(update.contains("WHERE id = ?::uuid AND hmac IS NOT DISTINCT FROM ?"), update);
+        assertFalse(update.contains("sequence"), "the chain position is never rewritten");
+        verify(preparedStatement).setString(1, "gdpr-erased:k1:abc");
+        verify(preparedStatement).setString(3, "v5:new");
+        verify(preparedStatement).setString(6, "v5:old");
+        ArgumentCaptor<Object> data = ArgumentCaptor.forClass(Object.class);
+        verify(jsonSerialization, atLeastOnce()).serialize(data.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) data.getValue();
+        assertEquals(Set.of("input", "actions"), payload.keySet(), "output, llmDetail and toolCalls are gone");
+    }
+
+    @Test
+    void redactEntry_staleRow_returnsFalse() throws Exception {
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(store.redactEntry(createEntry(), "v5:old"));
+    }
+
     @Test
     void pseudonymizeByUserId_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
@@ -557,5 +603,118 @@ class PostgresAuditStoreUnitTest {
         when(resultSet.getTimestamp("created_at")).thenReturn(now);
         when(resultSet.getString("data")).thenReturn("{}");
         when(jsonSerialization.deserialize(eq("{}"), eq(Map.class))).thenReturn(Map.of());
+    }
+
+    // ─── getEntriesByTask ───
+
+    @Test
+    void getEntriesByTask_withActor_filtersByTaskAndUser() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        store.getEntriesByTask("ai.labs.admin", "admin-ann", 5, 20);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().getLast().contains("WHERE task_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"),
+                sql.getAllValues().getLast());
+        verify(preparedStatement).setString(1, "ai.labs.admin");
+        verify(preparedStatement).setString(2, "admin-ann");
+        verify(preparedStatement).setInt(3, 20);
+        verify(preparedStatement).setInt(4, 5);
+    }
+
+    @Test
+    void getEntriesByTask_withoutActor_filtersByTaskOnly() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        store.getEntriesByTask("ai.labs.admin", null, 0, 10);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().getLast().contains("WHERE task_id = ? ORDER BY created_at DESC"), sql.getAllValues().getLast());
+    }
+
+    // ─── Late indexes: built CONCURRENTLY in the background ───
+
+    private static final String LOCK_SQL = "SELECT pg_try_advisory_lock(?, ?)";
+    private static final String VALID_SQL = "SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)";
+
+    /**
+     * Stubs the advisory lock and the validity probe: valid before (null = absent),
+     * then after.
+     */
+    private void stubIndexState(boolean lockGranted, Boolean before, Boolean after) throws Exception {
+        PreparedStatement lock = mock(PreparedStatement.class);
+        ResultSet lockRs = mock(ResultSet.class);
+        when(connection.prepareStatement(LOCK_SQL)).thenReturn(lock);
+        when(lock.executeQuery()).thenReturn(lockRs);
+        when(lockRs.next()).thenReturn(true);
+        when(lockRs.getBoolean(1)).thenReturn(lockGranted);
+        PreparedStatement valid = mock(PreparedStatement.class);
+        ResultSet validRs = mock(ResultSet.class);
+        when(connection.prepareStatement(VALID_SQL)).thenReturn(valid);
+        when(valid.executeQuery()).thenReturn(validRs);
+        // per index: probe before, probe after
+        when(validRs.next()).thenReturn(before != null, true, before != null, true);
+        int[] calls = {0};
+        when(validRs.getBoolean(1)).thenAnswer(invocation -> before != null && calls[0]++ % 2 == 0 ? before : after);
+    }
+
+    @Test
+    void ensureSchema_doesNotBuildTheLargeIndexesInline_butStartsTheBackgroundBuildOnce() throws Exception {
+        var launched = new AtomicInteger();
+        store.indexBuildLauncher = task -> launched.incrementAndGet();
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+
+        store.getEntries("conv-1", 0, 10);
+        store.countByConversation("conv-1");
+
+        assertEquals(1, launched.get(), "one background build per store");
+        ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
+        verify(statement, atLeastOnce()).execute(ddl.capture());
+        assertTrue(ddl.getAllValues().stream().noneMatch(sql -> sql.contains("idx_audit_user") || sql.contains("idx_audit_task")),
+                "the audit-writer thread must not build them: " + ddl.getAllValues());
+    }
+
+    @Test
+    void buildLateIndexes_createsConcurrentlyUnderAnAdvisoryLock() throws Exception {
+        stubIndexState(true, null, true);
+
+        store.buildLateIndexes();
+
+        verify(connection).setAutoCommit(true);
+        verify(statement).execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_user ON audit_ledger (user_id)");
+        verify(statement).execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_task ON audit_ledger (task_id, created_at DESC)");
+        verify(statement, never()).execute(startsWith("DROP INDEX"));
+        verify(connection, times(2)).prepareStatement("SELECT pg_advisory_unlock(?, ?)");
+    }
+
+    @Test
+    void buildLateIndexes_repairsAnIndexAnInterruptedBuildLeftInvalid() throws Exception {
+        stubIndexState(true, false, true);
+
+        store.buildLateIndexes();
+
+        verify(statement).execute("DROP INDEX CONCURRENTLY IF EXISTS idx_audit_user");
+        verify(statement).execute("DROP INDEX CONCURRENTLY IF EXISTS idx_audit_task");
+    }
+
+    @Test
+    void buildLateIndexes_anIndexStillInvalidAfterItsBuild_isAnErrorSoItIsRetried() throws Exception {
+        stubIndexState(true, null, false);
+
+        assertThrows(SQLException.class, () -> store.buildLateIndexes());
+    }
+
+    @Test
+    void buildLateIndexes_lockHeldByAnotherInstance_buildsNothing() throws Exception {
+        stubIndexState(false, null, true);
+
+        var thrown = assertThrows(SQLException.class, () -> store.buildLateIndexes());
+
+        assertEquals("55P03", thrown.getSQLState());
+        verify(statement, never()).execute(startsWith("CREATE INDEX CONCURRENTLY"));
     }
 }

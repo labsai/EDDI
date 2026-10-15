@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -6,7 +6,6 @@ import {
   Search,
   Trash2,
   Plus,
-  X,
   MessageSquare,
   Server,
   Bot,
@@ -17,6 +16,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AgentPicker } from "@/components/shared/agent-picker";
 import { ENVIRONMENTS } from "@/lib/constants";
 import {
   useUserConversation,
@@ -25,12 +26,23 @@ import {
 } from "@/hooks/use-user-conversations";
 import { useDebounce } from "@/hooks/use-debounce";
 
-export function UserConversationsPage({ embedded }: { embedded?: boolean } = {}) {
+export function UserConversationsPage({
+  embedded,
+  userId: controlledUserId,
+  onUserIdChange,
+}: {
+  embedded?: boolean;
+  /** Set by UserDataPage so the id is shared by its tabs; standalone keeps its own. */
+  userId?: string;
+  onUserIdChange?: (userId: string) => void;
+} = {}) {
   const { t } = useTranslation();
 
   // Lookup state
   const [intent, setIntent] = useState("");
-  const [userId, setUserId] = useState("");
+  const [localUserId, setLocalUserId] = useState("");
+  const userId = controlledUserId ?? localUserId;
+  const setUserId = onUserIdChange ?? setLocalUserId;
   const debouncedIntent = useDebounce(intent, 400);
   const debouncedUserId = useDebounce(userId, 400);
 
@@ -101,10 +113,11 @@ export function UserConversationsPage({ embedded }: { embedded?: boolean } = {})
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor="uc-intent" className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.intent", "Intent")}
             </label>
             <input
+              id="uc-intent"
               type="text"
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
@@ -114,10 +127,11 @@ export function UserConversationsPage({ embedded }: { embedded?: boolean } = {})
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor="uc-userid" className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.userId", "User ID")}
             </label>
             <input
+              id="uc-userid"
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
@@ -299,18 +313,12 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
   const [agentId, setAgentId] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [environment, setEnvironment] = useState("production");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [onClose]);
+  const ids = useId();
+  const intentId = `${ids}-intent`;
+  const userIdId = `${ids}-user`;
+  const agentIdId = `${ids}-agent`;
+  const envId = `${ids}-env`;
+  const conversationIdId = `${ids}-conversation`;
 
   const isValid =
     intent.trim() &&
@@ -345,37 +353,21 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
   }, [isValid, intent, userId, agentId, conversationId, environment, createMutation, t, onClose]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("userConversations.createTitle", "Create Binding")}
+    <AccessibleDialog
+      open
+      onClose={onClose}
+      title={t("userConversations.createTitle", "Create Binding")}
+      maxWidth="max-w-lg"
+      testId="uc-create-dialog"
     >
-      <div
-        className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 mx-4"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="uc-create-dialog"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">
-            {t("userConversations.createTitle", "Create Binding")}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
-            aria-label={t("common.close")}
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
+      <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor={intentId} className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.intent", "Intent")}
             </label>
             <input
+              id={intentId}
               type="text"
               value={intent}
               onChange={(e) => setIntent(e.target.value)}
@@ -385,10 +377,11 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor={userIdId} className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.userId", "User ID")}
             </label>
             <input
+              id={userIdId}
               type="text"
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
@@ -397,22 +390,22 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor={agentIdId} className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.agentId", "Agent ID")}
             </label>
-            <input
-              type="text"
+            <AgentPicker
+              id={agentIdId}
               value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              placeholder="abc123"
-              className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              onChange={setAgentId}
+              placeholder={t("conversations.filterByAgent", "Filter by agent")}
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <label htmlFor={envId} className="mb-1 block text-xs font-medium text-muted-foreground">
               {t("userConversations.environment", "Environment")}
             </label>
             <select
+              id={envId}
               value={environment}
               onChange={(e) => setEnvironment(e.target.value)}
               className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -426,10 +419,11 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+          <label htmlFor={conversationIdId} className="mb-1 block text-xs font-medium text-muted-foreground">
             {t("userConversations.conversationId", "Conversation ID")}
           </label>
           <input
+            id={conversationIdId}
             type="text"
             value={conversationId}
             onChange={(e) => setConversationId(e.target.value)}
@@ -454,6 +448,6 @@ function CreateUserConvDialog({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

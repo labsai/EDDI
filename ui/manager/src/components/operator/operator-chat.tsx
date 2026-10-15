@@ -25,6 +25,7 @@ import type { SentAttachment } from "@/hooks/use-chat";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/ime";
 
 export interface OperatorChatProps {
   messages: ChatMessage[];
@@ -131,6 +132,13 @@ export interface OperatorChatProps {
    * can never describe a different pause.
    */
   pauseKey?: string | null;
+  /**
+   * The composer's text, owned by the caller (the operator chat store) so an
+   * unsent draft outlives this component — the drawer unmounts it on close.
+   * Both must be passed; omitted, the composer keeps its own local state.
+   */
+  draft?: string;
+  onDraftChange?: (draft: string) => void;
 }
 
 export function OperatorChat({
@@ -165,9 +173,14 @@ export function OperatorChat({
   pauseKey,
   conversationId,
   onEnsureConversation,
+  draft,
+  onDraftChange,
 }: OperatorChatProps) {
   const { t } = useTranslation();
-  const [input, setInput] = useState("");
+  const [localInput, setLocalInput] = useState("");
+  const draftControlled = draft !== undefined && onDraftChange !== undefined;
+  const input = draftControlled ? draft : localInput;
+  const setInput = draftControlled ? onDraftChange : setLocalInput;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // From `pauseKey` ONLY: `pausedAt` comes from query data that is withheld
   // whenever a response does not describe the pause, so keying on it would flip
@@ -613,6 +626,9 @@ export function OperatorChat({
             autoResizeInput();
           }}
           onKeyDown={(e) => {
+            // The Enter that confirms an IME composition commits the converted
+            // text; it is not a send.
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               submit(input);
