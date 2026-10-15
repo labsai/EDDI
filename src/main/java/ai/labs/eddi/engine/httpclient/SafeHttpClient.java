@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.engine.httpclient;
 
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -19,6 +21,7 @@ import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -55,6 +58,9 @@ import java.util.concurrent.TimeoutException;
  * {@link #MAX_REDIRECT_BODY_BYTES}, never handed to the caller's body
  * handler</li>
  * <li>On cross-origin redirects, Authorization/Cookie headers are stripped</li>
+ * <li>The W3C trace context ({@code traceparent}/{@code tracestate}) of the
+ * current span is added to the first hop and to same-origin hops, never to a
+ * cross-origin one — see {@link #withTraceContext}</li>
  * </ul>
  *
  * @since 6.0.2
@@ -107,6 +113,13 @@ public class SafeHttpClient {
     private final long connectTimeoutMs;
 
     /**
+     * Adds the W3C trace headers to the first hop. Field-injected and null-tolerant
+     * because unit tests construct this client by hand; null means no propagation.
+     */
+    @Inject
+    TracePropagation tracePropagation;
+
+    /**
      * Interrupts a body read that stalled after the response headers arrived — see
      * {@link BoundedBodyReader}. One daemon thread per client instance; cheap, and
      * the client is {@code @ApplicationScoped} so there is one of it in production.
@@ -147,7 +160,7 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
+        HttpRequest bounded = prepare(request);
         return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
     }
 
@@ -168,7 +181,7 @@ public class SafeHttpClient {
     public <T> HttpResponse<T> sendValidated(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        HttpRequest bounded = withDefaultTimeout(request);
+        HttpRequest bounded = prepare(request);
         return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
     }
 
@@ -189,7 +202,7 @@ public class SafeHttpClient {
     public BoundedResponse sendValidatedBounded(HttpRequest request, long maxBytes)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        HttpRequest bounded = withDefaultTimeout(request);
+        HttpRequest bounded = prepare(request);
         HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
         return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
     }
@@ -202,7 +215,7 @@ public class SafeHttpClient {
      */
     public BoundedResponse sendBounded(HttpRequest request, long maxBytes)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
+        HttpRequest bounded = prepare(request);
         HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
         return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
     }
@@ -248,7 +261,7 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> sendNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
+        HttpRequest bounded = prepare(request);
         return sendOnce(bounded, bodyHandler, deadlineFor(bounded));
     }
 
@@ -436,6 +449,39 @@ public class SafeHttpClient {
     }
 
     /**
+     * The request as it goes out on its first hop: bounded in time
+     * ({@link #withDefaultTimeout}) and carrying the current W3C trace context
+     * ({@link #withTraceContext}).
+     */
+    private HttpRequest prepare(HttpRequest request) {
+        return withTraceContext(withDefaultTimeout(request), tracePropagation);
+    }
+
+    /**
+     * Returns {@code request} with {@code traceparent}/{@code tracestate} for the
+     * current span added, or unchanged when there is nothing to add — propagation
+     * off or absent, no valid span, or the caller already set a trace header (never
+     * overwritten).
+     * <p>
+     * Applied to the first hop only. A same-origin redirect hop inherits the
+     * headers through {@link #copyHeaders}; a cross-origin hop has them stripped
+     * there, as credentials are, and gets none back — the caller vouched for one
+     * origin, not for wherever it redirects. Package-private for the test.
+     */
+    static HttpRequest withTraceContext(HttpRequest request, TracePropagation propagation) {
+        if (propagation == null) {
+            return request;
+        }
+        Map<String, String> traceHeaders = propagation.headersMissingFrom(name -> request.headers().firstValue(name).isPresent());
+        if (traceHeaders.isEmpty()) {
+            return request;
+        }
+        HttpRequest.Builder builder = HttpRequest.newBuilder(request, (name, value) -> true);
+        traceHeaders.forEach(builder::header);
+        return builder.build();
+    }
+
+    /**
      * Returns {@code request} unchanged when it already carries a timeout, else a
      * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
      * immutable, so the bound can only be applied by rebuilding.
@@ -581,6 +627,11 @@ public class SafeHttpClient {
 
             // Strip sensitive headers on cross-origin redirects
             if (!sameOrigin && SENSITIVE_HEADERS.contains(lower))
+                return;
+
+            // ...and the trace context: it names this deployment's trace and span,
+            // and the origin the caller vouched for is not the one being redirected to
+            if (!sameOrigin && TracePropagation.isTraceHeader(lower))
                 return;
 
             for (String value : values) {

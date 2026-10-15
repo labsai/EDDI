@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.httpclient.bootstrap;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -137,19 +138,19 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every {@link SafeHttpClient#SENSITIVE_HEADERS} entry from
-     * {@code next} when it targets a different origin (scheme, host or effective
-     * port) than {@code original}. Same-origin hops keep their headers, so an
-     * in-service redirect still authenticates.
+     * Removes every {@link SafeHttpClient#SENSITIVE_HEADERS} entry (and the
+     * {@link TracePropagation#HEADERS trace context}) from {@code next} when it
+     * targets a different origin (scheme, host or effective port) than
+     * {@code original}. Same-origin hops keep their headers, so an in-service
+     * redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
-        if (original == null) {
-            // Cannot prove same-origin, so fail safe and strip.
+        if (original == null || !sameOrigin(original, next)) {
+            // Cannot prove same-origin (null original), so fail safe and strip.
             SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
-            return;
-        }
-        if (!sameOrigin(original, next)) {
-            SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
+            // The W3C trace context goes too, as in SafeHttpClient: the caller vouched
+            // for one origin, and the trace id names this deployment's trace.
+            TracePropagation.HEADERS.forEach(next::removeHeader);
         }
     }
 

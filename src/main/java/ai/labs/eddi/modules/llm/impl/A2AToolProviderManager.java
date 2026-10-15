@@ -9,6 +9,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -126,6 +127,14 @@ public class A2AToolProviderManager {
     private final Map<String, CircuitState> circuitBreakers = new ConcurrentHashMap<>();
 
     /**
+     * Outbound W3C trace propagation. Field-injected and null-tolerant: the
+     * convenience constructors used by unit tests leave it null, which means no
+     * propagation.
+     */
+    @Inject
+    TracePropagation tracePropagation;
+
+    /**
      * @param requestResolvers
      *            dispatch name → what the call would send, so a gated A2A call can
      *            show its approver a target and be pinned to a fingerprint. Empty,
@@ -150,6 +159,19 @@ public class A2AToolProviderManager {
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
         this.connectionResolver = connectionResolver;
+    }
+
+    /**
+     * Adds the W3C trace context of the current span — the {@code execute_tool}
+     * span of the call, on the tool path — so the peer agent's trace joins this
+     * one. Every header on these requests is composed here, never by an agent
+     * author, so there is no configured trace header to preserve. Runs on the
+     * calling thread; the JDK client sends on its own.
+     */
+    private void injectTraceContext(HttpRequest.Builder requestBuilder) {
+        if (tracePropagation != null) {
+            tracePropagation.inject(requestBuilder);
+        }
     }
 
     /**
@@ -401,6 +423,7 @@ public class A2AToolProviderManager {
                 .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).GET();
 
         applyCredential(requestBuilder, config, agentUrl, true);
+        injectTraceContext(requestBuilder);
 
         HttpRequest cardRequest = requestBuilder.build();
         HttpResponse<InputStream> response = httpClient().send(cardRequest, HttpResponse.BodyHandlers.ofInputStream());
@@ -591,6 +614,7 @@ public class A2AToolProviderManager {
         }
 
         applyCredential(requestBuilder, config, agentUrl);
+        injectTraceContext(requestBuilder);
 
         HttpRequest taskRequest = requestBuilder.build();
         HttpResponse<InputStream> response = httpClient().send(taskRequest, HttpResponse.BodyHandlers.ofInputStream());

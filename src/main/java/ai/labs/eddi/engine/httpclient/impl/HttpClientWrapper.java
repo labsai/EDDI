@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -52,6 +53,13 @@ public class HttpClientWrapper implements IHttpClient {
     private final String userAgent;
     private static final Logger log = Logger.getLogger(HttpClientWrapper.class);
 
+    /**
+     * Adds the W3C trace headers at send time. Field-injected and null-tolerant:
+     * unit tests build this wrapper by hand, and null means no propagation.
+     */
+    @Inject
+    TracePropagation tracePropagation;
+
     @Inject
     public HttpClientWrapper(VertxHttpClient httpClient, @ConfigProperty(name = "systemRuntime.projectDomain") String projectDomain,
             @ConfigProperty(name = "systemRuntime.projectVersion") String projectVersion) {
@@ -90,6 +98,42 @@ public class HttpClientWrapper implements IHttpClient {
         } else {
             piped.send(responseHandler);
         }
+    }
+
+    /**
+     * {@code request} with the current W3C trace context added, or {@code request}
+     * itself when there is nothing to add — propagation off, no valid span, or the
+     * agent author configured a trace header (never overwritten).
+     *
+     * <p>
+     * Added to a {@link HttpRequest#copy() copy}, never to the request the
+     * {@code RequestWrapper} holds: {@code toMap()} is the record of the call that
+     * goes into conversation memory and into a gated call's approval fingerprint,
+     * and a trace id that differs on every send would make a human-approved call
+     * fail its own fingerprint on resume.
+     * </p>
+     *
+     * <p>
+     * When the Quarkus OpenTelemetry SDK is enabled its Vert.x HTTP client tracer
+     * may also be active on this client (it is created from the Quarkus-managed
+     * {@code Vertx}). If it sees the parent span it opens a client span and
+     * <em>sets</em> {@code traceparent} to that span — a child of the
+     * {@code execute_tool} span, so the trace stays connected either way. This
+     * explicit header is what carries the trace when that tracer does not run.
+     * Called on the sending thread, where the tool's span is current.
+     * </p>
+     */
+    static HttpRequest<Buffer> withTraceContext(HttpRequest<Buffer> request, TracePropagation propagation) {
+        if (propagation == null) {
+            return request;
+        }
+        Map<String, String> traceHeaders = propagation.headersMissingFrom(name -> request.headers().contains(name));
+        if (traceHeaders.isEmpty()) {
+            return request;
+        }
+        HttpRequest<Buffer> traced = request.copy();
+        traceHeaders.forEach(traced::putHeader);
+        return traced;
     }
 
     /**
@@ -252,6 +296,7 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         private void doSend(Handler<AsyncResult<IResponse>> handler) {
+            HttpRequest<Buffer> outgoing = withTraceContext(request, tracePropagation);
             // Stream the response into a size-capped sink instead of buffering the
             // whole body and checking the length afterwards. A body that exceeds
             // maxLength fails the sink mid-stream, so the transfer is aborted rather
@@ -266,9 +311,9 @@ public class HttpClientWrapper implements IHttpClient {
                     handler.handle(Future.failedFuture(new HttpRequestException("Invalid encoding: " + requestEncoding, e)));
                     return;
                 }
-                executePipedSend(request, buffer, sink, responseHandler);
+                executePipedSend(outgoing, buffer, sink, responseHandler);
             } else {
-                executePipedSend(request, null, sink, responseHandler);
+                executePipedSend(outgoing, null, sink, responseHandler);
             }
         }
 

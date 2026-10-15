@@ -200,6 +200,32 @@ class HttpClientModuleTest {
     }
 
     @Test
+    @DisplayName("a cross-origin redirect hop is stripped of the W3C trace context too")
+    void crossOriginHopStripsTraceContext() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("evil.example.net", 443, true);
+        next.addHeader("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        next.addHeader("tracestate", "vendor=v1");
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertNull(next.getHeaders().get("traceparent"), "the trace id must not follow a redirect to another origin");
+        assertNull(next.getHeaders().get("tracestate"));
+    }
+
+    @Test
+    @DisplayName("a same-origin redirect hop keeps the W3C trace context")
+    void sameOriginHopKeepsTraceContext() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("api.example.com", 443, true);
+        next.addHeader("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertTrue(next.getHeaders().contains("traceparent"));
+    }
+
+    @Test
     @DisplayName("a same-origin redirect hop keeps its credential headers so an in-service redirect still authenticates")
     void sameOriginHopKeepsCredentials() {
         HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);

@@ -8,9 +8,14 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -195,6 +200,44 @@ class A2ATaskCredentialWiringTest {
             assertEquals("task-key", header(taskRequest, "X-Api-Key"));
             assertNull(header(taskRequest, "Authorization"),
                     "a connection supplies the whole value; adding Authorization as well would send two credentials");
+        }
+    }
+
+    @Nested
+    @DisplayName("W3C trace context")
+    class TraceContext {
+
+        @Test
+        @DisplayName("the card fetch and the task call carry the current span's traceparent, and never baggage")
+        void bothRequestsCarryTraceparent() {
+            SdkTracerProvider tracerProvider = SdkTracerProvider.builder().build();
+            Span span = tracerProvider.get("test").spanBuilder("execute_tool peer_lookup").startSpan();
+            var manager = manager();
+            manager.tracePropagation = new TracePropagation(true);
+            try (Scope ignored = span.makeCurrent()) {
+                var executor = manager.discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+                executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+            } finally {
+                span.end();
+                tracerProvider.close();
+            }
+
+            SpanContext sc = span.getSpanContext();
+            String expected = "00-" + sc.getTraceId() + "-" + sc.getSpanId() + "-" + sc.getTraceFlags().asHex();
+            assertEquals(2, sent.size());
+            assertEquals(expected, header(sent.get(0), "traceparent"));
+            assertEquals(expected, header(sent.get(1), "traceparent"));
+            assertNull(header(sent.get(1), "baggage"));
+            assertEquals("Bearer sk-static", header(sent.get(1), "Authorization"), "the trace header is added, not substituted");
+        }
+
+        @Test
+        @DisplayName("without an injected propagator (or a valid span) nothing is added")
+        void nothingWithoutPropagator() {
+            var executor = manager().discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+            executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+
+            assertNull(header(sent.get(1), "traceparent"));
         }
     }
 
