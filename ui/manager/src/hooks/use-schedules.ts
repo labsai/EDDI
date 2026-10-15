@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getSchedules,
-  getSchedule,
   createSchedule,
   updateSchedule,
   deleteSchedule,
@@ -31,14 +30,6 @@ export function useSchedules(agentId?: string) {
     queryKey: KEYS.list(agentId),
     queryFn: () => getSchedules(agentId),
     refetchInterval: 10_000,
-  });
-}
-
-export function useSchedule(id: string) {
-  return useQuery({
-    queryKey: KEYS.detail(id),
-    queryFn: () => getSchedule(id),
-    enabled: !!id,
   });
 }
 

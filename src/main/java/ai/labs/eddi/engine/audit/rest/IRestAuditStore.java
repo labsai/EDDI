@@ -66,6 +66,27 @@ public interface IRestAuditStore {
                                           @DefaultValue("100") int limit);
 
     /**
+     * List the administrative actions recorded by {@code AdminActionAuditFilter}:
+     * every mutating REST request outside the chat APIs, with its caller, method,
+     * path, endpoint and response status — newest first. Declared before the
+     * {@code /{conversationId}} template so the literal path is unmistakable.
+     *
+     * @param actor
+     *            only the actions of this principal (optional)
+     * @param skip
+     *            number of entries to skip (default: 0)
+     * @param limit
+     *            maximum entries to return (default: 100, at most 1000)
+     * @return administrative-action records, newest first
+     */
+    @GET
+    @Path("/admin-actions")
+    List<AuditEntry> getAdminActions(@QueryParam("actor") String actor, @QueryParam("skip")
+    @DefaultValue("0") int skip,
+                                     @QueryParam("limit")
+                                     @DefaultValue("100") int limit);
+
+    /**
      * Get the number of audit entries for a conversation.
      *
      * @param conversationId

@@ -50,18 +50,18 @@ public class Dependency implements IRuleCondition {
     @Override
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
 
-        // before we execute the behavior rules we make deep copies, so that we don't
-        // change the rules in conversation memory!
+        // The referenced rules are executed as they are. They used to be deep-cloned
+        // on every evaluation "so that we don't change the rules in conversation
+        // memory" — but rules are not in conversation memory, executing a rule changes
+        // nothing in it (RulesEvaluator runs the very same instances), and the
+        // infinite-loop trace compares rules by name, so a clone bought nothing.
         List<Rule> filteredRules = new LinkedList<>();
-        try {
-            List<RuleGroup> behaviorGroups = behaviorSet.getRuleGroups();
-            List<Rule> behaviorRules = new LinkedList<>();
-            for (RuleGroup behaviorGroup : behaviorGroups) {
-                behaviorRules.addAll(behaviorGroup.getRules());
+        for (RuleGroup behaviorGroup : behaviorSet.getRuleGroups()) {
+            for (Rule behaviorRule : behaviorGroup.getRules()) {
+                if (behaviorRule.getName().equals(reference)) {
+                    filteredRules.add(behaviorRule);
+                }
             }
-            filteredRules.addAll(cloneRules(behaviorRules, reference));
-        } catch (CloneNotSupportedException e) {
-            throw new Rule.RuntimeException(e.getLocalizedMessage(), e);
         }
 
         ExecutionState state = ExecutionState.NOT_EXECUTED;
@@ -86,17 +86,6 @@ public class Dependency implements IRuleCondition {
         Dependency clone = new Dependency();
         clone.setConfigs(getConfigs());
         clone.setContainingRuleSet(behaviorSet);
-        return clone;
-    }
-
-    private List<Rule> cloneRules(List<Rule> behaviorRules, String filter) throws CloneNotSupportedException {
-        List<Rule> clone = new LinkedList<>();
-        for (Rule behaviorRule : behaviorRules) {
-            if (behaviorRule.getName().equals(filter)) {
-                clone.add(behaviorRule.clone());
-            }
-        }
-
         return clone;
     }
 

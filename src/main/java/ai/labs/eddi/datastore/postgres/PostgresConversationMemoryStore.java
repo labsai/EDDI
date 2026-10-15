@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -24,6 +25,7 @@ import jakarta.inject.Inject;
 import jakarta.enterprise.inject.Instance;
 import javax.sql.DataSource;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,7 +84,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         this.jsonSerialization = jsonSerialization;
     }
 
-    private synchronized void ensureSchema() {
+    private void ensureSchema() {
+        // Lock-free once the table exists: this runs on every load, the hottest read
+        // in the engine.
+        if (!schemaInitialized) {
+            initSchema();
+        }
+    }
+
+    private synchronized void initSchema() {
         if (schemaInitialized)
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
@@ -412,6 +422,14 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            // Not a UUID: not a conversation this store can hold — see PostgresIds.
+            return null;
+        }
+        // A read can be the first statement against a fresh database (GET of an
+        // unknown conversation before any was created): without the table it failed
+        // with "relation does not exist" — a 500 for what is a plain 404.
+        ensureSchema();
         String sql = "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
@@ -460,6 +478,164 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     /**
+     * The newest step-data timestamp of a row, in epoch milliseconds, computed by
+     * the database from
+     * {@code conversationSteps[].workflows[].lifecycleTasks[].timestamp}. Stored
+     * timestamps are numeric (epoch millis); an ISO-8601 string — what a mapper
+     * configured otherwise would have written — is read too. {@code NULL} when no
+     * step data carries a timestamp, which in a comparison is unknown and so never
+     * matches: a conversation that cannot be proven idle is never selected.
+     */
+    private static final String LAST_INTERACTION_MS = "(SELECT max(CASE "
+            + "WHEN jsonb_typeof(ts) = 'number' THEN (ts #>> '{}')::numeric "
+            + "WHEN jsonb_typeof(ts) = 'string' AND (ts #>> '{}') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "
+            + "THEN extract(epoch FROM (ts #>> '{}')::timestamptz) * 1000 END) "
+            + "FROM jsonb_path_query(data, '$.conversationSteps[*].workflows[*].lifecycleTasks[*].timestamp') AS ts)";
+
+    private static final String ACTIVITY_SELECT = "SELECT id, conversation_state, AGENT_ID, AGENT_VERSION, " + LAST_INTERACTION_MS
+            + " AS last_interaction_ms FROM conversation_memories";
+
+    /** How many rows one statement of {@link #endIdleConversations} ends. */
+    private static final int END_IDLE_BATCH_SIZE = 500;
+
+    /**
+     * The state a projection reports: {@code null} for a value this version does
+     * not know (a row written by a newer one) rather than an exception that would
+     * abort a whole page — the same mapping as the MongoDB store.
+     */
+    private static ConversationState stateOrNull(String state) {
+        if (state == null) {
+            return null;
+        }
+        try {
+            return ConversationState.valueOf(state);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static ConversationActivitySummary toActivitySummary(ResultSet rs) throws SQLException {
+        String state = rs.getString("conversation_state");
+        BigDecimal lastInteractionMs = rs.getBigDecimal("last_interaction_ms");
+        return new ConversationActivitySummary(rs.getString("id"), stateOrNull(state),
+                rs.getString("AGENT_ID"), rs.getObject("AGENT_VERSION", Integer.class),
+                lastInteractionMs == null ? null : Instant.ofEpochMilli(lastInteractionMs.longValue()));
+    }
+
+    @Override
+    public List<ConversationActivitySummary> loadOpenConversationActivity(String agentId, Integer agentVersion, String afterConversationId,
+                                                                          int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        var sql = new StringBuilder(ACTIVITY_SELECT).append(" WHERE AGENT_ID = ? AND conversation_state <> ?");
+        if (agentVersion != null) {
+            sql.append(" AND AGENT_VERSION = ?");
+        }
+        if (afterConversationId != null) {
+            sql.append(" AND id > ?::uuid");
+        }
+        sql.append(" ORDER BY id LIMIT ?");
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            int index = 1;
+            ps.setString(index++, agentId);
+            ps.setString(index++, ENDED.toString());
+            if (agentVersion != null) {
+                ps.setInt(index++, agentVersion);
+            }
+            if (afterConversationId != null) {
+                ps.setString(index++, afterConversationId);
+            }
+            ps.setInt(index, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<ConversationActivitySummary> batch = new ArrayList<>();
+                while (rs.next()) {
+                    batch.add(toActivitySummary(rs));
+                }
+                return batch;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public ConversationActivitySummary loadConversationActivity(String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try {
+            UUID.fromString(conversationId);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return null;
+        }
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(ACTIVITY_SELECT + " WHERE id = ?::uuid")) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? toActivitySummary(rs) : null;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Counts, or ends in batches of {@link #END_IDLE_BATCH_SIZE} rows per statement
+     * — each statement its own transaction, so ending tens of thousands of large
+     * rows never holds one multi-gigabyte transaction (and its WAL) open. The idle
+     * predicate is repeated on the outer statement so a row that turns active
+     * between the batch's selection and its update is re-checked and left alone.
+     */
+    @Override
+    public long endIdleConversations(Instant idleSince, String agentId, String endReason, boolean dryRun)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String predicate = "conversation_state = 'READY' AND " + (agentId != null ? "AGENT_ID = ? AND " : "") + LAST_INTERACTION_MS + " < ?";
+        long cutoffMs = idleSince.toEpochMilli();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            if (dryRun) {
+                try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM conversation_memories WHERE " + predicate)) {
+                    int index = 1;
+                    if (agentId != null) {
+                        ps.setString(index++, agentId);
+                    }
+                    ps.setLong(index, cutoffMs);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        return rs.getLong(1);
+                    }
+                }
+            }
+            String update = "UPDATE conversation_memories SET conversation_state = 'ENDED', "
+                    + "data = jsonb_set(" + (endReason != null ? "jsonb_set(data, '{endReason}', to_jsonb(?::text))" : "data")
+                    + ", '{conversationState}', to_jsonb('ENDED'::text)) "
+                    + "WHERE id IN (SELECT id FROM conversation_memories WHERE " + predicate + " LIMIT " + END_IDLE_BATCH_SIZE + ") AND "
+                    + predicate;
+            long ended = 0;
+            while (true) {
+                int updated;
+                try (PreparedStatement ps = conn.prepareStatement(update)) {
+                    int index = 1;
+                    if (endReason != null) {
+                        ps.setString(index++, endReason);
+                    }
+                    for (int pass = 0; pass < 2; pass++) {
+                        if (agentId != null) {
+                            ps.setString(index++, agentId);
+                        }
+                        ps.setLong(index++, cutoffMs);
+                    }
+                    updated = ps.executeUpdate();
+                }
+                ended += updated;
+                if (updated == 0) {
+                    return ended;
+                }
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to end idle conversations", e);
+        }
+    }
+
+    /**
      * The indexed {@code conversation_state} column is the single source of truth
      * for the state: CAS transitions ({@link #compareAndSetState}) and
      * {@link #setConversationState} update the column, while the JSONB document
@@ -477,6 +653,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void setConversationState(String conversationId, ConversationState conversationState) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         // Patch the JSONB copy of the state along with the column so direct
         // document readers can never observe the pre-transition state.
@@ -494,6 +673,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void setConversationEndReason(String conversationId, String endReason) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         String sql = "UPDATE conversation_memories SET data = jsonb_set(data, '{endReason}', to_jsonb(?::text)) WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -507,6 +689,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void deleteConversationMemorySnapshot(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         String sql = "DELETE FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -554,7 +739,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     Integer agentVersion = rs.getObject("AGENT_VERSION", Integer.class);
                     summaries.put(conversationId, new ConversationListingSummary(conversationId, rs.getString("user_id"),
                             environment == null ? null : Deployment.Environment.fromString(environment),
-                            state == null ? null : ConversationState.valueOf(state), rs.getString("AGENT_ID"),
+                            stateOrNull(state), rs.getString("AGENT_ID"),
                             agentVersion, rs.getInt("step_count")));
                 }
             }
@@ -566,6 +751,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public ConversationState getConversationState(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
         ensureSchema();
         String sql = "SELECT conversation_state FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -583,6 +771,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public Long getRevision(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
         ensureSchema();
         String sql = "SELECT COALESCE((data->>'_rev')::bigint, 0) AS rev FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -657,6 +848,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target)
             throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
         ensureSchema();
         // Column is the CAS arbiter; the JSONB copy is patched in the same
         // statement so document and column can never diverge on this transition.
@@ -694,6 +888,9 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     @Override
     public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return;
+        }
         ensureSchema();
         // Terminal cleanup must also drop the tool-level HITL fields so no stale
         // hitlPauseType / pending batch lingers on an ended or cancelled document.
@@ -722,6 +919,20 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             + "data->'hitlPendingToolCalls'->'calls' AS pending_calls_json "
             + "FROM conversation_memories WHERE conversation_state = ?";
 
+    /**
+     * Oldest pause first, undated pauses last, so the limit never drops the oldest
+     * approval — which the retention sweep and
+     * {@code eddi_hitl_pending_oldest_age_seconds} both depend on. The pause time
+     * lives only inside {@code data}, as whatever the snapshot mapper wrote: epoch
+     * seconds (a JSON number) or an ISO-8601 string. Both are normalised to a
+     * timestamp; a string that does not look like a date sorts as undated instead
+     * of failing the whole listing on a cast error.
+     */
+    private static final String PENDING_OLDEST_FIRST = " ORDER BY CASE jsonb_typeof(data->'hitlPausedAt')"
+            + " WHEN 'number' THEN to_timestamp((data->>'hitlPausedAt')::double precision)"
+            + " WHEN 'string' THEN CASE WHEN data->>'hitlPausedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9:]+)$'"
+            + " THEN (data->>'hitlPausedAt')::timestamptz END END ASC NULLS LAST";
+
     @Override
     public List<PendingApprovalSummary> findPendingApprovalSummaries(int limit)
             throws IResourceStore.ResourceStoreException {
@@ -729,7 +940,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // Single bounded query with JSONB field extraction — this listing is
         // polled and backs the crash-recovery sweep; deserializing full multi-MB
         // documents here violates the interface's projection contract.
-        String sql = PENDING_SUMMARY_SELECT + " LIMIT ?";
+        String sql = PENDING_SUMMARY_SELECT + PENDING_OLDEST_FIRST + " LIMIT ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ConversationState.AWAITING_HUMAN.name());
             ps.setInt(2, limit);
@@ -745,7 +956,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         ensureSchema();
         // Owner filter INSIDE the query: the limit applies after the restriction,
         // so a user's inbox is complete even behind a large global backlog.
-        String sql = PENDING_SUMMARY_SELECT + " AND data->>'userId' = ? LIMIT ?";
+        String sql = PENDING_SUMMARY_SELECT + " AND data->>'userId' = ?" + PENDING_OLDEST_FIRST + " LIMIT ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, ConversationState.AWAITING_HUMAN.name());
             ps.setString(2, ownerUserId);

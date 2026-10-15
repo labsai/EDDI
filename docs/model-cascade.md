@@ -83,6 +83,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
+| `maxFormatRetries` | int | task `responseValidation.maxRetries` | Same-model corrective re-asks this step gets before the cascade escalates (`0..3`). `0` for an expensive last-resort model. See [Format recovery and escalation](#format-recovery-and-escalation). |
 
 > **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
 >
@@ -128,28 +129,55 @@ A separate (typically cheap) model rates the response's confidence. Requires a `
 
 Always returns `1.0` — effectively disables confidence gating. The first step's response is always accepted. Useful for timeout/error recovery only, or A/B testing.
 
+> Failure classes, the order of recovery across retry, re-ask, escalation and fallback, and a worked recipe are in
+> [LLM Turn Resilience](llm-resilience.md).
+
+### Cascade as failover
+
+A cascade does not have to be a cost ladder. As **failover** it answers with the first model and only moves on
+when that model fails or returns nothing usable: use `evaluationStrategy: "heuristic"` with a first-step
+`confidenceThreshold` of `0.1` (the heuristic scores an empty reply `0.0` and everything else at least `0.2`), or
+`evaluationStrategy: "none"` (confidence is always `1.0`, so low confidence never escalates; errors, timeouts and
+unusable replies still do). Put a second model, ideally another version or provider, behind it.
+
 ## Error Handling
 
 | Error Type | Behavior |
 |---|---|
-| **Rate limited (429) / 5xx** | Retried **in-step** up to the task's `retry.maxAttempts` (with backoff) before escalating to the next step. |
+| **Rate limited (429) / 5xx (500 included)** | Retried **in-step** up to the task's `retry.maxAttempts` (with backoff, or the provider's own retry delay) before escalating to the next step. A provider delay longer than `retry.maxRetryAfterMs` skips the in-step retries and escalates at once. |
+| **Spent quota (e.g. a per-day quota)** | Not retried — a 429 that names a per-day quota or `insufficient_quota` escalates immediately (failure class `QUOTA_EXHAUSTED`). |
 | **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. A step streamed live is exempt from cancellation — see [Streaming the Final Step](#streaming-the-final-step). |
 | **Other errors** | Logged; escalate to the next step. |
+| **Circuit open** | With the task's opt-in [`circuitBreaker`](langchain.md#circuit-breaker-skip-a-model-that-keeps-failing), a step whose model keeps failing with the same permanent class (invalid output, bad request, model not found; auth or quota at once) is **skipped without a call** until its cool-down ends, then probed once. Per model: the other steps still run. Trace `status: circuit_open`. If the last step is open too, the best response so far is returned, else the turn fails with an `LlmCircuitOpenException` (or serves the `onError` fallback). |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
 | **All steps fail** | Return the best response seen so far, or throw `LifecycleException` if none produced a result. |
 
+Every escalation, re-ask and skipped step also leaves one structured INFO line (`LLM recovery ... action=escalate|retry|circuit_skip`) and counts `eddi.llm.recovery{action,outcome,trigger}`; see [LLM Turn Resilience](llm-resilience.md#in-the-log). A `${vars:...}` model name is shown **resolved** in the trace, the audit and the circuit key.
+
 The cascade tracks the "best response" seen so far — if a later step fails but an earlier step produced a usable response, that response is returned rather than throwing.
+
+## Format recovery and escalation
+
+When the task's `responseValidation` has a `retry` policy (see [Recovery policies](langchain.md#recovery-policies-retry-where-it-helps)), a step whose reply is unusable (invalid JSON, empty, truncated, filtered) does **not** escalate immediately. The order is cheapest first:
+
+1. the step's model answers;
+2. the parser repairs what it can locally;
+3. the **same model** is asked again with a corrective message, up to `maxRetries` (the step's `maxFormatRetries` wins), within the step's own `timeoutMs`: if less than `minAttemptMs` remains, the re-ask is skipped;
+4. if the reply is still unusable, the cascade **escalates** to the next step with the reason **`invalid_output`**, and that step runs the same sequence with its own re-asks;
+5. after the last step, `fallbackAction` applies (default: the configured fallback).
+
+An escalation for this reason shows up as `status: escalated`, `reason: invalid_output`, `invalidOutput` (`empty`, `truncated`, `content_filter` or `invalid_json`) and `formatRetries` on the step's trace entry, as `eddi.llm.cascade.escalations{reason=invalid_output}`, as `eddi.llm.recovery{action=escalate, outcome=invalid_output}`, and as a `cascade_escalation` SSE event with `reason: "invalid_output"`. An unusable step never outranks a usable answer: if the last step is unusable and an earlier step produced a usable (low-confidence) answer, that answer is returned. A step that may re-ask is buffered even when it would otherwise stream live; an `llm_retry` SSE event `{reason, attempt}` precedes each re-ask. In agent mode only the step's final model call is re-asked; no tool runs twice.
 
 ## SSE Events
 
-Two SSE event types provide real-time visibility, emitted through `ConversationEventSink` → `StreamingResponseHandler` → the `/agents/{conversationId}/stream` SSE endpoint:
+Three SSE event types provide real-time visibility, emitted through `ConversationEventSink` → `StreamingResponseHandler` → the `/agents/{conversationId}/stream` SSE endpoint:
 
 | Event | Fields |
 |---|---|
 | `cascade_step_start` | `stepIndex`, `modelType`, `modelName`, `totalSteps` |
 | `cascade_escalation` | `fromStep`, `toStep`, `confidence`, `threshold`, `reason`, `durationMs` |
 
-`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`.
+`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`. A third event, `llm_retry` (`reason`, `attempt`), is sent before a same-model re-ask (see [Format recovery and escalation](#format-recovery-and-escalation)).
 
 ## Streaming the Final Step
 
@@ -161,15 +189,31 @@ When streaming (SSE), a **guaranteed-accept step** is streamed **live** token-by
 
 ### Trace
 
-The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
+The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). A step that ended in a failure (`timeout`, `error`, `retryable_error`) also carries `failureClass` — one of `TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`, `UNKNOWN` (see [error classification](langchain.md#error-classification)) — and, when the provider asked callers to wait, `retryAfterMs`. Both are additive; `status` and `error` are unchanged. When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
 
 ### Response metadata
 
 If `responseMetadataObjectName` is set, the cascade populates it with real token usage plus `cascadeCostUsd`, `cascadeModel` (`provider/model`), `cascadeStep`, and `cascadeConfidence`.
 
+### Turn deadline and request timeouts
+
+Inside an agent's [turn deadline](langchain.md#turn-deadline) the cascade's own budget shrinks to
+`min(maxTotalDurationMs, remaining - reserve)`, each step's timeout is clamped to what is left, and a
+further step is not started when less than 3 seconds (plus the reserve) remain — the best answer so
+far is returned instead.
+
+A step's `timeoutMs` also bounds the provider request itself: the model built for the step has its
+`timeout` parameter clamped to the step's `timeoutMs` (rounded up to whole seconds up to 10 s, and to
+5-second steps above, so a deadline that shrinks every turn does not create a model per millisecond).
+Without that, cancelling the waiting future left the HTTP call running — billed, and holding a thread
+— for the model's full `timeout`. A model `timeout` already at or below the step's is left alone.
+Setting a model `timeout` longer than its step's `timeoutMs` is reported as a deploy-time warning;
+set them equal. `eddi.llm.cancelled{scope=cascade_step}` counts steps cancelled on timeout, and the
+trace of a clamped step carries `modelTimeoutClampedMs`.
+
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 

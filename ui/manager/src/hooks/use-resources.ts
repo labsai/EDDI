@@ -4,7 +4,6 @@ import {
   getResource,
   getResourceVersions,
   createResource,
-  updateResource,
   deleteResource,
   duplicateResource,
   getResourceType,
@@ -53,6 +52,12 @@ export function useResource<T = unknown>(
     queryKey: [...resourceKeys(slug), id, version],
     queryFn: () => getResource<T>(rt!, id, version),
     enabled: !!rt && !!id && version > 0,
+    // Moving onto another version of the SAME resource (after a save, or via the
+    // version picker) keeps the current editor mounted — and with it the active
+    // tab, scroll position and form state — instead of flashing a skeleton.
+    // A different resource never borrows the previous one's data.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === id ? previous : undefined,
   });
 }
 
@@ -96,6 +101,27 @@ export function useCreateResource(slug: string) {
   });
 }
 
+/** Rename a resource — its name and description live on the descriptor. */
+export function useUpdateResourceDescriptor(slug: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      name,
+      description,
+    }: {
+      id: string;
+      version: number;
+      name: string;
+      description: string;
+    }) => updateDescriptor(id, version, { name, description }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
+    },
+  });
+}
+
 export function useDeleteResource(slug: string) {
   const queryClient = useQueryClient();
   const rt = resolveType(slug);
@@ -117,29 +143,6 @@ export function useDuplicateResource(slug: string) {
     mutationFn: ({ id, version }: { id: string; version: number }) => {
       if (!rt) return Promise.reject(new Error(`Unknown resource type: ${slug}`));
       return duplicateResource(rt, id, version);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });
-    },
-  });
-}
-
-export function useUpdateResource(slug: string) {
-  const queryClient = useQueryClient();
-  const rt = resolveType(slug);
-  return useMutation({
-    mutationFn: ({
-      id,
-      version,
-      body,
-    }: {
-      id: string;
-      version: number;
-      body: unknown;
-    }) => {
-      if (!rt)
-        return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return updateResource(rt, id, version, body);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });

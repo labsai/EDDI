@@ -25,7 +25,13 @@
     "profile": "Profile",
     "guest": "Guest",
     "userMenu": "User menu",
-    "signedIn": "Signed in"
+    "signedIn": "Signed in",
+    "authenticating": "Authenticating…",
+    "initFailedTitle": "Sign-in failed",
+    "initFailedBody": "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+    "signInAgain": "Sign in again",
+    "sessionExpiredTitle": "Your session has expired.",
+    "sessionExpiredBody": "Unsaved changes are still on this page — copy anything you need before signing in again."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -76,7 +82,11 @@
     "monitoring": "Conversation Monitoring",
     "analytics": "Analytics",
     "connections": "Connections",
-    "workspaces": "Workspaces"
+    "workspaces": "Workspaces",
+    "breadcrumb": "Breadcrumb",
+    "checkingVersion": "Checking version...",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar"
   },
   "theme": {
     "light": "Light",
@@ -218,7 +228,16 @@
     "removeItem": "Remove {{item}}",
     "stepOf": "Step {{current}} of {{total}}",
     "versionShort": "v{{version}}",
-    "resizePanel": "Resize {{panel}}"
+    "resizePanel": "Resize {{panel}}",
+    "deletePermanently": "Delete permanently",
+    "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged.",
+    "errors": {
+      "network": "Can't reach EDDI. Check your connection and try again.",
+      "unauthorized": "Your session has expired. Sign in again.",
+      "forbidden": "You don't have permission to view this.",
+      "notFound": "Not found — it may have been deleted."
+    },
+    "rename": "Rename"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -228,7 +247,8 @@
     "quickCreateTitle": "Quick Create {{type}}",
     "quickCreateDesc": "Set a name and description, configure details later.",
     "guidedSetup": "Guided Setup",
-    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment."
+    "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment.",
+    "guidedSetupDescGroup": "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."
   },
   "platform": {
     "status": "Platform Status",
@@ -245,7 +265,8 @@
   },
   "stream": {
     "live": "Live",
-    "reconnecting": "Reconnecting…"
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Disconnected"
   },
   "agents": {
     "confirmDeleteDescription": "This action cannot be undone. The agent and all its data will be permanently removed.",
@@ -294,7 +315,9 @@
     "deployToProduction": "Deploy to production",
     "undeployFromProduction": "Undeploy from production",
     "deployFailedIn": "Deployment failed in {{environment}}",
-    "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn."
+    "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
+    "sortLoadingAll": "Loading every agent so the sort is complete…",
+    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page."
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -327,7 +350,7 @@
     "enableSwd": "Enable Strict Write Discipline",
     "forkingDisabledTooltip": "Available in a future release",
     "forkingEnabled": "Session Forking",
-    "forkingNote": "Session forking endpoint (POST /v6/conversations/{{id}}/fork) is not yet available.",
+    "forkingNote": "Session forking endpoint (POST /v6/conversations/:id/fork) is not yet available.",
     "guardrails": "Write Guardrails",
     "identity": "Cryptographic Identity",
     "keyExpired": "Expired",
@@ -376,9 +399,6 @@
     "userMemory": "User Memory",
     "userMemoryDesc": "Persistent per-user memory with LLM tools (remember/recall/forget). Basic longTerm property persistence always works regardless of this toggle.",
     "viewingOldVersion": "You are viewing version {{current}}. Latest is version {{latest}}.",
-    "workflowAdded": "Workflow added",
-    "workflowRemoved": "Workflow removed",
-    "workflowUpdated": "Workflow updated to latest version",
     "title": "Agent Detail",
     "backToAgents": "Back to Agents",
     "packages": "Workflows",
@@ -485,7 +505,19 @@
       "notice": "What the chat tells people (leave empty for the standard wording)",
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
-    }
+    },
+    "copyUrl": "Copy URL",
+    "liveElsewhere": "Live: v{{live}} · Viewing v{{viewing}} (not deployed)",
+    "removeWorkflow": "Remove workflow from agent",
+    "a2aAddSkill": "Add skill",
+    "saveConflict": "This agent was changed elsewhere since you opened it. Your edits are kept: review them and save again.",
+    "saveBeforeDeploy": "Save or discard your changes before deploying",
+    "reviewChanges": "Review changes",
+    "unsavedSections": "Sections with unsaved changes: {{count}}",
+    "reviewChangesTitle": "Unsaved changes to version {{version}}",
+    "savedVersion": "Saved v{{version}}",
+    "yourChanges": "Your changes",
+    "discardMessage": "Every unsaved change on this page goes back to what version {{version}} holds."
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -504,7 +536,7 @@
     "backToAgents": "Back to Agents",
     "next": "Next",
     "back": "Back",
-    "createOnly": "Create Only",
+    "createOnly": "Create without deploying",
     "createAndDeploy": "Create & Deploy",
     "typeTitle": "What kind of agent?",
     "typeDesc": "Choose the type of agent you want to create",
@@ -594,7 +626,25 @@
     "specUrlScheme": "Only http:// and https:// URLs are supported",
     "lastToolHint": "At least one tool must stay selected. Turn built-in tools off to disable them all.",
     "hfToken": "Hugging Face token",
-    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key."
+    "hfTokenHint": "Only needed for gated or private repositories. It is stored in the vault like an API key.",
+    "stepLabel": "Step {{n}} of {{total}}: {{name}}",
+    "createAndDeployProduction": "Create & deploy to production",
+    "createAndDeployTest": "Create & deploy to test",
+    "reviewKeyNotNeeded": "Not needed for this provider",
+    "reviewKeyNone": "None",
+    "reviewKeyVault": "Vault reference {{ref}}",
+    "reviewKeyEntered": "Entered here",
+    "reviewApiKey": "API key",
+    "reviewBaseUrl": "Base URL",
+    "deployTarget": "Deploy target",
+    "deployNoteProduction": "Create & deploy puts the agent live in production right away.",
+    "deployNoteTest": "Create & deploy starts the agent in the test environment; promote it to production when you are happy with it.",
+    "step_type": "Type",
+    "step_info": "Identity",
+    "step_llm": "Model",
+    "step_apispec": "API Spec",
+    "step_features": "Features",
+    "step_review": "Review"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -638,7 +688,26 @@
     "addHintDialog": "Select a task type to add to the pipeline",
     "reorder": "Reorder task",
     "saved": "Workflow saved successfully",
-    "saveError": "Failed to save workflow"
+    "saveError": "Failed to save workflow",
+    "stepUnsaved": "Not saved yet",
+    "saveAndEditHint": "This step is not saved yet. Save the workflow first, then edit its config.",
+    "saveAndEdit": "Save workflow & edit",
+    "removeStep": "Remove task",
+    "configCreatedUnsaved": "Config created — save the workflow to keep it in the pipeline",
+    "configNameFailed": "Config created, but its name could not be saved. Rename it later.",
+    "newConfigName": "Name for the new config",
+    "newConfigNamePlaceholder": "e.g. Support greeting",
+    "agentPinsOtherVersion": "Agent version {{agentVer}} uses this workflow at version {{found}}, not version {{version}}, so saving here would not change the agent. Nothing was saved. Open version {{found}}, or point the agent at version {{version}}.",
+    "agentMissingWorkflow": "Agent version {{agentVer}} does not use this workflow, so saving here would not change the agent. Nothing was saved.",
+    "noVersionReturned": "The server did not report the new workflow version.",
+    "agentUpdateFailed": "Workflow saved as version {{version}}, but updating the agent failed: {{error}}",
+    "agentPinMismatch": "Agent version {{agentVer}} uses this workflow at version {{found}}. You are viewing version {{version}}, so saving here would not change the agent.",
+    "switchToPinned": "Open version {{version}}",
+    "pointAgentAt": "Point agent at version {{version}}",
+    "createdDeleteFailed_one": "{{count}} config created during this edit could not be deleted",
+    "createdDeleteFailed_other": "{{count}} configs created during this edit could not be deleted",
+    "discardDeleteCreated_one": "Also delete the {{count}} config created during this edit",
+    "discardDeleteCreated_other": "Also delete the {{count}} configs created during this edit"
   },
   "conversations": {
     "confirmDeleteSoft": "By default this is a soft delete — the conversation is hidden from listings but its stored data is kept on the server.",
@@ -702,7 +771,13 @@
     "purgeSuccess_one": "Purged {{count}} ended conversation",
     "purgeSuccess_other": "Purged {{count}} ended conversations",
     "endStateUnavailable": "Could not re-check the conversations' current state, so nothing was ended. Try again.",
-    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again."
+    "endStateChanged": "A selected conversation is now waiting for approval. Review the selection and confirm again.",
+    "noMoreResults": "No more results",
+    "backToPreviousPage": "Back to previous page",
+    "purgeTitleAll": "Purge ended conversations — all agents",
+    "purgeScopeNote": "This is not limited to the agent selected above: it deletes ended conversations of every agent.",
+    "confirmPurgeScope": "Applies to ALL agents, not only the one selected above.",
+    "purgeDaysInvalid": "Enter a whole number of days, 1 or more."
   },
   "conversationDetail": {
     "backToConversations": "Back to Conversations",
@@ -720,7 +795,9 @@
     "totalCost": "Total Cost",
     "cacheHitRate": "Cache Hit Rate",
     "endReasonRetired": "Ended: the agent version was retired",
-    "stepAgentVersion": "Answered by agent version {{version}}"
+    "stepAgentVersion": "Answered by agent version {{version}}",
+    "searchTranscriptLabel": "Search the transcript",
+    "matchCount": "Matching steps: {{matches}}"
   },
   "chat": {
     "hide": "Hide",
@@ -799,7 +876,12 @@
     "reviewNoticeLabel": "Conversation review",
     "sendRejected": "Your message was not sent: {{reason}}",
     "sendWhileLoading": "Your message was not sent: the conversation is still loading. Try again in a moment.",
-    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason."
+    "turnFailed": "The agent could not answer this message. Check the server log or the conversation's audit trail for the reason.",
+    "errorWithReason": "Error: {{reason}}",
+    "endConversationFailed": "Could not end the conversation: {{reason}}",
+    "searchAgents": "Search agents",
+    "noAgentMatches": "No agents match your search",
+    "transcript": "Conversation"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -879,7 +961,9 @@
         "description": "NLP input parsing and dictionary configuration"
       }
     },
-    "descriptionPlaceholder": "Describe this {{type}} configuration..."
+    "descriptionPlaceholder": "Describe this {{type}} configuration...",
+    "viewingOldVersion": "You are viewing version {{current}}. The latest is version {{latest}}.",
+    "switchToLatest": "Switch to latest"
   },
   "editor": {
     "compare": "Compare",
@@ -923,7 +1007,17 @@
     "savedNotLive": "Saved — not yet live",
     "savedNotLiveDescription": "The running agent still serves the deployed version. Deploy to make this change take effect.",
     "deployNow": "Deploy",
-    "deployStarted": "Deployment started"
+    "deployStarted": "Deployment started",
+    "stay": "Stay",
+    "invalidJsonNotSaved": "Not saved — the JSON is invalid: {{reason}}",
+    "invalidJsonSave": "Not saved — the JSON is invalid. Fix it in the JSON tab.",
+    "versionLockedDirty": "Save or discard your changes to switch versions",
+    "savedAsVersion": "Saved as v{{version}} — not live yet",
+    "updateAgentAndSave": "Update agent and save",
+    "keepEditing": "Keep editing",
+    "discardChanges": "Discard changes",
+    "saveAndLeave": "Save & leave",
+    "modified": "Modified"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -958,7 +1052,21 @@
     "noRules": "No rules in this group",
     "noConditions": "No conditions",
     "sizeNoBound": "no limit",
-    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit."
+    "sizeBoundInvalid": "Must be a whole number from -2147483648 to 2147483647, or empty for no limit.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "configValueOf": "Value of {{key}}",
+    "removeConfig": "Remove {{key}}",
+    "toggleCondition": "Show or hide condition details",
+    "commaActionsWarning": "A comma list here means AND: every listed action must have occurred, in that order. To match any one of several actions, add one condition per action under an OR connector, or emit a shared action.",
+    "changeTypeTitle": "Change condition type?",
+    "changeTypeDescription": "Switching to {{type}} replaces this condition's settings with that type's defaults. The values you entered are lost.",
+    "changeTypeConfirm": "Change type",
+    "toggleRule": "Show or hide rule details",
+    "thisRule": "this rule",
+    "noLastStepWarning": "No actionmatcher on lastStep: this rule can fire on any step of the conversation, not just after the action you expect. Add an actionmatcher condition with occurrence lastStep.",
+    "toggleGroup": "Show or hide group",
+    "thisGroup": "this group"
   },
   "apiCallsEditor": {
     "noEndpointsFound": "No endpoints found in the spec",
@@ -1068,7 +1176,8 @@
     "skipNone": "none — no code is skipped",
     "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
     "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
-    "useDefaultSkipCodes": "Use default skip list"
+    "useDefaultSkipCodes": "Use default skip list",
+    "scope": "Scope"
   },
   "mcpcallsEditor": {
     "continueOnErrorHint": "On failure the pipeline continues; the error is exposed at ",
@@ -1126,7 +1235,9 @@
     "argumentType": "Argument type",
     "argumentText": "Text",
     "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
-    "removeArgument": "Remove argument"
+    "removeArgument": "Remove argument",
+    "maxResponseSize": "Max stored response size (characters)",
+    "maxResponseSizeHint": "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later."
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1396,7 +1507,101 @@
     "compatibleEndpointOverridden": "Endpoint: {{url}}",
     "modelType": "Model type",
     "paramName": "Parameter name",
-    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all."
+    "lastToolHint": "At least one tool must stay selected. Untick Enable Built-in Tools to disable them all.",
+    "maxToolCallsPerIteration": "Max tool calls per response",
+    "maxToolCallsPerIterationDefault": "(default {{n}})",
+    "maxToolCallsPerTurn": "Max tool calls per turn",
+    "maxToolCallsPerTurnDefault": "(default {{n}})",
+    "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
+    "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations.",
+    "toggleTask": "Show or hide task details",
+    "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
+    "model": "Model",
+    "deploymentName": "Deployment name",
+    "modelName": "Model",
+    "modelMissing": "No model set: the provider will reject every request.",
+    "apiKey": "API key",
+    "apiKeyNotNeeded": "This provider usually needs no API key.",
+    "temperature": "Temperature",
+    "temperaturePlaceholder": "Provider default",
+    "temperatureInvalid": "Enter a number, for example 0.7.",
+    "paramValueOf": "Value of {{key}}",
+    "removeParam": "Remove parameter {{key}}",
+    "accessToken": "Access token",
+    "authToken": "Hugging Face token (optional)",
+    "modelSettings": {
+      "title": "Model settings",
+      "rejectedBy": "Rejected by {{model}}",
+      "noEffectOn": "No effect on {{model}}",
+      "droppedHint": "EDDI removes it before each request, so this value is never sent.",
+      "removeKey": "Remove {{key}}",
+      "remove": "Remove",
+      "providerDefault": "Provider default",
+      "notNumber": "Enter a number.",
+      "notInteger": "Enter a whole number.",
+      "belowMin": "Must be at least {{min}}.",
+      "aboveMax": "Must be at most {{max}}.",
+      "defaultOn": "Default (on)",
+      "defaultOff": "Default (off)",
+      "on": "On",
+      "off": "Off",
+      "notBoolean": "“{{value}}” is neither true nor false; pick one.",
+      "inherited": "Inherited: {{value}}",
+      "defaultValueOption": "Default ({{value}})",
+      "optionRejected": "{{value}} (rejected by this model)",
+      "unknownOption": "“{{value}}” is not one of the accepted values.",
+      "addValueTo": "Add a value to {{label}}",
+      "addValue": "Type a value and press Enter",
+      "listInvalid": "Not a JSON array of strings or a comma-separated list.",
+      "jsonSyntax": "Not valid JSON yet.",
+      "jsonObject": "Must be a JSON object, such as { \"name\": \"value\" }.",
+      "jsonArray": "Must be a JSON array, such as [ … ].",
+      "formatJson": "Format",
+      "range": "{{min}} to {{max}}",
+      "atLeast": "at least {{min}}",
+      "atMost": "at most {{max}}",
+      "badgeRejected": "Rejected",
+      "badgeNoEffect": "No effect",
+      "defaultIs": "default {{value}}",
+      "docs": "Official documentation",
+      "docsFor": "Official documentation for {{key}} (opens in a new tab)",
+      "reset": "Reset to provider default",
+      "resetKey": "Reset {{key}} to the provider default",
+      "noneConfigured": "No settings configured: the provider's defaults apply",
+      "configured_one": "{{count}} setting configured",
+      "configured_other": "{{count}} settings configured",
+      "dropped_one": "{{count}} will be dropped for {{model}}",
+      "dropped_other": "{{count}} will be dropped for {{model}}",
+      "ignored_one": "{{count}} has no effect on {{model}}",
+      "ignored_other": "{{count}} have no effect on {{model}}",
+      "noModel": "Set a model to see which settings it accepts",
+      "filterPlaceholder": "Filter settings…",
+      "filter": "Filter model settings",
+      "clearFilter": "Clear filter",
+      "noMatch": "No setting matches “{{filter}}”.",
+      "groupConfigured": "Configured: {{count}}",
+      "groupRejected": "Rejected by the model: {{count}}",
+      "groupTotal": "Settings in this group: {{count}}",
+      "unavailable_one": "{{count}} setting that {{model}} rejects or ignores",
+      "unavailable_other": "{{count}} settings that {{model}} rejects or ignores",
+      "variableModel": "The model is a variable reference ({{model}}), so the checks below cannot know it yet; EDDI applies the model-specific rules once the variable is resolved.",
+      "badgeMigrated": "Sent as {{key}}",
+      "migratedTo": "Sent as {{key}} for {{model}}",
+      "group": {
+        "model": "Model",
+        "sampling": "Sampling",
+        "output": "Output",
+        "reasoning": "Reasoning",
+        "tools": "Tools",
+        "caching": "Caching",
+        "safety": "Safety",
+        "connection": "Connection",
+        "advanced": "Advanced"
+      }
+    },
+    "otherParams": "Other parameters",
+    "otherParamsHint": "Parameters not listed under Model settings, such as baseUrl, timeout or logRequests, or keys left over from another provider.",
+    "cascadeStepModel": "Step {{n}} model"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -1437,7 +1642,14 @@
     "maxLength": "Max length",
     "maxLengthShort": "max",
     "validationMsgPlaceholder": "Validation error message...",
-    "jsonPlaceholder": "{\"key\":\"value\"}"
+    "jsonPlaceholder": "{\"key\":\"value\"}",
+    "invalidJsonKept": "not saved; fix it or clear the field",
+    "itemType": "Output type",
+    "removeItem": "Remove output item",
+    "removeQuickReply": "Remove quick reply",
+    "toggleOutput": "Show or hide output details",
+    "timesOccurredLabel": "Times occurred",
+    "removeAlternativeGroup": "Remove alternative group {{n}}"
   },
   "propertySetterEditor": {
     "setters": "Property Setters",
@@ -1461,7 +1673,10 @@
     "visibilityTitle": "Which agents can see this longTerm property",
     "editValue": "Edit Value",
     "toggleGroup": "Toggle property group",
-    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope."
+    "secretFromPathWarning": "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",
+    "scope": "Scope",
+    "visibility": "Visibility",
+    "removeProperty": "Remove property"
   },
   "dictionaryEditor": {
     "language": "Language",
@@ -1576,7 +1791,8 @@
     "purgeError": "Failed to purge",
     "empty": "No coordinator data available",
     "emptyHint": "The coordinator service may still be starting up. Data will appear automatically.",
-    "lastNSnapshots": "Last {{count}} snapshots"
+    "lastNSnapshots": "Last {{count}} snapshots",
+    "refreshInterval": "Auto-refresh interval"
   },
   "contentEditor": {
     "expand": "Expand",
@@ -1620,7 +1836,7 @@
     "stepsCount": "{{count}} steps",
     "noConversationsFound": "No conversations found",
     "useConversationId": "Use ID: {{id}}",
-    "searchLogs": "Search logs…",
+    "searchLogs": "Search loaded entries…",
     "errors": "errors",
     "warnings": "warns",
     "infos": "info",
@@ -1632,7 +1848,17 @@
     "stateActive": "Active",
     "stateError": "Error",
     "stateEnded": "Ended",
-    "loadOlder": "Load older entries"
+    "loadOlder": "Load older entries",
+    "reconnect": "Reconnect",
+    "streamDisconnected": "Disconnected from the log stream.",
+    "errorCount_one": "{{count}} error",
+    "errorCount_other": "{{count}} errors",
+    "warnCount_one": "{{count}} warning",
+    "warnCount_other": "{{count}} warnings",
+    "copied": "Log entry copied",
+    "noMatches": "No loaded entries match your search.",
+    "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
+    "searchLogsLabel": "Search the loaded log entries"
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -1856,7 +2082,46 @@
       "reasonUncovered": "{{count}} loaded entry(ies) older than the checked window",
       "unverifiedTitle": "Not fully verified",
       "unverifiedDesc": "No signature was disproven, but not everything could be checked: {{reasons}}."
-    }
+    },
+    "adminActions": {
+      "description": "Every administrative change made through the REST API — deploys, configuration writes, imports, erasures, and the calls that were refused — signed into the audit ledger. Request bodies are never recorded, and the id of a person an action was about is pseudonymised.",
+      "actor": "Actor",
+      "actorPlaceholder": "Principal, e.g. alice",
+      "apply": "Apply",
+      "method": "Method",
+      "allMethods": "All methods",
+      "window": "Time",
+      "clear": "Clear filters",
+      "noMatch": "No administrative actions match these filters",
+      "empty": "No administrative actions recorded yet",
+      "noMatchLoadOlder": "Only the newest rows are loaded — load older ones to search further back.",
+      "emptyHint": "EDDI records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
+      "caption": "Administrative actions, newest first",
+      "colTime": "Time",
+      "colActor": "Actor",
+      "colAction": "Action",
+      "colEndpoint": "Endpoint",
+      "colStatus": "Status",
+      "filterByActor": "Show only this actor's actions",
+      "loadOlderError": "Loading older rows failed.",
+      "loadOlder": "Load older",
+      "forbidden": "Only administrators can read administrative actions",
+      "forbiddenHint": "The log records every administrator's changes, so reading it needs the eddi-admin role.",
+      "unsupported": "This EDDI does not record administrative actions",
+      "unsupportedHint": "They are recorded from EDDI 6.6 on.",
+      "loadError": "Could not load the administrative actions.",
+      "shown": "{{shown}} of {{loaded}} loaded rows shown",
+      "windowAny": "Any time",
+      "windowHour": "Last hour",
+      "windowDay": "Last 24 hours",
+      "windowWeek": "Last 7 days",
+      "windowMonth": "Last 30 days"
+    },
+    "views": "Audit views",
+    "tabTrail": "Pipeline trail",
+    "tabAdminActions": "Administrative actions",
+    "agentsDeployed": "Deployed",
+    "agentsNotDeployed": "Not deployed"
   },
   "schedules": {
     "cronHelp": "5-field format: minute hour day-of-month month day-of-week",
@@ -1987,7 +2252,18 @@
     "systemManaged": "System",
     "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
     "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
-    "failedScheduleGone": "Schedule no longer exists"
+    "failedScheduleGone": "Schedule no longer exists",
+    "disabledByPerson": "Disabled by a person. A schedule an undeploy switched off before EDDI 6.6 also shows this: enable it once by hand.",
+    "disabledUndeployed": "Agent undeployed",
+    "disabledUndeployedHint": "Switched off when its agent was undeployed. It comes back on by itself at the agent's next successful deploy — no action needed.",
+    "disabledAccessRevoked": "Access revoked",
+    "disabledAccessRevokedHint": "Its creator can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+    "disabledOtherHint": "Switched off by EDDI for the reason shown.",
+    "serverRefusedUpdate": "The server refused this change:",
+    "serverRefusedCreate": "The server refused this schedule:",
+    "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
+    "finishedOneShot": "One-time schedule: it ran and is finished.",
+    "oneTimeHelpZone": "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below)."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -2080,7 +2356,9 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "logOutput": "Log output",
-    "noMatch": "No logs match your filter"
+    "noMatch": "No logs match your filter",
+    "errorsAnnounce_one": "{{count}} error in the log",
+    "errorsAnnounce_other": "{{count}} errors in the log"
   },
   "promptViewer": {
     "error": "Failed to load prompt data",
@@ -2162,7 +2440,12 @@
       "mcpcalls": "MCP Calls",
       "rag": "Knowledge Bases",
       "dictionary": "Dictionary"
-    }
+    },
+    "testReady": "Saved and deployed as v{{version}} — the chat is ready",
+    "workflow": "Workflow",
+    "unsavedTitle": "Unsaved changes in this stage",
+    "unsavedMessage": "Switching stages replaces the editor. Save your changes first, discard them, or stay on this stage.",
+    "discardAndSwitch": "Discard & switch"
   },
   "ragEditor": {
     "general": "General",
@@ -2204,7 +2487,8 @@
     "paramRequired": "Required",
     "secretRequired": "Required — pick a vault secret",
     "secretOptional": "Optional — pick a vault secret",
-    "perKbDefault": "one per knowledge base (eddi_kb_<id>)",
+    "perKbDefault": "one per knowledge base (eddi_kbid_<id>)",
+    "perKbLegacyDefault": "derived from the name (eddi_kb_…)",
     "emptySavedValue": "Saved as an empty value, so the default is not used.",
     "useDefault": "Use default",
     "resetToDefault": "Reset to default",
@@ -2302,7 +2586,31 @@
     "chunkStrategyLegacy": "{{value}} (saved as Recursive)",
     "saveBeforeIngest": "Save your changes first — documents are ingested with the saved knowledge base's store and embedding model, not the edits on screen.",
     "chunkStrategyUnsupported": "{{value}} (not supported)",
-    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive."
+    "chunkStrategyUnsupportedHint": "The server refuses this strategy when you save. Choose Recursive.",
+    "location": {
+      "reference": "A store location must be written out, not a ${…} reference. The location decides whose documents an agent reads, and a reference is resolved only when the store is built — after every check — from variables any editor can change, so it could point at another knowledge base's store or at SQL. A knowledge base already saved with a reference stops ingesting and retrieving until it is saved once with the literal name.",
+      "pgIdentifier": "A pgvector table must be a plain name, optionally schema-qualified (letters, digits, _ and $). The store puts it into SQL as it is, so quotes, spaces and punctuation are refused.",
+      "refused": "The server refuses {{param}} = {{value}}",
+      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
+      "savedReference": "The saved {{param}} = {{value}} no longer works",
+      "refusedIfChanged": "{{param}} = {{value}} keeps working as saved, but the server would refuse it if it were changed"
+    },
+    "layout": {
+      "idTitle": "Own store (addressed by id)",
+      "nameTitle": "Name-based store (6.5 layout)",
+      "idBody": "This knowledge base has a store of its own: every chunk is tagged with its id and retrieval sees only its own chunks, even in a shared table.",
+      "nameBody": "Created before EDDI 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
+      "defaultUnsaved": "Location: eddi_kbid_<id> (default, assigned when saved)",
+      "migrate": "Move to its own store…",
+      "renameNote": "Renaming this knowledge base moves it the same way. Needs EDDI 6.6 or later.",
+      "migrateTitle": "Move this knowledge base to its own store?",
+      "migrateBodyExplicit": "It keeps its table, but only chunks tagged with its id are retrieved from now on — none of the chunks already there carry that tag, so it starts EMPTY. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. Nothing is deleted. The change takes effect when you save, and cannot be switched back.",
+      "migrateBody": "It moves to a new, EMPTY store of its own. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. The old store is left in place, untouched. The change takes effect when you save, and cannot be switched back.",
+      "migrateConfirm": "Move when I save",
+      "explicit": "Location: {{value}} (set above)",
+      "default": "Location: {{value}} (default)",
+      "legacyDefault": "Location: derived from the name “{{name}}” (default)"
+    }
   },
   "onboarding": {
     "welcome": {
@@ -2322,7 +2630,8 @@
       "readyTitle": "Ready to Start?",
       "readySubtitle": "You can restart any tour from the sidebar Help menu",
       "startTour": "Start the Tour",
-      "exploreOwn": "I'll Explore on My Own"
+      "exploreOwn": "I'll Explore on My Own",
+      "panelN": "Panel {{n}}"
     },
     "tour": {
       "back": "Back",
@@ -2473,7 +2782,8 @@
       "title": "Help & Tour",
       "platformTour": "Platform Tour",
       "resetAll": "Reset All Tours",
-      "resetConfirm": "Reset all tour progress?"
+      "resetConfirm": "Reset all tour progress?",
+      "completed": "Completed"
     },
     "offer": {
       "message": "New here? Take the {{page}}",
@@ -2564,7 +2874,7 @@
     "count_one": "{{count}} group",
     "count_other": "{{count}} groups",
     "confirmDelete": "Delete this group?",
-    "confirmDeleteDesc": "This will permanently delete the group configuration.",
+    "confirmDeleteDesc": "The group is marked deleted and disappears from this list.",
     "duplicateSuccess": "Group duplicated",
     "members": "members",
     "discussionStyle": "Discussion Style",
@@ -2685,8 +2995,8 @@
     "deleteGroupOnlySuccess": "Group deleted (agents kept)",
     "deleteGroupOnlyWarning": "This will delete the group. All member agents will be kept.",
     "deleteGroupAndAgents": "Delete Group + All Agents",
-    "deleteWithMembersSuccess": "Group and all member agents deleted (soft-delete)",
-    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered.",
+    "deleteWithMembersSuccess": "Group and all member agents deleted",
+    "deleteWithMembersWarning": "This will delete the group and all {{count}} member agents.",
     "hideDiscussions": "Hide discussions panel",
     "showDiscussions": "Show discussions panel",
     "hideConfig": "Hide config panel",
@@ -3054,8 +3364,32 @@
       "humanNeedsName_one": "{{count}} human member needs a display name.",
       "humanNeedsName_other": "{{count}} human members need a display name.",
       "humanNeedsId_one": "{{count}} human member needs the person's user id.",
-      "humanNeedsId_other": "{{count}} human members need the person's user id."
-    }
+      "humanNeedsId_other": "{{count}} human members need the person's user id.",
+      "duplicateMember": "{{ids}} is listed more than once. A member holds one seat: two seats would share one member conversation and see each other's answers. Use a second agent for a second seat."
+    },
+    "serverRefused": "The server refused this group:",
+    "versionLookupFailed": "Could not find this group's current version.",
+    "deletePermanentlyHint": "Cannot be undone: the group and its standing workspace (backlog, cadences and their schedules) are removed for good. Without this the group is only marked deleted and stays recoverable until purged.",
+    "deletePermanentlyWithMembersHint": "Cannot be undone: the group, its workspace and every member agent are removed for good. Without this they are only marked deleted and stay recoverable until purged.",
+    "deleteMembersFailedAfterGroup": "The group was deleted, but these member agents could not be: {{ids}}. Delete them from the Agents page.",
+    "deleteMembersFailedGroupKept": "The group was kept: these member agents could not be deleted: {{ids}}. Try again to finish.",
+    "transcriptLabel": "Discussion transcript",
+    "announceAwaitingApproval": "The discussion is paused and waiting for your approval.",
+    "announceAwaitingHuman": "The discussion is waiting for a member's response.",
+    "newMessages": "New messages",
+    "finishEditingFirst": "Save or cancel the section you are editing first",
+    "editBasics": "Edit name, members and settings",
+    "humanTurnResuming": "Your response was recorded. The discussion is resuming — this page follows it and updates every few seconds.",
+    "composerMode": "What to do with your message",
+    "composerModeNew": "New discussion",
+    "composerModeContinue": "Continue this discussion",
+    "loadMoreDiscussions": "Load older discussions",
+    "confirmDeleteLiveDiscussionDescription": "This discussion is still running. It is stopped, and the transcript and everything in it are removed permanently. This cannot be undone.",
+    "discardEditsTitle": "Discard unsaved edits?",
+    "discardEditsDescription": "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
+    "discardEditsConfirm": "Discard",
+    "keepEditing": "Keep editing",
+    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs."
   },
   "taskBoard": {
     "title": "Task Board",
@@ -3179,15 +3513,66 @@
     "humanOnTimeoutAbort": "Abort the discussion",
     "humanOnTimeoutSkip": "Skip their turn and continue",
     "humanTurnSettingsTitle": "Human member turn settings",
-    "humanTurnTimeoutLabel": "Turn timeout (ISO-8601 duration)",
-    "humanTurnTimeoutPlaceholder": "e.g. PT24H — blank waits indefinitely",
-    "humanTurnTimeoutInvalid": "Not a valid ISO-8601 duration, e.g. PT24H or P1D.",
+    "humanTurnTimeoutLabel": "Turn timeout",
+    "humanTurnTimeoutPlaceholder": "Leave empty to wait indefinitely.",
+    "humanTurnTimeoutInvalid": "Enter a number greater than zero.",
     "humanOnTimeoutLabel": "On timeout",
     "memberTypeHuman": "Human",
     "humanPrincipalId": "Principal ID",
     "humanPrincipalIdPlaceholder": "The user's login/principal id",
     "humanTurnSettingsHint": "The discussion pauses and waits when it's a human member's turn to speak. Choose what happens if they don't respond in time.",
-    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak."
+    "humanPrincipalIdHint": "The identity that may submit this member's turns — the discussion pauses and waits for them when it's their turn to speak.",
+    "modelPlaceholder": "e.g. {{model}}",
+    "stepTemplate": "Preset",
+    "stepConfig": "Setup",
+    "stepMembers": "Members",
+    "stepReview": "Review",
+    "stepsLabel": "Wizard progress",
+    "stepAria": "Step {{n}}: {{title}}",
+    "blockersTitle": "To continue:",
+    "blockerName": "Enter a group name.",
+    "blockerHitlPhases": "Select at least one phase to pause at, or turn off human approval.",
+    "blockerHitlTimeout": "Enter a valid approval timeout (for example PT15M), or choose a different timeout policy.",
+    "blockerStyle": "Pick a discussion style this server supports.",
+    "blockerMemberName": "{{member}}: add a display name.",
+    "blockerMemberPrincipal": "{{member}}: enter the person's principal ID.",
+    "blockerMemberGroup": "{{member}}: pick the nested group.",
+    "blockerMemberAgent": "{{member}}: pick an existing agent, or switch to Create New.",
+    "blockerMemberKey": "{{member}}: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerModeratorKey": "Moderator: add an API key for {{provider}}, or choose a provider that needs none (for example Ollama).",
+    "blockerTurnTimeout": "Set the human turn timeout to a number greater than zero, or clear it.",
+    "memberFallbackName": "Member {{n}}",
+    "styleBestFor": {
+      "ROUND_TABLE": "Open brainstorming — every perspective on a question.",
+      "PEER_REVIEW": "Reviewing a draft or proposal from several angles.",
+      "DEVIL_ADVOCATE": "Stress-testing a plan before you commit to it.",
+      "DELPHI": "Forecasts and estimates where independent opinions should converge.",
+      "DEBATE": "Weighing a decision with two opposing sides.",
+      "TASK_FORCE": "Planning and carrying out multi-step work with assigned tasks.",
+      "NEGOTIATION": "Reaching agreement between parties with different interests."
+    },
+    "howItRuns": "How it runs",
+    "roundsExplain": "One round is every member speaking once. More rounds let members respond to each other, but every extra round adds LLM calls and cost.",
+    "roundsEstimate": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds).",
+    "roundsEstimateModerator": "Estimated: about {{calls}} LLM calls per discussion ({{members}} members × {{rounds}} rounds + 1 moderator).",
+    "unitMinutes": "minutes",
+    "unitHours": "hours",
+    "unitDays": "days",
+    "durationNoLimit": "No limit",
+    "durationUnit": "Unit",
+    "defaultMemberPrompt": "You are {{name}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptRole": "You are {{name}}, specialising in {{role}}. Provide clear, actionable insights from your domain perspective.",
+    "defaultMemberPromptNoName": "You are a member of this group. Provide clear, actionable insights from your domain perspective.",
+    "defaultModeratorPrompt": "You are a skilled moderator. Synthesize the group's discussion into a clear, balanced summary that captures key insights, areas of agreement, and remaining disagreements.",
+    "memberNameLabel": "Display name",
+    "memberRoleLabel": "Role",
+    "memberTypeLabel": "Member type",
+    "bulkTitle": "Same provider and key for all new agents",
+    "bulkHint": "Every new agent needs an LLM provider and, for most providers, an API key. Fill it in once here and apply it to all of them; you can still change a single agent afterwards.",
+    "bulkApply": "Apply to all new agents",
+    "apiKeyRequired": "{{provider}} needs an API key before this agent can be created.",
+    "presetsNote": "These are starter presets that fill in this wizard. To use a packaged, pre-tuned discussion and assign your existing agents to its roles instead, see",
+    "presetsLink": "Group Templates"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -3243,7 +3628,9 @@
     "roleCount_one": "{{count}} role to assign",
     "roleCount_other": "{{count}} roles to assign",
     "empty": "No templates available",
-    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard."
+    "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard.",
+    "wizardNote": "Prefer to create new agents as you go, or build from scratch? The group wizard offers lighter starter presets.",
+    "wizardLink": "Open the group wizard"
   },
   "memories": {
     "title": "User Memory",
@@ -3272,7 +3659,12 @@
     "created": "Created",
     "updated": "Updated",
     "sourceConversation": "Source Conversation",
-    "conflicted": "Conflicted"
+    "conflicted": "Conflicted",
+    "deleteEntryTitle": "Delete this memory?",
+    "deleteEntryDesc": "\"{{key}}\" is permanently removed for this user. Agents stop recalling it. This cannot be undone.",
+    "deleteAllDescUser": "This permanently deletes all {{total}} memory entries for user \"{{userId}}\". This cannot be undone.",
+    "toggleDetails": "Show or hide details for {{key}}",
+    "deleteEntryLabel": "Delete memory entry {{key}}"
   },
   "properties": {
     "title": "User Properties",
@@ -3308,7 +3700,9 @@
     "deleted": "Trigger deleted",
     "deleteTitle": "Delete Trigger",
     "deleteDesc": "Permanently delete the trigger for intent \"{{intent}}\"?",
-    "searchPlaceholder": "Filter by intent or agent ID..."
+    "searchPlaceholder": "Filter by intent or agent ID...",
+    "needIntent": "Enter an intent to save.",
+    "needAgent": "Choose at least one agent to save."
   },
   "capabilities": {
     "agentCount": "Agents",
@@ -3325,7 +3719,11 @@
     "registeredSkills": "Registered Skills",
     "noSkills": "No skills found",
     "matchingAgents": "Matching Agents",
-    "noMatches": "No agents found for this skill"
+    "noMatches": "No agents found for this skill",
+    "searchLabel": "Search skills",
+    "strategyLabel": "Match strategy",
+    "emptyTitle": "No capabilities registered yet",
+    "emptyDesc": "Agents appear here once they declare capabilities (skills) in their configuration. Add a capability to an agent and it shows up in this registry."
   },
   "exportDialog": {
     "title": "Export Agent",
@@ -3383,7 +3781,11 @@
     "partialBody": "The rest of the agent was written. These resources were left as they were and need attention.",
     "partialCounts": "{{created}} created, {{updated}} updated, {{failed}} failed.",
     "schedulesSkipped_one": "{{count}} schedule in the archive was not imported, because the selection did not include it.",
-    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them."
+    "schedulesSkipped_other": "{{count}} schedules in the archive were not imported, because the selection did not include them.",
+    "mergeScopeDefaultSpace": "your default space",
+    "mergeScope": "This merge updates only resources you may edit in {{space}}. A copy of this agent in another workspace is never changed — the import creates your own copy instead. Switch space first to update the copy that lives there.",
+    "moveUp": "Move up",
+    "moveDown": "Move down"
   },
   "sync": {
     "actionCreate": "New",
@@ -3615,7 +4017,11 @@
     "groupLinkUnavailable": "This group could not be located, so there is no safe link to it.",
     "confirmApproveGroupDescription": "Approve the whole paused phase and resume the discussion. Every task waiting on this pause is approved with it — open the group to decide them individually.",
     "confirmRejectGroupDescription": "Reject the whole paused phase. Every task waiting on this pause is rejected with it, and the discussion does not continue past it — open the group to decide them individually.",
-    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again."
+    "pauseChanged": "This request changed since you opened it — nothing was decided. Review it again.",
+    "regularTruncated": "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
+    "conversationColumn": "Conversation",
+    "groupReviewLoadError": "The discussion could not be loaded.",
+    "groupReviewNoEntries": "Nothing has been said yet."
   },
   "chatDrawer": {
     "deploying": "Deploying agent…",
@@ -3645,7 +4051,20 @@
     "secretVault": "Secret Vault",
     "vaultDown": "Vault unavailable",
     "vaultUp": "Vault ready",
-    "viewLogs": "View Logs"
+    "viewLogs": "View Logs",
+    "coordAdminOnly": "Coordinator: requires admin",
+    "vaultAdminOnly": "Vault: requires admin",
+    "vaultChecking": "Vault checking…",
+    "statsPartial": "Some counts could not be loaded — they are shown as unavailable, not zero.",
+    "countUnavailable": "Could not be loaded",
+    "convState": {
+      "READY": "Ready",
+      "IN_PROGRESS": "In progress",
+      "ENDED": "Ended",
+      "EXECUTION_INTERRUPTED": "Interrupted",
+      "ERROR": "Error",
+      "AWAITING_HUMAN": "Awaiting human"
+    }
   },
   "errorBoundary": {
     "retry": "Try Again",
@@ -3703,7 +4122,23 @@
     "conversationsTruncated_other": "Conversations were capped — the user has {{count}} in total.",
     "failedConversations_one": "{{count}} conversation could not be read and is absent from the bundle.",
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
-    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled."
+    "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
+    "auditRedacted": "Audit Entries Redacted",
+    "auditLegacy": "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+    "auditPseudonymizeMode": "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
+    "auditRedactionFailed": "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
+    "auditRedactedExplanation": "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",
+    "completeExplanation": "Complete means every step succeeded, including a final check that no audit row under this user's id still holds unredacted content.",
+    "failedStep": {
+      "auditRedaction": "Some audit rows still hold this user's prompts or responses. Run the erasure again — it is safe to repeat and only touches what is left. If it keeps failing, the server log names the cause under this erasure's pseudonym.",
+      "auditLedger": "The user id could not be replaced in every audit row. Run the erasure again once the database is reachable.",
+      "databaseLogs": "Database log entries could not be pseudonymised. Run the erasure again; log retention also removes them in time.",
+      "generic": "This step did not finish. Run the erasure again once the cause in the server log is fixed — it is safe to repeat."
+    },
+    "noDataFoundToast": "No data found for this user id — nothing was deleted.",
+    "noDataFoundTitle": "No data found for this user id",
+    "noDataFoundBody": "Nothing was deleted for \"{{userId}}\". Check the id for typos, then try again.",
+    "confirmTypeLabel": "Type the user id \"{{userId}}\" to confirm"
   },
   "mockBanner": {
     "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
@@ -3726,7 +4161,12 @@
     "found_other": "{{count}} orphans found",
     "scanIncomplete": "This scan did not finish",
     "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
-    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone."
+    "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
+    "purgeIncompleteScan": "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+    "purgeFailed": "Purge failed",
+    "scanFailed": "The scan failed: {{reason}}",
+    "reviewHint": "Open a resource from the list to inspect it first; every orphan on the list is deleted.",
+    "typeToConfirm": "Type {{count}} to confirm"
   },
   "quotas": {
     "apiCallsMinute": "API Calls / Minute",
@@ -3739,7 +4179,6 @@
     "enabled": "Enabled",
     "enforcementOff": "Enforcement is off.",
     "enforcementOffHint": "Quotas are not being enforced. Enable enforcement and save to start applying limits.",
-    "limitHint": "-1 = unlimited",
     "liveUsage": "Live Usage",
     "maxAgentsPerTenant": "Max Agents / Tenant",
     "maxApiCallsPerMinute": "Max API Calls / Minute",
@@ -3752,7 +4191,10 @@
     "resetSuccess": "Usage counters reset",
     "saveSuccess": "Quota saved",
     "tenantId": "Tenant ID",
-    "title": "Tenant Quotas"
+    "title": "Tenant Quotas",
+    "limitHintEmpty": "Empty or -1 = unlimited, 0 = blocked",
+    "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
+    "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",
@@ -4100,7 +4542,7 @@
       "deleteBoard": "Dissolve Task Force",
       "deleteBoardDesc": "Remove this task force configuration. Agents will remain.",
       "deleteBoardAll": "Dissolve Task Force + All Agents",
-      "deleteBoardAllDesc": "Remove this task force and all member agents permanently.",
+      "deleteBoardAllDesc": "Remove this task force and all of its member agents.",
       "unsavedChanges": "You have unsaved changes",
       "templateSaved": "Saved as template",
       "saveAsTemplate": "Save as Template",
@@ -4108,8 +4550,8 @@
       "saveChanges": "Save Changes",
       "deleteAllTitle": "Dissolve Task Force & All Agents?",
       "deleteTitle": "Dissolve Task Force?",
-      "deleteAllConfirm": "This will permanently dissolve this task force and remove all its member agents. This action cannot be undone.",
-      "deleteConfirm": "This will permanently dissolve this task force configuration. Member agents will not be affected.",
+      "deleteAllConfirm": "This dissolves this task force and deletes all of its member agents.",
+      "deleteConfirm": "This dissolves this task force. Member agents are not affected.",
       "title": "Settings"
     },
     "nav": {
@@ -4165,11 +4607,11 @@
     },
     "dashboard": {
       "assembleTaskForce": "Assemble Task Force",
-      "bulkDeleteConfirm": "This dissolves every selected task force and cannot be undone.",
+      "bulkDeleteConfirm": "This dissolves every selected task force. Member agents are not affected.",
       "bulkDeleteTitle_one": "Dissolve this task force?",
       "bulkDeleteTitle_other": "Dissolve {{count}} task forces?",
       "cancel": "Cancel",
-      "deleteConfirm": "Are you sure you want to dissolve this task force? This action cannot be undone.",
+      "deleteConfirm": "Are you sure you want to dissolve this task force? Member agents are not affected.",
       "deleteError": "Failed to delete task force",
       "deletePartialFail": "{{success}} deleted, {{fail}} failed",
       "deleteSelected": "Delete",
@@ -4234,7 +4676,8 @@
       "tryDifferent": "Try a different search term",
       "untitled": "Untitled Conversation",
       "loadListError": "Failed to load conversations",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "deleteFailed": "Could not delete the conversation"
     },
     "insights": "Insights",
     "memberCount": "{{count}} members",
@@ -4664,7 +5107,13 @@
     "inputTemplateTooLong": "The prompt template is limited to {{max}} characters.",
     "cronInvalid": "That is not a valid cron expression.",
     "scheduleUnknown": "Schedule unavailable",
-    "nextRun": "next {{when}}"
+    "nextRun": "next {{when}}",
+    "taskSubjectLabel": "Subject",
+    "taskDescriptionLabel": "Description",
+    "inputTemplateLabel": "Prompt template",
+    "priorityTitle": "Priority {{n}} — higher numbers are picked first",
+    "backlogNote": "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited or removed once it is added; a run completes it.",
+    "priorityHint": "Higher numbers are picked first by a cadence run. 0 is the default."
   },
   "workforceWizard": {
     "title": "New Team"
@@ -5005,7 +5454,9 @@
     "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
     "confirmAuthChange": "Change how this connection authenticates?",
     "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
-    "confirmAuthChangeAccept": "Change it"
+    "confirmAuthChangeAccept": "Change it",
+    "deleted": "Connection \"{{name}}\" deleted",
+    "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
   },
   "extensionTypes": {
     "parser": "Input Parser",
@@ -5215,13 +5666,16 @@
     "legacyAdminOnly": "Visible to administrators only — once owners have been assigned",
     "lastChanged": "Last changed by {{who}}",
     "neverChanged": "Not changed here yet",
-    "saved": "Settings saved"
+    "saved": "Settings saved",
+    "deleteVariableTitle": "Delete this variable?",
+    "deleteVariableDescription": "Agents that use it lose its value until it is stored again. This cannot be undone.",
+    "legacyDefault": "Not set here — the default applies (visible to everyone)"
   },
   "cascadeSave": {
     "workflowChanged": "Workflow {{workflowId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
     "agentChanged": "Agent {{agentId}} changed elsewhere (now version {{current}}, this page has version {{version}}). Reload the page. Nothing was saved.",
     "workflowMissingResource": "Workflow {{workflowId}} (version {{version}}) does not reference {{resource}}, so saving it here would not change the agent. Nothing was saved.",
-    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) references workflow {{workflowId}} at version {{found}}, not version {{expected}}. The agent changed since this page was opened. Reload it. Nothing was saved.",
+    "agentWorkflowMismatch": "Agent {{agentId}} (version {{version}}) uses workflow {{workflowId}} at version {{found}}, but this page was opened at version {{expected}}. Nothing was saved. Update the agent to use the new workflow version, or open version {{found}}.",
     "agentMissingWorkflow": "Agent {{agentId}} (version {{version}}) does not reference workflow {{workflowId}}. Nothing was saved."
   },
   "llmProviders": {
@@ -5247,7 +5701,7 @@
     "compatibleHint": "Only for changes that cannot break a conversation in progress, e.g. prompt wording or a different model. Leave unticked if properties, actions or workflow steps were renamed or removed.",
     "compatibleLegacyNote": "The current version predates version following, so conversations already running on it stay on it. The next compatible save links up.",
     "compatibleUnknownNote": "Conversations on a version that predates version following stay on it.",
-    "generationBadge": "compat. gen {{generation}}",
+    "generationBadge": "Generation {{generation}}",
     "generationTooltip": "Compatibility generation {{generation}}: versions of this agent with the same generation are compatible, so a running conversation moves to the newest deployed one on its next turn. A breaking save starts a new generation.",
     "impactTitle": "Deploying v{{version}} to {{environment}} — running conversations",
     "impactFollow_one": "{{count}} active conversation on v{{from}} will continue on v{{to}}",
@@ -5258,5 +5712,39 @@
     "impactReasonLegacy": "predates version following",
     "impactReasonBreaking": "breaking change",
     "switchNotice": "Agent moved from v{{from}} to v{{to}}"
+  },
+  "propertyValue": {
+    "typeLabel": "Value type",
+    "jsonOnly": "Set in the JSON tab",
+    "valueLabel": "Value",
+    "intRange": "Outside the Integer range (±2,147,483,647). Choose Long integer for this value.",
+    "unsafeLong": "Beyond 9,007,199,254,740,991 the browser cannot hold this whole number exactly; edit it in the JSON tab.",
+    "needs66": "Long integer and Decimal need EDDI 6.6 or later.",
+    "conflict": "This row sets {{fields}}. Only {{winner}} is used; choosing a type here keeps that one value and removes the rest.",
+    "kindString": "Text / template",
+    "kindInt": "Integer",
+    "kindLong": "Long integer",
+    "kindDouble": "Decimal",
+    "kindFloat": "Float (≈7 digits)",
+    "kindBoolean": "Boolean",
+    "kindObject": "Object (JSON)",
+    "kindList": "List (JSON)"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "There is nothing at this address. It may have moved, or the link may be mistyped.",
+    "backToDashboard": "Back to Dashboard",
+    "backToWorkforce": "Back to Workforce",
+    "chooseWorkspace": "Choose a workspace"
+  },
+  "actionTags": {
+    "remove": "Remove {{action}}",
+    "none": "No actions",
+    "inputLabel": "New action",
+    "add": "Add action"
+  },
+  "wizardLeave": {
+    "title": "Leave without creating?",
+    "message": "Your team setup, including any prompts and API keys you entered, has not been created yet and will be lost."
   }
 }

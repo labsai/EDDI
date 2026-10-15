@@ -22,6 +22,7 @@ import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
+import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
 import type { IngestionSource } from "@/lib/api/ingestion-sources";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -32,6 +33,13 @@ export interface RagConfig {
   embeddingParameters?: Record<string, string>;
   storeType?: string;
   storeParameters?: Record<string, string>;
+  /**
+   * How the vector store is addressed (EDDI 6.6+): `"id"` — a store of its own,
+   * stamped by the server on every knowledge base created since — or absent /
+   * `"name"`, the 6.5 layout addressed by the name. Never written by the editor
+   * except through the explicit "move to its own store" action.
+   */
+  storeNamespace?: string;
   chunkStrategy?: string;
   chunkSize?: number;
   chunkOverlap?: number;
@@ -86,6 +94,9 @@ const EMBEDDING_PARAM_HINTS: Record<string, ParamHint[]> = {
   openai: [
     { key: "model", defaultValue: "text-embedding-3-small" },
     { key: "apiKey", required: true },
+    // Any OpenAI-compatible server. Honoured since 6.6 — before, it was ignored
+    // and documents went to api.openai.com.
+    { key: "baseUrl", defaultValue: "https://api.openai.com/v1" },
   ],
   "azure-openai": [
     { key: "endpoint", example: "https://my-resource.openai.azure.com/", required: true },
@@ -919,11 +930,20 @@ export function RagEditor({
 
   const selectedProvider = EMBEDDING_PROVIDERS.find((p) => p.value === data.embeddingProvider);
   const selectedStore = STORE_TYPES.find((s) => s.value === data.storeType);
-  // What `EmbeddingStoreFactory` names a KB's table/collection/index when none
-  // is set. Resource ids are lower-case hex, so its sanitising leaves them as-is.
-  const perKbName = resourceId
-    ? `eddi_kb_${resourceId.toLowerCase()}`
-    : t("ragEditor.perKbDefault", "one per knowledge base (eddi_kb_<id>)");
+  // What `KnowledgeBaseStorage.defaultPhysicalName` names a KB's
+  // table/collection/index when none is set. A KB with no id yet is new, and the
+  // server stamps every new KB with the per-id layout. Resource ids are lower-case
+  // hex, so the id sanitising leaves them as-is. The legacy (6.5) layout derives
+  // the name differently per store type, so it is spelled out only for a name
+  // every derivation leaves unchanged.
+  const perKbName =
+    !resourceId
+      ? t("ragEditor.perKbDefault", "one per knowledge base (eddi_kbid_<id>)")
+      : data.storeNamespace === "id"
+        ? `eddi_kbid_${resourceId.toLowerCase()}`
+        : data.name && data.name.length <= 50 && /^[a-z0-9_]*[a-z0-9]$/.test(data.name)
+          ? `eddi_kb_${data.name}`
+          : t("ragEditor.perKbLegacyDefault", "derived from the name (eddi_kb_…)");
   const storeHints = storeParamHints(data.storeType ?? "in-memory", perKbName);
   const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
 
@@ -1097,6 +1117,8 @@ export function RagEditor({
               />
             </div>
           )}
+
+          <RagStoragePanel data={data} onChange={onChange} readOnly={readOnly} resourceId={resourceId} version={version} />
         </div>
       </Section>
 

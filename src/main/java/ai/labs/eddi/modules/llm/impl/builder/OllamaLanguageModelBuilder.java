@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -20,6 +21,9 @@ import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBo
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyStringList;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringMap;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -75,38 +79,38 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      */
     private static final String KEY_RETURN_THINKING = "returnThinking";
 
+    static final String KEY_NUM_CTX = "numCtx";
+    static final String KEY_MIN_P = "minP";
+    static final String KEY_REPEAT_PENALTY = "repeatPenalty";
+    static final String KEY_REPEAT_LAST_N = "repeatLastN";
+    static final String KEY_SEED = "seed";
+    static final String KEY_STOP_SEQUENCES = "stopSequences";
+    static final String KEY_TRUNCATE = "truncate";
+    static final String KEY_CUSTOM_HEADERS = "customHeaders";
+
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_MODEL, KEY_TIMEOUT, KEY_LOG_REQUESTS, KEY_LOG_RESPONSES, KEY_BASE_URL,
-                KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TOP_P, KEY_TOP_K, KEY_THINK, KEY_RETURN_THINKING);
+                KEY_TEMPERATURE, KEY_MAX_TOKENS, KEY_TOP_P, KEY_TOP_K, KEY_THINK, KEY_RETURN_THINKING, KEY_NUM_CTX,
+                KEY_MIN_P, KEY_REPEAT_PENALTY, KEY_REPEAT_LAST_N, KEY_SEED, KEY_STOP_SEQUENCES, KEY_TRUNCATE,
+                KEY_CUSTOM_HEADERS);
     }
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = OllamaChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        return build(parameters, JdkHttpClient.builder());
+    }
 
-        if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
-            builder.baseUrl(parameters.get(KEY_BASE_URL));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
-            builder.modelName(parameters.get(KEY_MODEL));
-        }
-        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-        applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
-        applyDouble(parameters, KEY_TOP_P, builder::topP);
-        applyInt(parameters, KEY_TOP_K, builder::topK);
-        applyBoolean(parameters, KEY_THINK, builder::think);
-        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
-            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
-        }
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
-            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
-        }
+    /**
+     * Seam for the unit tests: a fake {@link HttpClientBuilder} shows what reaches
+     * the wire. Production goes through {@link #build(Map)}.
+     */
+    ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
+        var builder = OllamaChatModel.builder().httpClientBuilder(httpClientBuilder);
+        applyTo(builder, parameters);
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
 
         return builder.build();
     }
@@ -114,12 +118,23 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
         var builder = OllamaStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        applyTo(builder, parameters);
+        return builder.build();
+    }
 
-        if (!isNullOrEmpty(parameters.get(KEY_BASE_URL))) {
+    /**
+     * The synchronous and the streaming client are configured by identical bodies:
+     * their common base builder ({@code OllamaBaseChatModel.Builder}) is
+     * package-private in langchain4j, so it cannot be named here. Change both
+     * together.
+     */
+    private static void applyTo(OllamaChatModel.OllamaChatModelBuilder builder, Map<String, String> parameters) {
+        String baseUrl = stringValue(parameters, KEY_BASE_URL);
+        if (baseUrl != null) {
             // Never let a model base URL point at the cloud instance-metadata service
             // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(parameters.get(KEY_BASE_URL));
-            builder.baseUrl(parameters.get(KEY_BASE_URL));
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            builder.baseUrl(baseUrl);
         }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
             builder.modelName(parameters.get(KEY_MODEL));
@@ -129,15 +144,58 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
         applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
         applyDouble(parameters, KEY_TOP_P, builder::topP);
         applyInt(parameters, KEY_TOP_K, builder::topK);
+        applyInt(parameters, KEY_NUM_CTX, builder::numCtx);
+        applyDouble(parameters, KEY_MIN_P, builder::minP);
+        applyDouble(parameters, KEY_REPEAT_PENALTY, builder::repeatPenalty);
+        applyInt(parameters, KEY_REPEAT_LAST_N, builder::repeatLastN);
+        applyInt(parameters, KEY_SEED, builder::seed);
+        applyStringList(parameters, KEY_STOP_SEQUENCES, builder::stop);
+        applyBoolean(parameters, KEY_TRUNCATE, builder::truncate);
         applyBoolean(parameters, KEY_THINK, builder::think);
         applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
-            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        applyBoolean(parameters, KEY_LOG_REQUESTS, builder::logRequests);
+        applyBoolean(parameters, KEY_LOG_RESPONSES, builder::logResponses);
+        Map<String, String> headers = stringMap(parameters, KEY_CUSTOM_HEADERS);
+        if (headers != null) {
+            builder.customHeaders(headers);
         }
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
-            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
-        }
+    }
 
-        return builder.build();
+    /**
+     * Streaming twin of
+     * {@link #applyTo(OllamaChatModel.OllamaChatModelBuilder, Map)}; keep
+     * identical.
+     */
+    private static void applyTo(OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder, Map<String, String> parameters) {
+        String baseUrl = stringValue(parameters, KEY_BASE_URL);
+        if (baseUrl != null) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            builder.baseUrl(baseUrl);
+        }
+        if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
+            builder.modelName(parameters.get(KEY_MODEL));
+        }
+        applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
+        applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
+        applyInt(parameters, KEY_MAX_TOKENS, builder::numPredict);
+        applyDouble(parameters, KEY_TOP_P, builder::topP);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
+        applyInt(parameters, KEY_NUM_CTX, builder::numCtx);
+        applyDouble(parameters, KEY_MIN_P, builder::minP);
+        applyDouble(parameters, KEY_REPEAT_PENALTY, builder::repeatPenalty);
+        applyInt(parameters, KEY_REPEAT_LAST_N, builder::repeatLastN);
+        applyInt(parameters, KEY_SEED, builder::seed);
+        applyStringList(parameters, KEY_STOP_SEQUENCES, builder::stop);
+        applyBoolean(parameters, KEY_TRUNCATE, builder::truncate);
+        applyBoolean(parameters, KEY_THINK, builder::think);
+        applyBoolean(parameters, KEY_RETURN_THINKING, builder::returnThinking);
+        applyBoolean(parameters, KEY_LOG_REQUESTS, builder::logRequests);
+        applyBoolean(parameters, KEY_LOG_RESPONSES, builder::logResponses);
+        Map<String, String> headers = stringMap(parameters, KEY_CUSTOM_HEADERS);
+        if (headers != null) {
+            builder.customHeaders(headers);
+        }
     }
 }

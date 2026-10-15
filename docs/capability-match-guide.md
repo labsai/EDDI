@@ -197,12 +197,23 @@ Use the discovered agents to dynamically compose a group conversation:
 }
 ```
 
-**System prompt (LLM task triggered by `create_expert_group`):**
-```text
-Legal analysis experts have been identified for this request.
+The rule only decides *that* experts exist; assembling them is a separate step. EDDI has no
+built-in LLM tool that creates a group from an ordinary conversation. Groups are created and
+started through the MCP server or the REST API:
 
-Use the createGroupConversation tool to assemble them into a discussion panel.
-```
+| Step | MCP tool (EDDI's `/mcp` server) | REST |
+| --- | --- | --- |
+| Create the panel from the matched agent IDs | `create_group` (`memberAgentIds` as a comma-separated list, `style` e.g. `ROUND_TABLE`) | `POST /groupstore/groups` |
+| Run the discussion | `discuss_with_group` (waits for the result) or `start_group_discussion` (returns at once; poll `read_group_conversation`) | `POST /groups/{groupId}/conversations` |
+
+The `create_expert_group` action is the signal for whatever client drives that (an MCP client
+such as an assistant connected to `/mcp`, or your own application calling REST) to act on the
+conversation's outcome.
+
+Inside a group discussion that is already running, members can grow the panel themselves: with
+`dynamicAgents.enabled` and `dynamicAgents.allowRecruitment` set on the group, a member's LLM gets `findAgentsByCapability` to locate a
+specialist and `recruitAgent` to bring it in from the next round — see
+[Group Conversations](group-conversations.md#recruitment).
 
 > The matched agent IDs are written with `storeData` into the current step's data
 > store under the key `capabilityMatch.results`, so Java tasks and tools can read

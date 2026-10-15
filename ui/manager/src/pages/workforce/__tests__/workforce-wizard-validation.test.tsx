@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/test/mocks/server";
 import { renderPage } from "@/test/test-utils";
 import { WorkforceWizard } from "@/pages/workforce/workforce-wizard";
+import { providerNeedsKey, providerLabel } from "@/components/workforce/wizard/member-validation";
 
 /**
  * Creating a Workforce provisions one agent per advisor through
@@ -238,26 +239,18 @@ describe("Workforce wizard — the team step says what the backend will refuse",
     expect(screen.getByLabelText(/workforce name/i)).toBeInTheDocument();
   });
 
-  it("still requires a key for gemini-vertex, which LLM_PROVIDERS calls keyless", async () => {
+  it("still requires a key for gemini-vertex, which LLM_PROVIDERS calls keyless", () => {
     // LLM_PROVIDERS marks gemini-vertex needsKey: false, but the backend's
     // isLocalLlmProvider allow-list (ollama, jlama, bedrock, oracle-genai)
     // does not include it — so a keyless request is rejected server-side,
     // after earlier advisors have already been provisioned. Validation
     // mirrors the backend's list, not the UI flag.
-    const user = userEvent.setup();
-    renderWizard();
-    await fillNamesOnly(user);
-    await fillPrompts(user);
-
-    await user.selectOptions(
-      screen.getByLabelText(/llm provider/i, { selector: "#provider-defaults" }),
-      "gemini-vertex",
-    );
-
-    expect(screen.getByTestId("apikey-defaults")).toBeInTheDocument();
-    await user.click(next());
-    expect(screen.getByLabelText(/workforce name/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("alert")[1]).toHaveTextContent(/google vertex ai needs an api key/i);
+    //
+    // The picker no longer OFFERS gemini-vertex (setup cannot configure it —
+    // see isProvisionableBySetup), so the rule is asserted on the validator
+    // itself: a stored or hand-written value must still be refused.
+    expect(providerNeedsKey("gemini-vertex")).toBe(true);
+    expect(providerLabel("gemini-vertex")).toBe("Google Vertex AI");
   });
 
   it("associates the API key label and its error with the input itself", async () => {

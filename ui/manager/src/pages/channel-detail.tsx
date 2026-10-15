@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
@@ -19,6 +19,7 @@ import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-secrets";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import {
   CHANNEL_TYPES,
@@ -31,6 +32,13 @@ import {
 
 /* ─── Target Card ─────────────────────────────────────────────── */
 
+let targetKeySeq = 0;
+/** A React key for a target card, unique for the page's lifetime. */
+function nextTargetKey(): string {
+  targetKeySeq += 1;
+  return `target-${targetKeySeq}`;
+}
+
 function TargetCard({
   target, index, isDefault, onUpdate, onRemove, onSetDefault,
 }: {
@@ -38,6 +46,7 @@ function TargetCard({
   onUpdate: (t: ChannelTarget) => void; onRemove: () => void; onSetDefault: () => void;
 }) {
   const { t } = useTranslation();
+  const uid = useId();
   const [triggerInput, setTriggerInput] = useState("");
   const [expanded, setExpanded] = useState(true);
 
@@ -52,7 +61,7 @@ function TargetCard({
   return (
     <div data-testid={`target-card-${index}`} className="rounded-xl border border-border/50 bg-card overflow-hidden">
       <div className="flex items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${target.type === "GROUP" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/30 dark:text-violet-400" : "bg-primary/10 text-primary"}`}>
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${target.type === "GROUP" ? "bg-secondary text-secondary-foreground ring-1 ring-border" : "bg-primary/10 text-primary"}`}>
           {target.type === "GROUP" ? <Users className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
         </div>
         <div className="flex-1 min-w-0">
@@ -70,12 +79,13 @@ function TargetCard({
         <div className="p-4 space-y-4 border-t border-border/30">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium">{t("channelDetail.targetName", "Name")}</label>
-              <Input data-testid={`target-name-${index}`} className="h-8 text-sm" value={target.name} onChange={(e) => onUpdate({ ...target, name: e.target.value })} placeholder="e.g. support" />
+              <label htmlFor={`${uid}-name`} className="text-xs font-medium">{t("channelDetail.targetName", "Name")}</label>
+              <Input id={`${uid}-name`} data-testid={`target-name-${index}`} className="h-8 text-sm" value={target.name} onChange={(e) => onUpdate({ ...target, name: e.target.value })} placeholder="e.g. support" />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium">{t("channelDetail.targetType", "Type")}</label>
+              <label htmlFor={`${uid}-type`} className="text-xs font-medium">{t("channelDetail.targetType", "Type")}</label>
               <select
+                id={`${uid}-type`}
                 className="flex h-8 w-full rounded-lg border border-border bg-background px-2 text-sm"
                 value={target.type}
                 onChange={(e) => {
@@ -85,7 +95,6 @@ function TargetCard({
                   const type = e.target.value as "AGENT" | "GROUP";
                   onUpdate({ ...target, type, targetId: type === target.type ? target.targetId : "" });
                 }}
-                aria-label={t("channelDetail.targetType", "Type")}
               >
                 <option value="AGENT">{t("channelDetail.typeAgent", "Agent")}</option>
                 <option value="GROUP">{t("channelDetail.typeGroup", "Group")}</option>
@@ -123,15 +132,15 @@ function TargetCard({
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
+            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
             <p className="text-xs text-muted-foreground">{t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
             <div className="flex gap-1.5 flex-wrap">
               {target.triggers.map((tr) => (
-                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}:<button aria-label={`Remove ${tr}`} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
+                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}:<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
               ))}
             </div>
             <div className="flex gap-1">
-              <Input className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTrigger())} />
+              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTrigger())} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTrigger}>{t("common.add", "Add")}</Button>
             </div>
           </div>
@@ -144,7 +153,7 @@ function TargetCard({
                 <Star className="h-3 w-3" />{t("channelDetail.setDefault", "Set as Default")}
               </Button>
             )}
-            <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive ms-auto gap-1" onClick={onRemove}>
+            <Button variant="ghost" size="sm" className="text-xs text-destructive hover:text-destructive ms-auto gap-1" onClick={onRemove} data-testid={`remove-target-${index}`}>
               <Trash2 className="h-3 w-3" />{t("channelDetail.removeTarget", "Remove")}
             </Button>
           </div>
@@ -211,20 +220,32 @@ function GroupTargetPicker({
 
 export function ChannelDetailPage() {
   const { t } = useTranslation();
+  const uid = useId();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, refetch } = useChannel(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
   const [draft, setDraft] = useState<ChannelIntegrationConfiguration | null>(null);
+  // React keys for the target cards, parallel to `draft.targets`. Not on the
+  // targets themselves, which are saved verbatim. The cards keep local state
+  // (a half-typed trigger, collapsed or not); keyed by index, removing one
+  // card handed its state to the card that slid into its place.
+  const [targetKeys, setTargetKeys] = useState<string[]>([]);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [rawOpen, setRawOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The stored configuration the draft was seeded from (or last saved as), as
+  // JSON. The draft differing from it is what "unsaved changes" means here.
+  const [baseline, setBaseline] = useState<string | null>(null);
+  const isDirty =
+    draft !== null && baseline !== null && JSON.stringify(draft) !== baseline;
+  useUnsavedChangesGuard(isDirty);
 
   /*
    * Seed the draft once per channel version — not on every `config` object.
@@ -240,6 +261,8 @@ export function ChannelDetailPage() {
     if (config && seededFor.current !== key) {
       seededFor.current = key;
       setDraft({ ...config });
+      setBaseline(JSON.stringify(config));
+      setTargetKeys(config.targets.map(() => nextTargetKey()));
     }
   }, [config, id, version]);
 
@@ -269,6 +292,7 @@ export function ChannelDetailPage() {
         const { version: newVersion } = parseChannelResourceUri(location);
         setSearchParams({ version: String(newVersion) }, { replace: true });
       }
+      setBaseline(JSON.stringify(draft));
       toast.success(t("channelDetail.saveSuccess", "Channel saved"));
     } catch (err) {
       // Backend rejects duplicate/reserved triggers, missing targetId, a
@@ -281,6 +305,8 @@ export function ChannelDetailPage() {
     if (!id) return;
     try {
       await deleteMutation.mutateAsync({ id, version });
+      // Gone: nothing left to lose, so leaving must not ask.
+      setBaseline(JSON.stringify(draft));
       navigate("/manage/channels");
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -315,6 +341,7 @@ export function ChannelDetailPage() {
       }
       return { ...prev, targets: remaining, defaultTargetName };
     });
+    setTargetKeys((keys) => keys.filter((_, i) => i !== index));
   }, []);
 
   const setDefaultTarget = useCallback((name: string) => {
@@ -334,10 +361,16 @@ export function ChannelDetailPage() {
       };
       return { ...prev, targets: [...prev.targets, newTarget] };
     });
+    setTargetKeys((keys) => [...keys, nextTargetKey()]);
   }, []);
 
   const copyWebhookUrl = async () => {
-    await navigator.clipboard.writeText(webhookUrl);
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+    } catch {
+      toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -355,6 +388,7 @@ export function ChannelDetailPage() {
     return (
       <div data-testid="channel-detail-error">
         <ErrorState
+          error={error}
           message={t("common.error")}
           onRetry={() => refetch()}
           retryLabel={t("common.retry")}
@@ -424,12 +458,12 @@ export function ChannelDetailPage() {
         <h2 className="text-sm font-semibold flex items-center gap-2"><Cable className="h-4 w-4 text-primary" />{t("channelDetail.general", "General")}</h2>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.name", "Name")}</label>
-            <Input data-testid="channel-name-input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <label htmlFor={`${uid}-name`} className="text-xs font-medium">{t("channelDetail.name", "Name")}</label>
+            <Input id={`${uid}-name`} data-testid="channel-name-input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.type", "Channel Type")}</label>
-            <select data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => setDraft({ ...draft, channelType: e.target.value })}>
+            <label htmlFor={`${uid}-type`} className="text-xs font-medium">{t("channelDetail.type", "Channel Type")}</label>
+            <select id={`${uid}-type`} data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => setDraft({ ...draft, channelType: e.target.value })}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
           </div>
@@ -441,16 +475,16 @@ export function ChannelDetailPage() {
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
         <div className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.channelId", "Slack Channel ID")}</label>
-            <Input data-testid="channel-id-input" value={draft.platformConfig.channelId ?? ""} onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, channelId: e.target.value } })} placeholder="C0123ABCDEF" />
+            <label htmlFor={`${uid}-channelid`} className="text-xs font-medium">{t("channelDetail.channelId", "Slack Channel ID")}</label>
+            <Input id={`${uid}-channelid`} data-testid="channel-id-input" value={draft.platformConfig.channelId ?? ""} onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, channelId: e.target.value } })} placeholder="C0123ABCDEF" />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.botToken", "Bot Token")}</label>
-            <SecretKeyPicker key={`${id}-bot-token`} referenceOnly testId="channel-bot-token" value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, botToken: v } } : prev)} placeholder="${vault:slack-bot-token}" />
+            <label htmlFor={`${uid}-bot`} className="text-xs font-medium">{t("channelDetail.botToken", "Bot Token")}</label>
+            <SecretKeyPicker key={`${id}-bot-token`} id={`${uid}-bot`} referenceOnly testId="channel-bot-token" value={draft.platformConfig.botToken ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, botToken: v } } : prev)} placeholder="${vault:slack-bot-token}" />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium">{t("channelDetail.signingSecret", "Signing Secret")}</label>
-            <SecretKeyPicker key={`${id}-signing-secret`} referenceOnly testId="channel-signing-secret" value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, signingSecret: v } } : prev)} placeholder="${vault:slack-signing-secret}" />
+            <label htmlFor={`${uid}-signing`} className="text-xs font-medium">{t("channelDetail.signingSecret", "Signing Secret")}</label>
+            <SecretKeyPicker key={`${id}-signing-secret`} id={`${uid}-signing`} referenceOnly testId="channel-signing-secret" value={draft.platformConfig.signingSecret ?? ""} onChange={(v) => setDraft((prev) => prev ? { ...prev, platformConfig: { ...prev.platformConfig, signingSecret: v } } : prev)} placeholder="${vault:slack-signing-secret}" />
           </div>
 
           {/* Human-in-the-Loop approvals (optional) — routes HITL approval cards
@@ -458,8 +492,9 @@ export function ChannelDetailPage() {
           <div className="space-y-3 border-t border-border/50 pt-3">
             <p className="text-xs font-semibold text-muted-foreground">{t("channelDetail.hitlSection", "Human-in-the-Loop Approvals (optional)")}</p>
             <div className="space-y-1">
-              <label className="text-xs font-medium">{t("channelDetail.hitlApprovalChannel", "Approval Channel ID")}</label>
+              <label htmlFor={`${uid}-hitlchan`} className="text-xs font-medium">{t("channelDetail.hitlApprovalChannel", "Approval Channel ID")}</label>
               <Input
+                id={`${uid}-hitlchan`}
                 data-testid="hitl-approval-channel-input"
                 value={draft.platformConfig.hitlApprovalChannel ?? ""}
                 onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, hitlApprovalChannel: e.target.value } })}
@@ -468,8 +503,9 @@ export function ChannelDetailPage() {
               <p className="text-[10px] text-muted-foreground">{t("channelDetail.hitlApprovalChannelHint", "Slack channel that receives an approval card when a conversation pauses.")}</p>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium">{t("channelDetail.hitlApproverUserIds", "Approver User IDs")}</label>
+              <label htmlFor={`${uid}-hitlusers`} className="text-xs font-medium">{t("channelDetail.hitlApproverUserIds", "Approver User IDs")}</label>
               <Input
+                id={`${uid}-hitlusers`}
                 data-testid="hitl-approver-ids-input"
                 value={draft.platformConfig.hitlApproverUserIds ?? ""}
                 onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, hitlApproverUserIds: e.target.value } })}
@@ -518,7 +554,7 @@ export function ChannelDetailPage() {
         </div>
         <div className="space-y-3">
           {draft.targets.map((target, i) => (
-            <TargetCard key={i} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
+            <TargetCard key={targetKeys[i] ?? `index-${i}`} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
               onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} />
           ))}
         </div>

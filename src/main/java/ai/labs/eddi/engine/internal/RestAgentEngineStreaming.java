@@ -25,10 +25,14 @@ import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMappe
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -118,6 +122,17 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
+    @Inject
+    TurnDeadlineHeaderReader turnDeadlineHeaderReader;
+
+    /**
+     * Reads {@code Idempotency-Key} / {@code X-EDDI-Request-Id}; nullable in unit
+     * tests.
+     */
+    @Inject
+    IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
+
     @Inject
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
@@ -158,6 +173,21 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // Engine-reserved context keys are only ever set by EDDI itself — see
         // ClientContextGuard. Same boundary as the non-streaming twin.
         clientContextGuard.strip(inputData);
+        if (turnDeadlineHeaderReader != null) {
+            turnDeadlineHeaderReader.apply(inputData);
+        }
+        if (idempotencyKeyHeaderReader != null) {
+            try {
+                idempotencyKeyHeaderReader.apply(inputData);
+            } catch (TurnIdempotencyService.InvalidIdempotencyKeyException e) {
+                // Before the sink is touched, like the input cap: a plain 400, not an
+                // 'error' event on a 200 stream.
+                throw new BadRequestException(e.getMessage(), Response.status(Response.Status.BAD_REQUEST)
+                        .type(MediaType.APPLICATION_JSON).entity(RestAgentEngine.errorBody(
+                                new TurnError("INVALID_IDEMPOTENCY_KEY", false, null, e.getMessage())))
+                        .build());
+            }
+        }
 
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
@@ -217,6 +247,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                                                         long durationMs) {
                             stream.sendJson("cascade_escalation",
                                     new CascadeEscalationEvent(fromStep, toStep, finite(confidence), finite(threshold), reason, durationMs));
+                        }
+
+                        @Override
+                        public void onLlmRetry(String reason, int attempt) {
+                            stream.sendJson("llm_retry", new LlmRetryEvent(reason, attempt));
                         }
 
                         @Override
@@ -540,6 +575,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private record CascadeStepStartEvent(int stepIndex, String modelType, String modelName, int totalSteps) {
     }
 
+    /** Typed payload for the {@code llm_retry} SSE event. */
+    private record LlmRetryEvent(String reason, int attempt) {
+    }
+
     /** Typed payload for the {@code cascade_escalation} SSE event. */
     private record CascadeEscalationEvent(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
     }
@@ -629,6 +668,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             if (snapshot.getConversationOutputs() != null) {
                 sb.append(",\"conversationOutputs\":")
                         .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));
+            }
+            if (snapshot.getError() != null) {
+                sb.append(",\"error\":").append(MAPPER.writeValueAsString(snapshot.getError()));
             }
             sb.append("}");
             return sb.toString();

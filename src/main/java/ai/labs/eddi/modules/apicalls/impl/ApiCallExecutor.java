@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -32,6 +34,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -101,6 +104,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * {@value #BATCH_DEFAULT_MAX_SIZE_PROPERTY}.
      */
     public static final int DEFAULT_MAX_BATCH_SIZE = 100;
+
+    /**
+     * Below this much budget after the reserve, a call gets the whole of what is
+     * left of the turn rather than a sliver.
+     */
+    private static final long MIN_DEADLINE_CALL_BUDGET_MS = 500L;
 
     /**
      * Ceiling for {@code maxBatchSize}: a config may lower the default or raise it
@@ -262,6 +271,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
                     substitutedSecrets.addAll(built.resolvedSecrets());
                     request = built.request();
+                    // Inside a turn deadline the call may not outlive what is left of the
+                    // turn. The first call is never skipped while any time remains.
+                    TurnDeadline turnDeadline = memory.getTurnDeadline();
+                    if (turnDeadline != null) {
+                        if (turnDeadline.isExpired()) {
+                            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall").increment();
+                            throw new LifecycleException("ApiCall (" + call.getName() + ") not sent: the turn deadline has already passed");
+                        }
+                        request.setTimeout(deadlineBoundedTimeout(resolveTimeout(call), turnDeadline), TimeUnit.MILLISECONDS);
+                    }
                     var objectName = call.getName() + "Request";
                     var requestMap = request.toMap();
                     // Scrub resolved secrets — headers, query parameters and body — from
@@ -405,6 +424,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     amountOfExecutions++;
                     retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
                             response.getContentAsString());
+                    if (retryCall && memory.getTurnDeadline() != null
+                            && !retryFitsDeadline(call, amountOfExecutions, memory.getTurnDeadline())) {
+                        Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall_retry").increment();
+                        LOGGER.warn(format("ApiCall (%s) not retried: %sms left in the turn is not enough for the backoff plus another attempt",
+                                call.getName(), memory.getTurnDeadline().remainingMs()));
+                        retryCall = false;
+                    }
                 } while (retryCall);
 
                 // This executor has no response-validation stage, so a post-response
@@ -619,9 +645,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         if (preRequest != null && preRequest.getBatchRequests() != null) {
             BatchRequestBuildingInstruction batchRequest = preRequest.getBatchRequests();
-            if (batchRequest.getExecuteCallsSequentially() == null) {
-                batchRequest.setExecuteCallsSequentially(false);
-            }
+            // Read, not defaulted in place: the instruction is part of the cached
+            // configuration every conversation of the agent shares.
+            boolean executeCallsSequentially = Boolean.TRUE.equals(batchRequest.getExecuteCallsSequentially());
 
             // Every request is built here, on the turn's own thread, and only the sending
             // goes to the background. A request that cannot be built — an unsatisfiable
@@ -665,7 +691,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
                 for (BuiltRequest built : requests) {
                     IRequest request = built.request();
-                    if (batchRequest.getExecuteCallsSequentially()) {
+                    if (executeCallsSequentially) {
                         long executionStart = currentTimeMillis();
                         LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
                         IResponse response = request.send();
@@ -747,6 +773,30 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
 
         return Math.min(configuredMaxBackoff, MAX_BACKOFF_MILLIS);
+    }
+
+    /**
+     * The call's timeout, shortened to what the turn can still spare: what is left
+     * after the reserve, or all of what is left when that is almost nothing (the
+     * call is still attempted, with the time there is).
+     */
+    static long deadlineBoundedTimeout(long configuredMs, TurnDeadline deadline) {
+        long budget = deadline.remainingAfterReserveMs();
+        if (budget < MIN_DEADLINE_CALL_BUDGET_MS) {
+            budget = deadline.remainingMs();
+        }
+        return Math.max(1L, Math.min(configuredMs, budget));
+    }
+
+    /**
+     * Whether another attempt of {@code call} fits: the retry backoff plus a call
+     * of at least {@code min(timeout, 3 s)} must remain after the reserve.
+     * {@code amountOfExecutions} is how many attempts have been made.
+     */
+    boolean retryFitsDeadline(ApiCall call, int amountOfExecutions, TurnDeadline deadline) {
+        long delay = getDelayInMillis(call, true, amountOfExecutions);
+        long attempt = Math.min(resolveTimeout(call), TurnDeadline.MIN_ATTEMPT_MS);
+        return deadline.remainingAfterReserveMs() >= delay + attempt;
     }
 
     /**
@@ -910,12 +960,25 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
+    }
+
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException {
         var resolvedSecrets = new HashSet<String>();
         try {
-            return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
+            if (ApprovedCallScope.isActive()) {
+                // A human-approved tool call: judge the request exactly as it will be
+                // sent, after preRequest.propertyInstructions ran — the preview the
+                // resumer checked before execution is built without them.
+                Map<String, Object> outgoing = built.request().toMap();
+                ApprovedCallScope.checkOutgoing(stringOf(outgoing.get(IRequest.KEY_METHOD)), stringOf(outgoing.get(IRequest.KEY_URI)),
+                        stringOf(outgoing.get(IRequest.KEY_BODY)));
+            }
+            return built;
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1051,7 +1114,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
-        var targetUriStr = prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
+        var targetUriStr = templateTargetUri(targetDestination, templateDataObjects);
         // Resolve global variable references, then vault references in URL
         targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
         targetUriStr = resolveSecrets(targetUriStr, resolvedSecrets, "the request path");
@@ -1437,6 +1500,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -1470,10 +1536,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * Recursion is depth-bounded ({@link #MAX_PATH_VIEW_DEPTH}). Template data is
      * rebuilt per turn from conversation memory and is not expected to nest deeply;
      * the bound exists so a pathological or self-referential structure cannot turn
-     * a request into a stack overflow. Past it the value is passed through
-     * unencoded rather than dropped: losing data would silently change what a
-     * legitimate template renders, and nothing that deep is reachable by a path
-     * expression in practice.
+     * a request into a stack overflow. Past it a map or list is replaced by an
+     * empty one — fail closed. It used to be passed through unencoded, so a string
+     * nested more than ten levels deep (an upstream response saved in memory is
+     * enough) reached the request path with its {@code /}, {@code ?} and {@code #}
+     * intact. A string at any depth is still encoded.
      * <p>
      * Non-String scalars (numbers, booleans) are left alone — Qute renders them via
      * {@code toString()} and none can yield a {@code /}, {@code ?} or {@code #}.
@@ -1484,8 +1551,65 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * identical encoding, so request pinning is unaffected.
      */
     private static Map<String, Object> pathSafeView(Map<String, Object> templateDataObjects) {
+        return encodedView(templateDataObjects, PATH_SEGMENT_UNRESERVED);
+    }
+
+    /**
+     * Renders the target URL template. The authority ({@code scheme://host:port})
+     * is rendered against a host-safe view and everything after it against the
+     * path-safe view.
+     * <p>
+     * A 5.x configuration such as {@code https://{properties.apiHost}} templates
+     * the host. The path-safe view percent-encodes every dot, which is right for a
+     * path segment (it keeps {@code ..} from traversing) and wrong for a host:
+     * {@code api.example.com} became {@code api%2Eexample%2Ecom} and the call
+     * failed with an unknown host. A host-safe value keeps letters, digits,
+     * {@code . - _} and {@code :}; anything else in a substituted value
+     * ({@code / @ ? #}, spaces, {@code %}) is still percent-encoded, so a value
+     * cannot add a path, a userinfo part or a query to the authority. The result is
+     * validated as before ({@link UrlValidationUtils}), so a host that resolves to
+     * a private or metadata address is refused all the same.
+     */
+    String templateTargetUri(String targetDestination, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException {
+        int authorityEnd = authorityEnd(targetDestination);
+        if (authorityEnd < 0) {
+            return prePostUtils.templateValues(targetDestination, pathSafeView(templateDataObjects));
+        }
+        String authority = prePostUtils.templateValues(targetDestination.substring(0, authorityEnd),
+                encodedView(templateDataObjects, HOST_UNRESERVED));
+        String rest = prePostUtils.templateValues(targetDestination.substring(authorityEnd), pathSafeView(templateDataObjects));
+        return authority + rest;
+    }
+
+    /**
+     * Index just past the authority of {@code scheme://authority/...}, or -1 when
+     * the value carries no http(s) scheme. Braces are tracked so a {@code /} inside
+     * a template expression does not end the authority early.
+     */
+    static int authorityEnd(String url) {
+        String lower = url.toLowerCase(Locale.ROOT);
+        int start = lower.startsWith("https://") ? 8 : lower.startsWith("http://") ? 7 : -1;
+        if (start < 0) {
+            return -1;
+        }
+        int depth = 0;
+        for (int i = start; i < url.length(); i++) {
+            char c = url.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}' && depth > 0) {
+                depth--;
+            } else if (depth == 0 && (c == '/' || c == '?' || c == '#')) {
+                return i;
+            }
+        }
+        return url.length();
+    }
+
+    private static Map<String, Object> encodedView(Map<String, Object> templateDataObjects, String unreserved) {
         var view = new HashMap<String, Object>(templateDataObjects.size());
-        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0)));
+        templateDataObjects.forEach((key, value) -> view.put(key, encodePathValue(value, 0, unreserved)));
         return view;
     }
 
@@ -1496,21 +1620,31 @@ public class ApiCallExecutor implements IApiCallExecutor {
     static final int MAX_PATH_VIEW_DEPTH = 10;
 
     static Object encodePathValue(Object value, int depth) {
+        return encodePathValue(value, depth, PATH_SEGMENT_UNRESERVED);
+    }
+
+    private static Object encodePathValue(Object value, int depth, String unreserved) {
         if (value instanceof String stringValue) {
-            return encodePathSegment(stringValue);
+            return encodeSegment(stringValue, unreserved);
         }
         if (depth >= MAX_PATH_VIEW_DEPTH) {
+            if (value instanceof Map<?, ?>) {
+                return Map.of();
+            }
+            if (value instanceof List<?>) {
+                return List.of();
+            }
             return value;
         }
         if (value instanceof Map<?, ?> nested) {
             var copy = new LinkedHashMap<Object, Object>(nested.size());
-            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1)));
+            nested.forEach((nestedKey, nestedValue) -> copy.put(nestedKey, encodePathValue(nestedValue, depth + 1, unreserved)));
             return copy;
         }
         if (value instanceof List<?> items) {
             var copy = new ArrayList<>(items.size());
             for (Object item : items) {
-                copy.add(encodePathValue(item, depth + 1));
+                copy.add(encodePathValue(item, depth + 1, unreserved));
             }
             return copy;
         }
@@ -1519,10 +1653,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /** Percent-encodes every byte outside RFC 3986 unreserved, UTF-8. */
     static String encodePathSegment(String value) {
+        return encodeSegment(value, PATH_SEGMENT_UNRESERVED);
+    }
+
+    private static String encodeSegment(String value, String unreserved) {
         var out = new StringBuilder(value.length());
         for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
             char c = (char) (b & 0xFF);
-            if (PATH_SEGMENT_UNRESERVED.indexOf(c) >= 0) {
+            if (unreserved.indexOf(c) >= 0) {
                 out.append(c);
             } else {
                 out.append('%').append(String.format("%02X", b & 0xFF));

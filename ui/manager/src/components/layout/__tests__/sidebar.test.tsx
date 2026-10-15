@@ -206,7 +206,8 @@ describe("Sidebar", () => {
     const stored = localStorage.getItem("eddi-sidebar-sections");
     expect(stored).toBeTruthy();
     const parsed = JSON.parse(stored!);
-    expect(parsed).toContain(3); // Admin is index 3
+    // Keyed by the section's stable id, not its position.
+    expect(parsed).toContain("admin");
   });
 
   // ── External links ─────────────────────────────────────────────────

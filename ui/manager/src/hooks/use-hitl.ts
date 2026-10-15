@@ -35,8 +35,27 @@ function clearChatPauseIfCurrent(conversationId: string) {
 
 // ── Queries ──────────────────────────────────────────────────────
 
+/**
+ * How many 1:1 pending approvals the inbox asks for. The backend endpoint has
+ * no offset, so anything past this is not reachable from one request; a result
+ * of exactly this many is reported as "more pending" rather than presented as
+ * the whole queue (see {@link isPendingApprovalsCapped}).
+ */
+export const PENDING_APPROVALS_LIMIT = 200;
+
+/**
+ * Whether a pending-approvals list hit the request cap. Like the group inbox's
+ * `truncated`, a heuristic: it also fires when exactly `limit` are pending.
+ */
+export function isPendingApprovalsCapped(
+  list: readonly unknown[] | undefined,
+  limit = PENDING_APPROVALS_LIMIT,
+): boolean {
+  return (list?.length ?? 0) >= limit;
+}
+
 /** Pending approvals for regular (1:1) conversations. */
-export function usePendingApprovals(limit = 200) {
+export function usePendingApprovals(limit = PENDING_APPROVALS_LIMIT) {
   return useQuery({
     queryKey: ["pending-approvals", { limit }],
     queryFn: () => listPendingApprovals(limit),
@@ -216,11 +235,11 @@ export function useCancelGroupDiscussion() {
 
 /**
  * Submit a HUMAN group member's turn (I6). Unlike the approve/stream resume,
- * this is a plain synchronous REST call — the backend has no `/human-input/stream`
- * variant, so the discussion resumes on the request thread and the response is
- * the settled `GroupConversation` (the next pause point, or COMPLETED). There is
- * no live token-by-token progress to show while it's in flight, only a loading
- * state until it resolves.
+ * this is a plain REST call — the backend has no `/human-input/stream` variant,
+ * so there is no live token-by-token progress to attach to. The call returns
+ * once the turn is recorded; the discussion resumes on the server from there, so
+ * callers follow it by polling the persisted conversation and should say it is
+ * resuming rather than imply it has settled.
  */
 export function useSubmitHumanInput() {
   const qc = useQueryClient();
@@ -236,9 +255,15 @@ export function useSubmitHumanInput() {
       memberId: string;
       content: string;
     }) => submitHumanInput(groupId, gcId, memberId, content),
-    onSuccess: (_data, { groupId }) => {
-      qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+    // Awaited, so the mutation stays pending until the refetched conversation
+    // is in: the backend resumes the discussion asynchronously, and without
+    // this the banner re-enabled for an instant on the stale AWAITING_HUMAN_INPUT
+    // document, with the typed text still in it.
+    onSuccess: async (_data, { groupId }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["groupConversations", groupId] }),
+        qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] }),
+      ]);
     },
   });
 }

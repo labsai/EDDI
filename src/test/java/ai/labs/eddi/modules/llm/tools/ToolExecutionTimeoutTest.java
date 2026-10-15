@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -135,6 +136,20 @@ class ToolExecutionTimeoutTest {
                 toolExecution, false, false, false, 60, timeoutMs);
     }
 
+    @Test
+    @DisplayName("an approved call's self-ungating scope follows it onto the timeout executor's thread")
+    void approvedCallScopeIsCarriedOntoTheExecutorThread() {
+        var seenOnWorker = new AtomicReference<Boolean>();
+        String result = ApprovedCallScope.run("agent-1", () -> runBounded("scopedTool", () -> {
+            seenOnWorker.set(ApprovedCallScope.isActive());
+            return "ok";
+        }, 5_000));
+
+        assertEquals("ok", result);
+        assertEquals(Boolean.TRUE, seenOnWorker.get(),
+                "without propagation the dispatch-time check silently stops applying on the worker thread");
+    }
+
     // ==================== expiry ====================
 
     @Test
@@ -245,10 +260,10 @@ class ToolExecutionTimeoutTest {
     @DisplayName("a tool that throws under a bound still reports its OWN message, not the executor's wrapper")
     void toolFailureKeepsItsMessage() {
         String result = runBounded("failingTool", () -> {
-            throw new IllegalStateException("upstream said no");
+            throw new ToolFailureException("Error: upstream said no");
         }, SHORT_TIMEOUT_MS);
 
-        assertEquals("Error executing tool: upstream said no", result);
+        assertEquals("Error: upstream said no", result);
         assertNull(meterRegistry.find("eddi.tool.execution.timeout").tag("tool", "failingTool").counter(),
                 "a plain failure is not a timeout");
     }

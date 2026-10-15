@@ -392,18 +392,50 @@ describe("RagEditor", () => {
   it("names the real backend default, not a sample, for a per-KB table", () => {
     renderWithProviders(
       <RagEditor
-        data={{ storeType: "pgvector", storeParameters: {} }}
+        data={{ storeType: "pgvector", storeParameters: {}, storeNamespace: "id" }}
         onChange={onChange}
         resourceId="6789abcdef0123456789abcd"
       />
     );
-    // EmbeddingStoreFactory derives eddi_kb_<id>; the old hint showed a fixed
-    // "embeddings", which made every KB that copied it share one table.
+    // KnowledgeBaseStorage derives eddi_kbid_<id> in the per-id layout; the old
+    // hint showed a fixed "embeddings", which made every KB that copied it share
+    // one table.
     expect(screen.getByTestId("store-value-table")).toHaveAttribute(
       "placeholder",
-      "Default: eddi_kb_6789abcdef0123456789abcd",
+      "Default: eddi_kbid_6789abcdef0123456789abcd",
     );
     expect(screen.getByTestId("store-value-user")).toHaveAttribute("placeholder", "Default: eddi");
+  });
+
+  it("derives the legacy (6.5) default from the name, and says so when it cannot spell it", () => {
+    const { unmount } = renderWithProviders(
+      <RagEditor
+        data={{ name: "product_docs", storeType: "pgvector", storeParameters: {} }}
+        onChange={onChange}
+        resourceId="6789abcdef0123456789abcd"
+      />
+    );
+    expect(screen.getByTestId("store-value-table")).toHaveAttribute("placeholder", "Default: eddi_kb_product_docs");
+    unmount();
+    renderWithProviders(
+      <RagEditor
+        data={{ name: "Product Docs", storeType: "pgvector", storeParameters: {} }}
+        onChange={onChange}
+        resourceId="6789abcdef0123456789abcd"
+      />
+    );
+    expect(screen.getByTestId("store-value-table")).toHaveAttribute(
+      "placeholder",
+      "Default: derived from the name (eddi_kb_…)",
+    );
+  });
+
+  it("calls a new knowledge base's default location its own per-id one", () => {
+    renderWithProviders(<RagEditor data={{ storeType: "qdrant", storeParameters: {} }} onChange={onChange} />);
+    expect(screen.getByTestId("store-value-collectionName")).toHaveAttribute(
+      "placeholder",
+      "Default: one per knowledge base (eddi_kbid_<id>)",
+    );
   });
 
   it("marks a sample value as a sample and a required field as required", () => {

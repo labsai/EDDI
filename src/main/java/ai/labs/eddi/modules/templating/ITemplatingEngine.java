@@ -12,6 +12,16 @@ import java.util.Map;
 public interface ITemplatingEngine {
     String processTemplate(String template, Map<String, Object> dynamicAttributesMap) throws TemplateEngineException;
 
+    /**
+     * Parses a template without rendering it.
+     *
+     * @return {@code null} when the template parses, or when it holds nothing to
+     *         parse; otherwise the parser's message
+     */
+    default String validateTemplate(String template) {
+        return null;
+    }
+
     String processTemplate(String template, Map<String, Object> dynamicAttributesMap, TemplateMode templateMode) throws TemplateEngineException;
 
     /**

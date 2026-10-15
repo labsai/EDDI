@@ -16,7 +16,8 @@ The editor now:
 - **lists every parameter the backend knows**, each with what an empty field means: `Default: …` (copied from the factories), `e.g. …` (a sample), or `Required`. Credential fields say "pick a vault secret" rather than suggesting a key name;
 - **never saves an empty value**: clearing a field removes the key. Unknown parameters (from an import, a hand edit, or "Add Parameter") stay on screen, in place and focused, until they have a value;
 - **flags `""` values saved by the old editor** ("the default is not used") with a one-click "Use default";
-- treats `connectionString` as a credential field (Atlas).
+- treats `connectionString` as a credential field (Atlas);
+- follows the storage layout from #945 (knowledge bases isolated by id): the default table, collection or index shows as `eddi_kbid_<id>` for a per-id knowledge base (and for a new one, which the server stamps with that layout), and as the name-derived `eddi_kb_<name>` for a 6.5 knowledge base. OpenAI's now-honoured `baseUrl` shows its real default, `https://api.openai.com/v1`.
 
 This is the first PR of [`planning/rag-embedding-ux-plan.md`](../../planning/rag-embedding-ux-plan.md) (P3, P4, P10, P11). The backend still uses `""` when it is sent. Normalising blank to absent server-side, and publishing the parameter catalogue so these hints stop being hand-copied, is WS1a in that plan.
 

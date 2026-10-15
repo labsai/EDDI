@@ -20,6 +20,11 @@ interface AgentPickerProps {
   "aria-invalid"?: boolean;
   /** Id(s) of the element(s) describing this field — typically its error text. */
   "aria-describedby"?: string;
+  /**
+   * Agents not to offer — e.g. ones already seated elsewhere in the same group.
+   * The current `value` is always offered, so a selection never vanishes.
+   */
+  excludeIds?: ReadonlySet<string>;
 }
 
 export function AgentPicker({
@@ -30,6 +35,7 @@ export function AgentPicker({
   id,
   "aria-invalid": ariaInvalid,
   "aria-describedby": ariaDescribedBy,
+  excludeIds,
 }: AgentPickerProps) {
   const { t } = useTranslation();
   
@@ -54,8 +60,11 @@ export function AgentPicker({
   // Group by agent ID and keep latest version
   const agents = useMemo(() => {
     if (!rawAgents) return [];
-    return groupAgentsByName(rawAgents);
-  }, [rawAgents]);
+    const grouped = groupAgentsByName(rawAgents);
+    return excludeIds && excludeIds.size > 0
+      ? grouped.filter((agent) => agent.id === value || !excludeIds.has(agent.id))
+      : grouped;
+  }, [rawAgents, excludeIds, value]);
 
   // Handlers
   const openPopup = useCallback(() => {

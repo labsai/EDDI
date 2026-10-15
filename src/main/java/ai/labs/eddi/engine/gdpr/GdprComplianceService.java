@@ -46,8 +46,8 @@ import java.util.*;
  * <p>
  * <strong>Deletion:</strong> Cascades erasure across all stores containing user
  * PII. User memories and conversations are permanently deleted. Audit ledger
- * and database logs are pseudonymized (userId → SHA-256 hash) under GDPR Art.
- * 17(3)(e).
+ * rows are kept, but their content is redacted and the user id pseudonymized
+ * ({@link AuditLedgerService#eraseUser}); database logs are pseudonymized.
  * <p>
  * <strong>Export:</strong> Aggregates all user data into a single
  * JSON-serializable bundle (GDPR Art. 15/20 — Right of Access / Data
@@ -375,7 +375,9 @@ public class GdprComplianceService {
      * <li>Delete all OAuth connection grants of the user</li>
      * <li>Re-sweep user memories written while the cascade ran</li>
      * <li>Pseudonymize database log entries</li>
-     * <li>Pseudonymize audit ledger entries</li>
+     * <li>Redact the content of the user's audit ledger entries and pseudonymize
+     * their user id (content is kept under
+     * {@code eddi.audit.erasure-mode=pseudonymize})</li>
      * </ol>
      * <p>
      * Conversation IDs are resolved once before step 2 and reused across steps 2–4.
@@ -726,10 +728,36 @@ public class GdprComplianceService {
             recordFailure(failedSteps, "databaseLogs", e, pseudonym);
         }
 
-        // 7. Pseudonymize audit ledger (retained under Art. 17(3)(e))
+        // 7a. Redact the audit ledger. The rows are retained (EU AI Act
+        // record-keeping),
+        // but not with this user's prompts, responses and tool calls in them: the
+        // ledger flushes its write queue first — entries still queued used to land
+        // after this step and be missed — then replaces each row's content with a
+        // redaction marker and re-signs the rows that verified. Skipped under
+        // eddi.audit.erasure-mode=pseudonymize.
         long auditPseudonymized = 0;
+        long auditRedacted = 0;
         try {
-            auditPseudonymized = auditStore.pseudonymizeByUserId(userId, pseudonym);
+            AuditLedgerService.ErasureResult redaction = auditLedgerService.eraseUser(userId);
+            if (redaction != null) {
+                auditRedacted = redaction.redacted();
+                auditPseudonymized += redaction.pseudonymized();
+                if (!redaction.complete()) {
+                    recordFailure(failedSteps, "auditRedaction",
+                            new IllegalStateException(redaction.failed() + " audit entries could not be redacted"), pseudonym);
+                }
+                LOGGER.infof("[GDPR] Redacted %d audit entries (%d re-signed, %d kept unverified) [%s]", auditRedacted, redaction.resealed(),
+                        redaction.keptUnverified(), pseudonym);
+            }
+        } catch (Exception e) {
+            recordFailure(failedSteps, "auditRedaction", e, pseudonym);
+        }
+
+        // 7b. Pseudonymize what is left in the audit ledger under the raw id — every
+        // row in pseudonymize mode, the rows the redaction could not reach otherwise.
+        try {
+            long remaining = auditStore.pseudonymizeByUserId(userId, pseudonym);
+            auditPseudonymized += remaining;
             LOGGER.infof("[GDPR] Pseudonymized %d audit entries [%s]",
                     auditPseudonymized, pseudonym);
         } catch (Exception e) {
@@ -756,7 +784,8 @@ public class GdprComplianceService {
                 conversationsDeleted, mappingsDeleted, logsPseudonymized,
                 auditPseudonymized, attachmentsDeleted, journalEntriesDeleted,
                 checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
-                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted);
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, Instant.now(), additionalDeleted,
+                auditRedacted);
 
         if (result.complete()) {
             LOGGER.infof("[GDPR] Erasure cascade complete [%s]: "
@@ -790,6 +819,7 @@ public class GdprComplianceService {
         auditDetails.put("inFlightWorkStopped", inFlightWorkStopped);
         auditDetails.put("logsPseudonymized", logsPseudonymized);
         auditDetails.put("auditPseudonymized", auditPseudonymized);
+        auditDetails.put("auditRedacted", auditRedacted);
         additionalDeleted.forEach((participant, removed) -> auditDetails.put(participant + "Deleted", removed));
         auditDetails.put("complete", result.complete());
         auditDetails.put("failedSteps", result.failedSteps());

@@ -1,11 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { AuthProvider } from "@/components/auth/auth-provider";
-import { App } from "@/app";
+import { RouterProvider } from "react-router-dom";
+import { queryClient } from "@/lib/query-client";
+import { createAppRouter } from "@/app-router";
 import { i18nReady } from "@/i18n/config";
 import "@/index.css";
 // NOT importing "@/hooks/session-log-store" here, deliberately. It used to be a
@@ -30,15 +27,6 @@ import "@fontsource-variable/noto-sans-tc";
 // components need it, so it lives in `@/lib/monaco-setup`, which those
 // components import for its side effect — see that file for why the
 // configuration cannot simply be deferred behind a function call.
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 1,
-    },
-  },
-});
 
 /**
  * Force the mock API on regardless of whether a backend answers.
@@ -71,7 +59,11 @@ async function startApp() {
       const res = await fetch("/agentstore/agents/descriptors?limit=1", {
         signal: AbortSignal.timeout(1500),
       });
-      if (!res.ok) throw new Error("Backend not OK");
+      // 401/403 is an answer from EDDI with authentication on (the probe runs
+      // before sign-in): the backend is there. Reading it as "unreachable" put
+      // every authenticated dev session onto the mock API, where an editor saw
+      // the mocks' admin data instead of the server's refusals.
+      if (!res.ok && res.status !== 401 && res.status !== 403) throw new Error("Backend not OK");
       console.log("[EDDI] Backend detected — using real API");
     } catch {
       // Say which of the two reasons it was. Logging "backend not reachable"
@@ -106,16 +98,12 @@ async function startApp() {
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <BrowserRouter>
-        <AuthProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
-              <App />
-              <Toaster position="bottom-right" richColors closeButton />
-            </ThemeProvider>
-          </QueryClientProvider>
-        </AuthProvider>
-      </BrowserRouter>
+      {/* useTransitions={false}: a data router wraps navigation in a React
+          transition by default, which keeps the OLD page on screen until a
+          lazy route's chunk has loaded — no skeleton, no sign the click did
+          anything. The app's Suspense boundary at the outlet is the loading
+          state, so navigation must render synchronously and let it show. */}
+      <RouterProvider router={createAppRouter(queryClient)} useTransitions={false} />
     </StrictMode>
   );
 }

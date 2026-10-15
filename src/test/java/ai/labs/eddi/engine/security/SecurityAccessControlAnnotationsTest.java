@@ -57,8 +57,22 @@ class SecurityAccessControlAnnotationsTest {
     @Test
     @DisplayName("Finding 9: the A2A JSON-RPC endpoint requires a real role")
     void a2aJsonRpcRoleGated() throws Exception {
-        var handleJsonRpc = RestA2AEndpoint.class.getMethod("handleJsonRpc", String.class, JsonRpcRequest.class);
+        var handleJsonRpc = RestA2AEndpoint.class.getMethod("handleJsonRpc", String.class, String.class, JsonRpcRequest.class);
         var roles = rolesOf(handleJsonRpc.getAnnotation(RolesAllowed.class));
-        assertTrue(roles.contains("eddi-user"), "a role-less realm user must not reach A2A tasks/send");
+        assertTrue(roles.contains("eddi-user"), "a role-less realm user must not reach A2A SendMessage");
+    }
+
+    @Test
+    @DisplayName("F7: the A2A agent roster requires a real role, not just a token")
+    void a2aAgentListingRoleGated() throws Exception {
+        var listing = RestA2AEndpoint.class.getMethod("listA2AAgents");
+        assertEquals(Set.of("eddi-admin", "eddi-editor", "eddi-user"), rolesOf(listing.getAnnotation(RolesAllowed.class)));
+    }
+
+    @Test
+    @DisplayName("F7: per-conversation store operations require some EDDI role on top of the owner check")
+    void conversationStoreRoleGated() {
+        assertEquals(Set.of("eddi-admin", "eddi-editor", "eddi-user", "eddi-approver", "eddi-viewer"),
+                rolesOf(IRestConversationStore.class.getAnnotation(RolesAllowed.class)));
     }
 }

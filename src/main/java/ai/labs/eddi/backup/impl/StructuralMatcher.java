@@ -34,6 +34,7 @@ import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import org.jboss.logging.Logger;
@@ -619,7 +620,9 @@ public class StructuralMatcher {
                         + agentId + ", so there is nothing to compare against.");
             }
             config = agentStore.readAgent(agentId, version);
-        } catch (NotFoundException e) {
+        } catch (NotFoundException | ForbiddenException e) {
+            // A caller without VIEW on the target is refused (403), not handed a 500
+            // that reads like a server fault.
             throw e;
         } catch (Exception e) {
             // instanceof rather than a second catch clause: the store's checked

@@ -5,6 +5,15 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alerting rules (docs/monitoring/eddi-alerts.yml, mounted by
+# docker-compose.monitoring.yml). They evaluate whether or not an Alertmanager is
+# configured: Prometheus' Alerts page and /api/v1/alerts show what is firing. To be
+# notified, add an `alerting: alertmanagers:` block pointing at your Alertmanager.
+# The rules select on job="eddi" for the generic series (up, http_*, jvm_*), so
+# keep the job name below if you copy this file.
+rule_files:
+  - /etc/prometheus/eddi-alerts.yml
+
 scrape_configs:
   - job_name: "eddi"
     metrics_path: "/q/metrics"
@@ -16,7 +25,8 @@ scrape_configs:
     # Increase scrape timeout for large metric sets
     scrape_timeout: 10s
     # With authentication on (docker-compose.auth.yml, install.sh --full),
-    # /q/metrics answers 401 to an anonymous scrape and this target shows DOWN.
+    # /q/metrics answers 401 to an anonymous scrape (403 to a token without the
+    # eddi-admin or eddi-metrics realm role) and this target shows DOWN.
     # Uncomment and create the client described in monitoring-guide.md
     # ("Scraping with authentication on"), mounting its secret into the
     # container — or set EDDI_METRICS_HTTP_POLICY=permit where /q/metrics cannot
