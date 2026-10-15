@@ -69,7 +69,12 @@ class AlertRulesTest {
             "EddiToolFailureRatio", // tool failure ratio
             "EddiVaultErrors", // vault errors
             "EddiQuotaStoreUnavailable", // quota unavailable
-            "EddiScheduleFiresDeadLettered", "EddiNatsDeadLetters", // schedule / NATS dead letters
+            // Schedule and turn dead letters. The NATS rule went with the
+            // build-profile NATS coordinator: a cluster counts its dead letters
+            // with the same meter as a single node
+            // (EddiConversationTurnsDeadLettered), and the cluster rules ship in
+            // eddi-cluster-alerts.yml.
+            "EddiScheduleFiresDeadLettered", "EddiConversationTurnsDeadLettered",
             "EddiOperatorGateRegressed", // gate verified
             "EddiHeapAfterGcHigh", // heap after GC
             "EddiRestartLoop"); // restart loop

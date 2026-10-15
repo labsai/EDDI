@@ -1,4 +1,5 @@
 import type { PendingToolCallView } from "@/lib/api/hitl";
+import { parseJsonPatch, type JsonPatchOp } from "./json-patch";
 
 /**
  * Refuses a gated write that would set an approval gate from inside an LLM
@@ -73,6 +74,35 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  * contract — an approver who cannot see the whole document cannot meaningfully
  * approve it.
  *
+ * ## Patches (RFC 6902)
+ *
+ * The operator edits an LLM configuration with `PATCH /llmstore/llms/{id}`, whose
+ * body is a list of operations rather than a document, so "does the body contain
+ * `toolApprovals`" is no longer the whole question. A patch is refused when:
+ *
+ *  - an operation's `path` or `from` names `toolApprovals` anywhere — a
+ *    substring test on the raw pointer, so a malformed pointer that merely spells
+ *    it fails closed too — at any depth, for any operation, `test` and `remove`
+ *    included: the guard is about the field being in play at all, not about which
+ *    way the patch moves it;
+ *  - an operation's `value` contains a `toolApprovals` key at any depth. That is
+ *    also what covers replacing a whole task, the whole `/tasks` array or the
+ *    root (`""`) with a value that carries one;
+ *  - an operation is `copy` or `move`, or anything but `add`, `replace`, `remove`
+ *    or `test`. Those two move a part of the STORED document to somewhere else
+ *    without the body naming what — `copy /tasks/0 -> /tasks/1` would duplicate
+ *    task 0's gate override onto task 1 — and the same blindness would let them
+ *    duplicate a stored credential reference into a field that sends it
+ *    somewhere. Neither is needed to edit a configuration, so they are refused
+ *    rather than reasoned about;
+ *  - the body is not a well-formed patch, or cannot be read in full (the same
+ *    truncated / unparseable / unpinned rules as a `PUT`).
+ *
+ * What stays allowed is, again, the absence case: a patch that never names the
+ * field leaves whatever the stored document holds exactly as it is, and a
+ * `replace` of a whole task by one with no override falls back to the agent-level
+ * gate — the same narrowing the residual below already states for a `PUT`.
+ *
  * ## Scope, stated honestly
  *
  * Manager-side, so it governs the Manager's three approval surfaces (operator
@@ -86,7 +116,7 @@ import type { PendingToolCallView } from "@/lib/api/hitl";
  */
 
 /** Why one call was refused. Distinguishes the failure modes for the UI. */
-export type GateCarryingReason = "carries-gate" | "unverifiable-body" | "unpinned-request";
+export type GateCarryingReason = "carries-gate" | "unverifiable-body" | "unpinned-request" | "unsupported-patch-op";
 
 /** A call refused because its body could set, or might set, an approval gate. */
 export interface GateCarryingCall {
@@ -131,6 +161,28 @@ function containsToolApprovalsKey(node: unknown): boolean {
     if (containsToolApprovalsKey(value)) return true;
   }
   return false;
+}
+
+/** The only patch operations the operator may use — see "Patches" above. */
+const ALLOWED_PATCH_OPS: ReadonlySet<string> = new Set(["add", "replace", "remove", "test"]);
+
+/** Whether a JSON Pointer names the gate field. Case-insensitive and substring on purpose. */
+function pointerNamesGate(pointer: string | undefined): boolean {
+  return typeof pointer === "string" && pointer.toLowerCase().includes("toolapprovals");
+}
+
+/**
+ * How a patch relates to the gate: touching it outranks using an operation the
+ * guard will not reason about, so the approver is told the more serious thing.
+ */
+function judgePatch(ops: readonly JsonPatchOp[]): GateCarryingReason | null {
+  let unsupported = false;
+  for (const op of ops) {
+    if (pointerNamesGate(op.path) || pointerNamesGate(op.from)) return "carries-gate";
+    if (op.value !== undefined && containsToolApprovalsKey(op.value)) return "carries-gate";
+    if (!ALLOWED_PATCH_OPS.has(op.op)) unsupported = true;
+  }
+  return unsupported ? "unsupported-patch-op" : null;
 }
 
 /**
@@ -209,6 +261,20 @@ export function findGateCarryingCalls(
       // Fail closed rather than fall back to a substring test, which would
       // pass a body that merely spells the key differently.
       found.push({ callId: call.callId, reason: "unverifiable-body" });
+      continue;
+    }
+
+    // A PATCH body is a list of operations, and what it does to the gate is not a
+    // property of any one key in it — see "Patches" above. Anything else keeps the
+    // whole-document test, which a patch body would also trip on through `value`.
+    if (method === "PATCH") {
+      const patch = parseJsonPatch(parsed);
+      if (!patch.ok) {
+        found.push({ callId: call.callId, reason: "unverifiable-body" });
+        continue;
+      }
+      const reason = judgePatch(patch.ops);
+      if (reason) found.push({ callId: call.callId, reason });
       continue;
     }
 

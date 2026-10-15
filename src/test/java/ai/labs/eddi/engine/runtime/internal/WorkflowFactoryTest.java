@@ -4,6 +4,17 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
+import ai.labs.eddi.engine.lifecycle.IComponentCache;
+import ai.labs.eddi.engine.cluster.events.RecordingEventBus;
+import ai.labs.eddi.engine.cluster.events.ClusterEvent;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.workflows.IWorkflowStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
@@ -57,6 +68,23 @@ class WorkflowFactoryTest {
     }
 
     @Test
+    @DisplayName("an Error while building leaves no half-built entry behind: the next call builds again instead of blocking for ever")
+    void anErrorDuringTheBuildDoesNotPoisonTheKey() throws Exception {
+        var workflow = mock(IExecutableWorkflow.class);
+        when(clientLibrary.getExecutableWorkflow("wf-err", 1)).thenThrow(new NoClassDefFoundError("missing")).thenReturn(workflow);
+
+        assertThrows(NoClassDefFoundError.class, () -> factory.getExecutableWorkflow("wf-err", 1));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<IExecutableWorkflow> second = executor.submit(() -> factory.getExecutableWorkflow("wf-err", 1));
+            assertSame(workflow, second.get(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     @DisplayName("should create separate entries for different workflow IDs")
     void separateWorkflows() throws Exception {
         var wf1 = mock(IExecutableWorkflow.class);
@@ -91,5 +119,72 @@ class WorkflowFactoryTest {
                 .thenThrow(new ServiceException("Not found"));
 
         assertThrows(ServiceException.class, () -> factory.getExecutableWorkflow("bad", 1));
+    }
+
+    @Test
+    @DisplayName("concurrent first requests build a workflow exactly once")
+    void concurrentFirstRequestsBuildOnce() throws Exception {
+        var workflow = mock(IExecutableWorkflow.class);
+        CountDownLatch building = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(clientLibrary.getExecutableWorkflow("wf-race", 1)).thenAnswer(inv -> {
+            building.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return workflow;
+        });
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        List<Future<IExecutableWorkflow>> results = new ArrayList<>();
+        for (int i = 0; i < 8; i++) {
+            results.add(pool.submit(() -> factory.getExecutableWorkflow("wf-race", 1)));
+        }
+        assertTrue(building.await(5, TimeUnit.SECONDS));
+        release.countDown();
+        for (Future<IExecutableWorkflow> result : results) {
+            assertSame(workflow, result.get(5, TimeUnit.SECONDS));
+        }
+        pool.shutdown();
+        verify(clientLibrary, times(1)).getExecutableWorkflow("wf-race", 1);
+    }
+
+    @Test
+    @DisplayName("a null version is a valid key (the old key class threw from equals)")
+    void nullVersionKey() throws Exception {
+        var workflow = mock(IExecutableWorkflow.class);
+        when(clientLibrary.getExecutableWorkflow("wf-null", null)).thenReturn(workflow);
+        assertSame(workflow, factory.getExecutableWorkflow("wf-null", null));
+        assertSame(workflow, factory.getExecutableWorkflow("wf-null", null));
+        when(clientLibrary.getExecutableWorkflow("wf-null", 1)).thenReturn(mock(IExecutableWorkflow.class));
+        assertNotSame(workflow, factory.getExecutableWorkflow("wf-null", 1));
+    }
+
+    @Test
+    @DisplayName("a failed build is not cached")
+    void failureNotCached() throws Exception {
+        var workflow = mock(IExecutableWorkflow.class);
+        when(clientLibrary.getExecutableWorkflow("wf-fail", 1)).thenThrow(new ServiceException("db down")).thenReturn(workflow);
+        assertThrows(ServiceException.class, () -> factory.getExecutableWorkflow("wf-fail", 1));
+        assertSame(workflow, factory.getExecutableWorkflow("wf-fail", 1));
+    }
+
+    @Test
+    @DisplayName("evicting a deleted version drops it here and announces it to the cluster")
+    void evictDropsAndAnnounces() throws Exception {
+        var bus = new RecordingEventBus();
+        factory.clusterEvents = bus;
+        var components = mock(IComponentCache.class);
+        factory.componentCache = components;
+        factory.subscribeToCluster();
+        when(clientLibrary.getExecutableWorkflow("wf-1", 1)).thenReturn(mock(IExecutableWorkflow.class));
+        factory.getExecutableWorkflow("wf-1", 1);
+
+        factory.evict("wf-1", 1);
+        assertEquals(0, factory.size());
+        verify(components).evictWorkflow("wf-1", 1);
+        assertEquals(1, bus.ofType(ClusterEvent.CONFIG_DELETED).size());
+
+        factory.getExecutableWorkflow("wf-1", 1);
+        bus.deliver(ClusterEvent.CONFIG_DELETED, Map.of("type", "workflow", "id", "wf-1", "version", 1));
+        assertEquals(0, factory.size(), "a deletion on another node evicts here too");
+        assertEquals(1, bus.ofType(ClusterEvent.CONFIG_DELETED).size(), "and is not re-published");
     }
 }

@@ -27,9 +27,17 @@ export interface ConfigWriteTarget {
  * Note EDDI writes version+1 rather than mutating in place, so the version in
  * the request URI is the BASE version — the one currently stored, and the
  * correct left-hand side of the comparison.
+ *
+ * `method` is `"PATCH"` for the credential-safe edit (`PATCH /{store}/{id}`):
+ * the URI has exactly the same shape, and the answer is "which document, at
+ * which version, is this patch applied to" rather than a diff base. No diff is
+ * offered for a patch — the body IS the diff.
  */
-export function resolveConfigWriteTarget(preview: ResolvedRequestPreview): ConfigWriteTarget | null {
-  if (!preview?.uri || preview.method?.toUpperCase() !== "PUT") return null;
+export function resolveConfigWriteTarget(
+  preview: ResolvedRequestPreview,
+  method: "PUT" | "PATCH" = "PUT",
+): ConfigWriteTarget | null {
+  if (!preview?.uri || preview.method?.toUpperCase() !== method) return null;
 
   let path: string;
   let searchParams: URLSearchParams;

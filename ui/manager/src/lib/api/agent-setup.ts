@@ -1,5 +1,7 @@
 import type { ProviderGroup } from "../llm-provider-catalog";
 import { api } from "../api-client";
+import { parseVersionFromLocation } from "./location-version";
+import { getAgentCurrentVersion } from "./agents";
 
 // ---------- Request types ----------
 
@@ -173,4 +175,17 @@ export function createApiAgent(
   request: CreateApiAgentRequest,
 ): Promise<SetupResult> {
   return api.post<SetupResult>("/administration/agents/setup-api", request);
+}
+
+/**
+ * The version a setup created, to deploy it by. The setup answer names the
+ * agent's location (`…/agents/{id}?version=N`); when it does not, the store's
+ * current version stands in, and failing that version 1 — which is what a new
+ * agent is.
+ */
+export async function resolveSetupVersion(result: SetupResult): Promise<number> {
+  const location = (result.resources as { agentLocation?: unknown } | undefined)?.agentLocation;
+  const parsed = parseVersionFromLocation(typeof location === "string" ? location : null);
+  if (parsed != null) return parsed;
+  return getAgentCurrentVersion(result.agentId).catch(() => 1);
 }

@@ -1,0 +1,809 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Cluster health",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 2,
+      "title": "Members",
+      "type": "stat",
+      "description": "`eddi_cluster_members` — replicas in the presence bucket.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_cluster_members{job=~\"$job\"})",
+          "legendFormat": "members",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 3,
+      "title": "NATS connected (per node)",
+      "type": "stat",
+      "description": "`eddi_cluster_nats_connected` — 1 while the node is connected.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "eddi_cluster_nats_connected{job=~\"$job\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 4,
+      "title": "Degraded nodes",
+      "type": "stat",
+      "description": "`eddi_cluster_degraded` — nodes running in degraded mode (NATS unreachable past the grace). Alert after 5 min.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(eddi_cluster_degraded{job=~\"$job\"})",
+          "legendFormat": "degraded",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 5,
+      "title": "NATS reconnects",
+      "type": "timeseries",
+      "description": "`eddi_cluster_nats_reconnects_total`",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_nats_reconnects_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 6,
+      "title": "Degraded-mode decisions",
+      "type": "timeseries",
+      "description": "`eddi_cluster_degraded_decisions_total` by area and action.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_degraded_decisions_total{job=~\"$job\"}[$__rate_interval])) by (area, action)",
+          "legendFormat": "{{area}}/{{action}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 7,
+      "title": "Node RPC latency",
+      "type": "timeseries",
+      "description": "`eddi_cluster_rpc_seconds` — cancel, group control, GDPR stop, status scatter.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_rpc_seconds_sum{job=~\"$job\"}[$__rate_interval])) by (op) / clamp_min(sum(rate(eddi_cluster_rpc_seconds_count{job=~\"$job\"}[$__rate_interval])) by (op), 1e-9)",
+          "legendFormat": "{{op}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "type": "row",
+      "title": "Conversation leases & fencing",
+      "id": 8,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 9,
+      "title": "Lease acquisitions by outcome",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_acquire_seconds` — `timeout` means a turn waited past the acquire timeout (409 Retry-After).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_lease_acquire_seconds_count{job=~\"$job\"}[$__rate_interval])) by (outcome, contended)",
+          "legendFormat": "{{outcome}} contended={{contended}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 10,
+      "title": "Mean lease wait",
+      "type": "timeseries",
+      "description": "Mean and peak time to obtain a conversation lease.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_lease_acquire_seconds_sum{job=~\"$job\"}[$__rate_interval])) / clamp_min(sum(rate(eddi_cluster_lease_acquire_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+          "legendFormat": "wait",
+          "refId": "A"
+        },
+        {
+          "expr": "max(eddi_cluster_lease_acquire_seconds_max{job=~\"$job\"})",
+          "legendFormat": "max",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 11,
+      "title": "Leases held",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_held` — turns running under a lease, per node.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "targets": [
+        {
+          "expr": "eddi_cluster_lease_held{job=~\"$job\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 12,
+      "title": "Leases lost / taken over",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_lost_total`, `eddi_cluster_lease_takeover_total`, `eddi_cluster_lease_release_conflicts_total`.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_lease_lost_total{job=~\"$job\"}[$__rate_interval])) by (reason)",
+          "legendFormat": "lost {{reason}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(eddi_cluster_lease_takeover_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "takeover",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(eddi_cluster_lease_release_conflicts_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "release conflicts",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 13,
+      "title": "Fenced (zombie) writes refused",
+      "type": "timeseries",
+      "description": "`eddi_cluster_fence_rejected_total` — a node that lost its lease tried to write. Each one is dead-lettered.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 23
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_fence_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "fenced",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 14,
+      "title": "Dead letters retained",
+      "type": "timeseries",
+      "description": "`eddi_coordinator_dead_letters` (shared stream) and `eddi_coordinator_total_dead_lettered_total`.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 23
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_coordinator_dead_letters{job=~\"$job\"})",
+          "legendFormat": "retained",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(eddi_coordinator_total_dead_lettered_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "new",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "type": "row",
+      "title": "Shared state (KV)",
+      "id": 15,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 16,
+      "title": "KV calls by bucket/outcome",
+      "type": "timeseries",
+      "description": "`eddi_cluster_kv_seconds` — every KV operation.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_kv_seconds_count{job=~\"$job\"}[$__rate_interval])) by (bucket, op, outcome)",
+          "legendFormat": "{{bucket}} {{op}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 17,
+      "title": "KV latency",
+      "type": "timeseries",
+      "description": "Mean KV round trip per bucket.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_kv_seconds_sum{job=~\"$job\"}[$__rate_interval])) by (bucket) / clamp_min(sum(rate(eddi_cluster_kv_seconds_count{job=~\"$job\"}[$__rate_interval])) by (bucket), 1e-9)",
+          "legendFormat": "{{bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 18,
+      "title": "CAS conflicts",
+      "type": "timeseries",
+      "description": "`eddi_cluster_kv_cas_conflicts_total` — lost compare-and-sets (lease contention, global rate limits).",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_kv_cas_conflicts_total{job=~\"$job\"}[$__rate_interval])) by (bucket)",
+          "legendFormat": "{{bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "type": "row",
+      "title": "Cluster events",
+      "id": 19,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 20,
+      "title": "Events published / consumed",
+      "type": "timeseries",
+      "description": "`eddi_cluster_events_published_total`, `eddi_cluster_events_consumed_total`.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 46
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_events_published_total{job=~\"$job\"}[$__rate_interval])) by (type)",
+          "legendFormat": "pub {{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eddi_cluster_events_consumed_total{job=~\"$job\"}[$__rate_interval])) by (type)",
+          "legendFormat": "con {{type}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 21,
+      "title": "Outbox & failed publishes",
+      "type": "timeseries",
+      "description": "`eddi_cluster_events_outbox`, `eddi_cluster_events_publish_failed_total`.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 46
+      },
+      "targets": [
+        {
+          "expr": "eddi_cluster_events_outbox{job=~\"$job\"}",
+          "legendFormat": "outbox {{instance}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(eddi_cluster_events_publish_failed_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "failed",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 22,
+      "title": "Resyncs",
+      "type": "timeseries",
+      "description": "`eddi_cluster_events_resync_total` — full cache flushes after possibly missed events.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 46
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_events_resync_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "type": "row",
+      "title": "Security & tool state",
+      "id": 23,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 24,
+      "title": "Nonce checks unavailable",
+      "type": "timeseries",
+      "description": "`eddi_agent_nonce_unavailable_total` — signed envelopes refused because the shared nonce store was unreachable (fail closed).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 54
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_agent_nonce_unavailable_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "rejected (503)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 25,
+      "title": "Tool rate-limit backend",
+      "type": "timeseries",
+      "description": "`eddi_cluster_ratelimit_decisions_total` — cluster-wide rate-limit decisions.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 54
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_ratelimit_decisions_total{job=~\"$job\"}[$__rate_interval])) by (scope, outcome)",
+          "legendFormat": "{{scope}} {{outcome}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(eddi_cluster_ratelimit_cas_retries_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "CAS retries",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 26,
+      "title": "Audit sequence allocation",
+      "type": "timeseries",
+      "description": "`eddi_cluster_audit_sequence_total` — chain positions allocated cluster-wide (`unsequenced` while NATS is down).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 54
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(eddi_cluster_audit_sequence_total{job=~\"$job\"}[$__rate_interval])) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 27,
+      "title": "Admin recovery actions",
+      "type": "timeseries",
+      "description": "`eddi_cluster_admin_actions_total` — recovery actions taken from the cluster console (force-release, drain, resync, reconcile, dead-letter replay/discard/forward), by action and outcome. Every one is also in the `cluster-admin` audit trail.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "targets": [
+        {
+          "expr": "sum by (action, outcome) (increase(eddi_cluster_admin_actions_total{job=~\"$job\"}[$__rate_interval]))",
+          "legendFormat": "{{action}} {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "eddi",
+    "cluster",
+    "nats"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
+        "name": "job",
+        "label": "Scrape job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(process_uptime_seconds, job)",
+        "query": {
+          "query": "label_values(process_uptime_seconds, job)",
+          "refId": "job"
+        },
+        "current": {
+          "text": "eddi",
+          "value": "eddi",
+          "selected": false
+        },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "hide": 0,
+        "refresh": 2,
+        "sort": 1,
+        "options": [],
+        "regex": "",
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "title": "EDDI Cluster",
+  "uid": "eddi-cluster",
+  "version": 1,
+  "description": "Horizontal scaling on NATS JetStream: membership, conversation leases and fencing, shared KV state, cluster events. Empty in in-memory mode. See docs/clustering.md."
+}

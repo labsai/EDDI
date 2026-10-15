@@ -1,4 +1,5 @@
-# NetworkPolicy — isolate NATS so only the EDDI pod may use the client protocol.
+# NetworkPolicy — isolate NATS so only the EDDI pods may use the client protocol
+# and only the NATS nodes themselves the cluster routes.
 #
 # Defense in depth beside the production overlay's EGRESS rules: this restricts
 # INGRESS to NATS. The client port (4222) is EDDI-only; the monitoring port
@@ -33,6 +34,15 @@ spec:
       ports:
         - protocol: TCP
           port: 4222
+    # Cluster routes: the other NATS nodes only.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nats
+              app.kubernetes.io/component: messaging
+      ports:
+        - protocol: TCP
+          port: 6222
     # Monitoring/health (8222): any pod in this policy's own namespace, so the
     # readiness probe and Prometheus keep working.
     - from:

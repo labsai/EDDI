@@ -148,6 +148,31 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+### Editing a configuration that holds a reference: PATCH, not echo
+
+A stored configuration carries your credential **references**, not secrets — `GET /llmstore/llms/{id}` returns `"apiKey": "${vault:anthropic-api-key}"`. Editing it by reading the document and sending the whole thing back with `PUT` therefore means *sending a reference back*, and that is the one thing a caller that is not a human at the Manager should not do:
+
+- An agent's API call (the Platform Operator's tools are such calls, generated from EDDI's own OpenAPI spec) resolves `${vault:…}` in its rendered request **just before sending**. A document body that echoes a reference it read would reach the store as the **plaintext secret** — written into a new, exportable configuration version.
+- It never gets that far: the reference in the body was not written by the call's own configuration, so the check above refuses the call. That is correct, and it is deliberately **not** relaxed with an "unchanged from the stored document" exemption — the check does not know the target document, and what the model read back is itself conversation data.
+
+The way through is to not send what does not change. `PATCH /{store}/{id}?version=N` with `Content-Type: application/json-patch+json` applies an [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) JSON Patch to version `N` and stores the result as a new version (returned in `Location`, like `PUT`):
+
+```bash
+curl -X PATCH "$EDDI/llmstore/llms/$ID?version=2" \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[{"op":"replace","path":"/tasks/0/parameters/modelName","value":"claude-sonnet-4-5"}]'
+```
+
+The reference already in the document is untouched, and a patch that tried to *introduce* one is refused by the same check as any other call — so a caller restricted this way can edit everything in the document **except** its credentials. `add`, `replace`, `remove` and `test` all work; `test` makes an edit conditional on what it expects to find.
+
+| Outcome | Status |
+| --- | --- |
+| New version stored | `200`, `Location` of the new version |
+| `N` is not the current version | `409`, the current resource URI in the body — nothing is applied |
+| Not a patch, an unknown operation, a `test` that does not hold, a path that does not resolve, or a patched document the model rejects (unknown field, wrong shape) | `400` with the reason |
+
+The patched document goes through the same strict parse and the same pre-write checks as a `PUT` body, so nothing a `PUT` would refuse can be stored this way. Available on `llmstore/llms`, `apicallstore/apicalls` and `mcpcallsstore/mcpcalls` — the stores whose documents carry references. A patch is limited to 256 KiB and 200 operations: it is a diff, not a document.
+
 ## Secrets that belong to a space
 
 With [workspaces](workspaces.md) enforced, writing to the vault stays with
@@ -165,7 +190,7 @@ Every stored secret carries an `allowedAgents` list — the agent IDs permitted 
 
 ### Why deploy time, not resolution time
 
-Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: in `enforce` mode a misconfigured agent simply does not come up, and the reason is a single ERROR line.
+Blocking at resolution would fail in the middle of a live conversation, after the agent is already serving users, and the operator would learn about the misconfiguration from a broken turn. The deploy-time check runs once, before any user is affected: in `enforce` mode a misconfigured agent simply does not come up — and the API says why (see [When a deploy is refused](#when-a-deploy-is-refused)), not only the server log.
 
 The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 
@@ -212,6 +237,80 @@ references vault secret(s) it is not granted
 ```
 
 Then set `enforce`. To widen a grant instead, see below — or remove the reference from the agent's configuration.
+
+### New agents always need adding
+
+A grant lists agent **ids**, and an agent's id exists only once the agent has been created. So every **new** agent that uses a restricted secret — whether it comes from the Manager's wizard, the setup API, MCP `setup_agent`, a ZIP import, an agent sync, or the Platform Operator's activation — is not on the grant when it is first deployed, and in `enforce` mode that first deploy is refused. This is the check working as intended; the fix is to add the new agent to the grant before (or after) its first deploy. There are three ways, and every one of them is an explicit administrator action — nothing grants silently, and no MCP tool can change a grant:
+
+1. **The Manager.** Deploying an agent — from the editor, its card or detail page, the creation wizard, or the import dialog — first runs the [preflight](#preflight-before-deploying). If a key the agent uses is restricted, a dialog names the key and who it is currently allowed for, and an administrator can **Add and deploy** in one step (a dry run first, then the append, then the deploy). Non-administrators see the same explanation and can copy the exact request for an administrator. The secret picker in each editor marks a restricted key with a lock badge, and says up front when the agent being edited is not on the grant yet.
+2. **The setup API**, with `"grantReferencedSecrets": true` on `POST /administration/agents/setup` or `/setup-api`. After creating the agent and before deploying it, the new agent is added to the grant of every restricted secret it references; each change is written to the [audit ledger](audit-ledger.md). The flag is for `eddi-admin` only (anyone else gets **403**) and it never touches a secret that is open to every agent. The response lists the secrets it extended under `grantedSecrets`.
+3. **The append endpoint**, `POST /secretstore/secrets/{tenantId}/{keyName}/grant/agents/{agentId}` — see [below](#adding-one-agent-to-a-grant).
+
+Without any of these, the setup API still creates the agent and answers with its id **and** the structured failure, so the caller can grant and redeploy *that* agent — running the setup again would only create a second agent that is refused the same way.
+
+### When a deploy is refused
+
+A deploy refused by the grant check used to answer only `{"status":"ERROR"}`. The reason now travels with it, as a `failure` object, in two places:
+
+- `POST /administration/{env}/deploy/{agentId}?version=N&waitForCompletion=true` — still **200** with `status: "ERROR"`, as every failed waited deploy has always answered, plus `error` (the message) and `failure`.
+- `GET /administration/{env}/deploymentstatus/{agentId}?version=N&format=detailed` — `failure` next to `status`, for a caller who may edit the agent.
+
+```json
+{
+  "status": "ERROR",
+  "failure": {
+    "code": "VAULT_GRANT_MISSING",
+    "message": "Agent '0123456789abcdef01234567' v1 uses vault secret(s) it is not granted: default/gemini-api-key. A secret's grant (allowedAgents) lists agent ids, so an agent created after the grant was written is never on it and has to be added. Fix (eddi-admin): POST /secretstore/secrets/default/gemini-api-key/grant/agents/0123456789abcdef01234567 (add ?dryRun=true to preview), or add the agent to the key's grant on the Manager's Secrets page, then deploy again.",
+    "secrets": [{ "tenantId": "default", "keyName": "gemini-api-key", "reference": "${vault:gemini-api-key}" }],
+    "fix": {
+      "addAgentId": "0123456789abcdef01234567",
+      "endpoints": ["POST /secretstore/secrets/default/gemini-api-key/grant/agents/0123456789abcdef01234567"],
+      "dryRunFirst": true
+    }
+  }
+}
+```
+
+Only names and references are returned, never a value. Any other cause of an ERROR is reported as `code: "DEPLOYMENT_FAILED"` with a fixed message that points to the server log. The cause itself goes only to the log, because an exception message can carry a credential, a connection string or an internal path. The failure is kept in memory with the deployment status, so it does not survive a restart — a redeploy recomputes it — and the next successful deploy clears it. MCP `deploy_agent` returns the same code, secret names and fix, with a note that an administrator has to apply it. For a grant refusal, the server log line says the same thing as `message`.
+
+### Preflight before deploying
+
+`GET /administration/{env}/deploy/{agentId}/preflight?version=N` runs the deploy's grant check without deploying. It needs the same EDIT access as the deploy and never returns a value:
+
+```json
+{
+  "agentId": "0123456789abcdef01234567",
+  "version": 1,
+  "enforcement": "ENFORCE",
+  "checked": true,
+  "ready": false,
+  "grantIssues": [
+    { "tenantId": "default", "keyName": "gemini-api-key", "reference": "${vault:gemini-api-key}",
+      "grantsAllAgents": false, "allowedAgentCount": 2, "allowedAgents": ["89abcdef0123456789abcdef", "fedcba9876543210fedcba98"] }
+  ]
+}
+```
+
+- `ready` is `false` only when the deploy would be refused: `enforce` mode with at least one issue. In `warn` mode the issues are still listed and `ready` is `true`.
+- `checked` is `false` when the check did not run — mode `off`, or it could not read what it needed. The deploy then goes ahead too, so the preflight reports `ready: true` rather than predict a refusal the deploy would not make.
+- `allowedAgents` — the ids on the grant — is returned to administrators only; an editor gets `allowedAgentCount`. The ids are not secret, but they map which other agents hold a credential, and only an administrator can change a grant anyway.
+
+### Adding one agent to a grant
+
+`POST /secretstore/secrets/{tenantId}/{keyName}/grant/agents/{agentId}` (`eddi-admin`) adds one agent and keeps everything already on the grant:
+
+```bash
+# Preview, then apply
+curl -X POST "$EDDI/secretstore/secrets/default/gemini-api-key/grant/agents/0123456789abcdef01234567?dryRun=true"
+curl -X POST "$EDDI/secretstore/secrets/default/gemini-api-key/grant/agents/0123456789abcdef01234567"
+```
+
+The answer has the same shape as the replacing `PUT …/grant` below, plus `changed`. It is:
+
+- **idempotent** — an agent already on the grant answers `changed: false` and writes nothing;
+- **never a narrowing** — a secret open to every agent (`["*"]`) is left exactly as it is (`changed: false`); appending an id there would turn "every agent" into "these agents";
+- **safe under concurrency** — the write is a compare-and-set on the stored grant, retried on a conflict, so two administrators granting two new agents at the same moment both land. With the replacing `PUT` that is a read-modify-write in the client, and one of the two grants would be lost;
+- **audited** — each change writes an audit-ledger entry (`taskType: vault`, `taskId: vault.grant.append`) with the actor, the secret, the agent, the previous and the new grant, and where it came from (`rest` or `setup`).
 
 ### Changing a grant without the secret's value
 
@@ -555,6 +654,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | -------- | ---------------------------- | ------------------------------------------------------ |
 | `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
 | `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value). `?dryRun=true` previews the impact without writing |
+| `POST`   | `/{tenantId}/{keyName}/grant/agents/{agentId}` | Add one agent to `allowedAgents`, atomically and idempotently; never changes a `*` grant — see [Adding one agent](#adding-one-agent-to-a-grant). `?dryRun=true` previews |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
