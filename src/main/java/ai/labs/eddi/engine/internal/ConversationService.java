@@ -57,6 +57,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -2209,6 +2210,19 @@ public class ConversationService implements IConversationService, UserErasurePar
      * new turn: the conversation, agent and environment, the user, and — unless
      * {@code eddi.coordinator.dead-letter.capture-input=false} — the input and its
      * context.
+     * <p>
+     * The capture happens <em>before</em> the pipeline runs, so the
+     * {@code scope: secret} scrub a property-setter step would apply cannot have
+     * happened yet. Two measures stand in for it (L6 of the 2026-10-15 security
+     * review): a turn is recorded as {@code secretInput} — without input or context
+     * — not only when the client flagged it so but also whenever the agent's
+     * workflows carry any {@code scope: secret} instruction, because such an agent
+     * expects secrets in its input and the client cannot be relied on to flag each
+     * one; and the input that is kept passes through {@link SecretRedactionFilter},
+     * so a credential-shaped token in an ordinary turn is masked rather than
+     * retained for the dead letter's lifetime. When the agent cannot be resolved
+     * the turn is treated as secret: a dead letter that cannot be replayed beats
+     * one that holds what it should not.
      */
     Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
                                      boolean rerun) {
@@ -2220,16 +2234,17 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
         if (captureDeadLetterInput && inputData != null) {
-            if (isSecretInput(inputData)) {
-                // A turn the client flagged secretInput: its input must not sit in a dead
+            if (isSecretInput(inputData) || agentExpectsSecrets(environment, memory)) {
+                // A turn the client flagged secretInput, or one addressed to an agent
+                // with a scope: secret instruction: its input must not sit in a dead
                 // letter for days. Recorded as such, without input or context — so it can
                 // be discarded but not replayed.
                 turn.put("secretInput", true);
                 return turn;
             }
-            turn.put("input", inputData.getInput());
+            turn.put("input", SecretRedactionFilter.redact(inputData.getInput()));
             if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
-                turn.put("context", inputData.getContext());
+                turn.put("context", redactContext(inputData.getContext()));
             }
         }
         return turn;
@@ -2239,6 +2254,45 @@ public class ConversationService implements IConversationService, UserErasurePar
         var context = inputData.getContext();
         Context flag = context == null ? null : context.get("secretInput");
         return flag != null && "true".equals(String.valueOf(flag.getValue()));
+    }
+
+    /**
+     * Whether the agent this turn runs against sets any {@code scope: secret}
+     * property. Fails closed: an agent that cannot be looked up is treated as one
+     * that expects secrets.
+     */
+    private boolean agentExpectsSecrets(Environment environment, IConversationMemory memory) {
+        try {
+            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
+            return agent == null || agent.hasSecretPropertyInstructions();
+        } catch (Exception e) {
+            LOGGER.debugf("Could not resolve agent %s v%s for the dead-letter capture; treating the turn as secret: %s",
+                    sanitize(memory.getAgentId()), memory.getAgentVersion(), e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * The turn's context with every string value run through
+     * {@link SecretRedactionFilter}. Values that did not change are kept as they
+     * are; a redacted one is a copy, so the live turn is never touched.
+     */
+    private static Map<String, Context> redactContext(Map<String, Context> context) {
+        Map<String, Context> redacted = new LinkedHashMap<>();
+        context.forEach((key, value) -> {
+            if (value != null && value.getValue() instanceof String text) {
+                String clean = SecretRedactionFilter.redact(text);
+                if (!clean.equals(text)) {
+                    Context copy = new Context(value.getType(), clean);
+                    copy.setServerGenerated(value.isServerGenerated());
+                    copy.setSecret(value.getSecret());
+                    redacted.put(key, copy);
+                    return;
+                }
+            }
+            redacted.put(key, value);
+        });
+        return redacted;
     }
 
     /**

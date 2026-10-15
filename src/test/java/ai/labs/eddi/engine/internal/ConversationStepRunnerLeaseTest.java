@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -193,11 +195,29 @@ class ConversationStepRunnerLeaseTest {
         verify(store, never()).raiseFence(anyString(), anyLong());
     }
 
+    /**
+     * A describing service whose agent lookup answers with an agent that does, or
+     * does not, carry a {@code scope: secret} property instruction.
+     */
+    private static ConversationService describingService(Boolean agentExpectsSecrets) throws Exception {
+        ConversationService service = mock(ConversationService.class, CALLS_REAL_METHODS);
+        setFinal(service, "captureDeadLetterInput", true);
+        IAgentFactory agentFactory = mock(IAgentFactory.class);
+        if (agentExpectsSecrets == null) {
+            when(agentFactory.getAgent(any(), anyString(), any())).thenThrow(new RuntimeException("store down"));
+        } else {
+            IAgent agent = mock(IAgent.class);
+            when(agent.hasSecretPropertyInstructions()).thenReturn(agentExpectsSecrets);
+            when(agentFactory.getAgent(any(), anyString(), any())).thenReturn(agent);
+        }
+        setFinal(service, "agentFactory", agentFactory);
+        return service;
+    }
+
     @Test
     @DisplayName("a dead letter of a secretInput turn records neither the input nor its context, and is not replayable")
     void secretInputNeverReachesADeadLetter() throws Exception {
-        ConversationService service = mock(ConversationService.class, CALLS_REAL_METHODS);
-        setFinal(service, "captureDeadLetterInput", true);
+        ConversationService service = describingService(false);
         IConversationMemory turnMemory = mock(IConversationMemory.class);
         when(turnMemory.getAgentId()).thenReturn("agent1");
 
@@ -212,6 +232,62 @@ class ConversationStepRunnerLeaseTest {
         Map<String, Object> plainTurn = service.describeTurn(Environment.production, turnMemory, ID, plain, false);
         assertEquals("hello", plainTurn.get("input"), "an ordinary turn keeps its input for replay");
         assertTrue(new DeadLetterEntry("2", ID, "e", 1, "{}", plainTurn).isReplayable());
+    }
+
+    // L6 (security review 2026-10-15): the capture runs before the pipeline, so the
+    // scope: secret scrub cannot have happened — the describe step must stand in.
+
+    @Test
+    @DisplayName("a turn for an agent with a scope: secret instruction is recorded as secretInput even without the client flag")
+    void agentWithSecretInstructionsIsNeverCaptured() throws Exception {
+        ConversationService service = describingService(true);
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        when(turnMemory.getAgentVersion()).thenReturn(3);
+
+        var unflagged = new InputData("hunter2", Map.of("lang", new Context(Context.ContextType.string, "en")));
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, unflagged, false);
+
+        assertFalse(turn.containsKey("input"), "the agent expects secrets: the input must not be kept");
+        assertFalse(turn.containsKey("context"));
+        assertEquals(true, turn.get("secretInput"));
+        assertFalse(new DeadLetterEntry("3", ID, "e", 1, "{}", turn).isReplayable());
+    }
+
+    @Test
+    @DisplayName("an agent that cannot be resolved is treated as one that expects secrets")
+    void unresolvableAgentFailsClosed() throws Exception {
+        ConversationService service = describingService(null);
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, new InputData("hello", Map.of()), false);
+
+        assertFalse(turn.containsKey("input"));
+        assertEquals(true, turn.get("secretInput"));
+    }
+
+    @Test
+    @DisplayName("a captured input and its string context values pass through the secret redaction filter")
+    void capturedInputIsRedacted() throws Exception {
+        ConversationService service = describingService(false);
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        var original = new Context(Context.ContextType.string, "Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789");
+        var input = new InputData("my key is api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789 ok",
+                Map.of("auth", original, "lang", new Context(Context.ContextType.string, "en")));
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, input, false);
+
+        String captured = (String) turn.get("input");
+        assertFalse(captured.contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"), "the credential must be masked: " + captured);
+        assertTrue(captured.startsWith("my key is"), "the rest of the input is kept for replay: " + captured);
+        @SuppressWarnings("unchecked")
+        Map<String, Context> context = (Map<String, Context>) turn.get("context");
+        assertFalse(String.valueOf(context.get("auth").getValue()).contains("abcdefghijklmnopqrstuvwxyz0123456789"));
+        assertEquals("Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789", original.getValue(), "the live turn's context is not rewritten");
+        assertEquals("en", context.get("lang").getValue());
+        assertTrue(new DeadLetterEntry("4", ID, "e", 1, "{}", turn).isReplayable());
     }
     private ConversationService.ProcessingTurn processingTurn() throws Exception {
         Constructor<ConversationService.ProcessingTurn> ctor = ConversationService.ProcessingTurn.class.getDeclaredConstructor(AtomicInteger.class);
