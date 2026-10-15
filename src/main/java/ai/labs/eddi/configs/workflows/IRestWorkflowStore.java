@@ -9,7 +9,11 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -88,7 +92,13 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
     @Operation(description = "Update references to other resources within this workflow resource.")
     Response updateResourceInWorkflow(@PathParam("id") String id,
                                       @Parameter(name = "version", required = true, example = "1")
-                                      @QueryParam("version") Integer version, URI resourceURI);
+                                      @QueryParam("version") Integer version,
+                                      @RequestBody(required = true,
+                                                   description = "Plain-text URI of the new version of a resource this workflow already references; "
+                                                           + "the existing reference to that resource is repointed to it. The URI MUST carry ?version=N.",
+                                                   content = @Content(mediaType = MediaType.TEXT_PLAIN,
+                                                                      schema = @Schema(type = SchemaType.STRING, format = "uri",
+                                                                                       example = "eddi://ai.labs.parser/parserstore/parsers/ID?version=3"))) URI resourceURI);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

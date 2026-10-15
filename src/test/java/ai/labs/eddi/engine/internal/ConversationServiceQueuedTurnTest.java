@@ -44,7 +44,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -219,7 +218,7 @@ class ConversationServiceQueuedTurnTest {
     }
 
     @Test
-    @DisplayName("E2: a pause whose commit is refused does not stay AWAITING_HUMAN in the state cache")
+    @DisplayName("E2: a pause whose commit is refused is never cached as AWAITING_HUMAN")
     void refusedPauseCommitCorrectsTheStateCache() throws Exception {
         doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
         IConversation conversation = mock(IConversation.class);
@@ -236,9 +235,11 @@ class ConversationServiceQueuedTurnTest {
 
         runQueuedSay();
 
-        InOrder order = inOrder(conversationStateCache);
-        order.verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
-        order.verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.READY);
+        // The paused outcome is delivered (and cached) only after the commit, so the
+        // refused pause never reaches the cache at all: it ends on the persisted state
+        // without ever advertising a pending approval the store did not hold.
+        verify(conversationStateCache, never()).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
+        verify(conversationStateCache, atLeastOnce()).put(CONVERSATION_ID, ConversationState.READY);
         verify(scheduleStore, never()).createSchedule(any());
     }
 

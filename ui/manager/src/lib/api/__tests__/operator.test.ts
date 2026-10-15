@@ -8,6 +8,8 @@ import {
   resolveAgentVersion,
   parseVersionFromLocation,
   findMissingEndpoints,
+  findUnusableEndpoints,
+  unusableEndpointsFromResult,
   apiAuthForMode,
   defaultOperatorConfig,
   deactivateOperator,
@@ -178,6 +180,108 @@ describe("spec validation", () => {
 
   it("reports malformed entries rather than skipping them", () => {
     expect(findMissingEndpoints(spec, ["garbage"])).toEqual(["garbage"]);
+  });
+});
+
+describe("findUnusableEndpoints — tools that could not send a required input", () => {
+  const text = { content: { "text/plain": { schema: { type: "string" } } } };
+  const json = { content: { "application/json": { schema: { type: "object" } } } };
+
+  function specOf(paths: Record<string, Record<string, unknown>>, components?: unknown): FetchedSpec {
+    return { raw: { paths, components }, paths };
+  }
+
+  it("accepts a JSON Patch body, so the PATCH endpoints stay allow-listed", () => {
+    const spec = specOf({
+      "/p/{id}": {
+        patch: {
+          requestBody: {
+            required: true,
+            content: { "application/json-patch+json": { schema: { type: "array" } } },
+          },
+        },
+      },
+    });
+    expect(findUnusableEndpoints(spec, ["PATCH /p/{id}"])).toEqual([]);
+  });
+
+  it("accepts the body types the generator can send (json, text/plain, with parameters)", () => {
+    const spec = specOf({
+      "/a": { put: { requestBody: { required: true, ...text } } },
+      "/b": { put: { requestBody: { required: true, ...json } } },
+      "/c": { put: { requestBody: { required: true, content: { "Text/Plain; charset=UTF-8": {} } } } },
+      "/d": { get: {} },
+    });
+    expect(
+      findUnusableEndpoints(spec, ["PUT /a", "PUT /b", "PUT /c", "GET /d"]),
+    ).toEqual([]);
+  });
+
+  it("names an endpoint whose only body type is one the generator cannot send", () => {
+    const spec = specOf({
+      "/import": {
+        post: { requestBody: { required: true, content: { "application/zip": {} } } },
+      },
+    });
+    const unusable = findUnusableEndpoints(spec, ["POST /import"]);
+    expect(unusable).toHaveLength(1);
+    expect(unusable[0]).toMatch(/^POST \/import: .*application\/zip/);
+  });
+
+  it("treats a body with no explicit required flag as required, and required:false as optional", () => {
+    const spec = specOf({
+      "/x": { post: { requestBody: { content: { "multipart/form-data": {} } } } },
+      "/y": { post: { requestBody: { required: false, content: { "multipart/form-data": {} } } } },
+    });
+    expect(findUnusableEndpoints(spec, ["POST /x", "POST /y"])).toHaveLength(1);
+  });
+
+  it("follows a $ref to components.requestBodies", () => {
+    const spec = specOf(
+      { "/z": { post: { requestBody: { $ref: "#/components/requestBodies/Zip" } } } },
+      { requestBodies: { Zip: { required: true, content: { "application/zip": {} } } } },
+    );
+    expect(findUnusableEndpoints(spec, ["POST /z"])).toHaveLength(1);
+  });
+
+  it("reports a required header parameter, from the operation or the path item", () => {
+    const spec = specOf({
+      "/h": { get: { parameters: [{ name: "X-Tenant", in: "header", required: true }] } },
+      "/p": { parameters: [{ name: "sid", in: "cookie", required: true }], get: {} },
+      "/ok": { get: { parameters: [{ name: "X-Opt", in: "header" }] } },
+    });
+    const unusable = findUnusableEndpoints(spec, ["GET /h", "GET /p", "GET /ok"]);
+    expect(unusable).toHaveLength(2);
+    expect(unusable[0]).toContain("X-Tenant");
+    expect(unusable[1]).toContain("sid");
+  });
+
+  it("exempts a required Authorization header when auth is configured, and only then", () => {
+    const spec = specOf({
+      "/a": { get: { parameters: [{ name: "authorization", in: "header", required: true }] } },
+      "/b": { get: { parameters: [{ name: "X-Tenant", in: "header", required: true }] } },
+    });
+    // caller-identity: the tools send Authorization themselves.
+    expect(findUnusableEndpoints(spec, ["GET /a"], "Bearer ${caller:token}")).toEqual([]);
+    // no auth configured: nothing sends it, so it is unusable.
+    expect(findUnusableEndpoints(spec, ["GET /a"])).toHaveLength(1);
+    expect(findUnusableEndpoints(spec, ["GET /a"], "  ")).toHaveLength(1);
+    // a different required header is never exempt.
+    expect(findUnusableEndpoints(spec, ["GET /b"], "Bearer x")).toHaveLength(1);
+  });
+
+  it("leaves endpoints missing from the spec to findMissingEndpoints", () => {
+    expect(findUnusableEndpoints(specOf({}), ["GET /nope", "garbage"])).toEqual([]);
+  });
+
+  it("reads the backend's report from a setup-api result, and an older backend's silence as none", () => {
+    expect(
+      unusableEndpointsFromResult({
+        resources: { unusableEndpoints: ["POST /import: nope", 7] },
+      } as never),
+    ).toEqual(["POST /import: nope"]);
+    expect(unusableEndpointsFromResult({ resources: {} } as never)).toEqual([]);
+    expect(unusableEndpointsFromResult({} as never)).toEqual([]);
   });
 });
 
