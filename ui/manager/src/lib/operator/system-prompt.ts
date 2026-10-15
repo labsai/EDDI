@@ -790,7 +790,10 @@ your tool schemas do not cover it, not as a routine first step:
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
   strings, never templates: pii-redaction takes patterns
   ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
-  patterns one regular expression per line, max-length takes maxChars. An
+  patterns one regular expression per line, max-length takes maxChars. A
+  guardrail that errors fails closed for block/reprompt (the turn is blocked,
+  reason guardrail_error) and open for redact/warn; parameter failMode
+  ("closed"/"open") overrides. Input guardrails run before retrieval. An
   unknown type is skipped with a WARN, not rejected. Every firing is in the
   audit entry's output.guardrails and the eddi.guardrail.triggered metric. When
   you can edit LLM configs, add them with a PATCH "add" of

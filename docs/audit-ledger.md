@@ -48,7 +48,7 @@ Each audit entry captures:
 | `taskIndex`      | int     | 0-based task position in the pipeline                      |
 | `durationMs`     | long    | Task execution time in milliseconds                        |
 | `input`          | Map     | Data read by the task (user input, actions)                |
-| `output`         | Map     | Data written by the task (output text, tool results); for an LLM task whose [guardrails](langchain.md#input-and-output-guardrails) fired, `guardrails` — a list of `{phase, type, action, reason, retryCount, taskId}` |
+| `output`         | Map     | Data written by the task (output text, tool results); for an LLM task whose [guardrails](langchain.md#input-and-output-guardrails) fired, `guardrails` — a list of `{phase, type, action, reason, retryCount, taskId}`; `reason` is `guardrail_error` when the guardrail itself failed (action `block` when it failed closed, `warn` when open) |
 | `llmDetail`      | Map     | LLM-specific: compiled prompt, model response, token usage |
 | `toolCalls`      | Map     | Tool execution: name, args, result, cost                   |
 | `actions`        | List    | Actions emitted by this task                               |
