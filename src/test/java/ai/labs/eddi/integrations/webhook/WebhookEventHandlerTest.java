@@ -161,6 +161,31 @@ class WebhookEventHandlerTest {
     }
 
     @Test
+    void repeatWhileFirstDeliveryIsInFlightIsRetryableNotADuplicate() throws Exception {
+        // The repeat arrives while the first delivery is inside startConversation;
+        // the first is then refused. Answering the repeat 200 would make its sender
+        // believe the event was delivered — it would be lost.
+        Dispatch[] repeat = new Dispatch[1];
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenAnswer(inv -> {
+                    repeat[0] = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-20", "{}"), null);
+                    throw new QuotaExceededException("conversations per day");
+                })
+                .thenReturn(new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1)));
+
+        Dispatch first = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-20", "{}"), null);
+
+        assertEquals(429, first.status());
+        assertEquals(409, repeat[0].status());
+        assertTrue(repeat[0].duplicate());
+        assertNull(repeat[0].conversationId());
+        // The sender retries: the event is processed, not swallowed.
+        Dispatch retried = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-20", "{}"), null);
+        assertEquals(202, retried.status());
+        assertFalse(retried.duplicate());
+    }
+
+    @Test
     void quotaExceededOnTheTurnIs429() throws Exception {
         doThrow(new QuotaExceededException("api calls")).when(conversationService)
                 .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());

@@ -115,6 +115,45 @@ class RestWebhookChannelTest {
     }
 
     @Test
+    void githubReplayWithoutDeliveryIdIsDeduplicatedOnTheSignature() throws Exception {
+        Map<String, String> headers = githubHeaders(PUSH, "unused");
+        headers.remove("x-github-delivery");
+
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, headers, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        Response replay = endpoint.receive(INTEGRATION_ID, new HashMap<>(headers), PUSH.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(200, replay.getStatus());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void genericHmacReplayWithoutEventIdIsDeduplicatedOnTheSignature() throws Exception {
+        integration.setPlatformConfig(Map.of("signingSecret", SECRET, "signatureScheme", "generic-hmac", "signatureHeader", "X-Acme-Sig"));
+        Map<String, String> headers = new HashMap<>();
+        headers.put("content-type", "application/json");
+        headers.put("x-acme-sig", HmacSignatures.hmacSha256Hex(SECRET, PUSH.getBytes(StandardCharsets.UTF_8)));
+
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, headers, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        assertEquals(200, endpoint.receive(INTEGRATION_ID, headers, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void repeatWhileInFlightIs409WithRetryAfter() throws Exception {
+        Response[] repeat = new Response[1];
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap())).thenAnswer(inv -> {
+            repeat[0] = endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-30"), PUSH.getBytes(StandardCharsets.UTF_8));
+            return new IConversationService.ConversationResult("111111111111111111111111", URI.create("eddi://c/1"));
+        });
+
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-30"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        assertEquals(409, repeat[0].getStatus());
+        assertEquals("5", repeat[0].getHeaderString("Retry-After"));
+        // Once the first is recorded, a further repeat is a plain duplicate.
+        assertEquals(200, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-30"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+    }
+
+    @Test
     void unsignedRequestIs401AndNeverReachesTheConversationService() {
         Map<String, String> headers = githubHeaders(PUSH, "d-2");
         headers.remove("x-hub-signature-256");

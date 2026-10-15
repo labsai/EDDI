@@ -86,6 +86,15 @@ class WebhookSignatureVerifierTest {
         }
 
         @Test
+        void timestampThatOverflowsTheAgeComputationIsStale() {
+            // NOW - (Long.MIN_VALUE + NOW) overflows to Long.MIN_VALUE, whose
+            // Math.abs is negative — it used to pass the freshness check.
+            long overflowing = Long.MIN_VALUE + NOW;
+            assertEquals(Result.STALE_TIMESTAMP,
+                    verify(verifier, settings, BODY, Map.of("X-Eddi-Signature", eddiHeader(SECRET, overflowing, BODY))));
+        }
+
+        @Test
         void tamperedBody() {
             byte[] tampered = "{\"action\":\"closed\",\"number\":7}".getBytes(StandardCharsets.UTF_8);
             assertEquals(Result.INVALID_SIGNATURE,

@@ -93,6 +93,9 @@ public class WebhookEventHandler {
     /** Marker for an event whose first delivery is still being processed. */
     static final String IN_FLIGHT = "";
 
+    /** Answer to a repeat delivery while the first one is still being processed. */
+    static final String IN_PROGRESS = "Delivery in progress — retry shortly.";
+
     private final ChannelTargetRouter router;
     private final IConversationService conversationService;
     private final IGroupConversationService groupConversationService;
@@ -147,7 +150,8 @@ public class WebhookEventHandler {
      *            the parsed event
      * @param fallbackDedupKey
      *            a key unique to this exact signed request, used when the event
-     *            carries no id (eddi-v1: the signature header); may be null
+     *            carries no id (the signature header value, for every scheme); may
+     *            be null
      */
     public Dispatch dispatch(String integrationId, ChannelIntegrationConfiguration integration,
                              WebhookChannelSettings settings, InboundEvent event, String fallbackDedupKey) {
@@ -157,10 +161,18 @@ public class WebhookEventHandler {
         if (dedupKey != null) {
             String previous = dedup.putIfAbsent(dedupKey, IN_FLIGHT);
             if (previous != null) {
+                if (previous.isEmpty()) {
+                    // The first delivery has not finished. It may still be refused
+                    // (429, 503, ...), which releases the reservation — so a 200 here
+                    // would tell the sender an event was delivered that never was,
+                    // and it would not retry. Answer retryably instead; only a
+                    // recorded 202 makes a repeat a duplicate.
+                    count("in_progress");
+                    return new Dispatch(409, null, null, true, IN_PROGRESS);
+                }
                 count("duplicate");
-                String id = previous.isEmpty() ? null : previous;
-                boolean group = id != null && id.startsWith("group:");
-                return new Dispatch(200, group ? null : id, group ? id.substring("group:".length()) : null, true, null);
+                boolean group = previous.startsWith("group:");
+                return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null);
             }
         }
 

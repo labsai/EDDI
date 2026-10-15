@@ -159,11 +159,21 @@ public class RestWebhookChannel {
             return error(e.status(), e.getMessage());
         }
 
-        String fallbackDedupKey = settings.scheme() == WebhookChannelSettings.Scheme.EDDI_V1
-                ? headers.get(WebhookSignatureVerifier.EDDI_SIGNATURE_HEADER.toLowerCase(Locale.ROOT))
-                : null;
+        // Used when the event carries no id. The signature value is unique to the
+        // signed bytes (and, for eddi-v1, the timestamp), so a captured request
+        // replayed verbatim is recognised. For github and generic-hmac — which sign
+        // no timestamp — this dedup window is the only replay protection there is.
+        String fallbackDedupKey = headers.get(signatureHeaderName(settings).toLowerCase(Locale.ROOT));
         Dispatch dispatch = handler.dispatch(integrationId, integration, settings, event, fallbackDedupKey);
         return toResponse(dispatch);
+    }
+
+    private static String signatureHeaderName(WebhookChannelSettings settings) {
+        return switch (settings.scheme() == null ? WebhookChannelSettings.Scheme.EDDI_V1 : settings.scheme()) {
+            case EDDI_V1 -> WebhookSignatureVerifier.EDDI_SIGNATURE_HEADER;
+            case GITHUB -> WebhookSignatureVerifier.GITHUB_SIGNATURE_HEADER;
+            case GENERIC_HMAC -> settings.signatureHeader();
+        };
     }
 
     private Response toResponse(Dispatch dispatch) {
@@ -181,7 +191,11 @@ public class RestWebhookChannel {
             entity.put("error", dispatch.error());
         }
         var builder = Response.status(dispatch.status()).type(MediaType.APPLICATION_JSON).entity(json(entity));
-        if (dispatch.status() == 429) {
+        if (dispatch.status() == 409 && dispatch.duplicate()) {
+            // A repeat of a delivery still being processed: retry soon, and it is
+            // answered 200 (accepted) or processed afresh (first one refused).
+            builder.header("Retry-After", "5");
+        } else if (dispatch.status() == 429) {
             builder.header("Retry-After", "60");
         } else if (dispatch.status() == 503) {
             builder.header("Retry-After", "30");

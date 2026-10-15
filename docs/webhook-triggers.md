@@ -98,13 +98,14 @@ Comparison is constant-time.
 | Scheme | Header | MAC input | Replay protection |
 | --- | --- | --- | --- |
 | `eddi-v1` | `X-Eddi-Signature: t=<unix seconds>,v1=<hex>` | `t + "." + body` | timestamp must be within 5 minutes, plus deduplication |
-| `github` | `X-Hub-Signature-256: sha256=<hex>` | `body` | deduplication by `X-GitHub-Delivery` |
-| `generic-hmac` | `<signatureHeader>: <signaturePrefix><hex or base64>` | `body` | deduplication by `eventIdHeader` only |
+| `github` | `X-Hub-Signature-256: sha256=<hex>` | `body` | deduplication only (by `X-GitHub-Delivery`, else the signature) |
+| `generic-hmac` | `<signatureHeader>: <signaturePrefix><hex or base64>` | `body` | deduplication only (by `eventIdHeader`, else the signature) |
 
 `eddi-v1` accepts several `v1=` entries in one header, so a sender can sign with an
 old and a new secret while you rotate. `github` and `generic-hmac` sign no
-timestamp: a captured request can be replayed once its delivery id has left the
-10-minute deduplication window. Prefer `eddi-v1` for anything you control.
+timestamp: a captured request can be replayed once its delivery id (or, without
+one, its signature) has left the 10-minute deduplication window. Prefer `eddi-v1`
+for anything you control.
 
 ### Signing a request (`eddi-v1`)
 
@@ -196,11 +197,11 @@ the pointer gets a new conversation.
 | Status | When |
 | --- | --- |
 | `202` | Accepted: `{"conversationId": "..."}` or `{"groupConversationId": "..."}` |
-| `200` | Duplicate: the event id was seen in the last 10 minutes — `{"duplicate": true, "conversationId": "..."}`, no turn runs |
+| `200` | Duplicate: this event was already accepted in the last 10 minutes — `{"duplicate": true, "conversationId": "..."}`, no turn runs |
 | `400` | Malformed JSON or CloudEvent |
 | `401` | Missing, malformed, stale or wrong signature, or the secret cannot be resolved |
 | `404` | No webhook integration with this id |
-| `409` | The correlated conversation is waiting for a human approval |
+| `409` | A repeat of an event whose first delivery is still being processed (`{"duplicate": true}`, `Retry-After: 5` — retry, it is answered 200 once accepted, or processed if the first was refused); or the correlated conversation is waiting for a human approval |
 | `413` | Body larger than `eddi.webhook.max-body-bytes` (default 262144 = 256 KB) |
 | `415` | Unsupported content type |
 | `422` | No target accepts this event type, or the target cannot run |
@@ -214,9 +215,12 @@ conversation coordinator, as for any REST turn. The one exception is a new
 conversation's `CONVERSATION_START` turn, which runs inline: keep webhook agents'
 start rules light.
 
-Deduplication is per node (an in-memory cache, 10 minutes). A refused event (4xx
-other than 200, 429, 5xx) is not remembered, so the sender's retry is processed.
-Without an event id, `eddi-v1` deduplicates on the signature header itself.
+Deduplication is per node (an in-memory cache, 10 minutes). Only an accepted
+(202) event is remembered: a refused one (4xx, 429, 5xx) is forgotten, so the
+sender's retry is processed, and a repeat that arrives while the first delivery is
+still running gets a retryable 409 rather than a 200 it could mistake for
+delivery. Without an event id, every scheme deduplicates on the signature header
+value itself.
 
 ### Quotas
 
@@ -233,6 +237,11 @@ Each event consumes what a REST conversation would: one conversation slot
 - The body is read as bytes and capped before anything else happens; nothing is
   parsed before the signature is verified.
 - Bodies and signatures are never logged.
+- **`github` and `generic-hmac` carry no timestamp.** Their only replay protection
+  is the deduplication window — 10 minutes, per node: a captured request replayed
+  after that (or against another node of a cluster) runs again. Use `eddi-v1`
+  wherever you can configure the sender; its 5-minute timestamp window is
+  enforced by the signature itself.
 - Rotate a secret by updating the vault entry; the channel router drops its cache
   when a vault secret changes. With `eddi-v1`, send both signatures during the
   switch.

@@ -93,8 +93,20 @@ public final class HmacSignatures {
      * Whether a Unix-seconds timestamp lies within {@code maxAgeSeconds} of
      * {@code nowEpochSeconds}, in either direction (a clock running ahead is as
      * suspicious as a replay).
+     * <p>
+     * Overflow-safe: a plain {@code Math.abs(now - ts)} wraps for a timestamp near
+     * {@code Long.MIN_VALUE} or {@code Long.MAX_VALUE} into a negative number that
+     * passes the check. Any arithmetic overflow here means the timestamp is
+     * absurdly far from now, so it is stale.
      */
     public static boolean isFresh(long timestampEpochSeconds, long nowEpochSeconds, long maxAgeSeconds) {
-        return Math.abs(nowEpochSeconds - timestampEpochSeconds) <= maxAgeSeconds;
+        if (maxAgeSeconds < 0) {
+            return false;
+        }
+        try {
+            return Math.absExact(Math.subtractExact(nowEpochSeconds, timestampEpochSeconds)) <= maxAgeSeconds;
+        } catch (ArithmeticException overflow) {
+            return false;
+        }
     }
 }

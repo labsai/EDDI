@@ -24,6 +24,15 @@ its `targets` table and `ChannelTargetRouter` (Pillar 3).
   restricted runtime Qute engine, default `event:<type>`.
 - **Routing** by event type against `targets[].triggers` (exact or `prefix*`, most
   specific wins), else the default target; agents and groups.
+- **Review fixes:** a repeat delivery that arrives while the first is still
+  being processed answers a retryable `409` (`Retry-After: 5`), not `200
+  duplicate` — the first may still be refused, and a 200 would have lost the
+  event; only a recorded `202` makes a repeat a duplicate. `HmacSignatures.isFresh`
+  is overflow-safe (`subtractExact`/`absExact`; a timestamp of
+  `Long.MIN_VALUE + now` used to read as fresh — also used by Slack). Events
+  without an id are deduplicated on the signature value for every scheme, not only
+  `eddi-v1`: for `github` and `generic-hmac`, which sign no timestamp, that window
+  is the only replay protection, as the docs now say.
 - **Conversations:** `new` per event, or `correlate` — one conversation per value at
   `correlationKeyPath`, mapped through `IUserConversationStore` like Slack threads.
 - **Identity:** turns run as `webhook:<integrationId>`.
