@@ -21,6 +21,8 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
+import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -30,6 +32,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
@@ -468,8 +471,13 @@ class ToolLoopRunner {
                     // (bound to id + tool + arguments, each usable once). Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
-                    var gateResult = toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                            effectiveToolApprovals, clearedCalls);
+                    var screened = refuseDoomedGatedCalls(
+                            toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                    effectiveToolApprovals, clearedCalls),
+                            setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
+                    var gateResult = screened.gateResult();
+                    // The pin step below reuses what the screening already resolved.
+                    var pinResolvers = screened.resolvers();
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = ToolApprovalGateSupport.readToolPauseCount(memory);
@@ -554,7 +562,7 @@ class ToolLoopRunner {
                             PendingToolCallBatch batch = gateSupport.buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, ToolApprovalGateSupport.activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
                                     toolSources, effectiveToolApprovals, transcriptMaxBytes, ruleByCallId, governingRule,
-                                    setup.toolRequestResolvers());
+                                    pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(
@@ -730,6 +738,110 @@ class ToolLoopRunner {
                 addResult(currentMessages, call, skipped, refusal, exchangeRecorder);
                 trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
             }
+        }
+    }
+
+    /**
+     * Refuses, before a human is asked, every gated call that is certain to be
+     * refused when it runs: one whose rendered request carries a credential
+     * reference conversation data supplied
+     * ({@link ConfigReferenceRefusedException}, the {@code ConfigReferenceGuard}
+     * rule).
+     * <p>
+     * <b>Why here.</b> Gate time already resolves each gated http call to pin it
+     * ({@code ToolApprovalGateSupport#pinResolvedRequest}), and that resolution
+     * runs the same request build — the guard included — as execution. But the
+     * pinning step is deliberately never allowed to fail a pause, so the guard's
+     * refusal was swallowed there ("approved unpinned") and the approver was shown
+     * a card for a call that was refused the instant they approved it: an approval
+     * spent on nothing, and a model told "refused" only afterwards. Refusing first
+     * costs the human nothing, and the refusal — which names the reference and the
+     * field, never a value — goes back to the model as the tool result so it can
+     * correct the request instead of waiting on a decision.
+     * <p>
+     * Only {@link ConfigReferenceRefusedException} counts. Any other failure to
+     * resolve is not known to be deterministic (and its message may quote the
+     * material being rendered), so those calls stay gated and are approved
+     * unpinned, exactly as before.
+     */
+    private static Screened refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
+                                                   Map<String, ToolRequestResolver> resolvers,
+                                                   List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                   List<Map<String, Object>> trace,
+                                                   ToolExchangeRecorder exchangeRecorder) {
+        if (resolvers == null || resolvers.isEmpty() || gateResult.gated().isEmpty()) {
+            return new Screened(gateResult, resolvers);
+        }
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        // Each gated call is resolved ONCE: the pin step that builds the pending batch
+        // is handed this outcome instead of building the same request a second time.
+        // A failure is remembered too and rethrown there, so the pin step still treats
+        // it exactly as before — a failure that may never stop a pause.
+        Map<ToolExecutionRequest, Object> outcomes = new IdentityHashMap<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            var resolver = resolvers.get(req.name());
+            if (resolver == null) {
+                stillGated.add(req);
+                continue;
+            }
+            try {
+                outcomes.put(req, resolver.resolve(req));
+                stillGated.add(req);
+            } catch (ConfigReferenceRefusedException refused) {
+                LOGGER.warnf("Refusing gated tool '%s' before asking for approval: a credential reference in its request came "
+                        + "from conversation data.", sanitize(req.name()));
+                addResult(currentMessages, aiMessage, req, errorJson(refused.getMessage()), exchangeRecorder);
+                Map<String, Object> step = new HashMap<>();
+                step.put("type", "tool_error");
+                step.put("tool", req.name());
+                step.put("error", "credential_reference_refused");
+                trace.add(step);
+            } catch (Exception e) {
+                // Not known to be deterministic: leave it to the pause, which pins it
+                // best-effort and approves it unpinned.
+                outcomes.put(req, e);
+                stillGated.add(req);
+            }
+        }
+        var screenedGate = stillGated.size() == gateResult.gated().size()
+                ? gateResult
+                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+        Map<String, ToolRequestResolver> memoised = new HashMap<>();
+        for (var entry : resolvers.entrySet()) {
+            ToolRequestResolver original = entry.getValue();
+            memoised.put(entry.getKey(), req -> {
+                Object outcome = outcomes.get(req);
+                if (outcome == null) {
+                    return original.resolve(req);
+                }
+                if (outcome instanceof RuntimeException failure) {
+                    throw failure;
+                }
+                if (outcome instanceof LifecycleException failure) {
+                    throw failure;
+                }
+                return (ResolvedRequest) outcome;
+            });
+        }
+        return new Screened(screenedGate, memoised);
+    }
+
+    /**
+     * The gate result after screening, and the resolvers to pin it with — the same
+     * ones, except that a call already resolved during screening answers from that
+     * resolution.
+     */
+    private record Screened(ToolApprovalGate.GateResult gateResult, Map<String, ToolRequestResolver> resolvers) {
+    }
+
+    private static final ObjectMapper ERROR_MAPPER = new ObjectMapper();
+
+    /** One JSON object with an {@code error} string, escaped. */
+    private static String errorJson(String message) {
+        try {
+            return ERROR_MAPPER.writeValueAsString(Map.of("error", message != null ? message : "refused"));
+        } catch (Exception e) {
+            return "{\"error\":\"refused\"}";
         }
     }
 
