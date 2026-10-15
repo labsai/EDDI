@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.agents.model;
 
+import ai.labs.eddi.engine.model.DeploymentFailure;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,8 +68,13 @@ public record AgentCascadeResult(String agentId, int previousAgentVersion, int n
      *            why it failed, if it did
      * @param previousVersionStillDeployed
      *            a deploy never retires the version it supersedes
+     * @param failure
+     *            the structured reason the deploy reported (for a missing vault
+     *            grant: the secret names and the exact grant call), when it
+     *            reported one
      */
-    public record Deployment(String environment, boolean redeployed, String status, String error, boolean previousVersionStillDeployed) {
+    public record Deployment(String environment, boolean redeployed, String status, String error, boolean previousVersionStillDeployed,
+            DeploymentFailure failure) {
     }
 
     /**
@@ -107,6 +114,20 @@ public record AgentCascadeResult(String agentId, int previousAgentVersion, int n
             }
             if (deployment.error() != null) {
                 result.put("deployError", deployment.error());
+            }
+            DeploymentFailure failure = deployment.failure();
+            if (failure != null) {
+                // Same keys deploy_agent reports, so a model reads both the same way.
+                result.put("failureCode", failure.code());
+                if (failure.secrets() != null) {
+                    result.put("secrets", failure.secrets());
+                }
+                if (failure.isGrantMissing()) {
+                    result.put("humanActionRequired", "An administrator must add this agent to the grant of each listed secret (the Manager's "
+                            + "deploy dialog or Secrets page, or the endpoints in 'fix'), then deploy this same agent version again. No tool "
+                            + "available here can change a grant.");
+                    result.put("fix", failure.fix());
+                }
             }
             if (deployment.environment() != null) {
                 result.put("previousVersionStillDeployed", deployment.previousVersionStillDeployed());

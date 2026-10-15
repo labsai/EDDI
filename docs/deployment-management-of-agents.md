@@ -192,7 +192,7 @@ changed workflow and the agent **once**:
   the approval gate (`hitlConfig`) included — is the stored value, written back unchanged.
 - **`redeploy`** goes through the normal deploy endpoint, so the tenant quota and the vault-grant
   check apply exactly as for `POST /administration/{environment}/deploy/{agentId}`. The documents are
-  written either way; the response's `deployment` says whether it went live.
+  written either way; the response's `deployment` says whether it went live. When the deploy reports why it failed (a missing vault grant names the secrets and the exact grant calls), `deployment.failure` carries that, and the MCP tool reports it as `failureCode`, `secrets`, `fix` and `humanActionRequired`, as `deploy_agent` does.
 - **Partial failure.** Workflows are written first, then the agent. If the agent save (or a later workflow write) fails, the error says the agent was **not** changed, names the workflow versions already written (unreferenced, harmless) and tells you to retry from the agent''s current version; a concurrent edit is a 409, anything else a 500. A store that does not report the version it wrote is an error, never a guessed version.
 - **`compatible`** is the flag described in the next section.
 - **Roles.** `eddi-admin` or `eddi-editor`, the same as the writes it composes, and the usual

@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory.RestInterfaceFactoryException;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -352,17 +353,23 @@ public class AgentCascadeService {
             Response deployResponse = agentAdmin.deployAgent(environment, agentId, version, true, true);
             Object status = null;
             Object error = null;
+            DeploymentFailure failure = null;
             if (deployResponse.getEntity() instanceof Map<?, ?> body) {
                 status = body.get("status");
                 error = body.get("error");
+                // The waited deploy now says WHY (a missing vault grant names the secrets
+                // and the fix); carry it, or the caller only sees "Deployment failed".
+                if (body.get("failure") instanceof DeploymentFailure reported) {
+                    failure = reported;
+                }
             }
             boolean redeployed = deployResponse.getStatus() == 200 && error == null && Deployment.Status.READY.name().equals(String.valueOf(status));
             // The previous version stays deployed: deploy never retires a version, and
             // undeploying would also disable the agent's schedules.
             return new AgentCascadeResult.Deployment(environment.name(), redeployed, status == null ? null : String.valueOf(status),
-                    error == null ? null : String.valueOf(error), redeployed);
+                    error == null ? null : String.valueOf(error), redeployed, failure);
         } catch (Exception deployErr) {
-            return new AgentCascadeResult.Deployment(null, false, null, "Redeployment failed: " + deployErr.getMessage(), false);
+            return new AgentCascadeResult.Deployment(null, false, null, "Redeployment failed: " + deployErr.getMessage(), false, null);
         }
     }
 

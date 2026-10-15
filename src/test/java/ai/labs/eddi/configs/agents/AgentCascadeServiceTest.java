@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -566,6 +567,50 @@ class AgentCascadeServiceTest {
             assertFalse(result.deployment().redeployed());
             assertTrue(result.deployment().error().contains("vault key"), result.deployment().error());
             assertNull(result.deployment().environment());
+        }
+
+        @Test
+        @DisplayName("a deploy refused for a missing vault grant carries the structured reason through, in the result and the flat map")
+        void grantMissingFailureCarried() throws Exception {
+            cascadedAgent();
+            var failure = new DeploymentFailure(DeploymentFailure.VAULT_GRANT_MISSING, "Agent is not granted vault key 'k'.",
+                    List.of(new DeploymentFailure.SecretRef("default", "k", "${vault:k}")),
+                    new DeploymentFailure.Fix(AGENT_ID, List.of("POST /secretstore/secrets/default/k/grant/agents/" + AGENT_ID), true));
+            var body = new HashMap<String, Object>();
+            body.put("status", "ERROR");
+            body.put("error", failure.message());
+            body.put("failure", failure);
+            when(agentAdmin.deployAgent(any(), eq(AGENT_ID), eq(2), anyBoolean(), anyBoolean())).thenReturn(Response.ok(body).build());
+
+            var result = service.cascade(AGENT_ID, 1, List.of(map(LLM_V1, LLM_V2)), true, Deployment.Environment.production, false);
+
+            assertFalse(result.deployment().redeployed());
+            assertEquals(failure, result.deployment().failure());
+            Map<String, Object> flat = result.toMap();
+            assertEquals(DeploymentFailure.VAULT_GRANT_MISSING, flat.get("failureCode"));
+            assertEquals(failure.secrets(), flat.get("secrets"));
+            assertEquals(failure.fix(), flat.get("fix"));
+            assertTrue(String.valueOf(flat.get("humanActionRequired")).contains("administrator"), String.valueOf(flat.get("humanActionRequired")));
+            // The documents are written either way.
+            assertEquals(2, result.newAgentVersion());
+        }
+
+        @Test
+        @DisplayName("a generic deploy failure carries its code but offers no grant fix")
+        void genericFailureHasNoFix() throws Exception {
+            cascadedAgent();
+            var body = new HashMap<String, Object>();
+            body.put("status", "ERROR");
+            body.put("error", "boom");
+            body.put("failure", DeploymentFailure.generic("boom"));
+            when(agentAdmin.deployAgent(any(), eq(AGENT_ID), eq(2), anyBoolean(), anyBoolean())).thenReturn(Response.ok(body).build());
+
+            Map<String, Object> flat = service.cascade(AGENT_ID, 1, List.of(map(LLM_V1, LLM_V2)), true, Deployment.Environment.production, false)
+                    .toMap();
+
+            assertEquals(DeploymentFailure.DEPLOYMENT_FAILED, flat.get("failureCode"));
+            assertFalse(flat.containsKey("fix"));
+            assertFalse(flat.containsKey("humanActionRequired"));
         }
 
         @Test
