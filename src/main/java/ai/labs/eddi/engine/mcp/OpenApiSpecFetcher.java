@@ -24,6 +24,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Supplier;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Fetches a remote OpenAPI document for {@link McpApiToolBuilder#parseSpec}.
  * <p>
@@ -146,6 +148,9 @@ public class OpenApiSpecFetcher {
                     .header("User-Agent", "EDDI-OpenAPI-Discovery/1.0").build();
             HttpResponse<InputStream> response;
             try {
+                // codeql[java/ssrf] False Positive: fetching the editor-supplied spec location
+                // is
+                // the feature; every hop is checked by targetPolicy.validateUrl just above.
                 response = httpClient.get().sendNoRedirect(request, OpenApiSpecFetcher::bodyOrNothing);
             } catch (IOException e) {
                 throw new IllegalArgumentException("Could not fetch the OpenAPI spec from " + forMessage(uri) + ": " + e.getMessage(), e);
@@ -161,11 +166,16 @@ public class OpenApiSpecFetcher {
                             "OpenAPI spec location " + forMessage(uri) + " answered " + status + " without a Location header");
                 }
                 URI next = uri.resolve(target.trim());
-                LOGGER.debugf("OpenAPI spec redirect %d/%d: %s -> %s", hop + 1, MAX_REDIRECTS, forMessage(uri), forMessage(next));
+                // The target comes from the server's Location header: sanitized so a
+                // crafted header cannot forge a log line.
+                LOGGER.debugf("OpenAPI spec redirect %d/%d: %s -> %s", hop + 1, MAX_REDIRECTS, sanitize(forMessage(uri)), sanitize(forMessage(next)));
                 uri = next;
                 continue;
             }
             if (status != 200) {
+                // Nothing reads an error body, but the stream holds the connection until it
+                // is closed; repeated failed discoveries would otherwise pile them up.
+                closeQuietly(response.body());
                 throw new IllegalArgumentException("OpenAPI spec location " + forMessage(uri) + " answered HTTP " + status);
             }
             BoundedBodyReader.Bounded body;
@@ -181,6 +191,14 @@ public class OpenApiSpecFetcher {
             return new String(body.bytes(), StandardCharsets.UTF_8);
         }
         throw new IllegalArgumentException("OpenAPI spec location redirected more than " + MAX_REDIRECTS + " times: " + forMessage(uri));
+    }
+
+    private static void closeQuietly(InputStream body) {
+        try {
+            body.close();
+        } catch (IOException e) {
+            // Best effort: the status is what the caller needs to hear about.
+        }
     }
 
     /**
