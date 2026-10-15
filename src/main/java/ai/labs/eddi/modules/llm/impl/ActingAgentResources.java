@@ -44,8 +44,15 @@ final class ActingAgentResources {
     private static final Logger LOGGER = Logger.getLogger(ActingAgentResources.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** The 24-hex id at the end of an {@code eddi://…/{id}?version=n} URI. */
-    private static final Pattern RESOURCE_ID = Pattern.compile("/([0-9a-fA-F]{24})(?:\\?|$)");
+    /**
+     * The id at the end of an {@code eddi://…/{id}?version=n} URI, in either shape
+     * a backend mints: a 24-hex MongoDB ObjectId or a canonical 8-4-4-4-12 UUID
+     * (PostgreSQL). Matching only the former made every id on a PostgreSQL
+     * deployment invisible to the gate — and "no id found" read as "nothing to
+     * protect", not as a failure.
+     */
+    private static final Pattern RESOURCE_ID = Pattern
+            .compile("/([0-9a-fA-F]{24}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:\\?|$)");
     private static final Pattern VERSION = Pattern.compile("(?:^|[?&])version=(\\d+)");
 
     private ActingAgentResources() {
@@ -111,7 +118,16 @@ final class ActingAgentResources {
             return null;
         }
         Matcher m = VERSION.matcher(uri);
-        return m.find() ? Integer.valueOf(m.group(1)) : null;
+        if (!m.find()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(m.group(1));
+        } catch (NumberFormatException e) {
+            // A digit run too long for an int is not a version; the caller then reads
+            // the current one, as for a URI with no version at all.
+            return null;
+        }
     }
 
     /** Exposed for the stored-gate comparison test. */

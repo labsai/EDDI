@@ -177,6 +177,22 @@ class SelfUngatingGuardProtectionTest {
         }
 
         @Test
+        @DisplayName("a PostgreSQL UUID agent id is a target too — the gate is not MongoDB-only")
+        void uuidTargetIsGuarded() {
+            String uuid = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+            Protection p = resolved(storedGate(GATE));
+            assertEquals(SelfUngatingGuard.GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PUT", "https://eddi/agentstore/agents/" + uuid + "?version=1", "{\"workflows\":[]}", p));
+            assertEquals(SelfUngatingGuard.GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PATCH", "https://eddi/agentstore/agents/" + uuid.toUpperCase(),
+                            "[{\"op\":\"remove\",\"path\":\"/hitlConfig\"}]", p));
+            // Own-resource ids in UUID shape are substring-tested like any other.
+            Protection own = new Protection(AGENT, Set.of(uuid), false, null);
+            assertEquals(SelfUngatingGuard.OWN_RESOURCE_REASON,
+                    SelfUngatingGuard.refusal("PUT", "https://eddi/llmstore/llms/" + uuid, "{\"tasks\":[]}", own));
+        }
+
+        @Test
         @DisplayName("the raw-argument fallback refuses an argument list naming hitlConfig")
         void rawArguments() {
             assertEquals(SelfUngatingGuard.GATE_REMOVAL_REASON,

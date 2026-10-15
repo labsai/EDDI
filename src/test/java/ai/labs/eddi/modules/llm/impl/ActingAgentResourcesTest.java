@@ -163,6 +163,12 @@ class ActingAgentResourcesTest {
     void parsing() {
         assertEquals(LLM, ActingAgentResources.idOf("eddi://ai.labs.llm/llmstore/llms/" + LLM + "?version=4"));
         assertEquals(LLM, ActingAgentResources.idOf("eddi://ai.labs.llm/llmstore/llms/" + LLM));
+        // PostgreSQL mints UUIDs: both shapes a backend produces must resolve, or every
+        // id on a PostgreSQL deployment is silently unprotected.
+        String uuid = "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+        assertEquals(uuid, ActingAgentResources.idOf("eddi://ai.labs.llm/llmstore/llms/" + uuid + "?version=2"));
+        assertEquals(uuid, ActingAgentResources.idOf("eddi://ai.labs.llm/llmstore/llms/" + uuid));
+        assertNull(ActingAgentResources.versionOf("eddi://x/y/" + LLM + "?version=99999999999999999999"), "an overflowing digit run is no version");
         assertNull(ActingAgentResources.idOf("eddi://ai.labs.llm/llmstore/llms/not-an-id"));
         assertNull(ActingAgentResources.idOf(null));
         assertEquals(4, ActingAgentResources.versionOf("eddi://x/y/" + LLM + "?version=4"));

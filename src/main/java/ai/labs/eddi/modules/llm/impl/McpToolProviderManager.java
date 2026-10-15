@@ -437,12 +437,6 @@ public class McpToolProviderManager {
                         // verbatim in the model's tool definitions — cap and sanitize it
                         // before it becomes prompt content.
                         ToolSpecification spec = governDescription(toolEntry.getKey(), serverName);
-                        // M7: so does every description, title and enum value in its
-                        // parameter schema — govern and bound those too.
-                        spec = governSchema(spec, serverName, schemaBudget);
-                        if (spec == null) {
-                            continue;
-                        }
                         ToolExecutor executor = toolEntry.getValue();
 
                         if (executor == null) {
@@ -456,6 +450,15 @@ public class McpToolProviderManager {
                         if (serverExecutors.containsKey(spec.name())) {
                             LOGGER.warnf("MCP server '%s' advertises tool '%s' more than once — keeping the first, dropping the duplicate",
                                     sanitize(serverName), sanitize(spec.name()));
+                            continue;
+                        }
+
+                        // M7: every description, title and enum value in the parameter
+                        // schema is remote text too — govern and bound it. After the two
+                        // drops above, so a tool that is dropped anyway is not charged
+                        // against the per-server budget ahead of the ones that are kept.
+                        spec = governSchema(spec, serverName, schemaBudget);
+                        if (spec == null) {
                             continue;
                         }
 

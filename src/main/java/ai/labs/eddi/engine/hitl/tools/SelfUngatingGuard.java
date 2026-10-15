@@ -77,8 +77,14 @@ public final class SelfUngatingGuard {
      * routing, so a test on only the current path is bypassed by spelling the old.
      */
     private static final List<String> LLM_STORE_PATHS = List.of("/llmstore/llms", "/langchainstore/langchains");
-    /** The agent store and its v5 name, same reason. */
-    private static final Pattern AGENT_STORE_TARGET = Pattern.compile("/(?:agentstore/agents|botstore/bots)/([0-9a-f]{24})(?:[/?#]|$)");
+    private static final String UUID_ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    /**
+     * The agent store and its v5 name, same reason. The id is either shape a
+     * backend mints — a 24-hex ObjectId (MongoDB) or a canonical UUID (PostgreSQL);
+     * the URI is lower-cased before this runs.
+     */
+    private static final Pattern AGENT_STORE_TARGET = Pattern
+            .compile("/(?:agentstore/agents|botstore/bots)/([0-9a-f]{24}|" + UUID_ID + ")(?:[/?#]|$)");
     /** Every configuration store answers under {@code /<name>store/}. */
     private static final Pattern CONFIG_STORE_PATH = Pattern.compile("/[a-z]+store/");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
