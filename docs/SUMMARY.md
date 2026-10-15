@@ -8,10 +8,9 @@
 - [Developer Quickstart Guide](developer-quickstart.md)
 - [Agent Manager Dashboard](agent-manager-gui.md)
 - [Creating your first Agent](creating-your-first-agent/README.md)
-  - [Create a "Hello World" agent](creating-your-first-agent/creating-your-first-agent.md)
-  - [Create an agent that reacts to user inputs](creating-your-first-agent/creating-your-first-agent-1.md)
 - [Putting It All Together](putting-it-all-together.md)
 - [Import/Export an Agent](import-export-an-agent.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## Architecture & Concepts
 
@@ -29,8 +28,10 @@
 - [Behavior Rules](behavior-rules.md)
 - [HTTP Calls / API Calls](httpcalls.md)
 - [LLM Integration](langchain.md)
+  - [LLM Parameters Reference](llm-parameters.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
+- [LLM Turn Resilience](llm-resilience.md)
 - [Prompt Snippets](prompt-snippets-guide.md)
 - [Output Configuration](output-configuration.md)
 - [Output Templating](output-templating.md)
@@ -41,6 +42,7 @@
 ## Conversations & Orchestration
 
 - [Conversations](conversations.md)
+- [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Managed Agents](managed-agents.md)
@@ -88,7 +90,8 @@
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [Release & Versioning Strategy](release-versioning.md)
 - [Release Signing & Verification](release-signing.md)
-- [Release Notes — 6.0.2](release-notes-6.0.2.md)
+- [Release Notes](release-notes.md)
+  - [Release Notes — 6.0.2](release-notes-6.0.2.md)
 - [Metrics & Monitoring](metrics.md)
 - [Monitoring & Tracing Guide](monitoring/monitoring-guide.md)
 - [Log Administration](log-administration.md)
@@ -100,6 +103,7 @@
 - [Code Review Standards](code-review-standards.md)
 - [Build Reproducibility](build-reproducibility.md)
 - [Changelog](changelog.md)
+  - [October 2026](changelog/2026-10.md)
   - [September 2026](changelog/2026-09.md)
   - [August 2026](changelog/2026-08.md)
   - [July 2026](changelog/2026-07.md)

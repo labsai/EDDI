@@ -156,7 +156,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         String authHeaderRef = trimToNull(request.authHeaderRef());
         if (authHeaderRef != null && !isReference(authHeaderRef)) {
             return badRequest("authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential. "
-                    + "Store the key with POST /secretstore/secrets and reference it here.");
+                    + "Store the key with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
         }
 
         return discover(request.specUrl(), request.apiBaseUrl(), authHeaderRef);

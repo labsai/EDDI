@@ -37,6 +37,11 @@ export const TOKEN_WAIT_MS = 10_000;
 export const REFRESH_LEAD_MS = 60_000;
 /** Never schedule a refresh sooner than this after receiving a token. */
 const MIN_REFRESH_DELAY_MS = 5_000;
+/**
+ * The longest delay a browser timer holds: it is stored as a signed 32-bit
+ * value, and anything above it overflows and fires at once (~24.8 days).
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 /** An access token is a few KB; anything far larger is not one. */
 const MAX_TOKEN_LENGTH = 16_384;
 
@@ -151,10 +156,16 @@ export function startEmbedAuth({
     // Ask a minute ahead; a token shorter-lived than that is renewed at
     // roughly 80 % of its life, and never sooner than a few seconds.
     const lead = Math.min(REFRESH_LEAD_MS, remaining * 0.2);
-    const delay = Math.max(MIN_REFRESH_DELAY_MS, remaining - lead);
+    const wanted = Math.max(MIN_REFRESH_DELAY_MS, remaining - lead);
+    // A token that lives longer than a timer can wait would overflow it: the
+    // request went out at once, a host answering with the same token got the
+    // same instant timer back, and the two looped. Wait in capped steps instead.
+    const delay = Math.min(MAX_TIMER_DELAY_MS, wanted);
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
-      if (!stopped) post(MSG_TOKEN_REQUEST);
+      if (stopped) return;
+      if (wanted > delay) scheduleRefresh(token);
+      else post(MSG_TOKEN_REQUEST);
     }, delay);
   };
 

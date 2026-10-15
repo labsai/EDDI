@@ -142,6 +142,18 @@ export interface LlmTask {
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
   maxToolIterations?: number;
+  /**
+   * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).
+   * Calls past it are answered `NOT_EXECUTED` and never reach the approval gate.
+   * `-1` or `0` removes the cap. Absent = the server default; never sent unless set,
+   * because an older backend's strict config parser refuses an unknown field.
+   */
+  maxToolCallsPerIteration?: number;
+  /**
+   * Most tool calls executed across a whole turn, HITL resumes included
+   * (EDDI 6.6+, default 100). Same refusal and same `-1`/`0` rule as above.
+   */
+  maxToolCallsPerTurn?: number;
   modelCascade?: ModelCascadeConfig;
 
   // Conversation Summary (Rolling Summary Strategy)
@@ -173,6 +185,12 @@ export interface LlmTask {
    * completes the turn; `error` (the default) fails it.
    */
   onError?: TaskOnError;
+  /**
+   * Opt-in per-model circuit breaker (off by default): skips a model that
+   * keeps failing with the same permanent class — invalid output, bad request,
+   * model not found; auth or quota at once — for `coolDownMs`, then probes once.
+   */
+  circuitBreaker?: TaskCircuitBreaker;
   /**
    * Timeout (seconds) for streaming chat completions. Overrides the engine
    * default (120s). Only applies while streaming is active.
@@ -298,6 +316,18 @@ export interface FallbackQuickReply {
   value?: string;
   expressions?: string;
   isDefault?: boolean;
+}
+
+/** Mirrors backend `LlmConfiguration.CircuitBreakerConfig`. */
+export interface TaskCircuitBreaker {
+  /** Default false: without it a task behaves exactly as before. */
+  enabled?: boolean;
+  /** How many of the latest counted turns are looked at. Default 10, 1..1000. */
+  window?: number;
+  /** How many of them must fail with the same class to open it. Default 8. */
+  threshold?: number;
+  /** Milliseconds an open circuit is skipped before one probe. Default 60000. */
+  coolDownMs?: number;
 }
 
 /** Task-level failure policy — mirrors backend `LlmConfiguration.OnError`. */

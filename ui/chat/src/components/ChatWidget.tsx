@@ -58,6 +58,7 @@ import {
   isTurnPaused,
   parseToolCallName,
   UNCONSUMED_STREAM_ERROR_CODES,
+  type DoneSnapshot,
   type OutputImage,
 } from "@/api/sse-events";
 import type {
@@ -84,13 +85,19 @@ interface TurnContext {
   stateBeforeSend: ConversationState | null;
   /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
   userMessageId: string | null;
+  /**
+   * The stream ended with a `done` whose payload could not be parsed. The turn
+   * finished on the server, but its outputs, quick replies and state are not
+   * known yet: the caller re-reads the conversation and applies that instead.
+   */
+  doneUnreadable: boolean;
 }
 
 function newTurn(
   stateBeforeSend: ConversationState | null,
   userMessageId: string | null = null,
 ): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId };
+  return { tokenCount: 0, stateBeforeSend, userMessageId, doneUnreadable: false };
 }
 
 function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
@@ -451,6 +458,108 @@ export function ChatWidget() {
     };
   }, [tokenOriginParam]);
 
+  /* ─── Apply a finished turn ───────────────────
+     The `done` payload, or — when that was unreadable — the conversation
+     re-read after the stream, which carries the same two fields.        */
+  const applyDoneSnapshot = useCallback(
+    (snapshot: DoneSnapshot | null, turn: TurnContext): void => {
+      const lastOutput = snapshot?.conversationOutputs?.length
+        ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
+        : undefined;
+      const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
+      const outputImages = extractOutputImages(lastOutput?.output);
+      const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
+
+      // A requested input field (a password prompt) arrives here on the
+      // streaming path, which is the default. Reading it only from the
+      // non-streaming snapshot meant the key went into the plain textarea,
+      // was shown in clear and was sent without `secretInput`. A skipped
+      // turn carries the PREVIOUS step's outputs, so it must not re-apply.
+      const inputField = skipped ? null : findInputField(lastOutput?.output);
+      if (inputField) {
+        dispatch({ type: "SET_INPUT_FIELD", field: inputField });
+      }
+
+      if (skipped) {
+        // The server dropped this turn without consuming it. The payload
+        // carries the PREVIOUS step's outputs, so its quick replies must
+        // not be applied — doing so re-offered stale buttons as if new.
+        //
+        // The user's own bubble must go too: leaving it there asserts the
+        // message was sent when it never reached the agent. Withdrawing it
+        // also hands the text back to the composer so it can be resent.
+        const pending = turn.userMessageId
+          ? pendingTurnsRef.current.get(turn.userMessageId)
+          : undefined;
+        if (turn.userMessageId) {
+          pendingTurnsRef.current.delete(turn.userMessageId);
+          dispatch({
+            type: "WITHDRAW_LAST_USER_MESSAGE",
+            messageId: turn.userMessageId,
+            draft: pending?.text,
+            attachments: pending?.attachments,
+            wasSecret: pending?.isSecret,
+          });
+        } else {
+          dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+        }
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: makeNotice(
+            skippedTurnMessage(snapshot?.conversationState),
+          ),
+        });
+      } else if (turn.tokenCount === 0) {
+        // No tokens, but the turn WAS accepted. Any text lives only in the
+        // done payload — including HITL's pending-approval placeholder,
+        // which arrives as a bare string. Dropping it left a paused turn
+        // rendering as "No response".
+        dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+        if (outputText || outputImages.length) {
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage(outputText, outputImages),
+          });
+        }
+        if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
+          dispatch({
+            type: "SET_QUICK_REPLIES",
+            replies: lastOutput?.quickReplies ?? [],
+          });
+        }
+      } else if (snapshot?.conversationOutputs?.length) {
+        // Tokens already rendered the answer, but responseValidation can
+        // SUPERSEDE them (fallback text) after the fact. The snapshot is
+        // authoritative.
+        if (outputText) {
+          dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+        }
+        // Images never stream as tokens; the snapshot is their only source.
+        if (outputImages.length) {
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage("", outputImages),
+          });
+        }
+        dispatch({
+          type: "SET_QUICK_REPLIES",
+          replies: lastOutput?.quickReplies ?? [],
+        });
+      }
+
+      if (snapshot?.conversationState) {
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: snapshot.conversationState,
+        });
+      }
+
+      dispatch({ type: "FINISH_STREAMING" });
+      dispatch({ type: "SET_PROCESSING", value: false });
+    },
+    [dispatch],
+  );
+
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
      so the caller can break out of the for-await loop.                  */
@@ -514,99 +623,17 @@ export function ChatWidget() {
 
         case "done": {
           const snapshot = parseDoneSnapshot(event.data);
-          const lastOutput = snapshot?.conversationOutputs?.length
-            ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
-            : undefined;
-          const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
-          const outputImages = extractOutputImages(lastOutput?.output);
-          const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
-
-          // A requested input field (a password prompt) arrives here on the
-          // streaming path, which is the default. Reading it only from the
-          // non-streaming snapshot meant the key went into the plain textarea,
-          // was shown in clear and was sent without `secretInput`. A skipped
-          // turn carries the PREVIOUS step's outputs, so it must not re-apply.
-          const inputField = skipped ? null : findInputField(lastOutput?.output);
-          if (inputField) {
-            dispatch({ type: "SET_INPUT_FIELD", field: inputField });
+          if (!snapshot) {
+            // The turn finished on the server, but its payload is unreadable
+            // (a proxy truncated it, say). Applying it as an empty snapshot
+            // ended a zero-token turn with no reply and no quick replies, and
+            // treating it as a stream failure would hand back a draft the agent
+            // already consumed. Stop reading; the caller re-reads the
+            // conversation and applies that instead.
+            turn.doneUnreadable = true;
+            return true;
           }
-
-          if (skipped) {
-            // The server dropped this turn without consuming it. The payload
-            // carries the PREVIOUS step's outputs, so its quick replies must
-            // not be applied — doing so re-offered stale buttons as if new.
-            //
-            // The user's own bubble must go too: leaving it there asserts the
-            // message was sent when it never reached the agent. Withdrawing it
-            // also hands the text back to the composer so it can be resent.
-            const pending = turn.userMessageId
-              ? pendingTurnsRef.current.get(turn.userMessageId)
-              : undefined;
-            if (turn.userMessageId) {
-              pendingTurnsRef.current.delete(turn.userMessageId);
-              dispatch({
-                type: "WITHDRAW_LAST_USER_MESSAGE",
-                messageId: turn.userMessageId,
-                draft: pending?.text,
-                attachments: pending?.attachments,
-                wasSecret: pending?.isSecret,
-              });
-            } else {
-              dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            }
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: makeNotice(
-                skippedTurnMessage(snapshot?.conversationState),
-              ),
-            });
-          } else if (turn.tokenCount === 0) {
-            // No tokens, but the turn WAS accepted. Any text lives only in the
-            // done payload — including HITL's pending-approval placeholder,
-            // which arrives as a bare string. Dropping it left a paused turn
-            // rendering as "No response".
-            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            if (outputText || outputImages.length) {
-              dispatch({
-                type: "ADD_MESSAGE",
-                message: makeAgentMessage(outputText, outputImages),
-              });
-            }
-            if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
-              dispatch({
-                type: "SET_QUICK_REPLIES",
-                replies: lastOutput?.quickReplies ?? [],
-              });
-            }
-          } else if (snapshot?.conversationOutputs?.length) {
-            // Tokens already rendered the answer, but responseValidation can
-            // SUPERSEDE them (fallback text) after the fact. The snapshot is
-            // authoritative.
-            if (outputText) {
-              dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
-            }
-            // Images never stream as tokens; the snapshot is their only source.
-            if (outputImages.length) {
-              dispatch({
-                type: "ADD_MESSAGE",
-                message: makeAgentMessage("", outputImages),
-              });
-            }
-            dispatch({
-              type: "SET_QUICK_REPLIES",
-              replies: lastOutput?.quickReplies ?? [],
-            });
-          }
-
-          if (snapshot?.conversationState) {
-            dispatch({
-              type: "SET_CONVERSATION_STATE",
-              state: snapshot.conversationState,
-            });
-          }
-
-          dispatch({ type: "FINISH_STREAMING" });
-          dispatch({ type: "SET_PROCESSING", value: false });
+          applyDoneSnapshot(snapshot, turn);
           return true;
         }
 
@@ -673,7 +700,7 @@ export function ChatWidget() {
           return false;
       }
     },
-    [dispatch],
+    [dispatch, applyDoneSnapshot],
   );
 
   /* ─── Process conversation snapshot ─────────── */
@@ -1051,6 +1078,7 @@ export function ChatWidget() {
           for await (const event of events) {
             if (handleSSEEvent(event, demoTurn)) demoDone = true;
           }
+          if (demoTurn.doneUnreadable) applyDoneSnapshot(null, demoTurn);
           // Safety net: finish streaming if the stream closed without a done event
           if (!demoDone) dispatch({ type: "FINISH_STREAMING" });
 
@@ -1147,6 +1175,10 @@ export function ChatWidget() {
               true,
             );
             if (gen !== generationRef.current) return;
+            // The `done` payload could not be read, so nothing of the turn's
+            // outcome has been applied yet. This read of the current step
+            // carries the same two fields — state and outputs — so it stands in.
+            if (turn.doneUnreadable && !stopped()) applyDoneSnapshot(after, turn);
             dispatch({
               type: "SET_UNDO_REDO",
               undoAvailable: after.undoAvailable ?? false,
@@ -1175,6 +1207,23 @@ export function ChatWidget() {
           } catch {
             // Availability refresh is best-effort; a failure here must not
             // sink an otherwise successful turn.
+            //
+            // Unless it was also the only source of the turn's outcome: then
+            // end the turn, and say so when nothing of the reply is on screen.
+            // The message WAS consumed, so the draft is not handed back.
+            if (
+              turn.doneUnreadable &&
+              gen === generationRef.current &&
+              !stopped()
+            ) {
+              applyDoneSnapshot(null, turn);
+              if (turn.tokenCount === 0) {
+                dispatch({
+                  type: "ADD_MESSAGE",
+                  message: makeNotice(`⚠️ ${t("send.connectionLost")}`),
+                });
+              }
+            }
           }
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
@@ -1359,6 +1408,7 @@ export function ChatWidget() {
       dispatch,
       processSnapshot,
       handleSSEEvent,
+      applyDoneSnapshot,
       isDemo,
       isManagedAgent,
       intent,

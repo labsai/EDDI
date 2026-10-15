@@ -274,9 +274,9 @@ async function loadParents(
         expected,
       },
       found
-        ? `Agent ${context.agentId} (version ${context.agentVersion}) references workflow ` +
-            `${context.workflowId} at version ${found}, not version ${expected}. ` +
-            `The agent changed since this page was opened — reload it. Nothing was saved.`
+        ? `Agent ${context.agentId} (version ${context.agentVersion}) uses workflow ` +
+            `${context.workflowId} at version ${found}, but this page was opened at version ${expected}. ` +
+            `Nothing was saved. Update the agent to use the new workflow version, or open version ${found}.`
         : `Agent ${context.agentId} (version ${context.agentVersion}) does not reference workflow ` +
             `${context.workflowId}. Nothing was saved.`,
     );

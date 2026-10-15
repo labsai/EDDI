@@ -1,4 +1,4 @@
-import { useEffect, useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { create } from "zustand";
 
 /**
@@ -31,6 +31,35 @@ function setGuardDirty(token: string, dirty: boolean) {
     else next.delete(token);
     return { dirtyGuards: next };
   });
+}
+
+/**
+ * The saves of the dirty guards that can save from the leave prompt, keyed by
+ * guard token. Module state, not store state: functions change every render and
+ * nothing renders from them — the prompt reads them when the user answers.
+ */
+const savers = new Map<string, { current: (() => Promise<boolean>) | undefined }>();
+
+/**
+ * One save that saves every dirty page, or `null` when some dirty page cannot
+ * save from the prompt (it then offers only Stay / Discard). Resolves `true`
+ * only when every save landed.
+ */
+export function saveAllDirtyGuards(): (() => Promise<boolean>) | null {
+  const { dirtyGuards } = useNavigationGuardStore.getState();
+  if (dirtyGuards.size === 0) return null;
+  const saves: (() => Promise<boolean>)[] = [];
+  for (const token of dirtyGuards) {
+    const save = savers.get(token)?.current;
+    if (!save) return null;
+    saves.push(save);
+  }
+  return async () => {
+    for (const save of saves) {
+      if (!(await save())) return false;
+    }
+    return true;
+  };
 }
 
 /** Whether any mounted guard has unsaved changes. Read by the single app blocker. */
@@ -82,10 +111,19 @@ export function consumeNavigationBypass(): boolean {
  * same page loses nothing. Under a bare `MemoryRouter` (isolated component tests)
  * there is no blocker, and only `beforeunload` applies.
  *
+ * A page that can save on demand passes `onSave` (resolving `true` once saved);
+ * the prompt then also offers **Save & leave**, and lets the navigation through
+ * only when the save landed.
+ *
  * @param isDirty Whether there are unsaved changes
+ * @param options.onSave Offers "Save & leave": resolve `true` once saved
  */
-export function useUnsavedChangesGuard(isDirty: boolean) {
+export function useUnsavedChangesGuard(isDirty: boolean, options?: { onSave?: () => Promise<boolean> }) {
   const token = useId();
+  const onSaveRef = useRef(options?.onSave);
+  useEffect(() => {
+    onSaveRef.current = options?.onSave;
+  });
 
   useEffect(() => {
     if (!isDirty) return;
@@ -102,7 +140,11 @@ export function useUnsavedChangesGuard(isDirty: boolean) {
 
   useEffect(() => {
     if (!isDirty) return;
+    savers.set(token, onSaveRef);
     setGuardDirty(token, true);
-    return () => setGuardDirty(token, false);
+    return () => {
+      savers.delete(token);
+      setGuardDirty(token, false);
+    };
   }, [isDirty, token]);
 }

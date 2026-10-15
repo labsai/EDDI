@@ -133,6 +133,14 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         FunctionCounter.builder("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue)
                 .description("Total conversation tasks processed")
                 .register(meterRegistry);
+        // A failed turn used to be visible only through the coordinator admin REST
+        // API: no meter counted it, so a storm of failing turns raised no alert.
+        // The counter is cumulative (it survives the cap and a purge); the gauge is
+        // what an operator would find in the dead-letter list right now.
+        FunctionCounter.builder("eddi.coordinator.dead_lettered", totalDeadLettered, AtomicLong::doubleValue)
+                .description("Conversation tasks the in-memory coordinator dead-lettered (cumulative)")
+                .register(meterRegistry);
+        meterRegistry.gauge("eddi.coordinator.dead_letters_retained", deadLetters, Collection::size);
     }
 
     private double computeTotalQueueDepth(Map<String, BlockingQueue<Callable<Void>>> queues) {

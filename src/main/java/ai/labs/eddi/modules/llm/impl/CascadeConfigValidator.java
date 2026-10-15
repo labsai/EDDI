@@ -61,6 +61,12 @@ final class CascadeConfigValidator {
         requireNonNegativeTaskPrice(taskId, "inputPricePer1M", task.getInputPricePer1M());
         requireNonNegativeTaskPrice(taskId, "outputPricePer1M", task.getOutputPricePer1M());
 
+        // Warnings only, never blocking: timeouts that contradict each other and a
+        // JSON agent with no fallback path (TurnResilienceWarnings).
+        for (String warning : TurnResilienceWarnings.taskWarnings(task)) {
+            LOGGER.warnf("LLM task '%s': %s.", taskId, warning);
+        }
+
         ModelCascadeConfig cascade = task.getModelCascade();
         if (cascade == null || !cascade.isEnabled()) {
             return;
