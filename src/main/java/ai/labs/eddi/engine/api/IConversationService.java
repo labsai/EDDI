@@ -221,11 +221,11 @@ public interface IConversationService {
     // conversation) ---
     //
     // The environment-qualified twins of these (readConversation,
-    // getConversationState,
-    // sayStreaming, undo/redo and their availability checks) had no caller outside
-    // ConversationService and are no longer part of the contract. say() keeps its
-    // qualified form above: schedules and A2A address an agent, not a stored
-    // record.
+    // getConversationState, undo/redo and their availability checks) had no caller
+    // outside ConversationService and are no longer part of the contract. say() and
+    // sayStreaming() keep their qualified forms: schedules and A2A address an
+    // agent,
+    // not a stored record.
 
     /**
      * Read a conversation memory snapshot — resolves agentId + environment from the
@@ -253,6 +253,16 @@ public interface IConversationService {
      */
     void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
                       StreamingResponseHandler streamingHandler)
+            throws Exception;
+
+    /**
+     * Process user input with SSE streaming for a known agent — the streaming twin
+     * of the qualified {@code say}. For callers that address an agent rather than a
+     * stored conversation record (A2A {@code message/stream}); the conversation-id
+     * overload above applies the caller-facing checks instead.
+     */
+    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception;
 
     Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
