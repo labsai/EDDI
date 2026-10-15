@@ -4,17 +4,25 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
+import ai.labs.eddi.engine.cluster.SharedBucket;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -452,5 +460,24 @@ class ToolCostTrackerTest {
             assertTrue(summary.contains("Total Cost"));
             assertTrue(summary.contains("websearch"));
         }
+    }
+    @Test
+    @DisplayName("cluster mode: a charge whose shared update lost every CAS still counts against the budget")
+    @SuppressWarnings("unchecked")
+    void lostSharedUpdateStillCountsAgainstTheBudget() {
+        ISharedKv costs = mock(ISharedKv.class);
+        when(costs.get(anyString())).thenReturn(Optional.of(new ISharedKv.Versioned("0.0".getBytes(), 1)));
+        when(costs.update(anyString(), any(), anyLong())).thenReturn(OptionalLong.empty());
+        NatsSharedStateFactory shared = mock(NatsSharedStateFactory.class);
+        when(shared.bucket(any(SharedBucket.class))).thenReturn(costs);
+        Instance<NatsSharedStateFactory> instance = mock(Instance.class);
+        when(instance.get()).thenReturn(shared);
+        tracker.natsSharedState = instance;
+        tracker.clusterConfig = ClusterConfig.defaults().withMessagingType("nats");
+
+        tracker.trackToolCall(SEARCH_WEB, "conv-cas");
+
+        assertFalse(tracker.isWithinBudget("conv-cas", 0.0005),
+                "the shared total still reads $0, but this conversation already spent $0.001 on this node");
     }
 }
