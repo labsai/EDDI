@@ -7,6 +7,7 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -99,6 +100,19 @@ public class UpgradeExecutor {
     private final BackupMetrics metrics;
 
     private final ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * Who may write {@code ${caller:token}}. Null when built outside the container,
+     * where the check is skipped. Updates go through the REST stores, which apply
+     * it themselves; the direct create in createExtension bypasses them, so they
+     * apply it here.
+     */
+    private CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    @Inject
+    void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
+        this.callerTokenAuthorPolicy = policy;
+    }
 
     @Inject
     public UpgradeExecutor(IRestAgentStore agentStore,
@@ -832,6 +846,9 @@ public class UpgradeExecutor {
         try {
             ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
             IResourceStore<Object> store = getStore(ops.storeClass());
+            if (callerTokenAuthorPolicy != null) {
+                callerTokenAuthorPolicy.requireMayAuthor(source.contentJson(), source.type());
+            }
             IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);

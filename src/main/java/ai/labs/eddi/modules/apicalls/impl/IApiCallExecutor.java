@@ -65,4 +65,16 @@ public interface IApiCallExecutor {
      */
     ResolvedRequest resolve(ApiCall httpCall, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
             throws LifecycleException;
+
+    /**
+     * Refuses a target URL whose host or port is a template when the deployment
+     * does not validate rendered hosts (SSRF protection off). Called at deploy time
+     * so the agent fails to deploy with a clear message instead of failing every
+     * turn; {@link #execute} applies the same check.
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    default void rejectTemplatedAuthority(String targetDestination) {
+    }
 }

@@ -116,6 +116,29 @@ headers are scrubbed before the request is recorded.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
+### Who may write `${caller:token}`
+
+The rules above say *where* the token may go. They do not say *whose* token it
+is: always that of whoever is chatting, never that of whoever wrote the config.
+So a call written by one person runs with the privileges of another. An editor
+could save a call to `http://127.0.0.1:7070/administration/…` with
+`Bearer ${caller:token}`, fire it on `CONVERSATION_START`, and have the next
+administrator who opens that agent run an admin-only endpoint with their own
+token — the same-origin rule allows it, because EDDI's own address is an allowed
+target.
+
+That is why, with authorization on, only `eddi.caller-identity.author-roles`
+(default `eddi-admin`) may **save** a configuration containing
+`${caller:token}`. Create, update, patch and duplicate of httpcalls, mcpcalls and
+LLM configs, and every document an import or sync writes, are checked; anyone
+else gets **403** naming the property. The check covers the whole document, so an
+editor can neither add the reference nor edit a call that already carries it.
+`${caller:userId}` is a name, not a credential, and stays open to editors.
+
+Widen the roles (`eddi.caller-identity.author-roles=eddi-admin,eddi-editor`) only
+when every editor is trusted with the privileges of every user who chats with
+their agents.
+
 The same reference works in an **MCP server's `apiKey`**, so a tool call reaches
 that server as the chatting user rather than as a standing service principal.
 Only the tool call carries the caller — the handshake and `tools/list` do not,

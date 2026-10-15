@@ -419,6 +419,34 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > variable). Leave it off only if every outbound target is a fixed literal and you
 > genuinely need to reach private addresses.
 >
+> **A templated host is refused while it is off.** An httpCall whose scheme, host
+> or port contains a template expression (`https://{properties.apiHost}`,
+> `http://127.0.0.1:{properties.port}`) fails to deploy, and a turn that still
+> reaches one fails, with a message naming this flag. A property is routinely
+> captured from user input, so without validation of the rendered host the
+> chatting user could pick loopback — EDDI's own admin API included. A
+> `${vars:…}` reference in the host is still accepted: its value is set by an
+> operator. Templating the *path* or query is unaffected.
+>
+> **Keep internal APIs with protection on** by listing them:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true
+> eddi.security.ssrf-protection.allowed-hosts=billing.internal,10.0.0.5:9200
+> ```
+>
+> Entries are exact `host` or `host:port` values, compared case-insensitively,
+> with no wildcards; a bare host matches any port. An httpCall to a listed host
+> skips the private-address check but never the cloud-metadata check, and
+> redirects stay off. A templated host can then only resolve to a listed host or
+> a public one. The allow-list applies to httpCalls; MCP servers and A2A peers
+> are validated as before.
+>
+> **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
+> WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
+> `false`. The default stays `false` because configured targets legitimately reach
+> internal hosts (the rule-based reference agent calls `http://localhost:7070`).
+>
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse
 > `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`,
