@@ -115,7 +115,7 @@ class InputTypedEmbeddingModelTest {
      * {@code EmbeddingModel.embed} validates against {@code supportedParameters()}
      * and throws {@code UnsupportedFeatureException} for anything unsupported
      * <em>rather than ignoring it</em>. Only Gemini and Cohere declare
-     * {@code INPUT_TYPE} in langchain4j 1.20.0, so setting it unconditionally would
+     * {@code INPUT_TYPE} in langchain4j 1.22.0, so setting it unconditionally would
      * turn every OpenAI, Azure, Ollama, Bedrock, Vertex and Mistral knowledge base
      * into a hard failure.
      */

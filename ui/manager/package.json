@@ -11,6 +11,7 @@
     "typecheck": "tsc -b",
     "i18n:check": "node scripts/check-i18n.mjs",
     "openapi:refresh": "node scripts/refresh-openapi-operations.mjs",
+    "gen:llm-params": "node scripts/gen-llm-parameter-catalog.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

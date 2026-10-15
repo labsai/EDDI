@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.huggingface.HuggingFaceChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,9 +13,11 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
@@ -34,11 +37,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * for backward compatibility with existing configurations.
  *
  * <p>
- * <b>Core builder methods:</b> {@code accessToken}, {@code modelId} (via
- * baseUrl), {@code timeout}, {@code temperature}, {@code maxNewTokens},
- * {@code waitForModel}. Parameters like {@code topK}, {@code topP},
- * {@code doSample}, {@code repetitionPenalty} are NOT supported by the core
- * HuggingFaceChatModel builder (they were quarkiverse extensions).
+ * <b>Core builder methods:</b> {@code accessToken}, {@code modelId},
+ * {@code baseUrl}, {@code timeout}, {@code temperature}, {@code maxNewTokens},
+ * {@code returnFullText}, {@code waitForModel}. Parameters like {@code topK},
+ * {@code topP}, {@code doSample}, {@code repetitionPenalty} are NOT supported
+ * by the core HuggingFaceChatModel builder (they were quarkiverse extensions).
  */
 @ApplicationScoped
 public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
@@ -48,41 +51,62 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_MAX_NEW_TOKENS = "maxNewTokens";
     private static final String KEY_WAIT_FOR_MODEL = "waitForModel";
-    private static final String BASE_URL_HUGGING_FACE = "https://api-inference.huggingface.co/models/";
+    /**
+     * The service root, without {@code models/} — langchain4j appends
+     * {@code models/<modelId>} itself. Unset, langchain4j's own default
+     * ({@code https://router.huggingface.co/hf-inference/}) applies.
+     */
+    static final String KEY_BASE_URL = "baseUrl";
+    static final String KEY_RETURN_FULL_TEXT = "returnFullText";
 
     @Override
     public Set<String> recognisedParameters() {
-        return Set.of(KEY_ACCESS_TOKEN, KEY_MODEL_ID, KEY_TEMPERATURE, KEY_TIMEOUT, KEY_MAX_NEW_TOKENS, KEY_WAIT_FOR_MODEL);
+        return Set.of(KEY_ACCESS_TOKEN, KEY_MODEL_ID, KEY_TEMPERATURE, KEY_TIMEOUT, KEY_MAX_NEW_TOKENS, KEY_WAIT_FOR_MODEL,
+                KEY_BASE_URL, KEY_RETURN_FULL_TEXT);
     }
 
-    @SuppressWarnings("removal")
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = HuggingFaceChatModel.builder();
+        return applyTo(HuggingFaceChatModel.builder(), parameters).build();
+    }
 
+    /**
+     * Applies the configured parameters and hands the builder back unbuilt, so the
+     * mapping can be asserted without an access token.
+     * <p>
+     * The model id goes to {@code modelId}: langchain4j's client requests
+     * {@code <baseUrl>models/<modelId>} and refuses to start without a model id.
+     * This builder used to fold the id into a {@code baseUrl} of
+     * {@code https://api-inference.huggingface.co/models/<id>} and never set
+     * {@code modelId}, which fails that check.
+     */
+    @SuppressWarnings("removal")
+    static HuggingFaceChatModel.Builder applyTo(HuggingFaceChatModel.Builder builder, Map<String, String> parameters) {
         if (!isNullOrEmpty(parameters.get(KEY_ACCESS_TOKEN))) {
             builder.accessToken(parameters.get(KEY_ACCESS_TOKEN));
         }
 
-        var modelId = parameters.get(KEY_MODEL_ID);
-        if (!isNullOrEmpty(modelId)) {
+        var modelId = stringValue(parameters, KEY_MODEL_ID);
+        if (modelId != null) {
             if (modelId.startsWith("/")) {
                 modelId = modelId.substring(1);
             }
-            var huggingFaceUrl = BASE_URL_HUGGING_FACE + modelId;
-            builder.baseUrl(huggingFaceUrl);
+            builder.modelId(modelId);
+        }
+
+        String baseUrl = stringValue(parameters, KEY_BASE_URL);
+        if (baseUrl != null) {
+            // Never let a model base URL point at the cloud instance-metadata service
+            // (always-on, independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            builder.baseUrl(baseUrl);
         }
 
         applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
-
         applyDouble(parameters, KEY_TEMPERATURE, builder::temperature);
-
         applyInt(parameters, KEY_MAX_NEW_TOKENS, builder::maxNewTokens);
-
-        if (!isNullOrEmpty(parameters.get(KEY_WAIT_FOR_MODEL))) {
-            builder.waitForModel(Boolean.parseBoolean(parameters.get(KEY_WAIT_FOR_MODEL)));
-        }
-
-        return builder.build();
+        applyBoolean(parameters, KEY_WAIT_FOR_MODEL, builder::waitForModel);
+        applyBoolean(parameters, KEY_RETURN_FULL_TEXT, builder::returnFullText);
+        return builder;
     }
 }

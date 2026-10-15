@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,8 +21,11 @@ import java.util.Map;
  */
 final class ModelParameterKeys {
 
-    /** Every key a builder reads the model from. */
-    static final List<String> MODEL_KEYS = List.of("modelName", "model", "modelId", "modelID", "deploymentName");
+    /**
+     * Every key a builder reads the model from; shared with
+     * {@link ModelParameterCatalog}, which gates parameters by that model.
+     */
+    static final List<String> MODEL_KEYS = ModelParameterCatalog.MODEL_KEYS;
 
     private ModelParameterKeys() {
     }

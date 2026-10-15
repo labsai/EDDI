@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -176,6 +178,127 @@ class OpenAiCompatibleLanguageModelBuilderTest {
             Map<String, String> in = withKey();
             merged(builderFor("deepseek"), in);
             assertEquals(1, in.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("vendor body fields and headers from the parameter catalog")
+    class VendorFields {
+
+        private Map<String, Object> body(String type, Map<String, String> in) {
+            merged(builderFor(type), in);
+            return custom.getValue();
+        }
+
+        @Test
+        @DisplayName("a top-level body field is coerced to its catalog type and not forwarded as a parameter")
+        void topLevel() {
+            Map<String, String> in = withKey();
+            in.put("enableThinking", " FALSE ");
+            in.put("topK", "20");
+            in.put("repetitionPenalty", "1.05");
+            Map<String, String> out = merged(builderFor("qwen"), in);
+            assertEquals(Boolean.FALSE, custom.getValue().get("enable_thinking"));
+            assertEquals(20, custom.getValue().get("top_k"));
+            assertEquals(1.05, custom.getValue().get("repetition_penalty"));
+            assertFalse(out.containsKey("enableThinking"));
+            assertFalse(out.containsKey("topK"));
+        }
+
+        @Test
+        @DisplayName("a dotted wire path becomes nested objects, sharing one parent")
+        void nested() {
+            Map<String, String> in = withKey();
+            in.put("thinkingType", "disabled");
+            in.put("clearThinking", "false");
+            Map<String, Object> body = body("zhipu", in);
+            assertEquals(Map.of("type", "disabled", "clear_thinking", false), body.get("thinking"));
+        }
+
+        @Test
+        @DisplayName("lists and JSON values are parsed; OpenRouter's reasoningEffort goes to reasoning.effort only")
+        void openRouter() {
+            Map<String, String> in = withKey();
+            in.put("providerOrder", "anthropic, google");
+            in.put("providerOnly", "[\"a,b\"]");
+            in.put("providerAllowFallbacks", "false");
+            in.put("plugins", "[{\"id\":\"web\",\"max_results\":3}]");
+            in.put("reasoningEffort", "high");
+            in.put("models", "a/b,c/d");
+            Map<String, String> out = merged(builderFor("openrouter"), in);
+            Map<String, Object> body = custom.getValue();
+            assertEquals(Map.of("order", List.of("anthropic", "google"), "only", List.of("a,b"), "allow_fallbacks", false),
+                    body.get("provider"));
+            assertEquals(List.of(Map.of("id", "web", "max_results", 3)), body.get("plugins"));
+            assertEquals(Map.of("effort", "high"), body.get("reasoning"));
+            assertEquals(List.of("a/b", "c/d"), body.get("models"));
+            assertFalse(out.containsKey("reasoningEffort"), "must not also be sent as top-level reasoning_effort");
+        }
+
+        @Test
+        @DisplayName("an unusable value is dropped (and not forwarded), the rest of the body survives")
+        void unusableValue() {
+            Map<String, String> in = withKey();
+            in.put("topK", "many");
+            in.put("enableSearch", "true");
+            Map<String, String> out = merged(builderFor("qwen"), in);
+            assertFalse(custom.getValue().containsKey("top_k"));
+            assertEquals(true, custom.getValue().get("enable_search"));
+            assertFalse(out.containsKey("topK"));
+        }
+
+        @Test
+        @DisplayName("the preset's customParameters are the base and a catalog field overrides them, without mutating the preset")
+        void presetBase() {
+            OpenAiCompatibleProvider minimax = OpenAiCompatibleProviders.find("minimax").orElseThrow();
+            Map<String, Object> presetBefore = Map.copyOf(minimax.customParameters());
+            assertEquals(true, body("minimax", withKey()).get("reasoning_split"));
+
+            setUp();
+            Map<String, String> in = withKey();
+            in.put("reasoningSplit", "false");
+            assertEquals(false, body("minimax", in).get("reasoning_split"));
+            assertEquals(presetBefore, minimax.customParameters());
+        }
+
+        @Test
+        @DisplayName("the user's own customParameters reach the delegate untouched, to be applied last")
+        void userCustomParametersPassThrough() {
+            Map<String, String> in = withKey();
+            in.put("enableThinking", "false");
+            in.put("customParameters", "{\"enable_thinking\":true}");
+            Map<String, String> out = merged(builderFor("qwen"), in);
+            assertEquals("{\"enable_thinking\":true}", out.get("customParameters"));
+        }
+
+        @Test
+        @DisplayName("OpenRouter attribution keys become headers, under the user's customHeaders")
+        void headers() throws Exception {
+            Map<String, String> in = withKey();
+            in.put("appReferer", "https://app.example");
+            in.put("appTitle", "EDDI");
+            in.put("customHeaders", "{\"X-Title\":\"Mine\",\"X-Other\":\"1\"}");
+            Map<String, String> out = merged(builderFor("openrouter"), in);
+            Map<?, ?> headers = new ObjectMapper().readValue(out.get("customHeaders"), Map.class);
+            assertEquals(Map.of("HTTP-Referer", "https://app.example", "X-Title", "Mine", "X-Other", "1"), headers);
+            assertFalse(out.containsKey("appReferer"));
+            assertFalse(out.containsKey("appTitle"));
+        }
+
+        @Test
+        @DisplayName("without attribution keys the user's customHeaders are left as written")
+        void noHeaders() {
+            Map<String, String> in = withKey();
+            in.put("customHeaders", "{\"A\":\"1\"}");
+            assertEquals("{\"A\":\"1\"}", merged(builderFor("openrouter"), in).get("customHeaders"));
+        }
+
+        @Test
+        @DisplayName("recognisedParameters include the provider's catalog keys")
+        void recognisedIncludesCatalog() {
+            assertTrue(builderFor("qwen").recognisedParameters().contains("enableThinking"));
+            assertTrue(builderFor("openrouter").recognisedParameters().contains("appReferer"));
+            assertFalse(builderFor("xai").recognisedParameters().contains("enableThinking"));
         }
     }
 
