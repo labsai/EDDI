@@ -109,9 +109,12 @@ describe("SchedulesPage", () => {
 
   it("shows schedule names from mock data", async () => {
     renderSchedules();
-    // Use findByText with extended timeout to wait for async data
-    expect(await screen.findByText("Daily Health Check", {}, { timeout: 3000 })).toBeInTheDocument();
-    // "Heartbeat Monitor" appears both in the table and the Next Fire card (soonest schedule)
+    // Either name can also render in the Next Fire card, which shows the soonest
+    // enabled schedule: Heartbeat Monitor fires 30 minutes from now, Daily Health
+    // Check at the next weekday 09:00 UTC, so between 08:30 and 09:00 UTC on a
+    // weekday it is Daily Health Check. A single-match query fails in that window.
+    const dailyHealthCheck = await screen.findAllByText("Daily Health Check", {}, { timeout: 3000 });
+    expect(dailyHealthCheck.length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Heartbeat Monitor").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Failed Report")).toBeInTheDocument();
   });
