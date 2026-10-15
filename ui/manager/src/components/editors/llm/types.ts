@@ -214,6 +214,41 @@ export interface LlmTask {
    */
   inputPricePer1M?: number | null;
   outputPricePer1M?: number | null;
+
+  /**
+   * Guardrails that screen the user's message before the model is called
+   * (EDDI 6.6+). Absent or empty = no screening and no guardrail code runs.
+   * Never sent unless set: an older backend's strict config parser refuses an
+   * unknown field.
+   */
+  inputGuardrails?: GuardrailConfig[];
+  /**
+   * Guardrails that screen the model's answer before it is stored or delivered
+   * (EDDI 6.6+). A `block`/`redact`/`reprompt` entry makes the task buffer its
+   * answer instead of streaming it; `warn` keeps streaming.
+   */
+  outputGuardrails?: GuardrailConfig[];
+}
+
+/** What a guardrail finding does. Mirrors the backend `GuardrailAction`. */
+export type GuardrailActionName = "block" | "redact" | "reprompt" | "warn";
+
+/**
+ * One input or output guardrail of an LLM task. Mirrors the backend
+ * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
+ * (input), `pii-redaction`, `regex-filter`, `max-length` (both), `json-object`
+ * (output); an unknown type is skipped by the engine with a WARN.
+ */
+export interface GuardrailConfig {
+  type: string;
+  /** Default `block`; an unknown value is treated as `block`. */
+  action?: GuardrailActionName;
+  /** `reprompt` only: extra model calls allowed. Default 2, clamped 0–5. */
+  maxRetries?: number;
+  /** The answer when this guardrail blocks; used verbatim (never templated). */
+  blockMessage?: string;
+  /** Per-type settings as plain strings, e.g. `{ patterns: "email,ssn" }`. */
+  parameters?: Record<string, string>;
 }
 
 /**
