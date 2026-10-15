@@ -1678,7 +1678,7 @@ is never counted as a failure. A refused call receives
 {"status":"NOT_EXECUTED","reason":"identical call already failed (HTTP 403) and nothing has changed since; do not repeat it. Report the failure to the user or try a different approach"}
 ```
 
-and is traced as `tool_repeat_refused` (metric `eddi.tool.repeat.refused`). The state lives for one run of the
+and is traced as `tool_repeat_refused` (metric `eddi.tool.repeat.refused`). A refused repeat still counts toward `maxToolCallsPerTurn`, because the model did issue it. The state lives for one run of the
 tool loop: a HITL resume starts with a fresh guard, and each model-cascade step has its own. Rule-triggered
 `httpcalls` (no LLM) are out of scope, as they cannot loop.
 

@@ -15,4 +15,4 @@ Inside the iteration cap a model could re-send the same failing call (a 403, a 4
 
 **Files:** [`ToolRepeatGuard.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolRepeatGuard.java), [`ToolOutcomeClassifier.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolOutcomeClassifier.java), [`ToolRepeatGuardConfig.java`](../../src/main/java/ai/labs/eddi/modules/llm/model/ToolRepeatGuardConfig.java), [`ToolLoopRunner.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolLoopRunner.java)
 
-**Follow-up:** the Manager editor control for `toolRepeatGuard` is not part of this change.
+**Manager:** the LLM task editor's tool-call limits block has a "Repeated failing tool calls" control (toggle, thresholds, exempt tools); the field is written only when the author changes something.

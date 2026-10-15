@@ -233,6 +233,19 @@ class ToolLoopRunnerToolPolicyTest {
         }
 
         @Test
+        @DisplayName("the classifier sees the RAW result: a 403 wrapped by the provenance guardrail is still refused")
+        void classifiesRawResultNotTheGovernedOne() throws Exception {
+            String raw = "{\"httpCode\":403,\"body\":\"no\"}";
+            runStubborn();
+
+            var firstResult = requests.get(1).messages().stream().filter(m -> m instanceof ToolExecutionResultMessage)
+                    .map(m -> ((ToolExecutionResultMessage) m).text()).findFirst().orElseThrow();
+            assertTrue(!firstResult.equals(raw) && !firstResult.stripLeading().startsWith("{"),
+                    "precondition: the model is shown a guardrail-wrapped result, not the raw JSON: " + firstResult);
+            assertEquals(1, executed.get(), "refused although the governed text no longer looks like a 403");
+        }
+
+        @Test
         @DisplayName("enabled:false restores the old behaviour: the call runs every round up to the iteration cap")
         void disabledGuardRunsEveryRound() throws Exception {
             var config = new ToolRepeatGuardConfig();
