@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -32,8 +33,11 @@ import org.mockito.InOrder;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -230,5 +234,19 @@ class GdprErasureInFlightAndGrantsTest {
         assertThrows(IllegalArgumentException.class, () -> service.deleteUserData("__service__"));
         assertThrows(IllegalArgumentException.class, () -> service.exportUserData("__service__"));
         assertEquals(2, grantStore.findAllByPrincipal("__service__").size());
+    }
+    @Test
+    void deleteUserData_aNodeThatCouldNotStopTheUsersWorkMakesTheClusterStopAFailedStep() throws Exception {
+        IClusterRpc rpc = mock(IClusterRpc.class);
+        when(rpc.isClustered()).thenReturn(true);
+        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap())).thenReturn(Map.of(
+                "n2", Map.of("stopped", 1),
+                "n3", Map.of("stopped", 0, "error", "stop step(s) failed: runningGroupDiscussions")));
+        service.clusterRpc = rpc;
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertEquals(List.of("clusterStop"), result.failedSteps());
+        verify(userMemoryStore, atLeastOnce()).deleteAllForUser(USER_ID);
     }
 }

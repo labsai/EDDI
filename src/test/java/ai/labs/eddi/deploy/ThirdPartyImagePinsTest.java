@@ -73,17 +73,28 @@ class ThirdPartyImagePinsTest {
     @Test
     @DisplayName("an upgrade never runs a second EDDI JVM next to the first")
     void eddiIsRecreatedNotSurged() throws IOException {
+        // Cluster stack (chart 2.7.0): the value is empty by default and the chart
+        // picks per
+        // messaging type — Recreate for in-memory (one JVM against the database at a
+        // time),
+        // RollingUpdate for nats, where the replicas coordinate through NATS.
+        // RollingUpdate
+        // with in-memory messaging is refused at render time.
         JsonNode strategy = helmValues().path("eddi").path("updateStrategy");
-        assertEquals("Recreate", strategy.path("type").asText(),
-                "helm eddi.updateStrategy must default to Recreate: a RollingUpdate surge pod is a second EDDI JVM "
-                        + "against the same database for the length of every rollout");
+        assertTrue(strategy.isMissingNode() || strategy.asText().isEmpty() || "Recreate".equals(strategy.path("type").asText()),
+                "helm eddi.updateStrategy must default to Recreate for in-memory messaging (empty picks per messaging "
+                        + "type): a RollingUpdate surge pod is a second EDDI JVM against the same database for the "
+                        + "length of every rollout, but was " + strategy);
+        String helpers = read(Path.of("helm", "eddi", "templates", "_helpers.tpl"));
+        assertTrue(helpers.contains("else if eq (include \"eddi.messagingType\" .) \"nats\" }}RollingUpdate{{ else }}Recreate{{ end }}"),
+                "an empty or absent eddi.updateStrategy must resolve to Recreate unless the chart runs in cluster mode — "
+                        + "`helm upgrade --reuse-values` from chart 2.4.0 or older carries no updateStrategy, and "
+                        + "`strategy: null` is a 25% RollingUpdate to Kubernetes");
         String template = read(Path.of("helm", "eddi", "templates", "deployment.yaml"));
-        assertTrue(template.contains("toYaml (.Values.eddi.updateStrategy | default (dict \"type\" \"Recreate\"))"),
-                "the Helm Deployment must render eddi.updateStrategy rather than a hard-coded strategy, and fall back to "
-                        + "Recreate when the value is absent: `helm upgrade --reuse-values` from chart 2.3.0 carries no "
-                        + "updateStrategy, and `toYaml nil` renders `strategy: null`, which Kubernetes reads as a "
-                        + "25% RollingUpdate");
-        assertFalse(template.contains("maxSurge"), "the Helm Deployment still hard-codes a surge");
+        assertTrue(template.contains("type: {{ $strategy }}"),
+                "the Helm Deployment must render the resolved strategy type, never a hard-coded one");
+        assertTrue(template.contains("eddi.updateStrategy=RollingUpdate needs eddi.messagingType=nats"),
+                "the Helm Deployment must refuse a RollingUpdate with in-memory messaging");
 
         for (Path manifest : List.of(Path.of("k8s", "base", "eddi-deployment.yaml"), Path.of("k8s", "quickstart.yaml"))) {
             JsonNode deployment = null;

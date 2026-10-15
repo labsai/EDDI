@@ -23,4 +23,16 @@ public class ComponentCache implements IComponentCache {
     public void put(String componentType, String key, Object component) {
         componentMaps.computeIfAbsent(componentType, k -> new ConcurrentHashMap<>()).put(key, component);
     }
+
+    @Override
+    public void evictWorkflow(String workflowId, Integer workflowVersion) {
+        if (workflowId == null) {
+            return;
+        }
+        // Keys are createComponentKey(id, version, step) = "id:version:step".
+        String prefix = workflowVersion == null ? workflowId + ":" : workflowId + ":" + workflowVersion + ":";
+        for (Map<String, Object> components : componentMaps.values()) {
+            components.keySet().removeIf(key -> key.startsWith(prefix));
+        }
+    }
 }

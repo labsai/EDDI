@@ -289,15 +289,6 @@ groups:
           description: "A schedule exhausted its retries. GET /schedulestore/schedules/{id}/fires shows the failure; POST .../retry fires it again."
           runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddischedulefiresdeadlettered"
 
-      - alert: EddiNatsDeadLetters
-        expr: sum by (job, instance) (increase(eddi_nats_dead_letter_count_total[15m])) > 0
-        labels:
-          severity: warning
-        annotations:
-          summary: "{{ $value | printf \"%.0f\" }} NATS messages were dead-lettered on {{ $labels.instance }}"
-          description: "The NATS coordinator moved conversation tasks to the dead-letter stream after exhausting their retries."
-          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddinatsdeadletters"
-
   - name: eddi.jvm
     rules:
       - alert: EddiHeapAfterGcHigh
