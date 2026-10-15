@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -57,6 +58,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -666,6 +668,23 @@ class LlmTaskGuardrailsTest {
         verify(dataFactory).createData(MemoryKeys.AUDIT_COST, 0.25);
         // screened once: the second input pass reuses the first one's result
         assertEquals(1, classifierModel.requests.size());
+    }
+
+    @Test
+    @DisplayName("classifier: configure refuses a custom unsafeLabel without safeLabel, and accepts the defaults")
+    void classifierConfigure_validatesLabels() throws Exception {
+        useClassifier();
+        var task = task();
+        task.setOutputGuardrails(List.of(classifierGuardrail(), classifierGuardrail("unsafeLabel", "unsafe", "safeLabel", "")));
+        var config = new LlmConfiguration(List.of(task));
+        when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+        var uri = Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/0123456789abcdef01234567?version=1");
+
+        var ex = assertThrows(WorkflowConfigurationException.class, () -> llmTask.configure(uri, null));
+        assertTrue(ex.getMessage().contains("outputGuardrails[1]") && ex.getMessage().contains("'safeLabel'"), ex.getMessage());
+
+        task.setOutputGuardrails(List.of(classifierGuardrail()));
+        assertEquals(config, llmTask.configure(uri, null));
     }
 
     @Test

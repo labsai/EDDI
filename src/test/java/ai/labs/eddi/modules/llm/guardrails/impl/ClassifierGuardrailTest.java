@@ -44,6 +44,7 @@ import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -138,7 +139,14 @@ class ClassifierGuardrailTest {
                 "**Yes** | NULL | NULL | NULL | UNSAFE",
                 "No | NULL | NULL | NULL | SAFE",
                 "no, it is fine | NULL | NULL | NULL | SAFE",
-                "maybe | NULL | NULL | NULL | SAFE",
+                // safe only on a positive match: anything else is undecided (fail closed)
+                "maybe | NULL | NULL | NULL | UNPARSEABLE",
+                "I cannot help with that. | NULL | NULL | NULL | UNPARSEABLE",
+                "<html><body>502 Bad Gateway</body></html> | NULL | NULL | NULL | UNPARSEABLE",
+                "N | NULL | NULL | NULL | UNPARSEABLE",
+                // a custom unsafeLabel without safeLabel: nothing counts as safe
+                "safe | unsafe | NULL | NULL | UNPARSEABLE",
+                "unsafe | unsafe | NULL | NULL | UNSAFE",
                 "'' | NULL | NULL | NULL | UNPARSEABLE",
                 "... | NULL | NULL | NULL | UNPARSEABLE",
                 // a safe label makes anything else undecided
@@ -169,9 +177,73 @@ class ClassifierGuardrailTest {
         }
 
         @Test
+        @DisplayName("labelPattern runs over the last 4 KB of the answer only")
+        void labelPatternScansTheTail() {
+            String pattern = "<score>\\s*(\\w+)\\s*</score>";
+            Map<String, String> p = params("labelPattern", pattern, "safeLabel", "no");
+            String filler = "x".repeat(100_000);
+            assertEquals(ClassifierGuardrail.Label.UNSAFE, ClassifierGuardrail.classify(filler + "<score> yes </score>", input(p)));
+            // a verdict outside the scanned tail is not seen: undecided, not safe
+            assertEquals(ClassifierGuardrail.Label.UNPARSEABLE,
+                    ClassifierGuardrail.classify("<score> no </score>" + "x".repeat(ClassifierGuardrail.MAX_LABEL_SCAN_CHARS), input(p)));
+            assertEquals("yes", ClassifierGuardrail.extractLabel(filler + "<score> yes </score>", pattern));
+        }
+
+        @Test
+        @DisplayName("the first word is taken from the head of a huge answer")
+        void firstWordOfHugeAnswer() {
+            assertEquals(ClassifierGuardrail.Label.SAFE, ClassifierGuardrail.classify("No " + "x".repeat(100_000), input(params())));
+        }
+
+        @Test
         @DisplayName("a null answer is undecided")
         void nullAnswer() {
             assertEquals(ClassifierGuardrail.Label.UNPARSEABLE, ClassifierGuardrail.classify(null, input(params())));
+        }
+    }
+
+    // === configuration validation ===
+
+    @Nested
+    @DisplayName("validate (deploy time)")
+    class Validate {
+
+        @Test
+        @DisplayName("default labels, or both labels set: valid")
+        void valid() {
+            assertNull(classifier.validate(params()));
+            assertNull(classifier.validate(params("unsafeLabel", "YES")));
+            assertNull(classifier.validate(params("unsafeLabel", "unsafe", "safeLabel", "safe")));
+        }
+
+        @Test
+        @DisplayName("a custom unsafeLabel without safeLabel is refused, naming safeLabel")
+        void customUnsafeWithoutSafe() {
+            String problem = classifier.validate(params("unsafeLabel", "unsafe"));
+            assertTrue(problem != null && problem.contains("'safeLabel'"), problem);
+        }
+
+        @Test
+        @DisplayName("no provider is refused, naming provider")
+        void noProvider() {
+            Map<String, String> p = params();
+            p.remove("provider");
+            String problem = classifier.validate(p);
+            assertTrue(problem != null && problem.contains("'provider'"), problem);
+        }
+
+        @Test
+        @DisplayName("GuardrailService.validate prefixes the list position and skips unknown types")
+        void serviceValidate() {
+            var service = new GuardrailService(List.of(classifier), meterRegistry);
+            var bad = new GuardrailConfig();
+            bad.setType(ClassifierGuardrail.TYPE);
+            bad.setParameters(params("unsafeLabel", "unsafe"));
+            var unknown = new GuardrailConfig();
+            unknown.setType("from-the-future");
+            List<String> problems = service.validate("inputGuardrails", List.of(unknown, bad));
+            assertEquals(1, problems.size());
+            assertTrue(problems.get(0).startsWith("inputGuardrails[1]: classifier guardrail:"), problems.get(0));
         }
     }
 

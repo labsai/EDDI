@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -48,5 +49,15 @@ public interface ContentGuardrail {
      */
     default boolean screensHistory() {
         return true;
+    }
+
+    /**
+     * Checks this guardrail's {@code parameters} when the task is deployed: a
+     * message naming the problem, or null when the configuration is usable. A
+     * configuration that cannot work at all (rather than one that is merely
+     * unusual) is worth refusing up front instead of failing every turn.
+     */
+    default String validate(Map<String, String> parameters) {
+        return null;
     }
 }

@@ -69,9 +69,11 @@ import java.util.regex.Pattern;
  * <h3>Verdict</h3> The label is the first capture group of the last
  * {@code labelPattern} match when that is set, otherwise the first word of the
  * answer. It is compared case-insensitively with {@code unsafeLabel} (default
- * {@code yes}) and, when set, {@code safeLabel}. With {@code safeLabel} set,
- * any other label is "could not decide"; without it, any non-empty label other
- * than {@code unsafeLabel} counts as safe.
+ * {@code yes}) and {@code safeLabel} (default {@code no} when
+ * {@code unsafeLabel} is the default; required otherwise). A text is safe only
+ * when the label positively matches {@code safeLabel}; any other answer is
+ * "could not decide".
+ *
  * <h3>Could not decide</h3> An unreachable or slow classifier
  * ({@code classifier_unavailable}) or an answer that is neither label
  * ({@code classifier_unparseable}) is reported as a
@@ -110,6 +112,15 @@ public class ClassifierGuardrail implements ContentGuardrail {
     static final String PARAM_TIMEOUT = "timeout";
 
     static final String DEFAULT_UNSAFE_LABEL = "yes";
+    /** The safe label assumed when {@code unsafeLabel} is left at its default. */
+    static final String DEFAULT_SAFE_LABEL = "no";
+    /**
+     * How much of the classifier's answer label extraction looks at: the last
+     * {@value} characters for a {@code labelPattern} (the verdict comes last), the
+     * first {@value} for the first word. An author regex never runs over an
+     * unexpectedly huge reply.
+     */
+    static final int MAX_LABEL_SCAN_CHARS = 4096;
     static final int DEFAULT_TIMEOUT_MS = 3000;
     /** Ceiling on {@code timeoutMs}: a classifier sits on every turn's path. */
     static final int MAX_TIMEOUT_MS = 60_000;
@@ -162,6 +173,29 @@ public class ClassifierGuardrail implements ContentGuardrail {
     @Override
     public boolean screensHistory() {
         return false;
+    }
+
+    /**
+     * A classifier must be able to tell "safe" apart from "anything else": with a
+     * custom {@code unsafeLabel} and no {@code safeLabel} there is no answer that
+     * means safe, so every turn would be undecided. Refused at deploy time.
+     */
+    @Override
+    public String validate(Map<String, String> parameters) {
+        Map<String, String> p = parameters != null ? parameters : Map.of();
+        if (isBlank(p.get(PARAM_PROVIDER))) {
+            return "classifier guardrail: parameter 'provider' is required (an LLM provider type such as 'openai' or 'ollama')";
+        }
+        if (!isBlank(p.get(PARAM_UNSAFE_LABEL)) && !DEFAULT_UNSAFE_LABEL.equalsIgnoreCase(p.get(PARAM_UNSAFE_LABEL).trim())
+                && isBlank(p.get(PARAM_SAFE_LABEL))) {
+            return "classifier guardrail: parameter 'safeLabel' is required when 'unsafeLabel' is set to anything but 'yes' — "
+                    + "an answer is only treated as safe when it matches safeLabel";
+        }
+        return null;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     @Override
@@ -326,14 +360,26 @@ public class ClassifierGuardrail implements ContentGuardrail {
             return Label.UNPARSEABLE;
         }
         String unsafe = context.parameter(PARAM_UNSAFE_LABEL, DEFAULT_UNSAFE_LABEL).trim();
-        String safe = context.parameter(PARAM_SAFE_LABEL, null);
         if (label.equalsIgnoreCase(unsafe)) {
             return Label.UNSAFE;
         }
-        if (safe == null) {
-            return Label.SAFE;
+        // Safe only on a positive match (fail closed, Pillar 4): a refusal, an error
+        // page, "maybe" or a truncated reply is undecided, and failMode applies.
+        String safe = safeLabel(context, unsafe);
+        return safe != null && label.equalsIgnoreCase(safe) ? Label.SAFE : Label.UNPARSEABLE;
+    }
+
+    /**
+     * The configured {@code safeLabel}; {@code no} when {@code unsafeLabel} is the
+     * default {@code yes}; otherwise null — nothing counts as safe (and
+     * {@link #validate} refuses such a configuration at deploy time).
+     */
+    static String safeLabel(GuardrailContext context, String unsafe) {
+        String safe = context.parameter(PARAM_SAFE_LABEL, null);
+        if (safe != null) {
+            return safe.trim();
         }
-        return label.equalsIgnoreCase(safe.trim()) ? Label.SAFE : Label.UNPARSEABLE;
+        return DEFAULT_UNSAFE_LABEL.equalsIgnoreCase(unsafe) ? DEFAULT_SAFE_LABEL : null;
     }
 
     /**
@@ -351,14 +397,16 @@ public class ClassifierGuardrail implements ContentGuardrail {
             if (pattern.isEmpty()) {
                 return null;
             }
-            Matcher matcher = pattern.get().matcher(answer);
+            String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
+            Matcher matcher = pattern.get().matcher(tail);
             String found = null;
             while (matcher.find()) {
                 found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
             }
             return found != null ? found.trim() : null;
         }
-        String first = WHITESPACE.split(answer.strip(), 2)[0];
+        String head = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(0, MAX_LABEL_SCAN_CHARS) : answer;
+        String first = WHITESPACE.split(head.strip(), 2)[0];
         return LABEL_EDGES.matcher(first).replaceAll("");
     }
 

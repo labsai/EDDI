@@ -2866,6 +2866,7 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                validateGuardrails(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {
@@ -2875,6 +2876,30 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on a guardrail configuration that cannot work at all (each
+     * type decides, {@code ContentGuardrail.validate}) — e.g. a classifier with a
+     * custom unsafe label but no safe label, which could never let a turn through.
+     */
+    void validateGuardrails(LlmConfiguration llmConfiguration) throws WorkflowConfigurationException {
+        if (guardrailService == null || llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (var task : llmConfiguration.tasks()) {
+            String taskId = task.getId() != null ? task.getId() : "<unnamed>";
+            for (String problem : guardrailService.validate("inputGuardrails", task.getInputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+            for (String problem : guardrailService.validate("outputGuardrails", task.getOutputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new WorkflowConfigurationException("Invalid guardrail configuration: " + String.join("; ", problems));
+        }
     }
 
     /**

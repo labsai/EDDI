@@ -115,6 +115,31 @@ public class GuardrailService {
     }
 
     /**
+     * The configuration problems of these guardrails, as reported by each type's
+     * {@link ContentGuardrail#validate}, prefixed with where the guardrail sits
+     * ({@code inputGuardrails[0]}). Unknown types are not problems here — they are
+     * skipped with a WARN at run time, so a config written for a newer EDDI loads.
+     */
+    public List<String> validate(String listName, List<GuardrailConfig> configs) {
+        List<String> problems = new ArrayList<>();
+        if (configs == null) {
+            return problems;
+        }
+        for (int i = 0; i < configs.size(); i++) {
+            GuardrailConfig config = configs.get(i);
+            ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
+            if (guardrail == null) {
+                continue;
+            }
+            String problem = guardrail.validate(config.getParameters());
+            if (problem != null) {
+                problems.add(listName + "[" + i + "]: " + problem);
+            }
+        }
+        return problems;
+    }
+
+    /**
      * Whether these output guardrails can change the answer — then the task must
      * buffer it: tokens already streamed to a client cannot be taken back.
      * {@code warn}-only guardrails do not force buffering.

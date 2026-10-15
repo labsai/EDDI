@@ -805,8 +805,9 @@ your tool schemas do not cover it, not as a routine first step:
   as on an LLM task (baseUrl, apiKey, modelName for openai / model for ollama,
   customParameters, maxTokens) — the admin sets apiKey in the editor as a vault
   reference; you never write one; unsafeLabel
-  (default "yes") and safeLabel — set both, then an answer that is neither
-  counts as undecided; labelPattern, a regex whose first group is the label
+  (default "yes") and safeLabel (default "no" only when unsafeLabel is "yes";
+  required otherwise, or the deploy is refused) — a text passes only when the
+  answer matches safeLabel, anything else counts as undecided; labelPattern, a regex whose first group is the label
   (Granite Guardian: <score>\\s*(\\w+)\\s*</score>), else the first word of the
   answer; optional promptTemplate, rendered with {input}, {output}, {risk}
   and, with includeRetrievedContext "true" on an output guardrail, {context}
