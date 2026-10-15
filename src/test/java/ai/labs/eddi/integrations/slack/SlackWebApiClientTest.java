@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.httpclient.outbound.ScriptedEngine;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,19 +16,28 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link SlackWebApiClient}.
  * <p>
- * These tests verify the constructor, exception contract for retryable errors,
- * graceful handling of non-retryable API responses, and the Markdown→mrkdwn
- * converter. Full HTTP integration tests (using WireMock) are in the
- * integration test suite.
+ * These tests verify the constructor, graceful handling of non-retryable API
+ * responses, and the Markdown→mrkdwn converter. Slack is a scripted engine
+ * behind the real outbound facade answering {@code ok:false}, so nothing here
+ * touches the network: a run without network access used to pass on the
+ * transport-failure path instead of the {@code ok:false} one.
  */
 class SlackWebApiClientTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private ScriptedEngine slack;
     private SlackWebApiClient client;
 
     @BeforeEach
     void setUp() {
-        client = new SlackWebApiClient(objectMapper, TestOutbound.standalone());
+        // What Slack answers for a bad token: HTTP 200 with ok:false.
+        slack = new ScriptedEngine().respond(200, "{\"ok\":false,\"error\":\"invalid_auth\"}");
+        client = new SlackWebApiClient(objectMapper, TestOutbound.facade(slack));
+    }
+
+    /** The JSON body of the request Slack received. */
+    private JsonNode sentBody() throws Exception {
+        return objectMapper.readTree(slack.lastHop().body());
     }
 
     @Test
@@ -35,27 +46,31 @@ class SlackWebApiClientTest {
     }
 
     @Test
-    void postMessage_invalidToken_returnsNull() {
+    void postMessage_invalidToken_returnsNull() throws Exception {
         // Slack returns HTTP 200 + ok:false for invalid tokens — non-retryable,
         // should return null without throwing
         String result = client.postMessage("Bearer xoxb-invalid", "C0123", null, "test message");
         assertNull(result);
+        assertEquals("https://slack.com/api/chat.postMessage", slack.lastHop().uri().toString());
+        assertEquals("C0123", sentBody().path("channel").asText());
     }
 
     @Test
-    void postMessage_withThreadTs_returnsNull() {
+    void postMessage_withThreadTs_returnsNull() throws Exception {
         // Invalid token + thread_ts — verifies thread_ts is included without error
         String result = client.postMessage("Bearer xoxb-invalid", "C0123", "12345.000", "test");
         assertNull(result);
+        assertEquals("12345.000", sentBody().path("thread_ts").asText());
     }
 
     @Test
-    void postMessage_specialCharacters_noSerializationError() {
+    void postMessage_specialCharacters_noSerializationError() throws Exception {
         // Special chars (control chars, unicode) should be properly escaped by
         // Jackson — the call should reach the API without JSON serialization errors
         String textWithSpecials = "He said \"hello\"\npath\\file\ttab\u0000null";
         String result = client.postMessage("Bearer xoxb-invalid", "C0123", null, textWithSpecials);
         assertNull(result); // API rejects, but no crash
+        assertEquals(textWithSpecials, sentBody().path("text").asText(), "the text must arrive intact, escaped as JSON");
     }
 
     @Test
