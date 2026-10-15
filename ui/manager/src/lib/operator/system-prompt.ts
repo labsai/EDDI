@@ -784,7 +784,7 @@ your tool schemas do not cover it, not as a routine first step:
   user's message before the model runs, outputGuardrails the answer before it
   is delivered. Each entry is {type, action, maxRetries, blockMessage,
   parameters}; type is prompt-injection (input), pii-redaction, regex-filter,
-  max-length (both) or json-object (output); action is block (default), redact,
+  max-length, classifier (both) or json-object (output); action is block (default), redact,
   reprompt (output: re-ask the same model, maxRetries default 2, max 5, then
   block) or warn. block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
@@ -798,6 +798,30 @@ your tool schemas do not cover it, not as a routine first step:
   audit entry's output.guardrails and the eddi.guardrail.triggered metric. When
   you can edit LLM configs, add them with a PATCH "add" of
   /tasks/<n>/inputGuardrails or /tasks/<n>/outputGuardrails.
+- The classifier guardrail asks a safety-classifier model the admin runs
+  (EDDI ships and recommends none; the admin checks the model's licence).
+  Parameters: provider (an EDDI provider type: openai for any OpenAI-compatible
+  server such as vLLM, ollama, ...) plus that provider's own parameters exactly
+  as on an LLM task (baseUrl, apiKey, modelName for openai / model for ollama,
+  customParameters, maxTokens) — the admin sets apiKey in the editor as a vault
+  reference; you never write one; unsafeLabel
+  (default "yes") and safeLabel — set both, then an answer that is neither
+  counts as undecided; labelPattern, a regex whose first group is the label
+  (Granite Guardian: <score>\\s*(\\w+)\\s*</score>), else the first word of the
+  answer; optional promptTemplate, rendered with {input}, {output}, {risk}
+  and, with includeRetrievedContext "true" on an output guardrail, {context}
+  — without it the text goes to the model as a plain conversation, which
+  suits models whose chat template builds the classification prompt (Granite
+  Guardian on vLLM with customParameters
+  {"chat_template_kwargs":{"guardian_config":{"criteria_id":"jailbreak"}}},
+  ShieldGemma on Ollama); timeoutMs (default 3000, the turn deadline wins);
+  inputPricePer1M/outputPricePer1M so its cost lands in audit:cost. A
+  classifier that cannot be reached, times out or answers no label follows
+  failMode: closed (default for block) blocks the turn with reason
+  classifier_unavailable or classifier_unparseable — an outage of the
+  classifier then blocks every guarded turn; open lets the text through with a
+  warning. It does not re-screen earlier history messages (cost). Point the
+  admin at docs/langchain.md for worked examples.
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
