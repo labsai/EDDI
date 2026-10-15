@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,6 +69,26 @@ class ConfigReferenceGuardTest {
         var e = assertThrows(IllegalArgumentException.class, () -> ConfigReferenceGuard.requireConfiguredReferences(
                 "{\"q\":\"{memory.current.input}\"}", "{\"q\":\"${vault:other-agents-key}\"}", "a request body", DATA, VAULTED));
         assertTrue(e.getMessage().startsWith("a request body contains the reference ${vault:other-agents-key}"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("the refusal is its own type and says what to do instead, generically — it names no endpoint")
+    void refusalSaysWhatToDoInstead() {
+        var e = assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredReferences("{x}",
+                "${vault:other-agents-key}", "a request body", DATA, VAULTED));
+        assertTrue(e.getMessage().contains("NAME"), e.getMessage());
+        assertTrue(e.getMessage().contains("partial update"), e.getMessage());
+        assertTrue(e.getMessage().contains("whoever typed it"), e.getMessage());
+        assertFalse(e.getMessage().contains("setup"), "the guard must not learn about a specific endpoint: " + e.getMessage());
+    }
+
+    @Test
+    @DisplayName("LLM parameters are refused with the same type and guidance")
+    void parameterRefusalIsTheSameType() {
+        assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("apiKey", "{context.k}"),
+                Map.of("apiKey", "${vault:x}"), Set.of(), "LLM", DATA, VAULTED));
+        assertThrows(ConfigReferenceRefusedException.class, () -> ConfigReferenceGuard.requireConfiguredParameters(Map.of("host", "{context.h}"),
+                Map.of("host", "${vars:x}"), Set.of(), "LLM", DATA, VAULTED));
     }
 
     @Test

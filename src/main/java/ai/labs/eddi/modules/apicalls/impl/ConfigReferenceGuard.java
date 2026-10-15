@@ -68,6 +68,23 @@ public final class ConfigReferenceGuard {
     }
 
     /**
+     * The refusal, worded for whoever reads it next — a human admin, an agent
+     * designer or an LLM that wrote the request. It says what happened, that
+     * retrying with the same text cannot work whoever typed it, and what to do
+     * instead, <em>generically</em>: this class knows no endpoint, so it names the
+     * two routes that exist everywhere rather than a particular field.
+     */
+    static String refusal(String location, String reference) {
+        return location + " contains the reference " + reference
+                + ", which the agent configuration does not write there: it came from conversation data (user input, a model reply,"
+                + " an API response or client context). References are only resolved where the configuration wrote them,"
+                + " so the call is refused. Retrying with the same text cannot succeed, whoever typed it."
+                + " Instead, send the credential's NAME in a field the endpoint documents for that (for example a vaultKeyName"
+                + " field takes the bare name, not a ${vault:...} reference), or edit with a partial update that does not repeat"
+                + " the credential at all. Never put a ${vault:...}, ${connection:...} or ${caller:...} reference in a request body.";
+    }
+
+    /**
      * @param template
      *            the configured value of the field, before templating
      * @param rendered
@@ -92,10 +109,7 @@ public final class ConfigReferenceGuard {
         allowed.addAll(autoVaultReferences(template, templateData, conversationProperties));
         for (String reference : references(rendered)) {
             if (!allowed.contains(reference)) {
-                throw new IllegalArgumentException(location + " contains the reference " + reference
-                        + ", which the agent configuration does not write there: it came from conversation data (user input, a model reply,"
-                        + " an API response or client context). References are only resolved where the configuration wrote them,"
-                        + " so the call is refused.");
+                throw new ConfigReferenceRefusedException(refusal(location, reference));
             }
         }
     }
@@ -144,9 +158,7 @@ public final class ConfigReferenceGuard {
             while (variables.find()) {
                 String reference = variables.group();
                 if (!configuredVariables.contains(reference)) {
-                    throw new IllegalArgumentException(location + " contains the reference " + reference
-                            + ", which the agent configuration does not write there: it came from conversation data (user input, a model "
-                            + "reply, an API response or client context). References are only resolved where the configuration wrote them.");
+                    throw new ConfigReferenceRefusedException(refusal(location, reference));
                 }
             }
         }
