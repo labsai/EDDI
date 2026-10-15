@@ -589,14 +589,110 @@ describe("prompt corrections from dev testing", () => {
     const body = defaultOperatorPromptBody("read_write");
     // Anchored to the cloud-provider sentence itself — a bare /apiKey.*REQUIRED/
     // could be satisfied by an unrelated later "REQUIRED".
-    expect(body).toMatch(/For a CLOUD\s+provider \(anthropic, openai, gemini\) `apiKey` is REQUIRED/);
-    expect(body).toContain("${vault:key-name}");
+    expect(body).toMatch(/A CLOUD\s+provider \(anthropic, openai, gemini\) REQUIRES a key/);
     // ...and the local exception, so the operator does not demand a key ollama
     // does not need.
     expect(body).toMatch(/Local\s+providers \(ollama\) need no key/);
-    expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
+    expect(body).toMatch(/ask which one to use BEFORE\s+proposing the call/);
     // And the read-only scope, which cannot create agents, does not carry it.
     expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
+  });
+});
+
+/**
+ * The platform refuses any `${vault:…}`/`${connection:…}`/`${caller:…}` reference
+ * that reaches a request body from conversation data (`ConfigReferenceGuard`).
+ * Observed: the operator copied its own LLM config's reference into setupAgent,
+ * told the admin that typing the reference would make it acceptable (false),
+ * burned an approval on the retry, and sent the admin to build the agent by
+ * hand. The prompt must teach the supported path instead.
+ */
+describe("credential references in tool-call bodies", () => {
+  const body = defaultOperatorPromptBody("read_write");
+  const flat = body.replace(/\s+/g, " ");
+
+  it("forbids a reference in any tool-call body, whoever typed it", () => {
+    expect(flat).toContain("NEVER put a ${vault:…}, ${connection:…} or ${caller:…} reference in any tool-call body");
+    expect(flat).toContain("whoever typed it");
+    expect(flat).toContain("The platform refuses a reference that comes from conversation data");
+  });
+
+  it("says that having the admin type the reference does not help — the exact false claim it made", () => {
+    expect(flat).toContain('having the admin type or "confirm" the reference does not change that');
+  });
+
+  it("points at vaultKeyName with a bare name and an empty apiKey, on both creation tools", () => {
+    expect(flat).toContain("pass its bare NAME where the endpoint takes a key name");
+    expect(flat).toContain("`vaultKeyName` on setupAgent and createApiAgent");
+    expect(flat).toContain("leave `apiKey` empty");
+    // The creation bullet states it where the operator decides the call.
+    expect(flat).toContain("put its bare NAME (for example `anthropic-api-key`) in `vaultKeyName` and leave `apiKey` empty");
+  });
+
+  it("never advertises writing a reference — the sentences that taught the opposite are gone", () => {
+    expect(flat).not.toContain("pass a ${vault:key-name} reference");
+    expect(flat).not.toContain("Secrets are always written as a ${vault:key-name} reference");
+    expect(flat).not.toContain("is always a ${vault:key-name} reference");
+  });
+
+  it("says it cannot read the vault, so it never claims a key exists", () => {
+    expect(flat).toContain("You cannot read the vault, so never claim a key exists");
+  });
+
+  it("says a new agent's first deploy is refused until an administrator grants it, and never to set grantReferencedSecrets", () => {
+    // Amends the vault-grant guidance of #983 instead of repeating it: no deploy:false
+    // detour any more, because the manager's grant dialog adds and deploys in one step.
+    expect(flat).toContain("its first deploy is refused with `VAULT_GRANT_MISSING`");
+    expect(flat).toContain("Granting is the administrator's decision");
+    expect(flat).toContain("never set it");
+    expect(flat).toContain("`grantReferencedSecrets`");
+    expect(flat).not.toContain("create it with `deploy` false");
+  });
+
+  it("tells it to explain and retry with the name — not to send the admin off to do it by hand", () => {
+    expect(flat).toContain("propose the call again with the key's name and do not send the admin to do the work by hand");
+  });
+
+  it("offers the key-name retry only where the endpoint has a key-name field — a whole-document write has none", () => {
+    // CodeRabbit on #1010: a blanket "retry with the key's name" misleads for an
+    // update that replaces a document already holding a reference.
+    expect(flat).toContain("Where the endpoint documents a key-name field");
+    expect(flat).toContain("a write that replaces a whole document which already holds a reference");
+    // Generic, so it is right with or without a PATCH tool: use a partial update
+    // when the store offers one, and only otherwise send the admin to the manager.
+    expect(flat).toContain("If the store offers a partial update (a JSON Patch), edit with that and leave the credential out of it");
+    expect(flat).toContain("Only when neither a key-name field nor a partial update exists, do not retry or improvise");
+    expect(flat).toContain("point the admin at the manager for that change");
+    expect(flat).not.toMatch(/patch[A-Z]\w+|operationId/);
+  });
+
+  it("states the refusal guidance exactly once, not twice (a merge once left a truncated copy of its opener)", () => {
+    // toContain would pass with a duplicate; count the occurrences.
+    const opener = "- If a call is refused over a credential reference, explain this rule. Where";
+    expect(body.split(opener).length - 1).toBe(1);
+  });
+
+  it.each(["read_only", "read_write"] as const)(
+    "has no substantial line twice in the %s prompt body — a duplicated or truncated line is a merge accident",
+    (scope) => {
+      const seen = new Map<string, number>();
+      for (const line of defaultOperatorPromptBody(scope).split("\n")) {
+        const text = line.trim();
+        // Short lines are structural (list markers, "...", headings that legitimately repeat).
+        if (text.length < 30) continue;
+        seen.set(text, (seen.get(text) ?? 0) + 1);
+      }
+      const duplicated = [...seen].filter(([, count]) => count > 1).map(([text]) => text);
+      expect(duplicated).toEqual([]);
+    },
+  );
+
+  it("appears once — an amendment of the existing sections, not a second copy", () => {
+    expect(body.split("Credentials in tool-call bodies:").length - 1).toBe(1);
+  });
+
+  it("is a write-scope rule: the read-only body has no use for it", () => {
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("Credentials in tool-call bodies:");
   });
 });
 
