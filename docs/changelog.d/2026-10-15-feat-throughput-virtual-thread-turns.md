@@ -63,6 +63,15 @@ after that change.
 MongoDB operations per successful turn are unchanged (≈ 22.7). A refused turn still costs its
 conversation loads, because admission sits after them. That is WS3a's single-load work.
 
+### Sizing the limit
+
+A later comparison run (the load-test harness, MongoDB and PostgreSQL, two rounds each) found that
+with exactly as many clients as the limit (1000 against 1000), 5–12 % of turns were refused. A turn keeps
+its place until it is persisted, which happens after its caller already has the answer, so a client's next
+turn can arrive first. The configuration reference and `application.properties` now say to leave roughly
+10–20 % headroom above the expected number of concurrently active conversations. They also give the
+measured heap per in-flight turn (~1 MB for short conversations) and PostgreSQL's pool default (50).
+
 ### Design decisions
 
 - **A callback marker, not a new `IRuntime` method or a wrapped callable.** About 25 tests mock
