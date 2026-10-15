@@ -1000,10 +1000,12 @@ describe("batched changes: the plan shape the operator is taught", () => {
   it("reads as two approvals once credential-safe PATCH is granted: the editing rules come first, the batch defers to them", () => {
     // The editing section teaches PATCH; the batching block names no method and
     // points back at it, so batch 1 is two PATCH edits and batch 2 is the cascade.
-    const editingAt = full.indexOf("EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH");
-    const batchingAt = full.indexOf("Planning and batching changes:");
-    expect(editingAt, "PATCH editing rules missing from the full prompt").toBeGreaterThan(-1);
-    expect(editingAt).toBeLessThan(batchingAt);
+    const editingMarker = "EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH";
+    const batchingMarker = "Planning and batching changes:";
+    // Both present, proven by toContain, so the two indices below are real positions.
+    expect(full).toContain(editingMarker);
+    expect(full).toContain(batchingMarker);
+    expect(full.indexOf(editingMarker)).toBeLessThan(full.indexOf(batchingMarker));
     expect(section(full)).toContain("each made as the editing rules above describe");
     expect(section(full)).toContain('Say "2 approvals" up');
   });
