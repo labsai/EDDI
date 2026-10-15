@@ -115,6 +115,11 @@ principal, not a user: erasing or exporting it is refused with 400.
     erasure is not `complete`. Details: [audit-ledger.md](audit-ledger.md#gdpr-erasure-redaction-not-deletion).
     Under `eddi.audit.erasure-mode=pseudonymize` only the userId is replaced and
     the content is **kept** — choose that only when a legal hold requires it
+15. Stores that registered as GDPR participants — the user directory, workspace
+    notifications and the **A2A task store** (a peer's tasks and context bindings,
+    each holding the message it sent and the reply it got, keyed by the peer's
+    principal) — **permanently deleted**. Each reports under its own step name
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`)
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -136,6 +141,8 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   download API
 - Linked OAuth accounts (`connectionGrants`: tenant, connection, status, scopes and
   dates) — never token material
+- A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
+  message sent, the reply, state and timestamps)
 
 > **Check `complete` before handing the bundle to the data subject.** The endpoint
 > answers **200** only when the bundle covers everything EDDI holds on the user,
@@ -341,6 +348,22 @@ A non-empty dead-letter sink is an incident, not a steady state — see
 
 **Data minimization (Art. 5(1)(e)):** Review the default retention periods
 and reduce them to the minimum necessary for your use case.
+
+## What erasure and export do not reach
+
+Erasure and export cover every store EDDI keys by a user. Four classes of data
+sit outside that boundary, each for a different reason; a controller's record of
+processing should name them and the measure that bounds each one.
+
+| Data | Why it is out of scope | What bounds it |
+| --- | --- | --- |
+| **RAG knowledge bases** (`ragstore`, pgvector, external vector stores) | Agent-level reference material an editor ingests for the agent, not records about a user. Nothing in a knowledge base is keyed by a user id, so no per-user sweep is possible — and personal data ingested as a source is a document the controller chose to publish to the agent, removed through the knowledge base's own source management | Review sources before ingestion, and delete a source that holds a data subject's record through the RAG store's source endpoints (see [rag.md](rag.md#ingestion-sources)) |
+| **Application log files** (console, files a log shipper collects) | Written as text to destinations EDDI does not control and cannot rewrite afterwards. The persisted database logs *are* pseudonymised (step 13); the console copy is not. Credential material is redacted before any record is written, and user ids appear only where the logging context carries them | Keep file and shipper retention short, and treat the collected logs as a processor's data set in your record of processing |
+| **Telemetry exports** (OpenTelemetry spans, Micrometer metrics) | Spans carry conversation and agent ids and timings, never message content or user ids; metrics are aggregates. Once exported they are the collector's data, outside EDDI's reach | Retention is set on the collector or metrics backend |
+| **LLM-provider retention** | Every LLM call sends the message and its context to the configured provider, a processor under its own DPA; EDDI cannot recall what the provider has logged | Choose providers with zero-retention terms, or self-host (Ollama, jlama); see [LLM Provider Data Flow](#llm-provider-data-flow) |
+
+The dead-letter sink of the audit ledger is a fifth case, treated above under
+[its own heading](#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it).
 
 ## Audit Ledger Legal Basis
 

@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -56,6 +58,44 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         contexts.put(scopedKey(principal, contextId), conversationId);
     }
 
+    @Override
+    public List<A2ATaskRecord> tasksOf(String principal) {
+        String prefix = principalPrefix(principal);
+        return tasks.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue)
+                .toList();
+    }
+
+    @Override
+    public long eraseForPrincipal(String principal) {
+        String prefix = principalPrefix(principal);
+        long removed = 0;
+        // Both maps are ConcurrentMaps: collect first, then remove, so the removal
+        // never races the iteration it is driven by.
+        for (String key : tasks.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+            if (tasks.remove(key) != null) {
+                removed++;
+            }
+        }
+        for (String key : contexts.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+            if (contexts.remove(key) != null) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * The prefix every key of {@code principal} starts with, and no other
+     * principal's key does: the length prefix in {@link #scopedKey} makes
+     * {@code "5:alice|"} distinct from {@code "11:alice|bob|"} however the names
+     * are chosen.
+     */
+    static String principalPrefix(String principal) {
+        return principal.length() + ":" + principal + "|";
+    }
+
     /**
      * Compound key binding a caller-supplied id to the peer that supplied it. The
      * principal is length-prefixed so the encoding stays injective even if a
@@ -63,6 +103,6 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * an id that collides with another peer's key.
      */
     static String scopedKey(String principal, String id) {
-        return principal.length() + ":" + principal + "|" + id;
+        return principalPrefix(principal) + id;
     }
 }
