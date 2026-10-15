@@ -27,7 +27,7 @@ Changes touching the following areas require **extra scrutiny** and explicit sec
 
 - **Authentication / authorization** — `AuthStartupGuard`, OIDC configuration, role checks
 - **Secrets handling** — `VaultSecretProvider`, `VaultSaltManager`, `SecretResolver`, property `scope: secret`
-- **HTTP clients** — Must use `SafeHttpClient`. No direct `HttpClient.newBuilder()`. All URLs validated via `UrlValidationUtils`.
+- **HTTP clients** — Must use `OutboundHttp`. No direct `HttpClient.newBuilder()`. A user- or model-chosen URL keeps `SsrfPolicy.STRICT`; every body is read with a capped `BodyMode`.
 - **Input validation** — Template injection, path traversal, SSRF vectors
 - **Deserialization** — Jackson `@JsonTypeInfo`, polymorphic type handling
 - **Dependencies** — New transitive dependencies reviewed for known vulnerabilities

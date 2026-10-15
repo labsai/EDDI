@@ -551,7 +551,7 @@ eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: s
 
 ### Outbound HTTP Metrics
 
-Requests through the outbound HTTP facade. So far its only traffic comes from the `SafeHttpClient` adapter (profile `default`), that is, from that adapter's callers: the built-in tools, the RAG crawler, OAuth token requests and attachment downloads. `httpcalls`, LLM providers, A2A, Slack and remote sync use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
+Requests through the outbound HTTP facade: the built-in tools, the RAG crawler, OAuth token requests, attachment downloads, A2A peers and Slack (profile `default`), and remote agent sync (profile `internal-peer`). `httpcalls` and the LLM providers use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
 
 ```text
 eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)

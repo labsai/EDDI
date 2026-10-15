@@ -381,7 +381,7 @@ Full guide: [hitl.md](hitl.md).
 
 ### Outbound HTTP client
 
-Requests made through `SafeHttpClient` (the built-in tools, the RAG crawler, OAuth token requests and attachment downloads) go through one facade, via that adapter, which applies the SSRF checks, redirect rules, cross-origin credential stripping, deadlines and body caps. More callers are moving onto it: `httpcalls.json`, LLM providers, A2A, Slack and remote sync still use their own clients today, and these settings do not reach them yet.
+EDDI's own outbound requests — the built-in tools, the RAG crawler, OAuth token requests, attachment downloads, A2A peers, Slack and remote agent sync — go through one facade, `OutboundHttp`, which applies the SSRF checks, redirect rules, cross-origin credential stripping, deadlines and body caps. `httpcalls.json` and the LLM providers still use their own clients, and these settings do not reach them yet. Remote sync uses its own `internal-peer` pool but, having no settings of its own yet, the `default` profile's values below.
 
 | Property | Default | Description |
 |---|---|---|

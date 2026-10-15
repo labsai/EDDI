@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,11 +19,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +27,7 @@ import java.util.Set;
 import java.io.IOException;
 
 /**
- * Lightweight Slack Web API client using {@link HttpClient}. No external SDK
+ * Lightweight Slack Web API client over {@link OutboundHttp}. No external SDK
  * dependency — Slack's API is just REST.
  * <p>
  * Currently supports:
@@ -55,15 +59,18 @@ public class SlackWebApiClient {
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
 
-    private final HttpClient httpClient;
+    /**
+     * Ceiling on a Slack API answer; a {@code chat.postMessage} reply is a few KB.
+     */
+    static final long MAX_RESPONSE_BYTES = 1024L * 1024;
+
+    private final OutboundHttp http;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public SlackWebApiClient(ObjectMapper objectMapper) {
+    public SlackWebApiClient(ObjectMapper objectMapper, OutboundHttp http) {
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
+        this.http = http;
     }
 
     /**
@@ -170,24 +177,27 @@ public class SlackWebApiClient {
         try {
             String jsonBody = objectMapper.writeValueAsString(body);
 
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(SLACK_API_BASE + endpoint))
+            // A fixed host: no SSRF check, and no redirect is followed — a 3xx is
+            // answered like any other non-200 status, never replayed with the bot token.
+            var request = OutboundRequest.builder(Profile.DEFAULT, URI.create(SLACK_API_BASE + endpoint))
+                    .ssrf(SsrfPolicy.NONE)
+                    .redirects(RedirectPolicy.NEVER)
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("Authorization", authToken)
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
+                    .method("POST", new RequestBody.StringBody(jsonBody, StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            OutboundResponse<String> response = http.send(request, BodyMode.string(MAX_RESPONSE_BYTES, BodyMode.OnOverflow.FAIL));
 
             // Retryable HTTP errors — throw so caller can retry
-            if (RETRYABLE_STATUS_CODES.contains(response.statusCode())) {
+            if (RETRYABLE_STATUS_CODES.contains(response.status())) {
                 throw new SlackDeliveryException(
-                        "Slack API returned retryable HTTP " + response.statusCode());
+                        "Slack API returned retryable HTTP " + response.status());
             }
 
             // Non-retryable HTTP errors — log and return null
-            if (response.statusCode() != 200) {
-                LOGGER.warnf("Slack %s returned HTTP %d: %s", endpoint, response.statusCode(),
+            if (response.status() != 200) {
+                LOGGER.warnf("Slack %s returned HTTP %d: %s", endpoint, response.status(),
                         truncateForLog(response.body()));
                 return null;
             }

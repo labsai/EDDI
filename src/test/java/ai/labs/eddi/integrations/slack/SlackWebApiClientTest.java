@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ class SlackWebApiClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new SlackWebApiClient(objectMapper);
+        client = new SlackWebApiClient(objectMapper, TestOutbound.standalone());
     }
 
     @Test

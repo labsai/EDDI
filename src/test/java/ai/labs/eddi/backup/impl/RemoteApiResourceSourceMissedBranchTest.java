@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -60,7 +61,7 @@ class RemoteApiResourceSourceMissedBranchTest {
                     .when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             assertThrows(RuntimeException.class, source::readAgent);
         }
@@ -72,7 +73,7 @@ class RemoteApiResourceSourceMissedBranchTest {
                     .when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             assertThrows(RuntimeException.class, source::readAgent);
         }
@@ -93,7 +94,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, "Bearer my-token", jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, "Bearer my-token", jsonSerialization, JdkClientEngine.facade(httpClient));
 
             source.readAgent();
             verify(httpClient, atLeastOnce()).send(
@@ -110,7 +111,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, "   ", jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, "   ", jsonSerialization, JdkClientEngine.facade(httpClient));
 
             source.readAgent();
             verify(httpClient, atLeastOnce()).send(argThat(request -> request.headers().firstValue("Authorization").isEmpty()),
@@ -147,7 +148,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(snippet).when(jsonSerialization).deserialize(eq("{}"), eq(PromptSnippet.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var snippets = source.readSnippets();
             assertEquals(1, snippets.size());
@@ -175,7 +176,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(snippet).when(jsonSerialization).deserialize(eq("{}"), eq(PromptSnippet.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             // Syncing one agent must not propose writing the source instance's whole
             // snippet library onto the target.
@@ -193,7 +194,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(descs).when(jsonSerialization).deserialize(eq("[]"), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var snippets = source.readSnippets();
             assertTrue(snippets.isEmpty());
@@ -212,7 +213,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doThrow(new IOException("parse error")).when(jsonSerialization).deserialize(eq("{}"), eq(PromptSnippet.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var snippets = source.readSnippets();
             assertTrue(snippets.isEmpty());
@@ -249,7 +250,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(null).when(jsonSerialization).deserialize(eq("{}"), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var workflows = source.readWorkflows();
             assertTrue(workflows.isEmpty());
@@ -276,7 +277,7 @@ class RemoteApiResourceSourceMissedBranchTest {
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
         RemoteApiResourceSource source = new RemoteApiResourceSource(
-                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var workflows = source.readWorkflows();
         assertEquals(1, workflows.size());
@@ -308,7 +309,7 @@ class RemoteApiResourceSourceMissedBranchTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var agentData = source.readAgent();
             assertNotNull(agentData);
@@ -331,7 +332,7 @@ class RemoteApiResourceSourceMissedBranchTest {
                     .deserialize(eq("[]"), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             // Falling back to version 1 silently synced an arbitrarily old
             // configuration into the target whenever the listing was paginated,
@@ -351,14 +352,14 @@ class RemoteApiResourceSourceMissedBranchTest {
         @DisplayName("https scheme — accepted")
         void httpsScheme() {
             assertDoesNotThrow(() -> new RemoteApiResourceSource(
-                    "https://remote.example.com", "agent1", 1, null, jsonSerialization, httpClient));
+                    "https://remote.example.com", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient)));
         }
 
         @Test
         @DisplayName("URL without trailing slash — accepted")
         void noTrailingSlash() {
             assertDoesNotThrow(() -> new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient));
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient)));
         }
     }
 }

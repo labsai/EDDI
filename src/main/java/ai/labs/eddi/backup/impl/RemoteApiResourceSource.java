@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.BodyTooLargeException;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -16,14 +24,9 @@ import ai.labs.eddi.utils.RestUtilities;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
@@ -90,7 +93,6 @@ public class RemoteApiResourceSource implements IResourceSource {
      * agent archive (a large one is single-digit MB) and far below a heap.
      */
     private static final long MAX_ARCHIVE_BYTES = 256L * 1024 * 1024;
-    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
     /**
      * Cap on every JSON document a live sync reads from the source (descriptor
@@ -108,7 +110,7 @@ public class RemoteApiResourceSource implements IResourceSource {
     private final Integer agentVersion;
     private final String authToken;
     private final IJsonSerialization jsonSerialization;
-    private final HttpClient httpClient;
+    private final OutboundHttp http;
     /** Applied to every configuration document read — see the class comment. */
     private final UnaryOperator<String> secretScrubber;
     /** What the operator should know about this source; see {@link #warnings()}. */
@@ -131,9 +133,6 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     private final Map<String, Map<String, String>> descriptorNamesByPath = new HashMap<>();
 
-    /** Whether this instance owns {@link #httpClient} and must close it. */
-    private final boolean ownsHttpClient;
-
     /**
      * @param secretScrubber
      *            applied to every configuration document before it leaves this
@@ -142,15 +141,14 @@ public class RemoteApiResourceSource implements IResourceSource {
      *            the preview and the target.
      */
     public RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
-            String authToken, IJsonSerialization jsonSerialization, UnaryOperator<String> secretScrubber) {
+            String authToken, IJsonSerialization jsonSerialization, UnaryOperator<String> secretScrubber, OutboundHttp http) {
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.agentId = agentId;
         this.agentVersion = agentVersion;
         this.authToken = authToken;
         this.jsonSerialization = jsonSerialization;
         this.secretScrubber = Objects.requireNonNull(secretScrubber, "secretScrubber");
-        this.httpClient = configure(HttpClient.newBuilder()).build();
-        this.ownsHttpClient = true;
+        this.http = Objects.requireNonNull(http, "http");
     }
 
     /**
@@ -170,7 +168,7 @@ public class RemoteApiResourceSource implements IResourceSource {
     /** Whether a failed read was the response-size cap, wherever in the chain. */
     static boolean isTooLarge(Throwable failure) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof CappedStringBodyHandler.ResponseTooLargeException) {
+            if (cause instanceof BodyTooLargeException) {
                 return true;
             }
             if (cause.getCause() == cause) {
@@ -180,9 +178,54 @@ public class RemoteApiResourceSource implements IResourceSource {
         return false;
     }
 
-    /** The body handler for every JSON document read from the source. */
-    static HttpResponse.BodyHandler<String> jsonBodyHandler() {
-        return new CappedStringBodyHandler(maxResponseBytes());
+    /*
+     * Every JSON document is read from the source as text and refused once it
+     * passes the cap: a declared Content-Length over it before anything is read,
+     * otherwise the moment it is crossed. A compromised source, or one simply wrong
+     * about what it serves, must not decide how much of this instance's heap one
+     * sync request takes. See sendJson.
+     */
+
+    /** What a size-cap refusal says, naming the property that sets the cap. */
+    static String tooLargeMessage(long maxBytes) {
+        return "the response is larger than this instance accepts from a sync source (" + maxBytes + " bytes, "
+                + MAX_RESPONSE_BYTES_PROPERTY + ")";
+    }
+
+    /**
+     * Reads one JSON document. A size-cap refusal is re-thrown with a message that
+     * names {@value #MAX_RESPONSE_BYTES_PROPERTY}, the knob an operator would turn;
+     * the facade's own exception stays in the chain, which is what
+     * {@link #isTooLarge} looks for.
+     */
+    static OutboundResponse<String> sendJson(OutboundHttp http, OutboundRequest request) throws IOException, InterruptedException {
+        long cap = maxResponseBytes();
+        try {
+            // codeql[java/ssrf] False Positive: the base URL was approved by
+            // SourceUrlValidator; connecting to a user-provided remote EDDI instance is
+            // the feature
+            return http.send(request, BodyMode.string(cap, BodyMode.OnOverflow.FAIL));
+        } catch (BodyTooLargeException e) {
+            throw new IOException(tooLargeMessage(cap), e);
+        }
+    }
+
+    /**
+     * A request to the source instance. {@link Profile#INTERNAL_PEER}:
+     * {@link SourceUrlValidator} already approved the base URL, so the facade adds
+     * no SSRF check, and no redirect is ever followed — a source answering 3xx can
+     * never bounce the caller's bearer at an address of its choosing; the hop
+     * surfaces as a non-200 status and the read fails.
+     */
+    static OutboundRequest.Builder peerRequest(URI uri, Duration timeout, String authToken) {
+        OutboundRequest.Builder builder = OutboundRequest.builder(Profile.INTERNAL_PEER, uri)
+                .ssrf(SsrfPolicy.NONE)
+                .redirects(RedirectPolicy.NEVER)
+                .timeout(timeout);
+        if (authToken != null && !authToken.isBlank()) {
+            builder.header("Authorization", authToken);
+        }
+        return builder;
     }
 
     /**
@@ -201,59 +244,10 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
     }
 
-    /**
-     * The configuration every {@link HttpClient} this class owns is built with.
-     * <p>
-     * Redirects are stated rather than inherited. A redirect is never followed, so
-     * a remote instance answering 3xx can never bounce the caller's
-     * X-Source-Authorization bearer at an address of its choosing: the hop surfaces
-     * as a non-200 status and the read fails. This is the JDK's default too, and
-     * saying so is what stops a later edit from changing it without anyone
-     * noticing.
-     * <p>
-     * Both build sites go through here, and it is package-private, so that the
-     * policy can be asserted directly. Building a real client to read it back is
-     * not an option in a sandboxed build: {@code HttpClient.build()} opens a
-     * selector, which needs a loopback socket.
-     */
-    static HttpClient.Builder configure(HttpClient.Builder builder) {
-        return builder
-                .connectTimeout(CONNECT_TIMEOUT)
-                .followRedirects(HttpClient.Redirect.NEVER);
-    }
-
-    // Visible for testing
+    /** Visible for testing — no scrubbing. */
     RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
-            String authToken, IJsonSerialization jsonSerialization,
-            HttpClient httpClient) {
-        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, httpClient, false);
-    }
-
-    /**
-     * Visible for testing. The owned-client branch of {@link #close()} is otherwise
-     * only reachable through the public constructor, which builds a real
-     * {@link HttpClient} — and that opens a selector, which needs a loopback socket
-     * a sandboxed build does not have.
-     */
-    RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
-            String authToken, IJsonSerialization jsonSerialization,
-            HttpClient httpClient, boolean ownsHttpClient) {
-        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, httpClient, ownsHttpClient,
-                UnaryOperator.identity());
-    }
-
-    /** Visible for testing — the scrubbing path. */
-    RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
-            String authToken, IJsonSerialization jsonSerialization,
-            HttpClient httpClient, boolean ownsHttpClient, UnaryOperator<String> secretScrubber) {
-        this.baseUrl = normalizeBaseUrl(baseUrl);
-        this.agentId = agentId;
-        this.agentVersion = agentVersion;
-        this.authToken = authToken;
-        this.jsonSerialization = jsonSerialization;
-        this.httpClient = httpClient;
-        this.ownsHttpClient = ownsHttpClient;
-        this.secretScrubber = Objects.requireNonNull(secretScrubber, "secretScrubber");
+            String authToken, IJsonSerialization jsonSerialization, OutboundHttp http) {
+        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, UnaryOperator.identity(), http);
     }
 
     /**
@@ -269,19 +263,6 @@ public class RemoteApiResourceSource implements IResourceSource {
     public List<String> warnings() {
         readSnippets();
         return List.copyOf(warnings);
-    }
-
-    /**
-     * Closes the HTTP client this instance created. Callers already wrap every
-     * source in try-with-resources; without this override they inherited
-     * {@link IResourceSource#close()}'s no-op, so a batch sync over N agents left N
-     * clients — each with a selector thread and an executor — alive until GC.
-     */
-    @Override
-    public void close() {
-        if (ownsHttpClient) {
-            httpClient.close();
-        }
     }
 
     @Override
@@ -470,7 +451,7 @@ public class RemoteApiResourceSource implements IResourceSource {
      *            serialization service
      * @return list of agent descriptors from the remote instance
      */
-    public static List<DocumentDescriptor> listRemoteAgentDescriptors(
+    public static List<DocumentDescriptor> listRemoteAgentDescriptors(OutboundHttp http,
                                                                       String baseUrl, String authToken, IJsonSerialization jsonSerialization) {
         String normalized = normalizeBaseUrl(baseUrl);
         if (!normalized.endsWith("/")) {
@@ -478,22 +459,13 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
         URI baseUri = URI.create(normalized);
 
-        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
+        try {
+            OutboundRequest request = peerRequest(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"), REQUEST_TIMEOUT,
+                    authToken).header("Accept", "application/json").build();
 
-            // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
-            // user-provided remote EDDI instance
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
-                    .timeout(REQUEST_TIMEOUT)
-                    .header("Accept", "application/json");
-            if (authToken != null && !authToken.isBlank()) {
-                builder.header("Authorization", authToken);
-            }
-            HttpRequest request = builder.GET().build();
-
-            HttpResponse<String> response = client.send(request, jsonBodyHandler());
-            if (response.statusCode() != 200) {
-                throw new RemoteReadException("Remote instance returned status " + response.statusCode());
+            OutboundResponse<String> response = sendJson(http, request);
+            if (response.status() != 200) {
+                throw new RemoteReadException("Remote instance returned status " + response.status());
             }
 
             DocumentDescriptor[] descriptors = jsonSerialization.deserialize(
@@ -532,20 +504,8 @@ public class RemoteApiResourceSource implements IResourceSource {
      *
      * @return the archive bytes
      */
-    public static byte[] exportAgentArchive(String baseUrl, String agentId, Integer agentVersion, String authToken) {
-        try (HttpClient client = configure(HttpClient.newBuilder()).build()) {
-            return exportAgentArchive(client, baseUrl, agentId, agentVersion, authToken);
-        }
-    }
-
-    /**
-     * Visible for testing, and the only reason this is split: the public form
-     * builds its own {@link HttpClient}, which opens a selector and so cannot run
-     * in a sandboxed build — and a client that cannot be substituted leaves the
-     * whole fetch path reachable only through an integration test.
-     */
-    static byte[] exportAgentArchive(HttpClient client, String baseUrl, String agentId, Integer agentVersion,
-                                     String authToken) {
+    public static byte[] exportAgentArchive(OutboundHttp http, String baseUrl, String agentId, Integer agentVersion,
+                                            String authToken) {
         String normalized = normalizeBaseUrl(baseUrl);
         URI baseUri = URI.create(normalized.endsWith("/") ? normalized : normalized + "/");
 
@@ -557,53 +517,50 @@ public class RemoteApiResourceSource implements IResourceSource {
             // OLDEST configuration while the preview showed its newest.
             int version = agentVersion != null
                     ? agentVersion
-                    : latestAgentVersion(client, baseUri, agentId, authToken);
+                    : latestAgentVersion(http, baseUri, agentId, authToken);
             String exportPath = "backup/export/" + encodePathSegment(agentId) + "?agentVersion=" + version;
 
+            // Not REQUEST_TIMEOUT: that budget is sized for reading one JSON
+            // document, and this POST makes the remote read every workflow and
+            // extension, scrub secrets, gather snippets and schedules and zip
+            // the lot before it answers. A large agent legitimately takes
+            // longer than a config read.
+            OutboundRequest exportRequest = peerRequest(baseUri.resolve(exportPath), ARCHIVE_DOWNLOAD_TIMEOUT, authToken)
+                    .method("POST").build();
             // codeql[java/ssrf] False Positive: connecting to the operator-approved
             // remote EDDI instance is the feature
-            HttpResponse<Void> exportResponse = client.send(
-                    // Not REQUEST_TIMEOUT: that budget is sized for reading one JSON
-                    // document, and this POST makes the remote read every workflow and
-                    // extension, scrub secrets, gather snippets and schedules and zip
-                    // the lot before it answers. A large agent legitimately takes
-                    // longer than a config read.
-                    authorized(HttpRequest.newBuilder().uri(baseUri.resolve(exportPath)).timeout(ARCHIVE_DOWNLOAD_TIMEOUT),
-                            authToken).POST(HttpRequest.BodyPublishers.noBody()).build(),
-                    HttpResponse.BodyHandlers.discarding());
+            OutboundResponse<Void> exportResponse = http.send(exportRequest, BodyMode.discard());
 
-            if (exportResponse.statusCode() < 200 || exportResponse.statusCode() >= 300) {
+            if (exportResponse.status() < 200 || exportResponse.status() >= 300) {
                 throw new RemoteReadException("Remote instance refused to export agent " + agentId
-                        + " (status " + exportResponse.statusCode() + ")");
+                        + " (status " + exportResponse.status() + ")");
             }
 
-            String archiveName = archiveNameFrom(exportResponse.headers().firstValue("Location").orElse(null));
+            String archiveName = archiveNameFrom(exportResponse.firstHeader("Location").orElse(null));
             if (archiveName == null) {
                 throw new RemoteReadException("Remote instance exported agent " + agentId
                         + " but named no archive to download");
             }
 
-            // codeql[java/ssrf] False Positive: same approved base URL as above
-            // ofInputStream, not ofByteArray: the byte-array handler blocks until the
-            // WHOLE body is in memory, so a size check after it runs is a check on an
-            // allocation that has already happened. The stream is read to the cap and
-            // no further.
-            HttpResponse<InputStream> download = client.send(
-                    authorized(HttpRequest.newBuilder()
-                            .uri(baseUri.resolve("backup/export/" + encodePathSegment(archiveName)))
-                            .timeout(ARCHIVE_DOWNLOAD_TIMEOUT), authToken).GET().build(),
-                    HttpResponse.BodyHandlers.ofInputStream());
+            OutboundRequest downloadRequest = peerRequest(baseUri.resolve("backup/export/" + encodePathSegment(archiveName)),
+                    ARCHIVE_DOWNLOAD_TIMEOUT, authToken).build();
+            // The archive is capped as it is read: a declared Content-Length over the
+            // cap is refused before anything is read, and a body without one, or
+            // longer than it claimed, stops one byte past the cap.
+            OutboundResponse<byte[]> download;
+            try {
+                // codeql[java/ssrf] False Positive: same approved base URL as above
+                download = http.send(downloadRequest, BodyMode.bytes(MAX_ARCHIVE_BYTES, BodyMode.OnOverflow.FAIL));
+            } catch (BodyTooLargeException e) {
+                throw new RemoteReadException("The exported archive for agent " + agentId
+                        + " is more than this instance will import (" + MAX_ARCHIVE_BYTES + " bytes)", e);
+            }
 
-            if (download.statusCode() != 200) {
+            if (download.status() != 200) {
                 throw new RemoteReadException("Could not download the exported archive for agent " + agentId
-                        + " (status " + download.statusCode() + ")");
+                        + " (status " + download.status() + ")");
             }
-            long declared = download.headers().firstValueAsLong("Content-Length").orElse(-1);
-            if (declared > MAX_ARCHIVE_BYTES) {
-                throw new RemoteReadException("The exported archive for agent " + agentId + " is "
-                        + declared + " bytes, more than this instance will import (" + MAX_ARCHIVE_BYTES + ")");
-            }
-            byte[] body = readAtMost(download.body(), agentId);
+            byte[] body = download.body();
             if (body.length == 0) {
                 throw new RemoteReadException("The exported archive for agent " + agentId + " came back empty");
             }
@@ -625,18 +582,14 @@ public class RemoteApiResourceSource implements IResourceSource {
      * {@code resolveLatestAgentVersion}, and must not guess: see the call site for
      * what guessing cost.
      */
-    private static int latestAgentVersion(HttpClient client, URI baseUri, String agentId, String authToken) {
+    private static int latestAgentVersion(OutboundHttp http, URI baseUri, String agentId, String authToken) {
         try {
-            // codeql[java/ssrf] False Positive: the operator-approved remote instance
-            HttpResponse<String> response = client.send(
-                    authorized(HttpRequest.newBuilder()
-                            .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
-                            .timeout(REQUEST_TIMEOUT)
-                            .header("Accept", "application/json"), authToken).GET().build(),
-                    jsonBodyHandler());
-            if (response.statusCode() != 200) {
+            OutboundRequest request = peerRequest(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"), REQUEST_TIMEOUT,
+                    authToken).header("Accept", "application/json").build();
+            OutboundResponse<String> response = sendJson(http, request);
+            if (response.status() != 200) {
                 throw new RemoteReadException("Could not list agents on " + baseUri
-                        + " to find the latest version of " + agentId + " (status " + response.statusCode() + ")");
+                        + " to find the latest version of " + agentId + " (status " + response.status() + ")");
             }
             for (String resource : agentResourceUris(response.body())) {
                 IResourceId resourceId = RestUtilities.extractResourceId(URI.create(resource));
@@ -676,34 +629,6 @@ public class RemoteApiResourceSource implements IResourceSource {
     }
 
     /**
-     * Reads the archive, refusing to allocate more than {@link #MAX_ARCHIVE_BYTES}.
-     * <p>
-     * The bound is enforced <em>while</em> reading. A remote that declares no
-     * {@code Content-Length}, or declares one and then sends more, cannot make this
-     * instance hold an unbounded body in memory before the guard is reached: the
-     * read stops one byte past the cap and the stream is closed.
-     */
-    private static byte[] readAtMost(InputStream body, String agentId) throws IOException {
-        if (body == null) {
-            return new byte[0];
-        }
-        try (body; ByteArrayOutputStream buffer = new ByteArrayOutputStream()) {
-            byte[] chunk = new byte[8192];
-            long total = 0;
-            int read;
-            while ((read = body.read(chunk)) != -1) {
-                total += read;
-                if (total > MAX_ARCHIVE_BYTES) {
-                    throw new RemoteReadException("The exported archive for agent " + agentId
-                            + " is larger than this instance will import (" + MAX_ARCHIVE_BYTES + " bytes)");
-                }
-                buffer.write(chunk, 0, read);
-            }
-            return buffer.toByteArray();
-        }
-    }
-
-    /**
      * The archive's file name from the export's {@code Location}, and nothing else
      * from it.
      * <p>
@@ -731,13 +656,6 @@ public class RemoteApiResourceSource implements IResourceSource {
             return null;
         }
         return name;
-    }
-
-    private static HttpRequest.Builder authorized(HttpRequest.Builder builder, String authToken) {
-        if (authToken != null && !authToken.isBlank()) {
-            builder.header("Authorization", authToken);
-        }
-        return builder;
     }
 
     private static String encodePathSegment(String segment) {
@@ -916,22 +834,11 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
         URI requestUri = URI.create(normalized).resolve(path.substring(1));
         try {
-            // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
-            // user-provided remote EDDI instance
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(requestUri)
-                    .timeout(REQUEST_TIMEOUT)
-                    .header("Accept", "application/json");
+            OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken).header("Accept", "application/json").build();
+            OutboundResponse<String> response = sendJson(http, request);
 
-            if (authToken != null && !authToken.isBlank()) {
-                builder.header("Authorization", authToken);
-            }
-
-            HttpRequest request = builder.GET().build();
-            HttpResponse<String> response = httpClient.send(request, jsonBodyHandler());
-
-            if (response.statusCode() != 200) {
-                throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.statusCode());
+            if (response.status() != 200) {
+                throw new RemoteReadException("Remote " + baseUrl + path + " returned status " + response.status());
             }
 
             return response.body();

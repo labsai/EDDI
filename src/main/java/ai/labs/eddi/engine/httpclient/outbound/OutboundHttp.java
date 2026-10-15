@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.httpclient.outbound;
 
-import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
