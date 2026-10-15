@@ -35,7 +35,7 @@ SAMPLED = re.compile(r"^(eddi_runtime_executor_(active|queued|max_threads)|eddi_
                      r"eddi_coordinator_(queue_depth|active_conversations)|eddi_audit_queue_(depth|capacity)|"
                      r"jvm_threads_(live|peak)_threads|mongodb_driver_pool_(size|checkedout|waitqueuesize))")
 # Counters compared before/after a run.
-COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_coordinator_dead_lettered_total|eddi_turn_idempotency_total|"
+COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_total|eddi_coordinator_dead_lettered_total|eddi_turn_idempotency_total|"
                      r"eddi_conversation_processing_duration_seconds_(count|sum)|eddi_llm_circuit[a-z_]*_total|"
                      r"http_server_requests_seconds_count)")
 
