@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
@@ -52,11 +53,12 @@ class McpHitlToolsTest {
     OwnershipValidator ownershipValidator;
     IJsonSerialization json;
     SecurityIdentity identity;
+    ResourceAccessGuard resourceAccessGuard = mock(ResourceAccessGuard.class);
     McpHitlTools tools;
 
     McpHitlTools build(boolean authEnabled, boolean mutationsEnabled) {
         return new McpHitlTools(conversationService, groupConversationService, guard,
-                ownershipValidator, json, identity, new SimpleMeterRegistry(),
+                ownershipValidator, resourceAccessGuard, json, identity, new SimpleMeterRegistry(),
                 authEnabled, mutationsEnabled);
     }
 
@@ -106,6 +108,27 @@ class McpHitlToolsTest {
             assertTrue(e.getMessage().contains("requires one of roles"), e.getMessage());
         }
         verifyNoInteractions(guard, conversationService, groupConversationService);
+    }
+
+    /**
+     * The USE gate REST's approve endpoint applies: an owner whose group access was
+     * revoked while the discussion was paused may not resume it; admins and
+     * approvers decide by role.
+     */
+    @Test
+    void approveGroupPhase_requiresGroupUseAccess_unlessAdminOrApprover() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(false);
+        when(ownershipValidator.isApprover(identity)).thenReturn(false);
+        doThrow(new ForbiddenException("revoked")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null);
+
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+        verifyNoInteractions(groupConversationService);
+
+        when(ownershipValidator.isApprover(identity)).thenReturn(true);
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
     }
 
     /** With authorization off the tier is a no-op, as every other MCP tier is. */

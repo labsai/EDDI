@@ -41,6 +41,8 @@ class ActingAgentResourcesTest {
     private static final String WORKFLOW = "5f1c0f3a9d8e4b2a7c6d1e01";
     private static final String LLM = "5f1c0f3a9d8e4b2a7c6d1e02";
     private static final String RULES = "5f1c0f3a9d8e4b2a7c6d1e03";
+    private static final String DICTIONARY = "5f1c0f3a9d8e4b2a7c6d1e04";
+    private static final String CORRECTION = "5f1c0f3a9d8e4b2a7c6d1e05";
 
     private static WorkflowConfiguration.WorkflowStep step(String type, String uri) {
         var step = new WorkflowConfiguration.WorkflowStep();
@@ -72,16 +74,25 @@ class ActingAgentResourcesTest {
         agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW + "?version=3")));
         when(agentStore.read(AGENT, 7)).thenReturn(agent);
         var workflow = new WorkflowConfiguration();
+        // A parser step names its resources under extensions, not config.uri.
+        var parser = step("eddi://ai.labs.parser", null);
+        parser.setExtensions(Map.of(
+                "dictionaries", List.of(Map.of("type", "eddi://ai.labs.parser.dictionaries.regular",
+                        "config",
+                        Map.of("uri", "eddi://ai.labs.parser.dictionaries.regular/dictionarystore/dictionaries/" + DICTIONARY + "?version=1"))),
+                "corrections", List.of(Map.of("type", "eddi://ai.labs.parser.corrections.levenshtein",
+                        "config", Map.of("uri", "eddi://x/y/" + CORRECTION)))));
         workflow.setWorkflowSteps(List.of(
                 step("eddi://ai.labs.llm", "eddi://ai.labs.llm/llmstore/llms/" + LLM + "?version=1"),
                 step("eddi://ai.labs.rules", "eddi://ai.labs.rules/rulestore/rulesets/" + RULES),
+                parser,
                 step("eddi://ai.labs.templating", null)));
         when(workflowStore.read(WORKFLOW, 3)).thenReturn(workflow);
 
         SelfUngatingGuard.Protection protection = ActingAgentResources.resolve(agentStore, workflowStore, AGENT, 7);
 
         assertEquals(AGENT, protection.actingAgentId());
-        assertEquals(Set.of(WORKFLOW, LLM, RULES), protection.ownResourceIds());
+        assertEquals(Set.of(WORKFLOW, LLM, RULES, DICTIONARY, CORRECTION), protection.ownResourceIds());
         assertFalse(protection.resourcesUnresolved());
         assertNotNull(protection.storedGates());
     }

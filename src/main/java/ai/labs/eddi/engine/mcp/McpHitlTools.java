@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -70,6 +71,7 @@ public class McpHitlTools {
     private final IGroupConversationService groupConversationService;
     private final HitlAccessGuard hitlAccessGuard;
     private final OwnershipValidator ownershipValidator;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final MeterRegistry meterRegistry;
@@ -81,6 +83,7 @@ public class McpHitlTools {
             IGroupConversationService groupConversationService,
             HitlAccessGuard hitlAccessGuard,
             OwnershipValidator ownershipValidator,
+            ResourceAccessGuard resourceAccessGuard,
             IJsonSerialization jsonSerialization,
             SecurityIdentity identity,
             MeterRegistry meterRegistry,
@@ -90,6 +93,7 @@ public class McpHitlTools {
         this.groupConversationService = groupConversationService;
         this.hitlAccessGuard = hitlAccessGuard;
         this.ownershipValidator = ownershipValidator;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.meterRegistry = meterRegistry;
@@ -506,6 +510,14 @@ public class McpHitlTools {
         }
         try {
             hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            // The USE gate REST's approve endpoint applies (requireResumeUseAccess): an
+            // approval resumes the run — every remaining member turn, at the group
+            // owner's cost — so an owner whose access to the group was revoked while
+            // it was paused must not drive it to completion. Admins and designated
+            // approvers decide by role, independently of group access.
+            if (!ownershipValidator.isAdmin(identity) && !ownershipValidator.isApprover(identity)) {
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            }
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(parsed);
             decision.setNote(note);

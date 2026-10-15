@@ -327,6 +327,7 @@ public class A2AToolProviderManager {
         }
 
         // Create a tool for each skill
+        Set<String> seenToolNames = new HashSet<>();
         for (Map<String, Object> skill : skills) {
             String skillId = (String) skill.getOrDefault("id", "skill");
             String skillName = (String) skill.getOrDefault("name", skillId);
@@ -340,6 +341,15 @@ public class A2AToolProviderManager {
             }
 
             String toolName = sanitizeToolName(agentName + "_" + skillId);
+            // A repeated skill id would produce the same tool name: the later copy
+            // would silently replace the executor while both specs reached the model
+            // — and, charged before the replacement, eat the per-agent schema budget
+            // of a distinct skill further down the card.
+            if (!seenToolNames.add(toolName)) {
+                LOGGER.warnf("A2A agent '%s' advertises skill '%s' more than once — keeping the first, dropping the duplicate",
+                        sanitizeForLog(agentName), sanitizeForLog(toolName));
+                continue;
+            }
 
             // The provenance suffix is appended AFTER governance so a remote card
             // cannot forge it: sanitizing the concatenation would let a skill whose

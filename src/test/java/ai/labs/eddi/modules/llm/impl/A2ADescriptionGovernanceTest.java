@@ -90,6 +90,22 @@ class A2ADescriptionGovernanceTest {
     }
 
     @Test
+    @DisplayName("a repeated skill id yields one tool — the duplicate is dropped before it is governed or charged")
+    void duplicateSkillIdsCollapse() throws Exception {
+        plantAgentCard(Map.of("name", "peer", "skills", List.of(
+                Map.of("id", "lookup", "name", "lookup", "description", "first"),
+                Map.of("id", "lookup", "name", "lookup", "description", "second"),
+                Map.of("id", "other", "name", "other", "description", "third"))));
+        var config = new A2AAgentConfig();
+        config.setUrl(AGENT_URL);
+
+        var result = manager.discoverTools(List.of(config));
+
+        assertEquals(2, result.toolSpecs().size(), result.toolSpecs().toString());
+        assertTrue(result.toolSpecs().get(0).description().startsWith("first"), result.toolSpecs().get(0).description());
+    }
+
+    @Test
     @DisplayName("M7: a directive inside a tool's parameter schema is redacted on the A2A side too")
     void governsParameterSchemas() throws Exception {
         var registry = new SimpleMeterRegistry();

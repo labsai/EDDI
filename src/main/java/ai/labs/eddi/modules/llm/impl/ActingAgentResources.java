@@ -16,6 +16,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -89,11 +90,12 @@ final class ActingAgentResources {
                         continue;
                     }
                     for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
-                        Object resourceUri = step.getConfig() != null ? step.getConfig().get("uri") : null;
-                        String resourceId = resourceUri != null ? idOf(resourceUri.toString()) : null;
-                        if (resourceId != null) {
-                            ids.add(resourceId);
-                        }
+                        // A step names its resource as config.uri — and a parser step names
+                        // several more under extensions.dictionaries[].config.uri and
+                        // extensions.corrections[].config.uri. Every uri at any depth of
+                        // either map is a document the agent runs on.
+                        collectUris(step.getConfig(), ids);
+                        collectUris(step.getExtensions(), ids);
                     }
                 }
             }
@@ -103,6 +105,28 @@ final class ActingAgentResources {
             return new Protection(agentId, ids, true, storedGates);
         }
         return new Protection(agentId, ids, false, storedGates);
+    }
+
+    /**
+     * Adds the id of every {@code uri} value found at any depth of {@code node}.
+     */
+    static void collectUris(Object node, Set<String> ids) {
+        if (node instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if ("uri".equals(entry.getKey()) && entry.getValue() != null) {
+                    String id = idOf(entry.getValue().toString());
+                    if (id != null) {
+                        ids.add(id);
+                    }
+                } else {
+                    collectUris(entry.getValue(), ids);
+                }
+            }
+        } else if (node instanceof Iterable<?> list) {
+            for (Object element : list) {
+                collectUris(element, ids);
+            }
+        }
     }
 
     static String idOf(String uri) {
