@@ -299,7 +299,9 @@ what it finds. Off by default. Worth knowing before touching it:
   the same reason (the agent id is a path segment). `cascade-preview.ts` /
   `cascade-summary.tsx` render a gated cascade as `llm <id> v1 → v2` plus
   "will redeploy to <env>"; the raw body stays below it. Knowledge-base binding:
-  batch 1 = two credential-safe PATCH edits (LLM config + workflow, parallel), batch 2 = one
+  batch 1 = the LLM config edit as a credential-safe PATCH plus the workflow write that
+  adds the RAG step as `PUT /workflowstore/workflows/{id}` (the workflow store has no
+  PATCH and a workflow holds no credential references), issued in parallel; batch 2 = one
   cascade carrying both new versions plus the redeploy. The batching block names no write
   method; it defers to the editing rules, so it stays right whichever method they teach.
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.

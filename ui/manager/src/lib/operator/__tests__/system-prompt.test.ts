@@ -1016,7 +1016,7 @@ describe("batched changes: the plan shape the operator is taught", () => {
 
   it("reads as two approvals once credential-safe PATCH is granted: the editing rules come first, the batch defers to them", () => {
     // The editing section teaches PATCH; the batching block names no method and
-    // points back at it, so batch 1 is two PATCH edits and batch 2 is the cascade.
+    // points back at it, so batch 1 is the LLM-config PATCH plus the workflow PUT (the workflow store has no PATCH) and batch 2 is the cascade.
     const editingMarker = "EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH";
     const batchingMarker = "Planning and batching changes:";
     // Both present, proven by toContain, so the two indices below are real positions.
