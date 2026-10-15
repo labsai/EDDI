@@ -231,7 +231,7 @@ describe("ApprovalBanner", () => {
       expect(screen.getByText("sendEmail")).toBeInTheDocument();
       expect(screen.getByText("transfer_funds")).toBeInTheDocument();
       expect(screen.getByText("mcp:*")).toBeInTheDocument();
-      expect(screen.getByTestId("tool-args-c1")).toHaveTextContent('"to":"[REDACTED]"');
+      expect(screen.getByTestId("tool-args-c1")).toHaveTextContent('"to": "[REDACTED]"');
     });
 
     it("approving with no per-call changes sends no toolDecisions (calls inherit APPROVED)", () => {
@@ -439,8 +439,9 @@ describe("ApprovalBanner", () => {
       expect(screen.getByTestId("approve-button")).not.toBeDisabled();
       expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
 
+      // The per-call review IS the confirmation: no dialog for a multi-call batch.
       fireEvent.click(screen.getByTestId("approve-button"));
-      confirmInDialog("Approve");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
         c1: { verdict: "APPROVED" },
         c2: { verdict: "APPROVED" },
@@ -572,5 +573,272 @@ describe("a failed pause-details read must not be approvable", () => {
     );
     fireEvent.click(screen.getByTestId("approval-details-retry"));
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ApprovalBanner — a tool-call pause with nothing to review", () => {
+  it("never enables Approve for a TOOL_CALL pause with zero calls", () => {
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={toolPause({ calls: [] })} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId("approval-details-missing")).toBeInTheDocument();
+    expect(screen.getByTestId("reject-button")).not.toBeDisabled();
+  });
+
+  it("also holds under requireExplicitPerCall, where 0 of 0 decided would otherwise read as complete", () => {
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        requireExplicitPerCall
+        pauseDetails={toolPause({ calls: [] })}
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+
+  it("keeps Approve disabled when a tool call is expected but the details are absent", () => {
+    renderWithProviders(
+      <ApprovalBanner surface="regular" expectToolCall pauseDetails={null} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    expect(screen.getByTestId("approval-details-missing")).toBeInTheDocument();
+  });
+
+  it("keeps Approve disabled when a tool call is expected but the details are a RULE pause", () => {
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        expectToolCall
+        pauseDetails={{ type: "RULE", reason: "why", actions: [] }}
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+
+  it("does not stack the missing-details notice on the pending or error states", () => {
+    const { rerender } = renderWithProviders(
+      <ApprovalBanner surface="regular" expectToolCall pauseDetails={null} pauseDetailsPending onDecide={vi.fn()} />,
+    );
+    expect(screen.queryByTestId("approval-details-missing")).not.toBeInTheDocument();
+    rerender(
+      <ApprovalBanner surface="regular" expectToolCall pauseDetails={null} pauseDetailsError onDecide={vi.fn()} />,
+    );
+    expect(screen.queryByTestId("approval-details-missing")).not.toBeInTheDocument();
+  });
+
+  it("allows Approve when the expected tool call is present (and decided, if per-call review is on)", () => {
+    renderWithProviders(
+      <ApprovalBanner surface="regular" expectToolCall pauseDetails={toolPause()} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeEnabled();
+    expect(screen.queryByTestId("approval-details-missing")).not.toBeInTheDocument();
+  });
+
+  it("leaves a plain RULE pause approvable when no tool call is expected (other callers unchanged)", () => {
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={null} onDecide={vi.fn()} />);
+    expect(screen.getByTestId("approve-button")).toBeEnabled();
+  });
+});
+
+describe("ApprovalBanner — tool-call arguments display", () => {
+  const nested = JSON.stringify({
+    requestBody: JSON.stringify({ agentName: "Support", apiKey: "<REDACTED>" }),
+  });
+  const pause = (args = nested, argsTruncated = false) =>
+    toolPause({
+      calls: [
+        { callId: "c1", toolName: "setupAgent", source: "http", arguments: args, argsTruncated, gateReason: "g", requestPinned: false },
+      ],
+    });
+
+  it("shows nested JSON-in-JSON arguments expanded, with a wrapping <pre>", () => {
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={vi.fn()} />);
+    const pre = screen.getByTestId("tool-args-c1");
+    expect(pre.textContent).toContain('"agentName": "Support"');
+    expect(pre.textContent).toContain('"<REDACTED>"');
+    expect(pre.textContent).not.toContain('\\"');
+    expect(pre.className).toContain("whitespace-pre-wrap");
+    expect(pre.className).toContain("max-h-96");
+  });
+
+  it("toggles to the exact raw text and back", () => {
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={vi.fn()} />);
+    const toggle = screen.getByTestId("tool-args-view-toggle-c1");
+    expect(toggle).toHaveAttribute("data-view", "formatted");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("data-view", "raw");
+    expect(screen.getByTestId("tool-args-c1").textContent).toBe(nested);
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("tool-args-c1").textContent).toContain('"agentName": "Support"');
+  });
+
+  it("offers no toggle when formatting changes nothing", () => {
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={pause("not json")} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("tool-args-c1").textContent).toBe("not json");
+    expect(screen.queryByTestId("tool-args-view-toggle-c1")).not.toBeInTheDocument();
+  });
+
+  it("shows truncated arguments verbatim", () => {
+    const truncated = '{"requestBody":"{\\"agentName\\":\\"Sup';
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={pause(truncated, true)} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("tool-args-c1").textContent).toBe(truncated);
+    expect(screen.queryByTestId("tool-args-view-toggle-c1")).not.toBeInTheDocument();
+  });
+
+  it("submits the decision from the ORIGINAL arguments: an amendment goes out exactly as typed, and an untouched call carries none", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause()} onDecide={onDecide} />);
+    // Viewing raw/formatted must not leak into the payload.
+    fireEvent.click(screen.getByTestId("tool-args-view-toggle-c1"));
+    fireEvent.click(screen.getByTestId("tool-args-view-toggle-c1"));
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenLastCalledWith("APPROVED", undefined, undefined, undefined);
+
+    const amended = '{"requestBody":"{\\"agentName\\":\\"Other\\"}"}';
+    fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+    fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: amended } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenLastCalledWith("APPROVED", undefined, undefined, {
+      c1: { verdict: "APPROVED", amendedArguments: amended },
+    });
+  });
+});
+
+describe("ApprovalBanner — fewest steps under requireExplicitPerCall", () => {
+  const oneCall = (over: Partial<ToolCallPauseDetails["calls"][number]> = {}) =>
+    toolPause({
+      calls: [
+        { callId: "c1", toolName: "setupAgent", source: "http", arguments: "{}", argsTruncated: false, gateReason: "g", requestPinned: false, ...over },
+      ],
+    });
+
+  it("single call: no per-call buttons or progress chip, Approve then confirm, explicit per-call APPROVED", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={oneCall()} onDecide={onDecide} requireExplicitPerCall />,
+    );
+    expect(screen.queryByTestId("tool-approve-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tool-reject-c1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("per-call-progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("explicit-review-missing")).not.toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toHaveTextContent("Approve");
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, { c1: { verdict: "APPROVED" } });
+  });
+
+  it("single call: amended arguments ride along on the explicit decision", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={oneCall()} onDecide={onDecide} requireExplicitPerCall />,
+    );
+    fireEvent.click(screen.getByTestId("tool-amend-toggle-c1"));
+    fireEvent.change(screen.getByTestId("tool-amend-c1"), { target: { value: '{"a":1}' } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
+      c1: { verdict: "APPROVED", amendedArguments: '{"a":1}' },
+    });
+  });
+
+  it("single call: Reject still confirms and rejects the batch", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={oneCall()} onDecide={onDecide} requireExplicitPerCall />,
+    );
+    fireEvent.click(screen.getByTestId("reject-button"));
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Reject");
+    expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined, undefined);
+  });
+
+  it("single call: a blocked call, pending, error, or zero calls still disable Approve", () => {
+    const { rerender } = renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={oneCall()}
+        onDecide={vi.fn()}
+        requireExplicitPerCall
+        blockedCalls={[{ callId: "c1", reason: "self-targeting" }]}
+      />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    for (const extra of [{ pauseDetailsPending: true }, { pauseDetailsError: true }]) {
+      rerender(
+        <ApprovalBanner surface="regular" pauseDetails={oneCall()} onDecide={vi.fn()} requireExplicitPerCall {...extra} />,
+      );
+      expect(screen.getByTestId("approve-button")).toBeDisabled();
+    }
+    rerender(
+      <ApprovalBanner surface="regular" pauseDetails={toolPause({ calls: [] })} onDecide={vi.fn()} requireExplicitPerCall expectToolCall />,
+    );
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+
+  it("multi call: the button reads Submit decisions, is disabled until all are decided, then submits with no dialog", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} requireExplicitPerCall />,
+    );
+    const button = screen.getByTestId("approve-button");
+    expect(button).toHaveTextContent("Submit decisions");
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByTestId("tool-approve-c1"));
+    expect(button).toBeDisabled();
+    fireEvent.click(screen.getByTestId("tool-reject-c2"));
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, {
+      c1: { verdict: "APPROVED" },
+      c2: { verdict: "REJECTED" },
+    });
+  });
+
+  it("multi call: a blocked call keeps Submit disabled even when all are decided", () => {
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={toolPause()}
+        onDecide={vi.fn()}
+        requireExplicitPerCall
+        blockedCalls={[{ callId: "c2", reason: "no" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("tool-approve-c1"));
+    fireEvent.click(screen.getByTestId("tool-approve-c2"));
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+  });
+
+  it("multi call: Reject the whole batch still confirms", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={toolPause()} onDecide={onDecide} requireExplicitPerCall />,
+    );
+    fireEvent.click(screen.getByTestId("reject-button"));
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Reject");
+    expect(onDecide).toHaveBeenCalledWith("REJECTED", undefined, undefined, undefined);
+  });
+
+  it("without requireExplicitPerCall nothing changes: Approve + confirm, label Approve, per-call buttons shown", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={oneCall()} onDecide={onDecide} />);
+    expect(screen.getByTestId("tool-approve-c1")).toBeInTheDocument();
+    expect(screen.getByTestId("approve-button")).toHaveTextContent("Approve");
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(onDecide).not.toHaveBeenCalled();
+    confirmInDialog("Approve");
+    expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined, undefined);
   });
 });

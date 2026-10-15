@@ -112,4 +112,14 @@ describe("PausedCard", () => {
     expect(card).not.toHaveAttribute("role", "status");
     expect(card).not.toHaveAttribute("aria-live");
   });
+
+  it("renders from the stream's news alone when no status is known yet, with Cancel and no deadline", () => {
+    const onCancel = vi.fn();
+    renderCard(<PausedCard status={null} onCancel={onCancel} />);
+    expect(screen.getByTestId("paused-card")).toHaveTextContent(/waiting for approval/i);
+    expect(screen.queryByTestId("paused-deadline")).toBeNull();
+    fireEvent.click(screen.getByTestId("paused-cancel"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /approve|reject/i })).toBeNull();
+  });
 });

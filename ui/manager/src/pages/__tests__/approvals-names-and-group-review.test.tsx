@@ -156,4 +156,28 @@ describe("ApprovalsPage — reviewing a group pause", () => {
     await waitFor(() => expect(sent.body?.decision?.verdict).toBe("APPROVED"));
     expect(sent.body?.decision?.note).toBe("Ship after the freeze lifts");
   });
+  it("holds Approve until the stored discussion is the one paused for approval", async () => {
+    // The pending list can be ahead of the stored discussion it names. Until the
+    // discussion itself says AWAITING_APPROVAL there are no phase or task
+    // particulars to decide from, so the row offers only Reject and Cancel.
+    serve({ groups: [{ ...base, conversationId: "gc-1", groupId: "grp1" }] });
+    server.use(
+      http.get("*/groups/grp1/conversations/gc-1", () =>
+        HttpResponse.json({
+          id: "gc-1",
+          groupId: "grp1",
+          state: "IN_PROGRESS",
+          originalQuestion: "Should we ship on Friday?",
+          transcript: [],
+        }),
+      ),
+    );
+    renderWithProviders(<ApprovalsPage />);
+
+    await userEvent.click(await screen.findByTestId("review-gc-1"));
+    const row = await screen.findByTestId("group-review-row-gc-1");
+    await waitFor(() => expect(within(row).getByTestId("approval-details-pending")).toBeInTheDocument());
+    expect(within(row).getByTestId("approve-button")).toBeDisabled();
+    expect(within(row).getByTestId("reject-button")).not.toBeDisabled();
+  });
 });

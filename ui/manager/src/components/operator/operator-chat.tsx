@@ -9,7 +9,7 @@ import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCirc
 import { Button } from "@/components/ui/button";
 import { ChatActivity } from "@/components/chat/chat-activity";
 import { InputHint } from "@/components/chat/input-hint";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { FileDropOverlay, PendingAttachmentChip } from "@/components/chat/attachment-chip";
 import { MessageAttachments } from "@/components/chat/chat-message";
 import {
@@ -127,6 +127,12 @@ export interface OperatorChatProps {
    */
   pauseSurface?: "banner" | "compact";
   /**
+   * Identity of the pause on screen (its `hitlPausedAt`). Keys the approval card
+   * and the decision summary, so a re-pause renders a fresh card and a summary
+   * can never describe a different pause.
+   */
+  pauseKey?: string | null;
+  /**
    * The composer's text, owned by the caller (the operator chat store) so an
    * unsent draft outlives this component — the drawer unmounts it on close.
    * Both must be passed; omitted, the composer keeps its own local state.
@@ -164,6 +170,7 @@ export function OperatorChat({
   blockedCalls,
   renderCallExtra,
   pauseSurface = "banner",
+  pauseKey,
   conversationId,
   onEnsureConversation,
   draft,
@@ -175,6 +182,10 @@ export function OperatorChat({
   const input = draftControlled ? draft : localInput;
   const setInput = draftControlled ? onDraftChange : setLocalInput;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // From `pauseKey` ONLY: `pausedAt` comes from query data that is withheld
+  // whenever a response does not describe the pause, so keying on it would flip
+  // the identity mid-decision and drop the reviewer's per-call choices.
+  const cardKey = `${conversationId ?? ""}:${pauseKey ?? ""}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Smart auto-scroll: follows new content only while the user is AT the
@@ -473,7 +484,9 @@ export function OperatorChat({
         )}
 
         {isPaused && pauseSurface === "banner" && (
-          <ApprovalBanner
+          <ApprovalCard
+            cardKey={cardKey}
+            isResolving={isResolvingPause}
             surface="regular"
             pauseReason={pauseReason ?? undefined}
             pausedAt={pausedAt}
@@ -492,6 +505,9 @@ export function OperatorChat({
             onRetryPauseDetails={onRetryPauseDetails}
             isSubmitting={isResolvingPause}
             requireExplicitPerCall
+            // The operator's gate is tool-call based: a pause with no TOOL_CALL
+            // detail means the details have not caught up, never "a rule pause".
+            expectToolCall
             blockedCalls={blockedCalls}
             renderCallExtra={renderCallExtra}
             onDecide={(verdict, note, _taskApprovals, toolDecisions) => onDecide?.(verdict, note, toolDecisions)}

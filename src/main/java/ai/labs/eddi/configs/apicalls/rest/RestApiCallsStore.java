@@ -254,6 +254,9 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             response.put("baseUrl", baseUrl != null ? baseUrl : "");
             response.put("endpointCount", result.endpointCount());
             response.put("groups", result.configsByGroup());
+            if (!result.unusableEndpoints().isEmpty()) {
+                response.put("unusableEndpoints", result.unusableEndpoints());
+            }
 
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {
