@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -71,8 +72,21 @@ public class CredentialReferenceResolver {
      *             a revoked grant.
      */
     public String resolveRequired(String template, String connectionName, String what) {
-        String resolved = globalVariableResolver.resolveValue(template);
-        resolved = secretResolver.resolveValue(resolved);
+        String expanded = globalVariableResolver.resolveValue(template);
+        if (template != null && !template.equals(expanded) && !ConnectionConfiguration.isAcceptableValueTemplate(expanded)) {
+            // A ${vars:} in a header template may stand for a vault reference or for
+            // the scaffolding around one ("Bearer "). It may not stand for the
+            // credential itself: a global variable is readable by every editor, and
+            // expanding one into the header would carry a plaintext key the vault never
+            // saw. The expanded template is held to the same rule the author would face
+            // writing it literally.
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "The " + what + " for connection '" + connectionName + "' expands a ${vars:…} reference into something that is not a "
+                            + "${vault:…} reference or short scaffolding around one. A global variable is readable by every editor, so a "
+                            + "credential may only live in the vault: store it with PUT /secretstore/secrets/{tenantId}/{keyName} and let "
+                            + "the variable hold the ${vault:…} reference.");
+        }
+        String resolved = secretResolver.resolveValue(expanded);
         if (resolved == null || resolved.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' resolved to an empty value. Check that the referenced vault key "
@@ -85,5 +99,64 @@ public class CredentialReferenceResolver {
                             + "provider would reject as a bad credential and which is indistinguishable from a revoked grant.");
         }
         return resolved;
+    }
+
+    /**
+     * {@link #resolveRequired} for a field whose whole value must be a vault
+     * reference — {@code oauth.clientSecret}, {@code staticAuth.passwordRef}.
+     * <p>
+     * Save-time validation accepts {@code ${vars:x}} in those fields, so that a
+     * variable can carry the reference for several connections. It is accepted on
+     * one condition: the variable holds a {@code ${vault:…}} reference. Without the
+     * condition the variable store, which every editor can read, is a second place
+     * a client secret can live in plaintext, outside the vault, export scrubbing
+     * and the grant check. The condition is checked here, at resolution, because
+     * the variable can be created or changed after the connection was saved.
+     *
+     * @throws ConnectionException
+     *             with {@code INVALID_CONFIGURATION} when the field, after
+     *             {@code ${vars:…}} expansion, is not exactly one vault reference
+     */
+    public String resolveVaultBacked(String template, String connectionName, String what) {
+        if (template == null || template.isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "The " + what + " for connection '" + connectionName + "' is empty. Re-save the connection with a ${vault:…} reference.");
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        if (!ConnectionConfiguration.isVaultReferenceOnly(expanded)) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "The " + what + " for connection '" + connectionName + "' " + notVaultBacked(template, expanded));
+        }
+        return resolveRequired(expanded, connectionName, what);
+    }
+
+    /**
+     * The save-time half of {@link #resolveVaultBacked}: refuses a
+     * {@code ${vars:x}} whose variable exists and holds anything but a vault
+     * reference. A variable that does not exist yet is let through — the connection
+     * may be saved before the variable, and {@link #resolveVaultBacked} refuses the
+     * connection at use until the variable is right.
+     *
+     * @throws IllegalArgumentException
+     *             with the message the 400 carries
+     */
+    public void requireVaultBacked(String value, String field) {
+        if (value == null || !value.contains("${vars:")) {
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(value);
+        if (expanded.contains("${vars:") || ConnectionConfiguration.isVaultReferenceOnly(expanded)) {
+            return;
+        }
+        throw new IllegalArgumentException(field + " " + notVaultBacked(value, expanded));
+    }
+
+    /** Never quotes the expansion: it may be the very credential this refuses. */
+    private static String notVaultBacked(String template, String expanded) {
+        String reason = expanded.contains("${vault:") || expanded.contains("${eddivault:")
+                ? "expands " + template + " into more than one vault reference"
+                : "expands " + template + " into a value that is not a ${vault:…} reference";
+        return reason + ". A global variable is readable by every editor, so it may only point at the vault: store the credential with "
+                + "PUT /secretstore/secrets/{tenantId}/{keyName} and set the variable to the ${vault:…} reference it answers with.";
     }
 }

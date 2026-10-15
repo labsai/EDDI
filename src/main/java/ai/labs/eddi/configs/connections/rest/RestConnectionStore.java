@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
 import ai.labs.eddi.connections.ConnectionsConfig;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -87,12 +88,20 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Inject
     ConnectionsConfig connectionsConfig;
 
+    /**
+     * Checks that a {@code ${vars:…}} in a credential field points at the vault —
+     * see {@link #requireVaultBackedCredentials}.
+     */
+    private final CredentialReferenceResolver credentialReferenceResolver;
+
     @Inject
     public RestConnectionStore(IConnectionStore connectionStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, ConnectionRegistry connectionRegistry, IConnectionGrantStore grantStore,
             ISecretProvider secretProvider,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authorizationEnabled,
-            ResourceAccessGuard resourceAccessGuard, IConnectionNameClaimStore nameClaimStore) {
+            ResourceAccessGuard resourceAccessGuard, IConnectionNameClaimStore nameClaimStore,
+            CredentialReferenceResolver credentialReferenceResolver) {
+        this.credentialReferenceResolver = credentialReferenceResolver;
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, connectionStore, documentDescriptorStore, resourceAccessGuard);
         this.connectionStore = connectionStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -790,10 +799,29 @@ public class RestConnectionStore implements IRestConnectionStore {
         }
         try {
             connectionConfiguration.validate();
+            requireVaultBackedCredentials(connectionConfiguration);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
         }
         requireDeploymentCanHonourIt(connectionConfiguration);
+    }
+
+    /**
+     * The model accepts {@code ${vars:x}} where it requires a reference, so one
+     * variable can carry a vault reference for several connections. It cannot see
+     * the variable store, so it cannot tell a variable holding a vault reference
+     * from one holding the client secret in plaintext — readable by every editor at
+     * {@code /variablestore/variables}. This can, and refuses the latter at save
+     * time; {@code CredentialReferenceResolver} refuses it again at use, for a
+     * variable changed afterwards.
+     */
+    private void requireVaultBackedCredentials(ConnectionConfiguration connection) {
+        if (connection.getOauth() != null) {
+            credentialReferenceResolver.requireVaultBacked(connection.getOauth().getClientSecret(), "oauth.clientSecret");
+        }
+        if (connection.getStaticAuth() != null) {
+            credentialReferenceResolver.requireVaultBacked(connection.getStaticAuth().getPasswordRef(), "staticAuth.passwordRef");
+        }
     }
 
     /**

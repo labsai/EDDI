@@ -57,10 +57,10 @@ class RestSecretStoreTest {
     void storeSecret_creates201WhenNew() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", "desc", null));
+        Response resp = rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", "desc", List.of("*")));
 
         assertEquals(201, resp.getStatus());
-        verify(secretProvider).store(any(SecretReference.class), eq("secret123"), eq("desc"), isNull());
+        verify(secretProvider).store(any(SecretReference.class), eq("secret123"), eq("desc"), eq(List.of("*")), isNull());
     }
 
     @Test
@@ -70,7 +70,7 @@ class RestSecretStoreTest {
         // so creating the secret must evict that stale cache entry.
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", null, null));
+        rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", null, List.of("*")));
 
         verify(secretResolver).invalidateCache(any(SecretReference.class));
     }
@@ -106,7 +106,7 @@ class RestSecretStoreTest {
         Response resp = rest.storeSecret("default", reserved, new IRestSecretStore.SecretRequest("val", null, null));
 
         assertEquals(400, resp.getStatus());
-        verify(secretProvider, never()).store(any(), any(), any(), any());
+        verify(secretProvider, never()).store(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -156,7 +156,7 @@ class RestSecretStoreTest {
         assertEquals(200, resp.getStatus());
         verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne", "agentTwo", "agentThree")), isNull());
         // The whole point: nothing on this path can write a value.
-        verify(secretProvider, never()).store(any(), any(), any(), any());
+        verify(secretProvider, never()).store(any(), any(), any(), any(), any());
 
         Map<String, Object> body = entityOf(resp);
         assertEquals(List.of("agentOne", "agentTwo", "agentThree"), body.get("allowedAgents"));
@@ -702,7 +702,7 @@ class RestSecretStoreTest {
     void storeSecret_returnsShortFormRefForDefaultTenant() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("default", "openaiKey", new IRestSecretStore.SecretRequest("sk-xxx", "OpenAI key", null));
+        Response resp = rest.storeSecret("default", "openaiKey", new IRestSecretStore.SecretRequest("sk-xxx", "OpenAI key", List.of("*")));
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -714,7 +714,7 @@ class RestSecretStoreTest {
     void storeSecret_returnsFullFormRefForCustomTenant() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("acme-corp", "dbPassword", new IRestSecretStore.SecretRequest("pass123", null, null));
+        Response resp = rest.storeSecret("acme-corp", "dbPassword", new IRestSecretStore.SecretRequest("pass123", null, List.of("*")));
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -733,10 +733,10 @@ class RestSecretStoreTest {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
             doThrow(new ISecretProvider.SecretProviderException("IO error"))
-                    .when(secretProvider).store(any(), any(), any(), any());
+                    .when(secretProvider).store(any(), any(), any(), any(), any());
 
             Response resp = rest.storeSecret("default", "myKey",
-                    new IRestSecretStore.SecretRequest("secret123", "desc", null));
+                    new IRestSecretStore.SecretRequest("secret123", "desc", List.of("*")));
 
             assertEquals(500, resp.getStatus());
         }
