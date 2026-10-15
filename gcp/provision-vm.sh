@@ -675,6 +675,13 @@ services:
       EDDI_KEYCLOAK_PUBLIC_URL: "https://\${KC_DOMAIN}"
       QUARKUS_OIDC_TOKEN_ISSUER: "https://\${KC_DOMAIN}/realms/eddi"
       QUARKUS_HTTP_CORS_ORIGINS: "https://\${EDDI_DOMAIN},http://localhost:${p_port}"
+      # nginx terminates TLS on this VM and proxies to EDDI over plain http, so
+      # the request EDDI sees is http and so would be the OAuth resource
+      # identifier it advertises for /mcp (the scheme follows the request since
+      # 6.6.1; MCP clients bind their token to that identifier). Name the public
+      # endpoint outright, which also pins the host - what docs/mcp-server.md
+      # asks of every production deployment.
+      QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: "https://\${EDDI_DOMAIN}/mcp"
   keycloak:
     environment:
       KC_HOSTNAME: "https://\${KC_DOMAIN}"

@@ -56,7 +56,13 @@ with one that drives quarkus-oidc's own `ResourceMetadataHandler` with the
 values from `application.properties` and proves an http request yields an http
 identifier and an https request an https one. The compose auth stacks, the k8s
 auth overlay and the Manager's Keycloak E2E compose keep their explicit `false`
-(now the default); only their comments changed.
+(now the default); only their comments changed. The one shipped stack that relied
+on the forced `https` was the GCP VM (`gcp/provision-vm.sh`): its nginx terminates
+TLS and proxies to EDDI over plain http, so its generated compose override now
+sets `QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE` to the public `https://<domain>/mcp`,
+the absolute identifier [mcp-server.md](../mcp-server.md) asks of every production
+deployment (CodeRabbit, outside-diff finding). [upgrading-from-6.4.md](../upgrading-from-6.4.md)
+no longer tells plain-http deployments to set `force-https-scheme=false`.
 
 **Files:** [`application.properties`](../../src/main/resources/application.properties),
 `src/main/java/ai/labs/eddi/ui/{IRestHtmlChatResource,RestHtmlChatResource}.java`,
