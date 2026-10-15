@@ -11,7 +11,11 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -125,7 +129,12 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateResourceInAgent(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
                                    @QueryParam("version") Integer version,
-                                   URI resourceURI,
+                                   @RequestBody(required = true,
+                                                description = "Plain-text URI of the new version of a resource this agent already references; "
+                                                        + "the existing reference to that resource is repointed to it. The URI MUST carry ?version=N.",
+                                                content = @Content(mediaType = MediaType.TEXT_PLAIN,
+                                                                   schema = @Schema(type = SchemaType.STRING, format = "uri",
+                                                                                    example = "eddi://ai.labs.workflow/workflowstore/workflows/ID?version=3"))) URI resourceURI,
                                    @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
                                    @QueryParam("compatible")
                                    @DefaultValue("false") Boolean compatible);

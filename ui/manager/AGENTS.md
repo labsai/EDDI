@@ -266,6 +266,18 @@ what it finds. Off by default. Worth knowing before touching it:
   **Backend floor: operator activation requires EDDI 6.2.0+** — the allow-list
   includes `GET /administration/docs{,/{name}}` (`@since 6.2.0`), and
   `findMissingEndpoints` refuses activation when the spec lacks an entry.
+  **A path in the spec is not a usable tool.** The generator
+  (`McpApiToolBuilder`) maps only `application/json` and `text/plain` request
+  bodies; an operation that *requires* any other body, or a required header
+  parameter, is skipped and reported (`resources.unusableEndpoints` on the
+  `setup-api` response). `findUnusableEndpoints` runs the same test against the
+  fetched spec before anything is created, and activation also rolls back on the
+  backend's report, so an allow-listed endpoint can never ship as a tool that
+  can only fail after the admin approved it (`updateResourceUri`'s `text/plain`
+  body was exactly that). **Before adding an endpoint to the allow-list, check
+  its body media type**; the two lists (`SUPPORTED_BODY_MEDIA_TYPES` in
+  `operator.ts`, `isSupportedBodyType` in the builder) must stay in step. An
+  older backend that does not report the field is covered by the pre-flight.
 - **Multi-step changes cost two approvals, not one per step.** Two levers, both
   stated to the operator by `buildBatchingSection` in `system-prompt.ts` (a
   clearly delimited block — keep it that way): (1) it lists the WHOLE plan before
@@ -285,9 +297,9 @@ what it finds. Off by default. Worth knowing before touching it:
   the same reason (the agent id is a path segment). `cascade-preview.ts` /
   `cascade-summary.tsx` render a gated cascade as `llm <id> v1 → v2` plus
   "will redeploy to <env>"; the raw body stays below it. Knowledge-base binding:
-  batch 1 = LLM config write + workflow write (parallel), batch 2 = one cascade
-  carrying both new versions plus the redeploy. (Once the credential-safe JSON
-  Patch endpoints land, batch 1 becomes two PATCH calls; the shape is unchanged.)
+  batch 1 = two credential-safe PATCH edits (LLM config + workflow, parallel), batch 2 = one
+  cascade carrying both new versions plus the redeploy. The batching block names no write
+  method; it defers to the editing rules, so it stays right whichever method they teach.
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.

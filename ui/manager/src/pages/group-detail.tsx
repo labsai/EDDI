@@ -53,7 +53,13 @@ import {
   type GroupConversation,
   type GroupConversationState,
 } from "@/lib/api/groups";
-import type { HitlVerdict } from "@/lib/api/hitl";
+import { getGroupApprovalStatus, type HitlDecision, type HitlVerdict } from "@/lib/api/hitl";
+import {
+  bindDecisionToPause,
+  currentGroupPauseOf,
+  isPauseChanged,
+  type ShownPause,
+} from "@/lib/hitl-pause-binding";
 import { STYLE_THEME } from "@/components/groups/discussion-style-theme";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
@@ -302,6 +308,9 @@ export function GroupDetailPage() {
   // Track an in-flight HITL decision so we can toast on the ACTUAL outcome
   // (hitl_resume ack / FAILED) rather than optimistically.
   const pendingDecisionRef = useRef<HitlVerdict | null>(null);
+  // An approve/reject is in flight, from submit until the resumed stream confirms
+  // or fails. Drives the approval card's receipt.
+  const [isApproving, setIsApproving] = useState(false);
 
   /**
    * Set when the user explicitly asked for an empty composer ("New Discussion"),
@@ -411,21 +420,51 @@ export function GroupDetailPage() {
   // Approve/reject a paused group discussion. Resumes over the approve/stream
   // SSE endpoint so the continued discussion renders live in the transcript.
   const handleApproveDiscussion = useCallback(
-    (gcId: string, verdict: HitlVerdict, note?: string, taskApprovals?: Record<string, string>) => {
+    async (gcId: string, verdict: HitlVerdict, note?: string, taskApprovals?: Record<string, string>) => {
       if (!groupId) return;
+      setIsApproving(true);
+      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
+      // Bound to the pause the card showed, exactly as the approvals inbox binds a
+      // group decision: the STORED pause (its start, and its id when the backend
+      // reports one) is compared with the pause now, and a changed pause refuses
+      // instead of approving something nobody reviewed.
+      const shown: ShownPause = {
+        pausedAt: paused?.pausedAt ?? null,
+        pauseType: paused?.hitlPauseType ?? "PHASE",
+      };
+      let decision: HitlDecision = { verdict, note };
+      try {
+        decision = await bindDecisionToPause(decision, shown, async () =>
+          currentGroupPauseOf(await getGroupApprovalStatus(groupId, gcId)),
+        );
+      } catch (err) {
+        setIsApproving(false);
+        if (isPauseChanged(err)) {
+          toast.error(
+            t(
+              "hitl.pauseChanged",
+              "This request changed since you opened it — nothing was decided. Review it again.",
+            ),
+          );
+          queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+          queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+        } else {
+          toast.error(friendlyGroupActionError(err, t));
+        }
+        return;
+      }
       // Feedback is driven off the resume outcome (see effect below), not fired
       // optimistically — the resume can fail (409 stale, 400 invalid decision).
       pendingDecisionRef.current = verdict;
       userClearedRef.current = true; // hold the clear until the stream takes over
-      const paused = selectedConversation?.id === gcId ? selectedConversation : null;
       setResumedConversation(paused);
       setSelectedConvId(null); // switch the transcript to the live resumed stream
       // Seeded for the same reason as the snapshot above: the approve endpoint
       // replays nothing, so without it the first resumed turn made the live
       // transcript the ONLY transcript, and every earlier phase left the view.
-      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals }, paused);
+      approveAndStream(groupId, gcId, { decision, taskApprovals }, paused);
     },
-    [groupId, approveAndStream, setSelectedConvId, selectedConversation],
+    [groupId, approveAndStream, setSelectedConvId, selectedConversation, queryClient, t],
   );
 
   // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
@@ -445,9 +484,11 @@ export function GroupDetailPage() {
       // Approvals inbox now (mirrors the cancel path) rather than waiting for the poll.
       queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     } else if (streamState.state === "FAILED") {
       toast.error(streamState.error || t("common.error", "Something went wrong"));
       pendingDecisionRef.current = null;
+      setIsApproving(false);
     }
   }, [streamState.hitlResume, streamState.state, streamState.error, queryClient, t]);
 
@@ -1146,7 +1187,7 @@ export function GroupDetailPage() {
                 rosterDisplayNames={rosterDisplayNames}
                 onApprove={handleApproveDiscussion}
                 onCancelDiscussion={handleCancelDiscussion}
-                isDeciding={cancelDiscussionMutation.isPending}
+                isDeciding={cancelDiscussionMutation.isPending || isApproving}
                 onSubmitHumanInput={handleSubmitHumanInput}
                 isSubmittingHumanInput={submitHumanInputMutation.isPending}
                 humanTurnTimeout={groupConfig.humanMemberConfig?.turnTimeout}
