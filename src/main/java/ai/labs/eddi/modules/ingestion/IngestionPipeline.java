@@ -19,6 +19,8 @@ import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
+import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -262,6 +264,7 @@ public class IngestionPipeline {
         // failure, an OutOfMemoryError, or a StackOverflowError from a pathological
         // page are each enough.
         try {
+            reconcileStoreFingerprint(mode, ragConfigId, knowledgeBase, knowledgeBaseId, source, sourceKey, collector);
             if (mode == Mode.INGEST) {
                 markForSweepIfFresh(source, sourceKey, runId);
             }
@@ -273,6 +276,14 @@ public class IngestionPipeline {
             // Added to, not assigned: a file retired as unreadable during the run is
             // already counted.
             collector.tombstoned += reconcileDeletions(source, sourceKey, runId, mode, sourceRun, collector);
+
+            // A run that wrote nothing (every document unchanged) never meets the
+            // retired store's refusal, yet its documents are not in the knowledge
+            // base's current store: report that rather than success.
+            if (mode == Mode.INGEST && collector.storeRefused == null && collector.store != null
+                    && EmbeddingStoreFactory.isRetired(collector.store)) {
+                collector.storeRefused = new InMemoryStoreRetiredException(knowledgeBaseId).getMessage();
+            }
 
             IngestionReport report = collector.toReport(summary, null, startedAt);
             finish(mode, runId, sourceKey, report, statusFor(collector));
@@ -302,8 +313,73 @@ public class IngestionPipeline {
      * operators to ignore the status.
      */
     private static IngestionRun.Status statusFor(Collector collector) {
+        if (collector.storeRefused != null) {
+            // Not "some documents failed": the in-memory store took nothing more. When
+            // it is full, every later run says the same until an operator acts; when
+            // it was replaced mid-run, the next run re-embeds into the new store.
+            return IngestionRun.Status.FAILED;
+        }
         boolean nothingUsable = collector.ingested + collector.unchanged == 0;
         return collector.failed > 0 && nothingUsable ? IngestionRun.Status.FAILED : IngestionRun.Status.COMPLETED;
+    }
+
+    /**
+     * Makes sure the content hashes this run is about to trust describe the vector
+     * store it is about to write to.
+     *
+     * <p>
+     * A hash says what a document was embedded as, not where. An in-memory store is
+     * gone after a restart and is rebuilt when the embedding configuration changes,
+     * while the hashes outlive both — so every document used to read "unchanged"
+     * over an empty store, and a scheduled run never refilled it. The store's
+     * fingerprint is therefore recorded with the source's state, and when the store
+     * this run writes to has a different one, the state is invalidated before
+     * anything is compared: every document is embedded again, and conditional
+     * requests are not sent, since a 304 would skip the page just the same.
+     *
+     * <p>
+     * A source with no recorded fingerprint — all state written before this check
+     * existed — counts as a mismatch, but only for a store that has a fingerprint
+     * at all. External stores have none today ({@code null}), keep their data
+     * across restarts, and are left exactly as they were.
+     *
+     * <p>
+     * Invalidated first, recorded second: a crash between the two leaves rows that
+     * re-embed and a fingerprint that still mismatches, so the next run settles it.
+     * A preview only reports what a run would do, and writes nothing.
+     */
+    private void reconcileStoreFingerprint(Mode mode, String ragConfigId, RagConfiguration knowledgeBase,
+                                           String knowledgeBaseId, IngestionSource source, String sourceKey,
+                                           Collector collector) {
+
+        String current;
+        if (mode == Mode.INGEST) {
+            // Bound for the whole run: the fingerprint checked here must describe the
+            // store the run writes to. A later lookup could return a newer, empty store
+            // if the knowledge base were dropped or remodelled meanwhile, and every
+            // document would then pass as "unchanged" against the old store's state.
+            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
+            current = EmbeddingStoreFactory.fingerprintOf(collector.store);
+        } else {
+            current = embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);
+        }
+        if (current == null) {
+            return;
+        }
+        String recorded = stateStore.storeFingerprint(sourceKey).orElse(null);
+        if (current.equals(recorded)) {
+            return;
+        }
+        collector.reembedAll = true;
+        if (mode != Mode.INGEST) {
+            return;
+        }
+        LOGGER.infof("Source '%s' of knowledge base '%s' last wrote to %s vector store than the one it writes to now "
+                + "(it was restarted, rebuilt, or its embedding configuration changed); every document is embedded again",
+                LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(knowledgeBaseId),
+                recorded == null ? "an unrecorded" : "a different");
+        stateStore.invalidateContent(sourceKey);
+        stateStore.recordStoreFingerprint(sourceKey, current);
     }
 
     /**
@@ -739,7 +815,8 @@ public class IngestionPipeline {
                              ExtractionLimits limits, Collector collector) {
         // Asked before the bytes are fetched: an unchanged file needs neither.
         var known = stateStore.lookup(sourceKey, file.fileId());
-        if (known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(file.contentHash())) {
+        if (!collector.reembedAll && known.isPresent() && !known.get().tombstoned()
+                && !known.get().hasChanged(file.contentHash())) {
             collector.onUnchanged(file.fileId());
             return;
         }
@@ -907,6 +984,16 @@ public class IngestionPipeline {
          * removed under it. Everything it would still write belongs to nobody.
          */
         private boolean superseded;
+        /**
+         * The vector store is not the one this source's state was written against, so
+         * no document may be judged unchanged — see {@link #reconcileStoreFingerprint}.
+         */
+        private boolean reembedAll;
+        /**
+         * Why the in-memory store refused this run's writes, once it has; the run stops
+         * there rather than failing every remaining document the same way.
+         */
+        private String storeRefused;
         private Instant nextOwnershipCheck = Instant.MIN;
 
         private Collector(RagConfiguration knowledgeBase, String ragConfigId, String knowledgeBaseId,
@@ -926,7 +1013,9 @@ public class IngestionPipeline {
 
         EmbeddingStore<TextSegment> store() {
             if (store == null) {
-                store = embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase);
+                // For writing: an in-memory store built under another embedding
+                // configuration is replaced rather than mixed with this run's vectors.
+                store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
             }
             return store;
         }
@@ -942,6 +1031,10 @@ public class IngestionPipeline {
 
         @Override
         public ConditionalHeaders conditionalFor(String documentId) {
+            if (reembedAll) {
+                // A 304 would report the page unchanged, and the store no longer has it.
+                return ConditionalHeaders.none();
+            }
             return stateStore.lookup(sourceKey, documentId)
                     // A tombstoned document has no vectors any more, so revalidating it
                     // would earn a 304 and leave it permanently unretrievable. Ask for
@@ -953,7 +1046,7 @@ public class IngestionPipeline {
 
         @Override
         public boolean isCancelled() {
-            return budgetExhausted || !stillOwnsRun(false);
+            return budgetExhausted || storeRefused != null || !stillOwnsRun(false);
         }
 
         /**
@@ -1111,6 +1204,12 @@ public class IngestionPipeline {
         }
 
         private void recordDocumentFailure(RuntimeException e) {
+            // Either refusal ends the run: no later document could be stored either.
+            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
+                storeRefused = e.getMessage();
+                LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
+                        LogSanitizer.sanitize(storeRefused));
+            }
             failed++;
             inconclusive++;
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
@@ -1136,7 +1235,7 @@ public class IngestionPipeline {
             }
 
             var existing = stateStore.lookup(sourceKey, documentId);
-            if (existing.isPresent() && !existing.get().hasChanged(changeKey)) {
+            if (!reembedAll && existing.isPresent() && !existing.get().hasChanged(changeKey)) {
                 unchanged++;
                 if (mode == Mode.INGEST && fromResponse) {
                     // The page was downloaded again, so the validators the server sent
@@ -1236,6 +1335,9 @@ public class IngestionPipeline {
             }
             if (error == null && superseded) {
                 error = "The run stopped: its source was purged, removed or reaped while it was running";
+            }
+            if (error == null && storeRefused != null) {
+                error = storeRefused;
             }
             return new IngestionReport(
                     runId,

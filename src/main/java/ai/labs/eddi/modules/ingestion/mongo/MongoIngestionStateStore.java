@@ -39,11 +39,12 @@ import java.util.function.Supplier;
  * MongoDB implementation of {@link IIngestionStateStore}.
  *
  * <p>
- * Two collections: one document-state row per (source, document), and one row
- * per run. The unique index on {@code (sourceId, status=RUNNING)} is what makes
- * {@link #startRun} a real mutual exclusion rather than a check-then-act race —
- * a second caller gets a duplicate-key error and is told a run is already in
- * flight.
+ * Three collections: one document-state row per (source, document), one row per
+ * run, and one row per source for what concerns the source as a whole (the
+ * store fingerprint). The unique index on {@code (sourceId, status=RUNNING)} is
+ * what makes {@link #startRun} a real mutual exclusion rather than a
+ * check-then-act race — a second caller gets a duplicate-key error and is told
+ * a run is already in flight.
  *
  * <h2>Fencing without a join</h2>
  *
@@ -70,8 +71,12 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     static final String DOCUMENTS_COLLECTION = "rag_ingestion_documents";
     static final String RUNS_COLLECTION = "rag_ingestion_runs";
+    /** One row per source, for what is about the source rather than a document. */
+    static final String SOURCES_COLLECTION = "rag_ingestion_sources";
 
     private static final String FIELD_SOURCE_ID = "sourceId";
+    private static final String FIELD_STORE_FINGERPRINT = "storeFingerprint";
+    private static final String FIELD_UPDATED_AT = "updatedAt";
     private static final String FIELD_DOCUMENT_ID = "documentId";
     private static final String FIELD_CONTENT_HASH = "contentHash";
     private static final String FIELD_ETAG = "etag";
@@ -103,11 +108,16 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     private final MongoCollection<Document> documents;
     private final MongoCollection<Document> runs;
+    private final MongoCollection<Document> sources;
 
     @Inject
     public MongoIngestionStateStore(MongoDatabase database) {
         this.documents = database.getCollection(DOCUMENTS_COLLECTION);
         this.runs = database.getCollection(RUNS_COLLECTION);
+        this.sources = database.getCollection(SOURCES_COLLECTION);
+
+        this.sources.createIndex(Indexes.ascending(FIELD_SOURCE_ID),
+                new IndexOptions().name("idx_ingestion_source").unique(true).background(true));
 
         this.documents.createIndex(Indexes.ascending(FIELD_SOURCE_ID, FIELD_DOCUMENT_ID),
                 new IndexOptions().name("idx_ingestion_doc").unique(true).background(true));
@@ -279,6 +289,24 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public Optional<String> storeFingerprint(String sourceId) {
+        return translating("read a source's store fingerprint", () -> {
+            Document found = sources.find(Filters.eq(FIELD_SOURCE_ID, sourceId)).first();
+            return Optional.ofNullable(found).map(row -> row.getString(FIELD_STORE_FINGERPRINT));
+        });
+    }
+
+    @Override
+    public void recordStoreFingerprint(String sourceId, String fingerprint) {
+        translating("record a source's store fingerprint", () -> sources.updateOne(
+                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                Updates.combine(
+                        Updates.set(FIELD_STORE_FINGERPRINT, fingerprint),
+                        Updates.set(FIELD_UPDATED_AT, Date.from(Instant.now()))),
+                new UpdateOptions().upsert(true)));
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         return translating("list a source's documents", () -> {
             List<DocumentState> states = new ArrayList<>();
@@ -295,6 +323,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         translating("purge a source", () -> {
             documents.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
             runs.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
+            sources.deleteMany(Filters.eq(FIELD_SOURCE_ID, sourceId));
         });
     }
 

@@ -228,12 +228,46 @@ public interface IIngestionStateStore {
      */
     void invalidateContent(String sourceId);
 
+    /**
+     * The fingerprint of the vector store this source's document state was written
+     * against, as last recorded by {@link #recordStoreFingerprint}.
+     *
+     * <p>
+     * Content hashes say what a document was embedded as; they cannot say
+     * <em>where</em>. An in-memory store is gone after a restart, and a knowledge
+     * base whose embedding configuration changes gets a fresh one, while the hashes
+     * survive both — so every document read as "unchanged" over an empty store and
+     * nothing re-embedded it. A run compares this value with the store it is about
+     * to write to and, on any difference, re-embeds everything.
+     *
+     * <p>
+     * An opaque string: the caller composes it (today the store's epoch; an
+     * embedding-model component is planned) and the store only keeps it. Empty for
+     * a source that has never recorded one — including every source whose state
+     * predates this method, which the caller treats as unknown.
+     */
+    Optional<String> storeFingerprint(String sourceId);
+
+    /**
+     * Records the fingerprint this source's state is now written against. Call it
+     * only after {@link #invalidateContent} has made every existing row re-embed,
+     * so that a crash between the two leaves rows that re-embed rather than a
+     * fingerprint that vouches for vectors that are not there.
+     *
+     * <p>
+     * Not fenced: it is written right after a run claims the source, by that run.
+     * Removed by {@link #purgeSource}.
+     */
+    void recordStoreFingerprint(String sourceId, String fingerprint);
+
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
 
     /**
-     * Forgets a source entirely. Used when the source is deleted or a full
-     * re-ingest is requested; the caller purges the vectors separately.
+     * Forgets a source entirely — documents, runs and its
+     * {@linkplain #storeFingerprint store fingerprint}. Used when the source is
+     * deleted or a full re-ingest is requested; the caller purges the vectors
+     * separately.
      */
     void purgeSource(String sourceId);
 

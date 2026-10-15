@@ -232,6 +232,14 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 
 ---
 
+## Knowledge bases (RAG)
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.rag.in-memory.max-segments` | `50000` | Most segments all `in-memory` knowledge bases may hold together. In-memory stores are never evicted, so this is what bounds their heap use — at 1536 dimensions, 50,000 segments are roughly 300 MB of vectors plus their text. A write past it fails (an ingestion run reports `FAILED` naming this setting) and nothing is evicted to make room. `0` or negative disables the cap — see [rag.md](rag.md#vector-stores) |
+
+---
+
 ## Security & authentication
 
 > Authentication itself is Quarkus OIDC, not an `eddi.*` property:

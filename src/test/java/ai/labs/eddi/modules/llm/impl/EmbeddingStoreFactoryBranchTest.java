@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -220,14 +221,16 @@ class EmbeddingStoreFactoryBranchTest {
         @Test
         @DisplayName("same kbId but different storeParameters → different store instances")
         void differentParams() throws Exception {
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(mock(GlobalVariableResolver.class),
+                    mock(SecretResolver.class), 50_000, Ticker.systemTicker());
+            // An external store: in-memory stores are keyed by knowledge base alone,
+            // because they have no parameters that mean anything.
             var config1 = new RagConfiguration();
-            config1.setStoreNamespace("id");
-            config1.setStoreType("in-memory");
+            config1.setStoreType("elasticsearch");
             config1.setStoreParameters(Map.of("extraKey", "value1"));
 
             var config2 = new RagConfiguration();
-            config2.setStoreNamespace("id");
-            config2.setStoreType("in-memory");
+            config2.setStoreType("elasticsearch");
             config2.setStoreParameters(Map.of("extraKey", "value2"));
 
             var store1 = factory.getOrCreate("kb-same", config1);

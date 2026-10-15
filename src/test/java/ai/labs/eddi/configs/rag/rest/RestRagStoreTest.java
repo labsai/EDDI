@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +38,7 @@ class RestRagStoreTest {
     void setUp() {
         openMocks(this);
         restRagStore = new RestRagStore(ragStore, documentDescriptorStore, jsonSchemaCreator, mock(ResourceAccessGuard.class),
-                mock(RagSourceIngestionService.class));
+                mock(RagSourceIngestionService.class), mock(EmbeddingStoreFactory.class));
     }
 
     @Test
