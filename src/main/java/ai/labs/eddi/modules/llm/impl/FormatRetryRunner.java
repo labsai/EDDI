@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.impl.builder.AnthropicLanguageModelBuilder;
+import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -72,6 +73,7 @@ import java.util.Set;
 final class FormatRetryRunner {
 
     private static final Logger LOGGER = Logger.getLogger(FormatRetryRunner.class);
+    private static final ModelParameterCatalog MODEL_PARAMETER_CATALOG = ModelParameterCatalog.defaultCatalog();
 
     /**
      * Longest bad reply echoed back as the assistant turn of a corrective re-ask.
@@ -515,10 +517,22 @@ final class FormatRetryRunner {
 
     /**
      * The base output-token cap a model runs with, from its parameters
-     * ({@code maxTokens}, or {@code maxOutputTokens} for Gemini), the provider's
-     * documented default where it has one, else null.
+     * ({@code maxTokens}, or {@code maxOutputTokens} for Gemini and Vertex), the
+     * provider's documented default where it has one, else null.
+     * <p>
+     * The parameters are first put through the model-parameter catalog, so a cap
+     * the model would reject is not counted: the re-ask carries its raised cap as
+     * {@code ChatRequest.maxOutputTokens}, which the OpenAI client sends as
+     * {@code max_tokens}, and a reasoning model answers that with an HTTP 400. For
+     * those models (configured through {@code maxCompletionTokens}) there is no
+     * base cap to raise and the truncation re-ask is skipped, as for any task
+     * without a configured cap. This lookup always applies the catalog, whatever
+     * {@code eddi.llm.parameter-catalog.drop-rejected} says: it only decides
+     * whether a re-ask can be sized, and sizing it from a cap the model rejects
+     * would fail.
      */
-    static Integer resolveBaseMaxOutputTokens(Map<String, String> params, String modelType) {
+    static Integer resolveBaseMaxOutputTokens(Map<String, String> configured, String modelType) {
+        Map<String, String> params = configured == null ? null : MODEL_PARAMETER_CATALOG.adapt(modelType, configured, true).parameters();
         if (params != null) {
             for (String key : List.of("maxTokens", "maxOutputTokens")) {
                 String value = params.get(key);

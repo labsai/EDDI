@@ -917,7 +917,7 @@ distinct task types.
 the role travels with the model instance because `EmbeddingStoreContentRetriever` offers
 no way to pass a per-call parameter.
 
-The role is only applied to providers that accept one. In langchain4j 1.20.0 that is
+The role is only applied to providers that accept one. In langchain4j 1.22.0 that is
 **`gemini` and `cohere`**; the other six declare no `INPUT_TYPE` parameter and are handed
 the provider's model unchanged. This is not a hard-coded list — EDDI reads each model's
 own `supportedParameters()`, so it cannot drift out of date when the dependency is

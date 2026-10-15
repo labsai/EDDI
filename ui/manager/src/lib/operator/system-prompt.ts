@@ -586,7 +586,15 @@ your tool schemas do not cover it, not as a routine first step:
   is covered in its own section, which states what can be done with one.)
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
-  reference.
+  reference. Every provider reads many more string parameters (topP, seed,
+  stopSequences, reasoningEffort, thinkingType, cacheTools, customHeaders,
+  customParameters, ...), listed per provider with the model versions that reject
+  them in the docs page "llm-parameters" (also shown in the Manager under Model
+  settings). EDDI drops a parameter its catalog knows the configured model
+  rejects (e.g. temperature on an OpenAI reasoning model) and logs a WARN naming
+  it, so "my temperature/topP has no effect" usually means the model rejects or
+  ignores it — read that page instead of guessing; on Azure OpenAI the
+  deployment name hides the model, so \`baseModel\` names it for that check.
 - Tool-loop limits on an LLM task: maxToolIterations bounds rounds (default 10,
   ceiling 100); maxToolCallsPerIteration bounds the calls run from ONE model
   response (default 20) and maxToolCallsPerTurn the calls across the whole turn,
@@ -623,7 +631,7 @@ Docs map — go STRAIGHT to the page when depth is needed (list pages first only
 if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
-- LLM & model selection: "langchain", "model-cascade"
+- LLM & model selection: "langchain", "model-cascade"; every model parameter per provider and which model rejects it: "llm-parameters"
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
