@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 import java.util.stream.IntStream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -72,6 +74,31 @@ public class AgentSigningService {
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
     private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
+
+    /**
+     * How long "this agent has no signing key" is believed before the vault is
+     * asked again. Most agents have no key, and the audit ledger signs every entry
+     * it writes — three per turn — so without this each entry of a keyless agent
+     * cost a vault lookup, i.e. a database read, only to learn the same thing
+     * again. A key generated or rotated on this node is used at once (both paths
+     * evict this entry); one generated on another node is picked up within the TTL,
+     * and entries signed meanwhile simply carry no signature, as they would have a
+     * moment earlier.
+     */
+    static final long MISSING_KEY_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
+
+    /** Bounds {@link #missingKeyUntil}; past it the map is simply cleared. */
+    static final int MAX_MISSING_KEY_ENTRIES = 10_000;
+
+    /**
+     * Cache key → {@link #nanoClock} reading until which the key is known to be
+     * absent. Only a vault answer of "not found" is remembered, never a vault
+     * failure.
+     */
+    private final ConcurrentHashMap<String, Long> missingKeyUntil = new ConcurrentHashMap<>();
+
+    /** Package-private so tests can move time instead of sleeping. */
+    LongSupplier nanoClock = System::nanoTime;
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -116,7 +143,7 @@ public class AgentSigningService {
 
             // Evict cached private key so the new key is used immediately
             // (prevents stale key on re-generation / rotation)
-            privateKeyCache.remove(cacheKey(tenantId, agentId));
+            evictKey(cacheKey(tenantId, agentId));
 
             LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
             return publicKeyB64;
@@ -370,7 +397,7 @@ public class AgentSigningService {
                 tally.firstFailure = vaultKey + ": " + e.getMessage();
             }
         } finally {
-            privateKeyCache.remove(cacheKeyStr);
+            evictKey(cacheKeyStr);
         }
     }
 
@@ -403,6 +430,14 @@ public class AgentSigningService {
         if (cached != null) {
             return cached;
         }
+        Long absentUntil = missingKeyUntil.get(cacheKeyStr);
+        if (absentUntil != null) {
+            if (nanoClock.getAsLong() - absentUntil < 0) {
+                throw new PrivateKeyLoadException(agentId,
+                        new ISecretProvider.SecretNotFoundException("No signing key for agent " + agentId + " (checked recently)"));
+            }
+            missingKeyUntil.remove(cacheKeyStr, absentUntil);
+        }
 
         String vaultKey = keyVersion > 0 ? vaultKeyNameVersioned(agentId, keyVersion) : vaultKeyName(agentId);
         PrivateKey loaded;
@@ -412,12 +447,28 @@ public class AgentSigningService {
             byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             loaded = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            rememberMissing(cacheKeyStr);
+            throw new PrivateKeyLoadException(agentId, e);
         } catch (Exception e) {
             throw new PrivateKeyLoadException(agentId, e);
         }
 
         PrivateKey raced = privateKeyCache.putIfAbsent(cacheKeyStr, loaded);
         return raced != null ? raced : loaded;
+    }
+
+    private void rememberMissing(String cacheKeyStr) {
+        if (missingKeyUntil.size() >= MAX_MISSING_KEY_ENTRIES) {
+            missingKeyUntil.clear();
+        }
+        missingKeyUntil.put(cacheKeyStr, nanoClock.getAsLong() + MISSING_KEY_TTL_NANOS);
+    }
+
+    /** Forgets both what was loaded and what was found missing under this key. */
+    private void evictKey(String cacheKeyStr) {
+        privateKeyCache.remove(cacheKeyStr);
+        missingKeyUntil.remove(cacheKeyStr);
     }
 
     private String vaultKeyName(String agentId) {
@@ -467,9 +518,9 @@ public class AgentSigningService {
                     List.of(agentId));
 
             // Evict version-specific cached private key so the new key is used immediately
-            privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + version);
+            evictKey(cacheKey(tenantId, agentId) + ";v=" + version);
             // Also evict the legacy unversioned entry (if any)
-            privateKeyCache.remove(cacheKey(tenantId, agentId));
+            evictKey(cacheKey(tenantId, agentId));
 
             LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
             return publicKeyB64;

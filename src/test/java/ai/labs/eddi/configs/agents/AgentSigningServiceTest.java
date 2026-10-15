@@ -48,6 +48,57 @@ class AgentSigningServiceTest {
         assertFalse(publicKey.isBlank());
     }
 
+    // ─── negative cache: a keyless agent does not ask the vault per audit entry
+    // ───
+
+    @Test
+    void keylessAgent_vaultAskedOncePerTtl() {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+
+        for (int i = 0; i < 3; i++) {
+            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+            assertTrue(e.getMessage().contains("No signing key found"), e.getMessage());
+        }
+        assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
+
+        now[0] += AgentSigningService.MISSING_KEY_TTL_NANOS;
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+        assertEquals(2, secretProvider.resolveCalls, "after the TTL the vault is asked again");
+    }
+
+    @Test
+    void keylessAgent_keyGeneratedHereIsUsedAtOnce() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
+
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-x");
+
+        assertTrue(signingService.verify(publicKey, "entry", signingService.sign("tenant-1", "agent-x", "entry")));
+    }
+
+    @Test
+    void keylessAgent_rotatedKeyIsUsedAtOnce() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        var envelope = SignedEnvelope.forSigning("agent-x", "agent-y", Map.of("text", "hello"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-x", envelope, 2));
+
+        signingService.rotateKey("tenant-1", "agent-x", 2);
+
+        assertNotNull(signingService.signEnvelope("tenant-1", "agent-x", envelope, 2).signature());
+    }
+
+    @Test
+    void vaultFailure_isNotRemembered() {
+        signingService.nanoClock = () -> 0L;
+        secretProvider.resolveUnreachable = true;
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+
+        assertEquals(2, secretProvider.resolveCalls);
+    }
+
     @Test
     void sign_and_verify_roundTrip() throws Exception {
         String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
@@ -736,6 +787,14 @@ class AgentSigningServiceTest {
          */
         private final Set<String> unreachable = new HashSet<>();
 
+        /**
+         * How often the vault was asked for a secret — for pinning the negative cache.
+         */
+        int resolveCalls;
+
+        /** Makes {@code resolve} fail as an unreachable vault would. */
+        boolean resolveUnreachable;
+
         /** Whether a key is still in the vault — for asserting what a delete left. */
         boolean contains(String tenantId, String keyName) {
             return store.containsKey(tenantId + ":" + keyName);
@@ -779,6 +838,10 @@ class AgentSigningServiceTest {
 
         @Override
         public String resolve(SecretReference reference) throws SecretNotFoundException {
+            resolveCalls++;
+            if (resolveUnreachable) {
+                throw new IllegalStateException("Vault unreachable");
+            }
             String key = reference.tenantId() + ":" + reference.keyName();
             String value = store.get(key);
             if (value == null) {
