@@ -847,6 +847,11 @@ public class UpgradeExecutor {
             ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
             IResourceStore<Object> store = getStore(ops.storeClass());
             if (callerTokenAuthorPolicy != null) {
+                // Inside the per-resource try on purpose: an upgrade is not transactional
+                // and reports each resource's outcome, so a refusal is recorded as that
+                // resource failing (nothing is written), exactly as the same refusal from
+                // the REST store does on the update path. Throwing here would abort the
+                // run with earlier resources already written and no rollback.
                 callerTokenAuthorPolicy.requireMayAuthor(source.contentJson(), source.type());
             }
             IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));

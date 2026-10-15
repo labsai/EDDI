@@ -80,11 +80,43 @@ public class CallerTokenAuthorPolicy {
         if (callerHoldsAuthorRole() || configuration == null || !containsCallerToken(configuration)) {
             return;
         }
-        String message = "This " + kind + " configuration contains ${caller:token}, which sends the bearer token of whoever chats "
+        throw forbidden("This " + kind + " configuration contains ${caller:token}, which sends the bearer token of whoever chats "
                 + "with the agent. Only " + String.join(" or ", authorRoles) + " may save it (" + AUTHOR_ROLES_PROPERTY + "), because "
                 + "a call written by someone else would run with that user's privileges. Use ${caller:userId}, a ${vault:...} "
-                + "reference or a connection instead, or ask an administrator to save it.";
-        throw new ForbiddenException(message, Response.status(Response.Status.FORBIDDEN)
+                + "reference or a connection instead, or ask an administrator to save it.");
+    }
+
+    /**
+     * Refuses to replace {@code existing} when it contains {@code ${caller:token}}
+     * and the caller could not write it back.
+     * <p>
+     * For writes that must be undoable — a merge import snapshots what it replaces
+     * and restores it if a later step fails. The restore goes through the same
+     * stores, so for a caller without an author role it would be refused, leaving
+     * the import's content in place. Refusing before the first write keeps the
+     * rollback possible.
+     *
+     * @param existing
+     *            the stored version about to be replaced; null passes
+     * @param what
+     *            names the resource in the message
+     * @throws ForbiddenException
+     *             403, as {@link #requireMayAuthor}
+     */
+    public void requireMayRestore(Object existing, String what) {
+        if (!authorizationEnabled) {
+            return;
+        }
+        if (callerHoldsAuthorRole() || existing == null || !containsCallerToken(existing)) {
+            return;
+        }
+        throw forbidden("The existing " + what + " contains ${caller:token}. Replacing it is undoable only by someone who may write "
+                + "it back, which takes " + String.join(" or ", authorRoles) + " (" + AUTHOR_ROLES_PROPERTY + "). Ask an "
+                + "administrator to run this import, or import it as a new agent.");
+    }
+
+    private static ForbiddenException forbidden(String message) {
+        return new ForbiddenException(message, Response.status(Response.Status.FORBIDDEN)
                 .entity(Map.of("error", message))
                 .type(MediaType.APPLICATION_JSON)
                 .build());

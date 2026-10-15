@@ -1284,6 +1284,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         DocumentDescriptor previousDescriptor = null;
         if (tracked == null) {
             previous = readForRollback(storeClass, localId, localVersion);
+            if (callerTokenAuthorPolicy != null) {
+                // The compensation below writes `previous` back through the same store,
+                // which refuses ${caller:token} from a non-author: refuse now instead
+                // of leaving a rollback that cannot run.
+                callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",

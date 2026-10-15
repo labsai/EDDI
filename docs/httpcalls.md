@@ -130,8 +130,11 @@ target.
 That is why, with authorization on, only `eddi.caller-identity.author-roles`
 (default `eddi-admin`) may **save** a configuration containing
 `${caller:token}`. Create, update, patch and duplicate of httpcalls, mcpcalls and
-LLM configs, and every document an import or sync writes, are checked; anyone
-else gets **403** naming the property. The check covers the whole document, so an
+LLM configs are checked, and so are the httpcalls, mcpcalls and LLM configs an
+import or sync writes; anyone else gets **403** naming the property (an upgrade
+or sync reports it as that resource failing). A merge import is also refused
+when it would replace an existing version that carries the reference, because
+its rollback could not write that version back. The check covers the whole document, so an
 editor can neither add the reference nor edit a call that already carries it.
 `${caller:userId}` is a name, not a credential, and stays open to editors.
 

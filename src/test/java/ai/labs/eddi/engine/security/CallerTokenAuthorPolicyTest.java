@@ -108,6 +108,20 @@ class CallerTokenAuthorPolicyTest {
     }
 
     @Test
+    @DisplayName("requireMayRestore: a non-author cannot replace a stored ${caller:token} version; an author or a clean version passes")
+    void requireMayRestore() {
+        var refused = assertThrows(ForbiddenException.class,
+                () -> policy(true, List.of("eddi-admin"), "eddi-editor").requireMayRestore(WITH_TOKEN, "resource 'x'"));
+        assertEquals(403, refused.getResponse().getStatus());
+        assertTrue(refused.getMessage().contains("resource 'x'"), refused.getMessage());
+
+        assertDoesNotThrow(() -> policy(true, List.of("eddi-admin"), "eddi-editor").requireMayRestore(WITH_USER_ID, "x"));
+        assertDoesNotThrow(() -> policy(true, List.of("eddi-admin"), "eddi-editor").requireMayRestore(null, "x"));
+        assertDoesNotThrow(() -> policy(false, List.of("eddi-admin"), "eddi-editor").requireMayRestore(WITH_TOKEN, "x"));
+        assertDoesNotThrow(() -> policy(true, List.of("eddi-admin"), "eddi-admin").requireMayRestore(WITH_TOKEN, "x"));
+    }
+
+    @Test
     @DisplayName("inactive with authorization off, and for a null config")
     void inactiveWhenAuthorizationIsOff() {
         assertDoesNotThrow(() -> policy(false, List.of("eddi-admin")).requireMayAuthor(WITH_TOKEN, "x"));

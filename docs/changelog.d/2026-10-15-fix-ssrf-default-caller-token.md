@@ -27,7 +27,8 @@ The two High findings of the 2026-10-15 security review.
 
 ### Known limitations
 
-- A merge import whose rollback restores an admin-authored `${caller:token}` version, run by an editor, cannot restore it (the restore goes through the store and is refused); the rollback loop logs it. It needs an editor to remove the reference first, which the same check refuses unless the new version drops it.
+- A merge import by a non-author is refused before its first write when it would replace a stored version containing `${caller:token}` (`CallerTokenAuthorPolicy.requireMayRestore`): its rollback restores through the same stores, which would refuse that version and leave the import's content in place.
+- An upgrade or instance sync reports a refusal as that resource failing rather than a 403, like every other per-resource failure there: an upgrade is not transactional, and aborting would leave earlier resources written.
 - With protection off, editor-written literal internal targets remain reachable by design; turn protection on and use the allow-list to close that.
 
 ```decision-log
