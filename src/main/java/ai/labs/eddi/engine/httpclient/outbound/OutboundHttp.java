@@ -302,8 +302,10 @@ public class OutboundHttp {
             } catch (IllegalArgumentException e) {
                 // A server-chosen header that is not a URI is a broken redirect, not a
                 // refused target: OutboundBlockedException is an IllegalArgumentException
-                // too, and callers read that as "SSRF said no".
-                throw new IOException("Redirect " + status + " with an unparsable Location header from: " + withoutQuery(uri), e);
+                // too, and callers read that as "SSRF said no". No cause: the parser's
+                // message quotes the raw header, query and all, and a tool hands this
+                // exception to the model and the log.
+                throw new IOException("Redirect " + status + " with an unparsable Location header from: " + withoutQuery(uri));
             }
             // Prevents SSRF via 302 → internal.
             checkHop(ssrf, request.hopValidator(), target);
