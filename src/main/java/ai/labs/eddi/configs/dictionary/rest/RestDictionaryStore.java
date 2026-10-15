@@ -20,6 +20,9 @@ import jakarta.inject.Inject;
 
 import jakarta.ws.rs.core.Response;
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
@@ -73,12 +76,53 @@ public class RestDictionaryStore implements IRestDictionaryStore {
 
     @Override
     public Response updateRegularDictionary(String id, Integer version, DictionaryConfiguration regularDictionaryConfiguration) {
+        Response invalid = validateRegExs(regularDictionaryConfiguration);
+        if (invalid != null) {
+            return invalid;
+        }
         return restVersionInfo.update(id, version, regularDictionaryConfiguration);
     }
 
     @Override
     public Response createRegularDictionary(DictionaryConfiguration regularDictionaryConfiguration) {
+        Response invalid = validateRegExs(regularDictionaryConfiguration);
+        if (invalid != null) {
+            return invalid;
+        }
         return restVersionInfo.create(regularDictionaryConfiguration);
+    }
+
+    /**
+     * Refuses a dictionary whose {@code regExs} hold a pattern Java cannot compile.
+     * <p>
+     * The pattern is compiled when the agent is DEPLOYED, so a typo saved here
+     * surfaced as a deployment failure of the whole agent, long after the editor
+     * had moved on and with a stack trace in place of the column the typo is in.
+     * Saying so at save time, with Java's own description of what is wrong, is the
+     * honest place for it.
+     *
+     * @return a 400 naming the pattern and the syntax error, or null when every
+     *         pattern compiles
+     */
+    private static Response validateRegExs(DictionaryConfiguration configuration) {
+        if (configuration == null || configuration.getRegExs() == null) {
+            return null;
+        }
+        for (var regExConfig : configuration.getRegExs()) {
+            String regEx = regExConfig != null ? regExConfig.getRegEx() : null;
+            if (regEx == null) {
+                continue;
+            }
+            try {
+                Pattern.compile(regEx);
+            } catch (PatternSyntaxException e) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("error", "regEx '" + regEx + "' is not a valid regular expression: " + e.getDescription()
+                                + (e.getIndex() >= 0 ? " near index " + e.getIndex() : "")))
+                        .build();
+            }
+        }
+        return null;
     }
 
     @Override
@@ -135,7 +179,9 @@ public class RestDictionaryStore implements IRestDictionaryStore {
         restVersionInfo.validateParameters(id, version);
         try {
             var regularDictionaryConfiguration = regularDictionaryStore.read(id, version);
-            return restVersionInfo.create(regularDictionaryConfiguration);
+            // A duplicate is a create: a pattern stored before the check existed must
+            // not become a new resource the create path refuses.
+            return createRegularDictionary(regularDictionaryConfiguration);
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }

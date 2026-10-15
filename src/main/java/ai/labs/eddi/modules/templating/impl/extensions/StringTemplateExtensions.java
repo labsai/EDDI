@@ -51,7 +51,25 @@ public class StringTemplateExtensions {
 
     @TemplateExtension(matchName = "replace")
     static String replace(String str, String target, String replacement) {
-        return str == null ? null : str.replace(target, replacement);
+        if (str == null) {
+            return null;
+        }
+        if (target != null && replacement != null && replacement.length() > target.length()) {
+            // Only a growing replacement can pass the bound; the size it will produce is
+            // known before a character is copied. An empty target matches between
+            // every pair of characters and at both ends.
+            long occurrences = target.isEmpty() ? str.length() + 1L : countOccurrences(str, target);
+            TemplateOutputLimit.requireWithin(str.length() + occurrences * (replacement.length() - target.length()), "replace");
+        }
+        return str.replace(target, replacement);
+    }
+
+    private static long countOccurrences(String str, String target) {
+        long count = 0;
+        for (int from = str.indexOf(target); from >= 0; from = str.indexOf(target, from + target.length())) {
+            count++;
+        }
+        return count;
     }
 
     @TemplateExtension(matchName = "contains")
@@ -124,6 +142,10 @@ public class StringTemplateExtensions {
 
     @TemplateExtension(matchName = "concat")
     static String concat(String str, String suffix) {
-        return str == null ? suffix : str.concat(suffix);
+        if (str == null) {
+            return suffix;
+        }
+        TemplateOutputLimit.requireWithin(str.length() + (suffix == null ? 0L : suffix.length()), "concat");
+        return str.concat(suffix);
     }
 }

@@ -563,6 +563,22 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 
 A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
 
+`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`.
+
+---
+
+## Parser and Matcher Bounds
+
+Three small parsers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
+
+| Parser | Reached by | Bound | On exceeding it |
+|---|---|---|---|
+| Expression parser (`ExpressionProvider`) | Any client — a `context` entry of type `expressions` is parsed by the property-setter and by every `contextmatcher` rule; also dictionaries, `inputmatcher` text | `eddi.expressions.max-length` (32,768 characters) and `eddi.expressions.max-depth` (32 nested parentheses), checked in one linear scan before parsing; the parser itself works on index ranges of the one string | A client-sent context entry: `413` `input_too_large` before the turn starts. Inside a turn: the task fails, counted and audited like any other task failure |
+| Dictionary `regEx` (`RegEx`) | Every token of every user input, against every pattern of the deployed dictionaries | 200 ms per match, enforced through a deadline-checking `CharSequence` (`RegexDeadline`); the pattern must also compile when the dictionary is **saved** | A match past its budget is a miss (logged at WARN); an invalid pattern is refused with `400` at save time, naming the syntax error |
+| Path expressions (`PathNavigator`) | `fromObjectPath` and the other property-instruction paths in `httpcalls`/`mcpcalls`/`property` configs | 64 `+`/`-` operands per expression (the longest-prefix search is quadratic in that count) | The expression resolves to nothing |
+
+A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
+
 ---
 
 ## Tool Execution Pipeline
