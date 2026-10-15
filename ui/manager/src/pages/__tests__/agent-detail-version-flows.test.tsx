@@ -107,7 +107,7 @@ describe("AgentDetailPage — workflows", () => {
     expect(await screen.findByText("Support Ticket Pipeline")).toBeInTheDocument();
   });
 
-  it("asks before removing a workflow, and Cancel removes nothing", async () => {
+  it("removing a workflow writes nothing until Save, and Discard brings it back", async () => {
     let puts = 0;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -121,9 +121,12 @@ describe("AgentDetailPage — workflows", () => {
     renderAgentDetail("agent1");
     const user = userEvent.setup();
     await user.click(await screen.findByTestId("remove-workflow-wf1"));
-    await screen.findByText("Remove workflow from this agent?");
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId("remove-workflow-wf1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+    expect(await screen.findByTestId("remove-workflow-wf1")).toBeInTheDocument();
     expect(puts).toBe(0);
   });
 
@@ -138,7 +141,7 @@ describe("AgentDetailPage — section saves", () => {
     vi.clearAllMocks();
   });
 
-  it("says which version a section save created and that it is not live", async () => {
+  it("says which version Save created and that it is not live", async () => {
     server.use(
       http.put("*/agentstore/agents/:id", () =>
         new HttpResponse(null, {
@@ -153,6 +156,9 @@ describe("AgentDetailPage — section saves", () => {
     await user.click(within(section).getByRole("button", { name: /Agent-to-Agent/ }));
     await user.type(await screen.findByTestId("a2a-skill-input"), "new-skill");
     await user.click(screen.getByRole("button", { name: "Add skill" }));
+    // Recorded in the draft; Save writes it.
+    expect(toastSuccess).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("save-btn"));
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     const [title, options] = toastSuccess.mock.calls[0]!;

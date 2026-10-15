@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
@@ -8,6 +8,9 @@ import { SecurityIdentitySection } from "@/components/editors/agent-config-secti
 import type { Agent } from "@/lib/api/agents";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
+
+/** The page's draft setter; a section only ever reports an edit through it. */
+const onChange = vi.fn();
 
 function renderSection(agentOverrides: Partial<Agent> = {}) {
   const queryClient = new QueryClient({
@@ -30,13 +33,15 @@ function renderSection(agentOverrides: Partial<Agent> = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-security">
-        <SecurityIdentitySection agent={agent} agentId="agent-test" version={1} />
+        <SecurityIdentitySection agent={agent} onChange={onChange} />
       </ThemeProvider>
     </QueryClientProvider>,
   );
 }
 
 describe("SecurityIdentitySection — Flag UX", () => {
+  beforeEach(() => onChange.mockReset());
+
   it("renders the section header", async () => {
     renderSection();
     await waitFor(() => {
@@ -131,7 +136,7 @@ describe("SecurityIdentitySection — Flag UX", () => {
     expect(checkbox.checked).toBe(false);
   });
 
-  it("clicking 'Enable anyway' confirms the flag and calls update API", async () => {
+  it("clicking 'Enable anyway' confirms the flag records the edit without saving", async () => {
     let updateCalled = false;
     server.use(
       http.put("*/agentstore/agents/:id", () => {
@@ -161,10 +166,12 @@ describe("SecurityIdentitySection — Flag UX", () => {
     // Click "Enable anyway" to confirm
     await user.click(screen.getByText(/Enable anyway/i));
 
-    // The dialog should close and the API should be called
+    // The dialog closes and the flag goes into the draft, unsaved
     await waitFor(() => {
       expect(screen.queryByText(/Enable security flag\?/i)).not.toBeInTheDocument();
-      expect(updateCalled).toBe(true);
+      // Recorded in the draft — and not written: saving is the page's Save.
+      expect(onChange).toHaveBeenCalled();
+      expect(updateCalled).toBe(false);
     });
   });
 

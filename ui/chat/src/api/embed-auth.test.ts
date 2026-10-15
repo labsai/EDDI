@@ -182,6 +182,27 @@ describe("refresh before expiry", () => {
     ]);
   });
 
+  it("waits out a token that outlives the longest browser timer instead of asking at once", () => {
+    // A timer delay above 2^31-1 ms (~24.8 days) overflows and fires at once.
+    // A host that answers with the same token would then loop with the widget.
+    vi.useFakeTimers();
+    const { win, posted, deliver } = framedWindow();
+    embed = startEmbedAuth({ allowedOrigins: [HOST], win, now: () => Date.now() });
+    const day = 24 * 3600_000;
+
+    deliver({ type: MSG_TOKEN, token: jwt(Math.floor(Date.now() / 1000) + 60 * 24 * 3600) });
+    const requests = () => posted.filter((p) => p.data.type === MSG_TOKEN_REQUEST);
+
+    vi.advanceTimersByTime(1_000);
+    expect(requests()).toEqual([]);
+    vi.advanceTimersByTime(60 * day - 2 * 60_000);
+    expect(requests()).toEqual([]);
+    vi.advanceTimersByTime(2 * 60_000);
+    expect(requests()).toEqual([
+      { data: { type: MSG_TOKEN_REQUEST, protocol: 1 }, targetOrigin: HOST },
+    ]);
+  });
+
   it("schedules no refresh for an opaque (non-JWT) token", () => {
     vi.useFakeTimers();
     const { win, posted, deliver } = framedWindow();
