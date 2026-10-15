@@ -3,6 +3,7 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantedPatchEndpoints,
   grantsConversationTesting,
   grantsGroupDiscussion,
   grantsKnowledgeBaseReads,
@@ -455,6 +456,46 @@ const BODY_AUTHORING_AGENT_MODIFY = `- You can change an existing agent's system
   settings, or which workflows it references at the top level. Point the user
   at the agent's page in the manager for those.`;
 
+// --- Credential-safe edits (PATCH) ------------------------------------------
+/**
+ * Appended only when a `PATCH /{store}/{id}` is granted — see
+ * `PATCHABLE_EXTENSION_STORES` in `tool-scopes.ts` for why a patch and not a
+ * `PUT`. The text is a function of the granted endpoints so it names only the
+ * stores the operator can actually patch.
+ *
+ * The facts it must get across, and why each is spelled out: the operator
+ * cannot see why a `PUT` of an LLM document is refused (the error names a
+ * reference it believes it merely copied); a patch sends only what changes and
+ * so never needs to hold a credential; a patch that WRITES a reference is
+ * refused like any other call, so credentials stay a manager task; `copy` and
+ * `move` are refused by the Manager's gate guard, and a patch that names
+ * `toolApprovals` makes the whole batch unapprovable — a model that does not
+ * know either wastes the approval it asks for. A `409` is the only way it learns
+ * the document moved on.
+ */
+function buildAuthoringPatch(endpoints: readonly string[]): string {
+  const stores = grantedPatchEndpoints(endpoints)
+    .map((entry) => entry.replace(/^PATCH /, ""))
+    .join(", ");
+  return `- EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH, not PUT,
+  and never send back a document you read. Those documents hold credential
+  REFERENCES (\${vault:…}); a full PUT that echoes one is refused, and an echo
+  that got through would store the secret itself. A patch sends only what
+  changes, so it never has to mention a credential. PATCH endpoints you hold:
+  ${stores}. Call it with the id and \`version\` you read, and a body that is an
+  RFC 6902 patch, for example
+  [{"op":"add","path":"/tasks/0/knowledgeBases","value":[{"name":"docs"}]}] —
+  op is add, replace, remove or test, path is a JSON Pointer into the document
+  you read (array items are numbered from 0). Never use copy or move; they are
+  refused. Do NOT write a \${vault:…} reference in a patch: that is refused too,
+  and credentials are changed on the Secrets page and the agent's page in the
+  manager. In an LLM patch no operation may name "toolApprovals" in its path or
+  its value, or the whole batch becomes unapprovable. A 409 means the document
+  has a newer version: read it again and propose the edit again against that.
+  Use PUT only for a document that holds no references.`;
+}
+// --- end credential-safe edits ----------------------------------------------
+
 /**
  * Appended only when `grantsKnowledgeBaseBinding` — connecting a knowledge base
  * that already exists to an agent, through the workflow and LLM writes the
@@ -527,6 +568,9 @@ function buildAuthoringSection(endpoints: readonly string[]): string {
   const lines = [BODY_AUTHORING_HEADER];
   if (grantsAgentCreation(endpoints)) lines.push(BODY_AUTHORING_AGENT_CREATE);
   if (grantsAgentModification(endpoints)) lines.push(BODY_AUTHORING_AGENT_MODIFY);
+  if (grantsAgentModification(endpoints) && grantedPatchEndpoints(endpoints).length > 0) {
+    lines.push(buildAuthoringPatch(endpoints));
+  }
   if (grantsKnowledgeBaseBinding(endpoints)) lines.push(BODY_AUTHORING_KNOWLEDGE_BASE_BINDING);
   if (!grantsAgentCreation(endpoints) && !grantsAgentModification(endpoints)) {
     lines.push(BODY_AUTHORING_NO_AGENT);

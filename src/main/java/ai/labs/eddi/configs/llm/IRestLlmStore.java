@@ -9,9 +9,14 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
@@ -80,4 +85,17 @@ public interface IRestLlmStore extends IRestVersionInfo {
                        @QueryParam("version") Integer version,
                        @QueryParam("permanent")
                        @DefaultValue("false") Boolean permanent);
+
+    @PATCH
+    @Path("/{id}")
+    @Consumes(ConfigJsonPatcher.JSON_PATCH_MEDIA_TYPE)
+    @Operation(operationId = "patchLlm",
+               description = "Partially update the config with an RFC 6902 JSON Patch (Content-Type application/json-patch+json): applied to version N, validated exactly as PUT, stored as a new version returned in Location. 409 if N is not the current version, 400 for a failed test operation, a path that does not resolve, or a patched document the model rejects. Send only what changes — a patch never needs to carry a credential reference, so prefer it to PUT for any config that holds one.")
+    @RequestBody(required = true,
+                 content = @Content(mediaType = ConfigJsonPatcher.JSON_PATCH_MEDIA_TYPE,
+                                    schema = @Schema(type = SchemaType.ARRAY,
+                                                     example = "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"claude-sonnet-4-5\"}]")))
+    Response patchLlm(@PathParam("id") String id,
+                      @Parameter(name = "version", required = true, example = "1")
+                      @QueryParam("version") Integer version, String jsonPatch);
 }
