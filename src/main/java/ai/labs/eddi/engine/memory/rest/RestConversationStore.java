@@ -758,39 +758,57 @@ public class RestConversationStore implements IRestConversationStore {
         });
 
         if (deletePermanently) {
-            // If the conversation is a live pending approval, resolve the HITL state
-            // BEFORE removing the document: endConversation disarms the armed
-            // timeout schedule (otherwise it fires later against a deleted
-            // conversation, logs "Conversation not found", and leaves a dead
-            // schedule row), clears the bookmark, writes the hitl.approval
-            // cancellation audit, and invalidates the cached AWAITING_HUMAN state
-            // (which getConversationState would otherwise keep serving for a
-            // nonexistent conversation until TTL).
-            try {
-                if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
-                    // G4: attribute the pause-terminating end (this store has no request
-                    // principal and also runs from scheduled cleanup).
-                    conversationService.endConversation(conversationId, "system:admin-end");
-                }
-            } catch (Exception e) {
-                log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
-                        sanitize(conversationId), e.getMessage()));
-            }
-
-            // The snapshot holds the only references to the conversation's vault
-            // slots: if they cannot be deleted, nothing is — a retry can then still
-            // find them. Deleting the snapshot anyway would orphan the credentials.
-            if (!deleteAutoVaultedSecretsForConversation(conversationId)) {
-                throw new ResourceStoreException("Could not delete the vault secrets of conversation " + conversationId
-                        + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
-            }
-            deleteAttachmentsForConversation(conversationId);
-            conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            conversationDescriptorStore.deleteAllDescriptor(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
+            purgeConversation(conversationId);
         } else {
             softDelete(conversationId);
         }
+    }
+
+    /**
+     * The permanent delete, without the caller check {@link #deleteConversationLog}
+     * runs first: ends a pending approval, removes the conversation's vault slots,
+     * attachments, memory and descriptors.
+     * <p>
+     * For server-side callers that act on conversations they created themselves —
+     * the agent test runner cleaning up its test conversations — and so have no
+     * request identity to check. Never expose it on a REST or MCP surface.
+     *
+     * @throws ResourceStoreException
+     *             when the vault slots could not be deleted; nothing is deleted
+     *             then
+     */
+    public void purgeConversation(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        checkNotNull(conversationId, "conversationId");
+        // If the conversation is a live pending approval, resolve the HITL state
+        // BEFORE removing the document: endConversation disarms the armed
+        // timeout schedule (otherwise it fires later against a deleted
+        // conversation, logs "Conversation not found", and leaves a dead
+        // schedule row), clears the bookmark, writes the hitl.approval
+        // cancellation audit, and invalidates the cached AWAITING_HUMAN state
+        // (which getConversationState would otherwise keep serving for a
+        // nonexistent conversation until TTL).
+        try {
+            if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
+                // G4: attribute the pause-terminating end (this store has no request
+                // principal and also runs from scheduled cleanup).
+                conversationService.endConversation(conversationId, "system:admin-end");
+            }
+        } catch (Exception e) {
+            log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
+                    sanitize(conversationId), e.getMessage()));
+        }
+
+        // The snapshot holds the only references to the conversation's vault
+        // slots: if they cannot be deleted, nothing is — a retry can then still
+        // find them. Deleting the snapshot anyway would orphan the credentials.
+        if (!deleteAutoVaultedSecretsForConversation(conversationId)) {
+            throw new ResourceStoreException("Could not delete the vault secrets of conversation " + conversationId
+                    + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
+        }
+        deleteAttachmentsForConversation(conversationId);
+        conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
+        conversationDescriptorStore.deleteAllDescriptor(conversationId);
+        log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
     }
 
     /**
