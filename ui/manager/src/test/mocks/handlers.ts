@@ -2547,6 +2547,28 @@ export const handlers = [
     });
   }),
 
+  // Cron preview (RagSourceIngestionService.previewCron). Before the KB handler.
+  http.get("*/ragstore/rags/cron/preview", ({ request }) => {
+    const cron = new URL(request.url).searchParams.get("cron") ?? "";
+    if (cron.trim().split(/\s+/).length !== 5) {
+      return HttpResponse.json({
+        cron,
+        valid: false,
+        error: "Cron expression must have exactly 5 fields (min hour dom month dow), got " +
+          cron.trim().split(/\s+/).filter(Boolean).length,
+        timeZone: "UTC",
+        nextFires: [],
+      });
+    }
+    return HttpResponse.json({
+      cron,
+      valid: true,
+      error: null,
+      timeZone: "UTC",
+      nextFires: ["2026-10-16T02:00:00Z", "2026-10-17T02:00:00Z", "2026-10-18T02:00:00Z"],
+    });
+  }),
+
   // RAG Knowledge Base mock data (BEFORE generic handlers)
   http.get("*/ragstore/rags/:id", ({ request }) => {
     const url = new URL(request.url);
@@ -2637,6 +2659,9 @@ export const handlers = [
         segmentsStored: 57,
         costUsd: 0.0,
         error: null,
+        documentsSkipped: 2,
+        stopReason: "COMPLETED",
+        trigger: "SCHEDULED",
       },
     ]);
   }),
@@ -2703,6 +2728,101 @@ export const handlers = [
 
   http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
     return HttpResponse.json({ status: "deleted", fileId: params.fileId });
+  }),
+
+  // A source's schedule (RestRagIngestion.readSourceSchedule)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/schedule", () => {
+    return HttpResponse.json({
+      scheduled: true,
+      scheduleId: "sched-rag-1",
+      cron: "0 2 * * *",
+      timeZone: "UTC",
+      enabled: true,
+      disabledReason: null,
+      nextFire: "2026-10-16T02:00:00Z",
+      lastFired: "2026-10-15T02:00:00Z",
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      nextRetryAt: null,
+      recentFires: [
+        {
+          fireTime: "2026-10-15T02:00:00Z",
+          completedAt: "2026-10-15T02:00:01Z",
+          status: "COMPLETED",
+          errorMessage: null,
+          attemptNumber: 1,
+        },
+      ],
+    });
+  }),
+
+  // What a source has ingested (RestRagIngestion.readSourceDocuments)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/documents", ({ request }) => {
+    const q = new URL(request.url).searchParams.get("q")?.toLowerCase() ?? "";
+    const documents = [
+      {
+        documentId: "https://example.com/docs/intro",
+        label: "https://example.com/docs/intro",
+        url: "https://example.com/docs/intro",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-10-15T02:01:00Z",
+        missedRuns: 0,
+        tombstoned: false,
+      },
+      {
+        documentId: "https://example.com/docs/old-page",
+        label: "https://example.com/docs/old-page",
+        url: "https://example.com/docs/old-page",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-09-17T02:01:00Z",
+        missedRuns: 2,
+        tombstoned: true,
+      },
+    ].filter((document) => !q || document.label.toLowerCase().includes(q));
+    return HttpResponse.json({ total: documents.length, truncated: false, documents });
+  }),
+
+  http.get("*/ragstore/rags/:id/sources/:sourceId/chunks", ({ request }) => {
+    const documentId = new URL(request.url).searchParams.get("documentId");
+    return HttpResponse.json({
+      documentId,
+      chunks: [
+        {
+          index: 0,
+          score: null,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "0" },
+        },
+        {
+          index: 1,
+          score: null,
+          text: "Agents are assembled from workflows of JSON configurations.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "1" },
+        },
+      ],
+    });
+  }),
+
+  // A test retrieval (RestRagIngestion.searchKnowledgeBase)
+  http.post("*/ragstore/rags/:id/search", async ({ request }) => {
+    const body = (await request.json()) as { maxResults?: number; minScore?: number };
+    return HttpResponse.json({
+      maxResults: body.maxResults ?? 5,
+      minScore: body.minScore ?? 0.6,
+      results: [
+        {
+          index: 0,
+          score: 0.873,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: {
+            documentId: "https://example.com/docs/intro",
+            url: "https://example.com/docs/intro",
+            title: "Introduction",
+            sourceName: "public-docs",
+          },
+        },
+      ],
+    });
   }),
 
   // --- Group Store Mock Handlers ---
