@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.runtime.LogRecordRedactor;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -87,10 +88,13 @@ class ObservableStreamingChatModel implements StreamingChatModel {
     }
 
     private void logRequest(ChatRequest request) {
-        if (logRequests) {
+        if (logRequests && LOGGER.isDebugEnabled()) {
+            // DEBUG and redacted, as in ObservableChatModel: the last message is the
+            // user's own text (L12 of the 2026-10-15 security review).
             var messages = request.messages();
             var lastMsg = messages.isEmpty() ? "<empty>" : messages.getLast().toString();
-            LOGGER.infof("[%s] Streaming chat request: %d messages, last: \"%s\"", modelType, messages.size(), truncate(lastMsg, 200));
+            LOGGER.debugf("[%s] Streaming chat request: %d messages, last: \"%s\"", modelType, messages.size(),
+                    LogRecordRedactor.rewrite(truncate(lastMsg, 200)));
         }
     }
 
@@ -116,7 +120,7 @@ class ObservableStreamingChatModel implements StreamingChatModel {
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
                 LOGGER.infof("[%s] Streaming chat response (%dms): \"%s\"", modelType,
-                        System.currentTimeMillis() - startMs, truncate(snapshot(), 500));
+                        System.currentTimeMillis() - startMs, LogRecordRedactor.rewrite(truncate(snapshot(), 500)));
                 handler.onCompleteResponse(completeResponse);
             }
 

@@ -14,10 +14,15 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,6 +66,92 @@ class ObservableChatModelTest {
     // That class also pins the properties this one never could, because it uses a
     // delegate shaped like a real provider binding rather than a mock that stubs
     // chat(): single listener dispatch, and delegate.chat() never re-entered.
+
+    // --- request logging (L12 of the 2026-10-15 security review) ---
+
+    @Nested
+    class RequestLogging {
+
+        private static final String SECRET = "sk-abcdefghijklmnopqrstuvwxyz0123456789";
+
+        private List<LogRecord> captureLogs(Runnable action, Level level) {
+            List<LogRecord> records = new ArrayList<>();
+            var handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    records.add(record);
+                }
+
+                @Override
+                public void flush() {
+                    // nothing is buffered
+                }
+
+                @Override
+                public void close() {
+                    // nothing to release
+                }
+            };
+            var logger = Logger.getLogger(ObservableChatModel.class.getName());
+            var previousLevel = logger.getLevel();
+            boolean previousUseParentHandlers = logger.getUseParentHandlers();
+            logger.setLevel(level);
+            logger.setUseParentHandlers(false);
+            logger.addHandler(handler);
+            try {
+                action.run();
+            } finally {
+                logger.removeHandler(handler);
+                logger.setLevel(previousLevel);
+                logger.setUseParentHandlers(previousUseParentHandlers);
+            }
+            return records;
+        }
+
+        private static String rendered(LogRecord record) {
+            return record.getParameters() == null ? record.getMessage() : String.format(record.getMessage(), record.getParameters());
+        }
+
+        @Test
+        void requestLineIsDebugAndRedacted() {
+            ChatModel delegate = providerLikeMock();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("my api_key=" + SECRET + " please"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            var requestLines = records.stream().filter(r -> rendered(r).contains("Chat request")).toList();
+            assertEquals(1, requestLines.size(), "one request line: " + records);
+            assertEquals(Level.FINE, requestLines.get(0).getLevel(), "the request line is DEBUG, not INFO");
+            assertFalse(rendered(requestLines.get(0)).contains(SECRET), "the credential must be redacted: " + rendered(requestLines.get(0)));
+        }
+
+        @Test
+        void requestLineIsNotWrittenAtInfo() {
+            ChatModel delegate = providerLikeMock();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.INFO);
+
+            assertTrue(records.stream().noneMatch(r -> rendered(r).contains("Chat request")), "nothing at INFO: " + records);
+        }
+
+        @Test
+        void responseLineIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            when(delegate.chat(any(ChatRequest.class)))
+                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("your token=" + SECRET)).build());
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            var responseLines = records.stream().filter(r -> rendered(r).contains("Chat response")).toList();
+            assertEquals(1, responseLines.size(), "one response line: " + records);
+            assertFalse(rendered(responseLines.get(0)).contains(SECRET), rendered(responseLines.get(0)));
+        }
+    }
 
     // --- chat() delegation ---
 
