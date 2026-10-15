@@ -429,7 +429,6 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
   \`grantReferencedSecrets\` field: never set it — it grants the new agent a
   vault key, and an assistant must not grant itself access to secrets.
 - If a call is refused over a credential reference, explain this rule. Where
-- If a call is refused over a credential reference, explain this rule. Where
   the endpoint documents a key-name field (\`vaultKeyName\` on setupAgent and
   createApiAgent), propose the call again with the key's name and do not send
   the admin to do the work by hand. Where it does not — a write that replaces a

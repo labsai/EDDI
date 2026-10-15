@@ -4,7 +4,7 @@
 
 ### What happened
 
-An admin asked the Platform Operator for an agent on "the anthropic key available". The operator copied `${vault:anthropic-api-key}` out of its own LLM config into the `setupAgent` body and was refused; told the admin that typing the reference themselves would make it acceptable (false); proposed the call again, which the admin approved, and only then was it refused again; and finally sent the admin to build the agent by hand.
+An admin asked the Platform Operator for an agent on "the anthropic key available". As the admin reported it, the operator copied `${vault:anthropic-api-key}` out of its own LLM config into the `setupAgent` body and was refused (the report says before the approval step; that stage was not reproduced, and from the code a gated call takes the same path every time); told the admin that typing the reference themselves would make it acceptable (false); proposed the call, which the admin approved, and only then was it refused; and finally sent the admin to build the agent by hand. The refusal after an approval is confirmed from the code and is what this entry fixes.
 
 ### Why
 

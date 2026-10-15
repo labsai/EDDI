@@ -614,6 +614,27 @@ describe("credential references in tool-call bodies", () => {
     expect(flat).not.toMatch(/patch[A-Z]\w+|operationId/);
   });
 
+  it("states the refusal guidance exactly once, not twice (a merge once left a truncated copy of its opener)", () => {
+    // toContain would pass with a duplicate; count the occurrences.
+    const opener = "- If a call is refused over a credential reference, explain this rule. Where";
+    expect(body.split(opener).length - 1).toBe(1);
+  });
+
+  it.each(["read_only", "read_write"] as const)(
+    "has no substantial line twice in the %s prompt body — a duplicated or truncated line is a merge accident",
+    (scope) => {
+      const seen = new Map<string, number>();
+      for (const line of defaultOperatorPromptBody(scope).split("\n")) {
+        const text = line.trim();
+        // Short lines are structural (list markers, "...", headings that legitimately repeat).
+        if (text.length < 30) continue;
+        seen.set(text, (seen.get(text) ?? 0) + 1);
+      }
+      const duplicated = [...seen].filter(([, count]) => count > 1).map(([text]) => text);
+      expect(duplicated).toEqual([]);
+    },
+  );
+
   it("appears once — an amendment of the existing sections, not a second copy", () => {
     expect(body.split("Credentials in tool-call bodies:").length - 1).toBe(1);
   });
