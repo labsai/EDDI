@@ -780,6 +780,21 @@ your tool schemas do not cover it, not as a routine first step:
   a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
   and the model answers with what it has — the usual answer to "why did only
   some of my tools run?".
+- Guardrails on an LLM task (off unless configured): inputGuardrails screen the
+  user's message before the model runs, outputGuardrails the answer before it
+  is delivered. Each entry is {type, action, maxRetries, blockMessage,
+  parameters}; type is prompt-injection (input), pii-redaction, regex-filter,
+  max-length (both) or json-object (output); action is block (default), redact,
+  reprompt (output: re-ask the same model, maxRetries default 2, max 5, then
+  block) or warn. block/redact/reprompt on the output side make the task buffer
+  its answer instead of streaming it; warn keeps streaming. Parameters are plain
+  strings, never templates: pii-redaction takes patterns
+  ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
+  patterns one regular expression per line, max-length takes maxChars. An
+  unknown type is skipped with a WARN, not rejected. Every firing is in the
+  audit entry's output.guardrails and the eddi.guardrail.triggered metric. When
+  you can edit LLM configs, add them with a PATCH "add" of
+  /tasks/<n>/inputGuardrails or /tasks/<n>/outputGuardrails.
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
@@ -811,6 +826,8 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"; every model parameter per provider and which model rejects it: "llm-parameters"
+- input/output guardrails (prompt-injection, PII redaction, reprompt): "langchain"
+  (section "Input and Output Guardrails"), design and limits in "security"
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"

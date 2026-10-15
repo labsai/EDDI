@@ -953,6 +953,88 @@ Identity masking prepends identity concealment rules to the system prompt. This 
 
 ---
 
+## Input and Output Guardrails
+
+A task can screen the **user's message before the model is called** (`inputGuardrails`) and the **model's answer before it is stored or delivered** (`outputGuardrails`). Both are ordered lists; each entry names a guardrail `type` and what a finding does (`action`). Nothing is screened unless you configure it — a task without these lists runs no guardrail code at all.
+
+```json
+{
+  "tasks": [ {
+    "actions": ["support"],
+    "type": "openai",
+    "parameters": { "systemMessage": "You are a support agent.", "addToOutput": "true" },
+    "inputGuardrails": [
+      { "type": "prompt-injection", "action": "block", "blockMessage": "I can't process that request." },
+      { "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,ssn,creditcard" } }
+    ],
+    "outputGuardrails": [
+      { "type": "pii-redaction", "action": "redact" },
+      { "type": "json-object", "action": "reprompt", "maxRetries": 2 }
+    ]
+  } ]
+}
+```
+
+| Field | Description | Default |
+|---|---|---|
+| `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
+| `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
+| `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
+| `blockMessage` | The answer the user gets when this guardrail blocks. Used as-is — it is never run through the template engine. | `Request blocked by guardrail '<type>'.` / `Response withheld by guardrail '<type>'.` |
+| `parameters` | Per-type settings, plain strings (never templated). `repromptMessage` overrides the corrective message of a reprompt (`{reason}` is replaced by the guardrail's reason). | — |
+
+### Actions
+
+| Action | Input phase | Output phase |
+|---|---|---|
+| `block` | The model is **not called**, `preRequest` and `postResponse` do not run; the block message is the turn's answer. | The answer is replaced by the block message (not parsed as JSON, not recorded as the model's response). |
+| `redact` | The message the model sees is rewritten. Conversation memory keeps what the user sent. | The answer is rewritten before it is stored, parsed or delivered. A guardrail with no rewrite (a pure violation) is replaced by the block message. |
+| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
+| `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
+
+A guardrail that throws is recorded as a `warn` with reason `guardrail_error` and the text passes — a broken guardrail never fails the turn. A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
+
+### Built-in types
+
+| Type | Phases | Finds | Parameters |
+|---|---|---|---|
+| `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
+| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
+| `max-length` | input, output | Text longer than `maxChars`; `redact` truncates, `reprompt` asks for a shorter answer. | `maxChars` (default `8000`) |
+| `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
+
+For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
+
+Patterns in `parameters` are author configuration evaluated against untrusted text. Keep them free of nested quantifiers (`(a+)+`); an invalid pattern is ignored with a WARN.
+
+### Where guardrails run
+
+- **Input** guardrails run after the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments) and before the model is built, `preRequest` runs or the circuit breaker is consulted. They screen the **last user message** the model would see. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`.
+- Retrieval runs **before** input guardrails: the RAG query and an `httpCallRag` call see the raw user input.
+- **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked.
+- An `onError` fallback is the author's own text and is not screened.
+
+### Streaming
+
+Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
+
+### Audit, events and metrics
+
+Every guardrail that fires produces:
+
+- an audit record under the step key `audit:guardrail:<phase>:<type>` (`{phase, type, action, reason, retryCount, taskId}`), collected into the [audit ledger](audit-ledger.md) entry as `output.guardrails`. The `reason` is EDDI's (e.g. `pii:email`, `prompt_injection_pattern`) — never the screened text;
+- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
+- the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
+
+Reprompts are model calls: their tokens are added to the turn's token usage and cost.
+
+### Compatibility
+
+The two lists are optional; existing configurations load unchanged. An older EDDI ignores them (unknown properties are skipped) and runs the agent unguarded — keep that in mind before downgrading.
+
+---
+
 ## Built-in Tools
 
 When `enableBuiltInTools: true`, you can use these tools:

@@ -233,6 +233,8 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `tool_call` | `{"tool":"<name>"}` | Sent right before a tool runs — the name only. There is no "tool finished" event |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
 | `cascade_escalation` | `{"fromStep","toStep","confidence","threshold","reason","durationMs"}` | The cascade escalates to the next model |
+| `llm_retry` | `{"reason","attempt"}` | The LLM task asks the same model again after an unusable reply ([recovery policies](langchain.md#recovery-policies-retry-where-it-helps)) |
+| `guardrail_triggered` | `{"type","phase","action","taskId"}` — `phase` is `input` or `output`, `action` one of `block`, `redact`, `reprompt`, `warn` | An LLM task's [input or output guardrail](langchain.md#input-and-output-guardrails) fired. Sent before the answer; after a `block` the answer that follows is the block message |
 | `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, and `hitlPausedAt` when the turn paused | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags) |
 | `error` | `{"message", …}` | **Terminal.** The turn could not run or failed |
 

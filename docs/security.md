@@ -348,6 +348,17 @@ a data-subject request by username will not find them.
 
 When an LLM is given access to tools, every argument it supplies must be treated as **untrusted input**. An attacker can craft prompts that cause the LLM to pass malicious arguments to tools — a class of attacks known as **prompt injection**. EDDI mitigates these risks at the tool-execution layer so that individual tools do not need to implement their own defences.
 
+### Input and output screening
+
+Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length` and `json-object`. Design points that matter for a security review:
+
+- **A blocked input never reaches the model** — and no `preRequest` property mutation runs for it. Earlier messages of the history window are screened again on every turn, so a message blocked or redacted on its own turn is not replayed to the model later.
+- **Redaction changes what the model sees and what is delivered, not what is stored as the user's message.** Conversation memory keeps the user's input verbatim (it is the record); the ledger records the guardrail outcome and the delivered answer, never the guardrail's view of the screened text.
+- **Fail-safe vocabulary.** An unknown action is `block`; an unknown type is skipped with a WARN (configuration must keep loading on older versions). A guardrail that crashes degrades to `warn` — availability over screening for a bug, recorded in the audit trail as `guardrail_error`.
+- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data.
+- **Streaming.** An output guardrail that can change the answer forces the task to buffer it — streamed tokens cannot be retracted.
+- **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Retrieval (`httpCallRag`, vector RAG) runs before input guardrails and sees the raw input.
+
 ---
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
