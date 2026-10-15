@@ -43,6 +43,12 @@ class CascadingModelExecutorOpenAiCompatibleTest {
 
     private static ChatRequest runSingleStep(String taskType, Map<String, String> taskParams, Map<String, String> stepParams)
             throws Exception {
+        return runSingleStep(taskType, taskParams, stepParams, Map.of());
+    }
+
+    private static ChatRequest runSingleStep(String taskType, Map<String, String> taskParams, Map<String, String> stepParams,
+                                             Map<String, String> globals)
+            throws Exception {
         var model = FaultInjectingChatModel.script(Step.text("{\"a\":\"b\"}")).repeatLast();
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         doReturn(model).when(registry).getOrCreate(eq("openai-compatible"), anyMap());
@@ -64,7 +70,7 @@ class CascadingModelExecutorOpenAiCompatibleTest {
         task.setRetry(retry);
 
         GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
-        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> globals.getOrDefault(inv.getArgument(0), inv.getArgument(0)));
         var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null,
                 new CallerIdentityContext(null, null));
         List<ChatMessage> messages = List.of(SystemMessage.from("sys"), UserMessage.from("hi"));
@@ -78,6 +84,15 @@ class CascadingModelExecutorOpenAiCompatibleTest {
     void stepFlagApplies() throws Exception {
         var request = runSingleStep("anthropic", new HashMap<>(Map.of("apiKey", "k")),
                 Map.of("baseUrl", "http://vllm:8000/v1", "modelName", "granite", "jsonMode", "true"));
+        assertSame(ResponseFormat.JSON, request.responseFormat());
+    }
+
+    @Test
+    @DisplayName("a step's ${vars:...} flag is resolved before it is read")
+    void stepReferenceFlagResolved() throws Exception {
+        var request = runSingleStep("anthropic", new HashMap<>(Map.of("apiKey", "k")),
+                Map.of("baseUrl", "http://vllm:8000/v1", "modelName", "granite", "jsonMode", "${vars:stepJson}"),
+                Map.of("${vars:stepJson}", "true"));
         assertSame(ResponseFormat.JSON, request.responseFormat());
     }
 

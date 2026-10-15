@@ -26,11 +26,14 @@ fixed `https://` endpoint and a fixed default model.
   `ModelCapabilityService.visionOverride` places the endpoint's `vision=true` below the per-task
   `multimodal.vision` override and above the deployment override; the built-in default for the
   type is off.
-- **Strict flags.** A flag that is neither `true` nor `false` fails the deploy
-  (`OpenAiCompatibleConfigValidator`, run from `LlmTask.configure` for the task, each cascade
-  step and the judge) with a message naming the parameter, and fails again at build or request
-  time if it arrives through a template. A missing `baseUrl`/`modelName` fails the deploy the
-  same way. `customParameters` must parse to a JSON object for this type (the OpenAI builder
+- **Strict literal flags, lenient templated ones.** A literal flag that is neither `true` nor
+  `false` fails the deploy (`OpenAiCompatibleConfigValidator`, run from `LlmTask.configure` for
+  the task, each cascade step and the judge) with a message naming the parameter; so does a
+  missing `baseUrl`/`modelName`. LLM parameters are rendered by Qute before the request is built,
+  but `${vars:...}` is otherwise only resolved inside `ChatModelRegistry`, so the call sites
+  resolve global variables in the three flags first (`OpenAiCompatibleEndpoint.withResolvedFlags`).
+  A templated flag that still is not a boolean counts as `false` with one WARN per distinct value
+  (bounded): it never fails the build or the turn. `customParameters` must parse to a JSON object for this type (the OpenAI builder
   only warns and drops it).
 - **Telemetry.** `serverName` (default `openai-compatible`) is reported as
   `gen_ai.provider.name` and the `provider` meter tag in place of langchain4j's `OPEN_AI`,
@@ -50,7 +53,10 @@ fixed `https://` endpoint and a fixed default model.
   (agent wizard, operator activation, LLM editor, cascade steps, summary provider): required
   model and base URL with examples, an optional API key, and a note that the capability flags
   are switched on under Model settings, where they render from the catalog with a one-line
-  explanation each. The team builder does not offer it (its member form has no base URL).
+  explanation each. Pickers with no base URL field do not offer it: the workforce team builder,
+  the group wizard's members and moderator, the cascade judge and a group's summarizer. The
+  rolling-summary provider offers it only when the task itself is `openai-compatible`, because
+  the summarizer then inherits the task's `baseUrl` and key.
   7 i18n keys in all 11 locales.
 - **Docs and Operator.** A "Self-hosted OpenAI-compatible servers" section with a migration
   note in [`docs/langchain.md`](../langchain.md), the provider matrix row, and notes in
@@ -76,8 +82,8 @@ fixed `https://` endpoint and a fixed default model.
 
 - Model discovery via `GET /v1/models` and the deployment-level provider allow-list (C3) are out
   of scope.
-- `CreateSubAgentTool` does not carry a base URL, so a dynamic sub-agent on this type is refused
-  by setup with the "requires baseUrl" message rather than created.
+- `CreateSubAgentTool` has no base URL parameter, so it refuses this type up front with a
+  message telling the model to pick another provider or have an administrator create the agent.
 
 ```decision-log
 | 2026-10-15 | Self-hosted OpenAI-compatible servers get their own type, `openai-compatible`, with author-declared capability flags (jsonMode, jsonModeWithTools, vision; all off by default) instead of catalog rows | `type: openai` + `baseUrl` inherited OpenAI's JSON-with-tools and vision rules; the catalog validator requires a fixed https URL and model | Adding self-hosted rows to `openai-compatible-providers.json`; a new `extraBody` key next to `customParameters` |

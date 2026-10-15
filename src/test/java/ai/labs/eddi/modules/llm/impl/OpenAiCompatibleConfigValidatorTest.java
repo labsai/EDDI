@@ -81,10 +81,10 @@ class OpenAiCompatibleConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("a ${...} reference in a capability flag fails the deploy: flags are read before references resolve")
-    void referenceInFlagRefused() {
-        String message = failure(new LlmConfiguration(List.of(task("openai-compatible", endpoint("jsonMode", "${vars:selfHostedJson}")))));
-        assertTrue(message.contains("'jsonMode'") && message.contains("references"), message);
+    @DisplayName("a ${vars:...} reference or a template in a capability flag deploys: it is judged once resolved")
+    void referenceInFlagDeferred() {
+        assertDoesNotThrow(() -> OpenAiCompatibleConfigValidator.validate(new LlmConfiguration(List.of(task("openai-compatible",
+                endpoint("jsonMode", "${vars:selfHostedJson}", "jsonModeWithTools", "{properties.tools}"))))));
     }
 
     @Test

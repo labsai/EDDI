@@ -102,11 +102,14 @@ class SelfHostedOpenAiLanguageModelBuilderTest {
         }
 
         @Test
-        @DisplayName("a capability flag that is not a boolean is a named error, never a silent false")
+        @DisplayName("a capability flag that is not a boolean does not stop the model from being built")
         void badFlag() {
+            // A literal bad flag is a deploy error (OpenAiCompatibleConfigValidator); one
+            // that only shows up once a template resolves must not fail the model build,
+            // which would fail every turn. The flags shape requests, not the model.
             for (String key : List.of("jsonMode", "jsonModeWithTools", "vision")) {
-                var e = assertThrows(IllegalArgumentException.class, () -> builder.build(endpoint(key, "ture")));
-                assertTrue(e.getMessage().contains("'" + key + "'") && e.getMessage().contains("ture"), e.getMessage());
+                var prepared = builder.prepare(endpoint(key, "ture"));
+                assertFalse(prepared.containsKey(key), key);
             }
         }
 

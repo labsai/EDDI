@@ -132,9 +132,7 @@ public class ModelCapabilityService {
      * per-task {@code multimodal.vision} wins; otherwise {@code vision=true} turns
      * images on for any model name; otherwise the usual chain applies (deployment
      * override, then the built-in default, which is <em>off</em> for this type).
-     *
-     * @throws IllegalArgumentException
-     *             when the endpoint's {@code vision} flag is not a boolean
+     * Never throws: a {@code vision} value that is not a boolean counts as unset.
      */
     public static Support visionOverride(Support taskOverride, String provider, Map<String, String> parameters) {
         if (taskOverride != null && taskOverride != Support.AUTO) {

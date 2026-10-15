@@ -74,19 +74,19 @@ public class SelfHostedOpenAiLanguageModelBuilder implements ILanguageModelBuild
      * @throws IllegalArgumentException
      *             naming the parameter, for a missing {@code baseUrl} or
      *             {@code modelName}, a base URL that is not http(s) or targets the
-     *             cloud-metadata service, a capability flag that is not a boolean,
-     *             or a {@code customParameters} that is not a JSON object
+     *             cloud-metadata service, or a {@code customParameters} that is not
+     *             a JSON object
      */
     Map<String, String> prepare(Map<String, String> parameters) {
         Map<String, String> p = new HashMap<>(parameters == null ? Map.of() : parameters);
-        List<String> problems = OpenAiCompatibleEndpoint.problems(p);
+        // Only the required fields stop a build. Capability flags shape requests,
+        // not the model, and are judged there (see OpenAiCompatibleEndpoint): a
+        // literal bad flag already failed the deploy, and a templated one that
+        // resolves to a non-boolean degrades to false instead of failing the turn.
+        List<String> problems = OpenAiCompatibleEndpoint.missingRequired(p);
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", problems));
         }
-        // Resolved by now (templates and vault references are applied before a
-        // builder runs), so the flags can be parsed strictly.
-        OpenAiCompatibleEndpoint.capabilities(OpenAiCompatibleEndpoint.TYPE, p);
-        OpenAiCompatibleEndpoint.declaresVision(OpenAiCompatibleEndpoint.TYPE, p);
 
         String baseUrl = p.get(OpenAiCompatibleEndpoint.KEY_BASE_URL).trim();
         if (!UrlValidationUtils.isValidHttpUrl(baseUrl)) {

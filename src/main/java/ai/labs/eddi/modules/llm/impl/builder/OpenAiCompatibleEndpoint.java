@@ -6,13 +6,20 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider.Capabilities;
 
+import org.jboss.logging.Logger;
+
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * The generic {@code openai-compatible} LLM type: one self-hosted (or otherwise
@@ -36,8 +43,10 @@ import java.util.regex.Pattern;
  * (default {@value #TYPE}), so traces tell a {@code vllm} from a
  * {@code llama-server}.</li>
  * </ul>
- * A flag that is neither {@code true} nor {@code false} is a configuration
- * error, reported by name — never read as a silent {@code false}.
+ * A literal flag that is neither {@code true} nor {@code false} is a deploy
+ * error, reported by name, never read as a silent {@code false}. A templated
+ * flag is judged per request once resolved; one that still is not a boolean
+ * then counts as {@code false} with a WARN, and never fails the turn.
  */
 public final class OpenAiCompatibleEndpoint {
 
@@ -67,6 +76,10 @@ public final class OpenAiCompatibleEndpoint {
     static final int MAX_SERVER_NAME_LENGTH = 32;
     private static final Pattern SERVER_NAME = Pattern.compile("[a-z0-9._-]{1," + MAX_SERVER_NAME_LENGTH + "}");
 
+    private static final Logger LOGGER = Logger.getLogger(OpenAiCompatibleEndpoint.class);
+    private static final int MAX_WARNED = 256;
+    private static final Set<String> WARNED = ConcurrentHashMap.newKeySet();
+
     private OpenAiCompatibleEndpoint() {
         // non-instantiable utility
     }
@@ -79,9 +92,11 @@ public final class OpenAiCompatibleEndpoint {
     /**
      * The capabilities an {@code openai-compatible} endpoint declares, or empty for
      * any other type.
-     *
-     * @throws IllegalArgumentException
-     *             when a flag is neither {@code true} nor {@code false}
+     * <p>
+     * Read per request, so it never throws: a flag that is still not a boolean once
+     * resolved (a template rendering to something else, an unresolvable reference)
+     * counts as {@code false}, the conservative answer, with one WARN per distinct
+     * value. Literal values were already checked at deploy by {@link #problems}.
      */
     public static Optional<Capabilities> capabilities(String type, Map<String, String> parameters) {
         if (!isType(type)) {
@@ -92,10 +107,7 @@ public final class OpenAiCompatibleEndpoint {
 
     /**
      * Whether an {@code openai-compatible} endpoint declares {@code vision=true};
-     * {@code false} for every other type.
-     *
-     * @throws IllegalArgumentException
-     *             when the flag is neither {@code true} nor {@code false}
+     * {@code false} for every other type. Never throws, as {@link #capabilities}.
      */
     public static boolean declaresVision(String type, Map<String, String> parameters) {
         return isType(type) && flag(parameters, KEY_VISION);
@@ -117,30 +129,71 @@ public final class OpenAiCompatibleEndpoint {
     }
 
     /**
-     * What is wrong with an endpoint's parameters, one message per problem; empty
-     * when it is usable. A value still holding a template or a reference
-     * ({@code {...}}, {@code ${...}}) is not judged — it is only known at run time.
+     * What is wrong with an endpoint's configuration, one message per problem;
+     * empty when it is usable. The deploy-time check: a missing {@code baseUrl} or
+     * {@code modelName}, and a <em>literal</em> capability flag that is not a
+     * boolean. A value still holding a template or a reference ({@code {...}},
+     * {@code ${vars:...}}) is not judged: it is only known per request, where
+     * {@link #capabilities} degrades instead of failing.
      */
     public static List<String> problems(Map<String, String> parameters) {
-        List<String> problems = new ArrayList<>();
+        List<String> problems = missingRequired(parameters);
         Map<String, String> p = parameters == null ? Map.of() : parameters;
-        requirePresent(p, KEY_BASE_URL, "the URL of the server's OpenAI API, e.g. http://vllm.inference.svc:8000/v1", problems);
-        requirePresent(p, KEY_MODEL_NAME, "the model id the server serves, e.g. ibm-granite/granite-4.0-h-small", problems);
         for (String key : List.of(KEY_JSON_MODE, KEY_JSON_MODE_WITH_TOOLS, KEY_VISION)) {
             String raw = p.get(key);
-            if (raw == null || raw.isBlank()) {
-                continue;
-            }
-            if (raw.contains("${")) {
-                // Flags are read where the request is built, before vault and global
-                // variable references are resolved, so a reference could never work.
-                problems.add("LLM type '" + TYPE + "': parameter '" + key
-                        + "' must be a literal \"true\" or \"false\" (or a template); ${...} references are not resolved for capability flags");
-            } else if (!isDeferred(raw) && parseFlag(raw) == null) {
+            if (raw != null && !raw.isBlank() && !isDeferred(raw) && parseFlag(raw) == null) {
                 problems.add(invalidFlagMessage(key, raw));
             }
         }
         return problems;
+    }
+
+    /**
+     * The required fields that are missing: the only thing that stops a model from
+     * being built. Capability flags never do.
+     */
+    public static List<String> missingRequired(Map<String, String> parameters) {
+        List<String> problems = new ArrayList<>();
+        Map<String, String> p = parameters == null ? Map.of() : parameters;
+        requirePresent(p, KEY_BASE_URL, "the URL of the server's OpenAI API, e.g. http://vllm.inference.svc:8000/v1", problems);
+        requirePresent(p, KEY_MODEL_NAME, "the model id the server serves, e.g. ibm-granite/granite-4.0-h-small", problems);
+        return problems;
+    }
+
+    /**
+     * {@code parameters} with the capability flags passed through {@code resolver},
+     * for an {@code openai-compatible} type only; any other type gets the map back
+     * unchanged.
+     * <p>
+     * Task parameters reach the request-building code after the template engine
+     * ({@code {...}} is rendered) but before {@code ChatModelRegistry} resolves
+     * global-variable and vault references, so a flag written as
+     * {@code ${vars:vllm-json}} would otherwise be read unresolved. A resolver that
+     * throws leaves the value as it was, which {@link #capabilities} then reads as
+     * {@code false}.
+     */
+    public static Map<String, String> withResolvedFlags(String type, Map<String, String> parameters, UnaryOperator<String> resolver) {
+        if (!isType(type) || parameters == null || resolver == null) {
+            return parameters;
+        }
+        Map<String, String> resolved = null;
+        for (String key : CAPABILITY_KEYS) {
+            String raw = parameters.get(key);
+            if (raw == null || !raw.contains("${")) {
+                continue;
+            }
+            String value;
+            try {
+                value = resolver.apply(raw);
+            } catch (RuntimeException e) {
+                value = raw;
+            }
+            if (resolved == null) {
+                resolved = new HashMap<>(parameters);
+            }
+            resolved.put(key, value);
+        }
+        return resolved == null ? parameters : resolved;
     }
 
     private static void requirePresent(Map<String, String> p, String key, String hint, List<String> problems) {
@@ -162,9 +215,22 @@ public final class OpenAiCompatibleEndpoint {
         }
         Boolean parsed = parseFlag(raw);
         if (parsed == null) {
-            throw new IllegalArgumentException(invalidFlagMessage(key, raw));
+            warnOnce(key, raw);
+            return false;
         }
         return parsed;
+    }
+
+    /**
+     * One WARN per distinct (key, value): the flag is read on every request, so an
+     * unconditional warning would repeat every turn. Bounded, so a templated value
+     * fed from user input cannot grow the set without limit.
+     */
+    private static void warnOnce(String key, String raw) {
+        String marker = key + "=" + raw;
+        if (WARNED.size() < MAX_WARNED && WARNED.add(marker)) {
+            LOGGER.warnf("%s; treated as \"false\" for this request", sanitize(invalidFlagMessage(key, raw)));
+        }
     }
 
     private static Boolean parseFlag(String raw) {

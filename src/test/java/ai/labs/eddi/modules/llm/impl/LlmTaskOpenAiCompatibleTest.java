@@ -117,7 +117,10 @@ class LlmTaskOpenAiCompatibleTest {
         lenient().when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
         lenient().when(actionData.getResult()).thenReturn(List.of("action1"));
         lenient().when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-        lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        // Like Qute: {|...|} is a literal, which is how LlmTask keeps a configured
+        // ${vars:...} reference intact through templating.
+        lenient().when(templatingEngine.processTemplate(anyString(), any()))
+                .thenAnswer(inv -> ((String) inv.getArgument(0)).replace("{|", "").replace("|}", ""));
         var inputData = mock(IData.class);
         lenient().when(currentStep.getLatestData("input")).thenReturn(inputData);
         lenient().when(inputData.getResult()).thenReturn("question");
@@ -169,6 +172,34 @@ class LlmTaskOpenAiCompatibleTest {
 
         llmTask.execute(memory, config(false));
         assertNull(model.requests().get(1).responseFormat(), "an unknown server must not get response_format by default");
+    }
+
+    @Test
+    @DisplayName("templated flags: a Qute template and a ${vars:...} reference are read resolved")
+    void templatedFlags() throws Exception {
+        var model = liveModel();
+        when(templatingEngine.processTemplate(eq("{context.selfJson}"), any())).thenReturn("true");
+        when(globalVariableResolver.resolveValue("${vars:selfJson}")).thenReturn("true");
+
+        llmTask.execute(memory, config(false, "jsonMode", "{context.selfJson}"));
+        assertSame(ResponseFormat.JSON, model.requests().getFirst().responseFormat());
+
+        llmTask.execute(memory, config(false, "jsonMode", "${vars:selfJson}"));
+        assertSame(ResponseFormat.JSON, model.requests().get(1).responseFormat());
+    }
+
+    @Test
+    @DisplayName("a flag that resolves to a non-boolean degrades to false and the turn still completes")
+    void unresolvableFlagDegrades() throws Exception {
+        var model = liveModel();
+        when(globalVariableResolver.resolveValue("${vars:missing}")).thenReturn("${vars:missing}");
+        var forwarder = mock(AttachmentForwarder.class);
+        llmTask.attachmentForwarder = forwarder;
+
+        llmTask.execute(memory, config(false, "jsonMode", "${vars:missing}", "vision", "maybe"));
+
+        assertNull(model.requests().getFirst().responseFormat());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any());
     }
 
     @Test

@@ -32,6 +32,7 @@ import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -530,7 +531,7 @@ public class LlmTask implements ILifecycleTask {
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
         // An openai-compatible endpoint's own capability flags decide for it.
         var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), processedParams);
+                processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -1101,10 +1102,21 @@ public class LlmTask implements ILifecycleTask {
         var mm = task.getMultimodal();
         var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
         // Per-task override first, then what an openai-compatible endpoint declares.
-        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, processedParams);
+        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, capabilityParams(resolvedType, processedParams));
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
         attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
+    }
+
+    /**
+     * The parameters an {@code openai-compatible} endpoint's capability flags are
+     * read from: the rendered task parameters with {@code ${vars:...}} references
+     * in the flags resolved, which otherwise happens only inside
+     * {@code ChatModelRegistry}. Any other type gets the map back unchanged.
+     */
+    private Map<String, String> capabilityParams(String resolvedType, Map<String, String> processedParams) {
+        return OpenAiCompatibleEndpoint.withResolvedFlags(resolvedType, processedParams,
+                globalVariableResolver == null ? null : globalVariableResolver::resolveValue);
     }
 
     /**
@@ -1664,7 +1676,7 @@ public class LlmTask implements ILifecycleTask {
         // Same JSON policy the live loop would have applied — a resumed continuation
         // must not silently lose the API-level JSON the paused turn was running with.
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
-                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA), processedParams);
+                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
 
         // Stream the continuation's model rounds too. Replayed transcript rounds
         // never call the model, so the bridge only ever forwards NEW tokens — text

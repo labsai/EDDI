@@ -248,11 +248,8 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
      * capabilities an {@code openai-compatible} endpoint declares in
      * {@code parameters}. Pass the parameters of the model the request goes to: a
      * cascade step's merged parameters, not the task's. For any other type the
-     * parameters are not read.
-     *
-     * @throws IllegalArgumentException
-     *             when an {@code openai-compatible} capability flag is not a
-     *             boolean
+     * parameters are not read. Never throws: a flag that is not a boolean counts as
+     * {@code false} (see {@code OpenAiCompatibleEndpoint#capabilities}).
      */
     public static JsonResponseFormatPolicy of(boolean requested, String provider, String overrideToken, String responseSchema,
                                               Map<String, String> parameters) {

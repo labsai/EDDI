@@ -855,9 +855,9 @@ Every other `type: openai` parameter works too (`temperature`, `maxTokens`, `ret
 about is never sent a request feature it might answer with a 400; turn on what your server
 supports. Each flag must be `"true"` or `"false"`. Any other value (a typo such as `"ture"`)
 fails the deploy with a message naming the parameter instead of reading as `false`, and so does
-a missing `baseUrl` or `modelName`. A value that is still a template or a reference is checked
-once it resolves, except that a flag may not be a `${...}` reference: flags are read before
-references are resolved, so one is refused at deploy.
+a missing `baseUrl` or `modelName`. A flag may also be a template (`{context.x}`) or a global
+variable (`${vars:vllm-json}`); it is then read per request once resolved, and a value that is
+still not a boolean counts as `false` with one WARN per distinct value. It never fails the turn.
 
 **Precedence.** The per-task `jsonResponseFormat` (`on`/`off`) and `multimodal.vision` overrides
 still win over the endpoint's flags; then the flags; then, for vision only, the deployment

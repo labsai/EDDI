@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.capability;
 
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.request.ResponseFormat;
@@ -101,10 +102,32 @@ class OpenAiCompatibleEndpointCapabilitiesTest {
         }
 
         @Test
-        @DisplayName("a flag that is not a boolean is a named error")
+        @DisplayName("a flag that is not a boolean at request time counts as false instead of failing the turn")
         void badFlag() {
-            var e = assertThrows(IllegalArgumentException.class, () -> resolve(TYPE, null, params("jsonModeWithTools", "yes"), true));
-            assertTrue(e.getMessage().contains("'jsonModeWithTools'"), e.getMessage());
+            // Per request: degrade to the conservative answer, never fail the turn.
+            assertNull(resolve(TYPE, null, params("jsonModeWithTools", "yes"), true));
+            assertNull(resolve(TYPE, null, params("jsonMode", "${vault:unresolved}"), false));
+            assertSame(ResponseFormat.JSON, resolve(TYPE, null, params("jsonMode", "true", "jsonModeWithTools", "yes"), false));
+        }
+
+        @Test
+        @DisplayName("a ${vars:...} flag is resolved before it is read; a resolver failure counts as false")
+        void resolvedFlags() {
+            var p = params("jsonMode", "${vars:vllm-json}", "vision", "${vars:vllm-vision}");
+            Map<String, String> resolved = OpenAiCompatibleEndpoint.withResolvedFlags(TYPE, p,
+                    v -> v.equals("${vars:vllm-json}") ? "true" : v.equals("${vars:vllm-vision}") ? "TRUE" : v);
+            assertSame(ResponseFormat.JSON, resolve(TYPE, null, resolved, false));
+            assertTrue(OpenAiCompatibleEndpoint.declaresVision(TYPE, resolved));
+            assertEquals("${vars:vllm-json}", p.get("jsonMode"), "the input map is not modified");
+
+            Map<String, String> failed = OpenAiCompatibleEndpoint.withResolvedFlags(TYPE, p, v -> {
+                throw new IllegalStateException("store down");
+            });
+            assertNull(resolve(TYPE, null, failed, false));
+            // Any other type is returned untouched, resolver never consulted.
+            assertSame(p, OpenAiCompatibleEndpoint.withResolvedFlags("openai", p, v -> {
+                throw new AssertionError("not called");
+            }));
         }
 
         @Test
@@ -210,10 +233,9 @@ class OpenAiCompatibleEndpointCapabilitiesTest {
         }
 
         @Test
-        @DisplayName("a vision flag that is not a boolean is a named error")
+        @DisplayName("a vision flag that is not a boolean at request time counts as unset")
         void badFlag() {
-            var e = assertThrows(IllegalArgumentException.class, () -> vision(Support.AUTO, params("vision", "1"), "m"));
-            assertTrue(e.getMessage().contains("'vision'"), e.getMessage());
+            assertFalse(vision(Support.AUTO, params("vision", "1"), "m"));
         }
     }
 }
