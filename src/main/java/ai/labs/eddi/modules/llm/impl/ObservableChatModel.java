@@ -110,6 +110,11 @@ public class ObservableChatModel implements ChatModel {
 
     ObservableChatModel(ChatModel delegate, String modelType, Duration timeout, boolean logRequests, boolean logResponses,
             ChatModelListener telemetryListener) {
+        this(delegate, modelType, timeout, logRequests, logResponses, telemetryListener, null);
+    }
+
+    ObservableChatModel(ChatModel delegate, String modelType, Duration timeout, boolean logRequests, boolean logResponses,
+            ChatModelListener telemetryListener, String telemetryProvider) {
         this.delegate = delegate;
         this.modelType = modelType;
         this.timeout = timeout;
@@ -119,7 +124,9 @@ public class ObservableChatModel implements ChatModel {
         // EDDI's listener ONLY. The delegate's listeners are deliberately excluded:
         // doChat forwards to delegate.chat(), which dispatches them itself, so
         // including them here would fire every provider-registered listener twice.
-        this.listeners = telemetryListener == null ? List.of() : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType));
+        this.listeners = telemetryListener == null
+                ? List.of()
+                : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType, telemetryProvider));
     }
 
     @Override
@@ -252,6 +259,16 @@ public class ObservableChatModel implements ChatModel {
      */
     static ChatModel wrap(ChatModel model, String modelType, String timeoutMs, String logReq, String logResp,
                           ChatModelListener telemetryListener) {
+        return wrap(model, modelType, timeoutMs, logReq, logResp, telemetryListener, null);
+    }
+
+    /**
+     * As
+     * {@link #wrap(ChatModel, String, String, String, String, ChatModelListener)},
+     * reporting {@code telemetryProvider} (when non-null) as the provider name.
+     */
+    static ChatModel wrap(ChatModel model, String modelType, String timeoutMs, String logReq, String logResp,
+                          ChatModelListener telemetryListener, String telemetryProvider) {
         Duration timeout = null;
         if (timeoutMs != null && !timeoutMs.isBlank()) {
             try {
@@ -267,6 +284,6 @@ public class ObservableChatModel implements ChatModel {
         boolean logRequests = Boolean.parseBoolean(logReq);
         boolean logResponses = Boolean.parseBoolean(logResp);
 
-        return new ObservableChatModel(model, modelType, timeout, logRequests, logResponses, telemetryListener);
+        return new ObservableChatModel(model, modelType, timeout, logRequests, logResponses, telemetryListener, telemetryProvider);
     }
 }

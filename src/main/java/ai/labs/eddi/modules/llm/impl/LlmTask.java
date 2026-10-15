@@ -528,8 +528,9 @@ public class LlmTask implements ILifecycleTask {
         // together. Every execution mode below gets the same policy, so a tool-enabled
         // or streaming agent is no longer silently downgraded to prompt-only JSON.
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // An openai-compatible endpoint's own capability flags decide for it.
         var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat(),
-                processedParams.get(KEY_RESPONSE_SCHEMA));
+                processedParams.get(KEY_RESPONSE_SCHEMA), processedParams);
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -1098,7 +1099,9 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
         var mm = task.getMultimodal();
-        var vision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        // Per-task override first, then what an openai-compatible endpoint declares.
+        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, processedParams);
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
         attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
@@ -1661,7 +1664,7 @@ public class LlmTask implements ILifecycleTask {
         // Same JSON policy the live loop would have applied — a resumed continuation
         // must not silently lose the API-level JSON the paused turn was running with.
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
-                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA));
+                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA), processedParams);
 
         // Stream the continuation's model rounds too. Replayed transcript rounds
         // never call the model, so the bridge only ever forwards NEW tokens — text
@@ -2450,6 +2453,8 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                // Self-hosted endpoints: required fields and capability flags.
+                OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {

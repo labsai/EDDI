@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.capability;
 
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -11,6 +12,7 @@ import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +37,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li><b>Built-in defaults</b> — the conservative, model-aware table
  * below.</li>
  * </ol>
+ * A self-hosted {@code openai-compatible} endpoint has no model table: it
+ * declares vision in its own parameters, which {@link #visionOverride} places
+ * just below the per-task override. Its built-in default is unsupported.
  * Unknown providers <em>and unknown models</em> resolve to
  * <em>unsupported</em>, so the forwarder falls back to text extraction or a
  * metadata note and never sends content that would error the provider.
@@ -115,6 +120,27 @@ public class ModelCapabilityService {
      */
     public ModelCapabilityService(Function<String, Optional<String>> configLookup) {
         this.configLookup = configLookup;
+    }
+
+    /**
+     * The vision override to resolve with, given the per-task setting and the
+     * parameters of the model the request goes to.
+     * <p>
+     * A self-hosted {@code openai-compatible} endpoint cannot be judged by model
+     * name — {@code Qwen-VL}, a fine-tune or a served alias look alike — so it
+     * declares vision itself with {@code vision=true}. Precedence: an explicit
+     * per-task {@code multimodal.vision} wins; otherwise {@code vision=true} turns
+     * images on for any model name; otherwise the usual chain applies (deployment
+     * override, then the built-in default, which is <em>off</em> for this type).
+     *
+     * @throws IllegalArgumentException
+     *             when the endpoint's {@code vision} flag is not a boolean
+     */
+    public static Support visionOverride(Support taskOverride, String provider, Map<String, String> parameters) {
+        if (taskOverride != null && taskOverride != Support.AUTO) {
+            return taskOverride;
+        }
+        return OpenAiCompatibleEndpoint.declaresVision(provider, parameters) ? Support.ON : Support.AUTO;
     }
 
     public boolean supportsVision(String provider, String model) {

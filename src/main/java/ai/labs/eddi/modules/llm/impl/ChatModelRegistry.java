@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -271,7 +272,7 @@ public class ChatModelRegistry {
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
-        var cacheKey = new ModelCacheKey(type, filteredParams);
+        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
 
         ChatModel cached = modelCache.get(cacheKey);
         if (cached != null) {
@@ -299,7 +300,8 @@ public class ChatModelRegistry {
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
         modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
         var rawModel = modelBuilder.build(resolvedParams);
-        var model = ObservableChatModel.wrap(rawModel, type, timeoutMs, logReq, logResp, telemetryListener);
+        var model = ObservableChatModel.wrap(rawModel, type, timeoutMs, logReq, logResp, telemetryListener,
+                telemetryProvider(type, resolvedParams));
         publishIfCurrent(modelCache, cacheKey, model, generationAtBuildStart);
 
         return model;
@@ -326,7 +328,7 @@ public class ChatModelRegistry {
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
         var filteredParams = filterParams(processedParams);
-        var cacheKey = new ModelCacheKey(type, filteredParams);
+        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
 
         StreamingChatModel cached = streamingModelCache.get(cacheKey);
         if (cached != null) {
@@ -353,7 +355,8 @@ public class ChatModelRegistry {
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
             modelBuilder.warnAboutUnrecognisedParameters(type, resolvedParams);
             var rawModel = modelBuilder.buildStreaming(resolvedParams);
-            var model = ObservableStreamingChatModel.wrap(rawModel, type, logReq, logResp, telemetryListener);
+            var model = ObservableStreamingChatModel.wrap(rawModel, type, logReq, logResp, telemetryListener,
+                    telemetryProvider(type, resolvedParams));
             publishIfCurrent(streamingModelCache, cacheKey, model, generationAtBuildStart);
             return model;
         } catch (UnsupportedOperationException e) {
@@ -449,6 +452,32 @@ public class ChatModelRegistry {
         returnMap.remove(KEY_CONVERT_TO_OBJECT);
         normalizeTimeout(returnMap);
         return returnMap;
+    }
+
+    /**
+     * The parameters a model is cached under. An {@code openai-compatible}
+     * endpoint's capability flags ({@code jsonMode}, {@code jsonModeWithTools},
+     * {@code vision}) shape each request, never the model instance, so two tasks on
+     * one endpoint that differ only in those flags share one model. Everything else
+     * — including {@code serverName}, which the telemetry decorator bakes in —
+     * stays in the key.
+     */
+    static Map<String, String> cacheKeyParams(String type, Map<String, String> filteredParams) {
+        if (!OpenAiCompatibleEndpoint.isType(type)) {
+            return filteredParams;
+        }
+        var keyParams = new HashMap<>(filteredParams);
+        OpenAiCompatibleEndpoint.CAPABILITY_KEYS.forEach(keyParams::remove);
+        return keyParams;
+    }
+
+    /**
+     * The provider name telemetry reports: an {@code openai-compatible} endpoint's
+     * bounded {@code serverName}; {@code null} (the default resolution) for every
+     * other type.
+     */
+    static String telemetryProvider(String type, Map<String, String> resolvedParams) {
+        return OpenAiCompatibleEndpoint.isType(type) ? OpenAiCompatibleEndpoint.telemetryName(resolvedParams) : null;
     }
 
     /**

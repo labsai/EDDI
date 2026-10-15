@@ -437,7 +437,9 @@ eddi_llm_request_errors_total               # Failed calls; tags: provider, mode
 **Tag values are bounded.** `provider` is langchain4j's provider name (`OPEN_AI`,
 `ANTHROPIC`, …) or, where langchain4j has no name for the provider and reports
 `OTHER` (Jlama and HuggingFace, which used to share `provider="OTHER"`), EDDI's own
-model type (`jlama`, `huggingface`). `model` keeps its own
+model type (`jlama`, `huggingface`). A self-hosted `openai-compatible` endpoint
+reports its `serverName` (`vllm`, `llama-server`, …; default `openai-compatible`)
+instead of `OPEN_AI`, bounded to 32 characters of `a-z 0-9 . _ -`. `model` keeps its own
 series for the first 100 distinct model names a node sees, cut to 128 characters;
 every name after that is tagged `model="other"`. A model name can be templated from
 a property, and a property can be user input, so an uncapped tag was an unbounded

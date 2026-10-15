@@ -1391,3 +1391,86 @@ Model-specific behaviour:
 
 - `store` — **No effect** on models matching `^.*`: Groq does not support store.
 - `metadata` — **No effect** on models matching `^.*`: Groq does not support metadata.
+
+## Self-hosted (OpenAI-compatible) (`openai-compatible`)
+
+OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does, plus the vendor fields below. Model-version rules listed here are specific to this provider.
+
+
+### Model
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `jsonMode` | boolean | default `False` | Turn on if the server accepts response_format json_object; JSON agents then get API-level JSON on requests without tools. |
+| `jsonModeWithTools` | boolean | default `False` | Turn on if the server also accepts response_format together with tool definitions in one request. |
+| `vision` | boolean | default `False` | Turn on if the served model accepts images; image attachments are then sent to it whatever its name. |
+
+### Sampling
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `temperature` | double | 0–2 | Higher values make answers more varied, lower values more predictable. |
+| `topP` | double | 0–1 | Only consider the most likely words whose probabilities add up to this share; change this or temperature, not both. |
+| `frequencyPenalty` | double | -2–2 | Positive values discourage the model from repeating the same words. |
+| `presencePenalty` | double | -2–2 | Positive values encourage the model to move on to new topics. |
+| `seed` | int |  | Ask for repeatable answers to identical requests; best effort only. |
+| `logitBias` | json |  | Make specific tokens more or less likely, as a JSON object of token id to a bias between -100 and 100. |
+
+### Reasoning and thinking
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `reasoningEffort` | enum | `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max` | How much the model thinks before answering; more effort is slower and costs more. |
+| `returnThinking` | boolean |  | Keep the model's reasoning text from the response instead of discarding it. |
+| `sendThinking` | boolean |  | Send earlier reasoning back to the model on the next request, which some servers require during tool use. |
+
+### Output
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `maxTokens` | int | 1– | Upper limit on the tokens the model may produce (max_tokens). |
+| `maxCompletionTokens` | int | 1– | Upper limit on the tokens the model may produce, including its hidden reasoning. |
+| `stopSequences` | stringList |  | Up to four pieces of text that make the model stop writing when it produces them. |
+| `responseFormat` | enum | `text` / `json` | Set to json to make the model answer with a JSON object. |
+| `verbosity` | enum | `low` / `medium` / `high` | How long and detailed the answer should be (GPT-5 and later). |
+| `strictJsonSchema` | boolean |  | Make structured JSON answers follow the requested schema exactly. |
+
+### Tools
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `parallelToolCalls` | boolean |  | Allow the model to call several tools in one step, if the server supports it. |
+| `strictTools` | boolean |  | Make tool call arguments follow the tool's schema exactly. |
+
+### Caching
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `promptCacheKey` | string |  | Requests that share this key are more likely to reuse cached prompt prefixes. |
+| `promptCacheRetention` | enum | `in_memory` / `24h` | How long a cached prompt prefix is kept. |
+
+### Safety
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `user` | string |  | Legacy identifier of the end user; prefer safetyIdentifier and promptCacheKey. |
+| `safetyIdentifier` | string |  | A stable, hashed id of the end user that helps OpenAI detect abuse; never send personal data. |
+
+### Connection
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `serviceTier` | enum | `auto` / `default` / `flex` / `priority`; default `auto` | Processing tier: flex is cheaper but slower, priority is faster but costs more. |
+| `organizationId` | string |  | The OpenAI organization to bill when the key belongs to several. |
+| `projectId` | string |  | The OpenAI project to use when the key belongs to several. |
+| `serverName` | string | default `openai-compatible` | Names the server in traces and metrics, e.g. vllm or llama-server; up to 32 characters of a-z, 0-9, dot, dash and underscore. |
+
+### Advanced
+
+| Parameter | Type | Values | Description |
+| --- | --- | --- | --- |
+| `store` | boolean |  | Keep the request and answer in your OpenAI account for evaluations and distillation. |
+| `metadata` | json |  | Up to 16 tags stored with the completion, as a JSON object of string keys and values. |
+| `customHeaders` | json |  | Extra HTTP headers sent with every request, as a JSON object of header name to value. |
+| `customQueryParams` | json |  | Extra URL query parameters, as a JSON object of name to value. |
+| `customParameters` | json |  | Extra fields for the request body as a JSON object, e.g. vLLM's chat_template_kwargs or guided_json; must be a JSON object. |
