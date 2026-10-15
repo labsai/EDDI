@@ -63,6 +63,16 @@ after that change.
 MongoDB operations per successful turn are unchanged (≈ 22.7). A refused turn still costs its
 conversation loads, because admission sits after them. That is WS3a's single-load work.
 
+### `/v1` answers capacity refusals as 503
+
+Review found that the OpenAI-compatible bridge turned any `RejectedExecutionException` into a 500:
+the new in-flight limit, coordinator saturation and the shutdown drain alike. That applied to the sync
+response, the streaming error event and conversation start. It now answers 503 `capacity_exceeded` with
+`Retry-After: 5`, like every other surface. A quota-store outage gets 503
+`quota_accounting_unavailable` (`OpenAiApiException.capacityExceeded`,
+`OpenAiConversationBridge.rejectionAsApiException`, and a `Retry-After` header from
+`OpenAiExceptionMapper`).
+
 ### Sizing the limit
 
 A later comparison run (the load-test harness, MongoDB and PostgreSQL, two rounds each) found that
