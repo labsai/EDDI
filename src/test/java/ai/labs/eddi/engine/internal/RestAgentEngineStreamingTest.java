@@ -278,7 +278,7 @@ class RestAgentEngineStreamingTest {
         }
 
         @Test
-        @DisplayName("cascade handler methods emit cascade_step_start and cascade_escalation SSE events")
+        @DisplayName("cascade, retry and guardrail handler methods emit their SSE events")
         void forwardsCascadeEvents() throws Exception {
             var eventSink = mock(SseEventSink.class);
             var sse = mock(Sse.class);
@@ -312,6 +312,12 @@ class RestAgentEngineStreamingTest {
             handler.onLlmRetry("invalid_json", 1);
             verify(eventBuilder).name("llm_retry");
             verify(eventSink, times(3)).send(sseEvent);
+
+            handler.onGuardrailTriggered("pii-redaction", "output", "redact", "support");
+            verify(eventBuilder).name("guardrail_triggered");
+            verify(eventBuilder).data(any(Class.class),
+                    eq(" {\"type\":\"pii-redaction\",\"phase\":\"output\",\"action\":\"redact\",\"taskId\":\"support\"}"));
+            verify(eventSink, times(4)).send(sseEvent);
         }
 
         @Test

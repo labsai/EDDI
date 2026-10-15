@@ -51,6 +51,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.TASK_ERRORS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CASCADE_MODEL;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COMPILED_PROMPT;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_CONFIDENCE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_GUARDRAIL_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_NAME;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
@@ -643,6 +644,22 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
+     * Every guardrail record of the current step, in write order: the lists stored
+     * under {@code audit:guardrail:} keys by the LLM task. Each record is a flat
+     * map of strings and numbers, so it canonicalizes stably for the ledger HMAC.
+     */
+    private List<Object> collectGuardrailRecords(IConversationMemory.IConversationStep currentStep) {
+        List<Object> records = new ArrayList<>();
+        for (IData<?> element : currentStep.getAllElements()) {
+            if (element != null && element.getKey() != null && element.getKey().startsWith(AUDIT_GUARDRAIL_PREFIX)
+                    && element.getResult() instanceof List<?> entries) {
+                records.addAll(entries);
+            }
+        }
+        return records;
+    }
+
+    /**
      * Deep-redacts a collected tool trace before it is placed on the SSE
      * {@code task_complete} summary. Each entry is a {@code Map} whose
      * {@code arguments}/{@code result} strings are LLM- or user-controlled and may
@@ -706,6 +723,16 @@ public class LifecycleManager implements ILifecycleManager {
         // so an auditor summing cost over the turn would read a multiple of the truth
         // with no way to correct it after the fact.
         boolean llmTask = isLlmTask(task);
+
+        // Guardrail evidence (WS4): one record per guardrail that fired this turn,
+        // across every audit:guardrail:<phase>:<type> key. Absent when none fired —
+        // an agent without guardrails gets no "guardrails" member at all.
+        if (llmTask) {
+            List<Object> guardrails = collectGuardrailRecords(currentStep);
+            if (!guardrails.isEmpty()) {
+                output.put("guardrails", guardrails);
+            }
+        }
 
         // Collect LLM details (if present).
         Map<String, Object> llmDetail = null;
