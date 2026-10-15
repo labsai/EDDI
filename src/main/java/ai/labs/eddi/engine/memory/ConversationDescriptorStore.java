@@ -15,15 +15,19 @@ import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.util.Date;
 import java.util.List;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * @author ginccc
  */
 @ApplicationScoped
 public class ConversationDescriptorStore implements IConversationDescriptorStore {
+    private static final Logger LOGGER = Logger.getLogger(ConversationDescriptorStore.class);
     private final DescriptorStore<ConversationDescriptor> descriptorStore;
 
     /**
@@ -39,17 +43,40 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
         descriptorStore = new DescriptorStore<>(storageFactory, documentBuilder, ConversationDescriptor.class);
     }
 
+    /**
+     * Stamps the conversation's {@code lastModifiedOn}, which the retention sweep
+     * and the listings sort and filter on, with one update of that field.
+     * <p>
+     * This used to be a read-modify-write: the current id, the descriptor read
+     * twice over and a version-checked replace of the whole document — three reads
+     * and a write on every turn, and a replace that could undo a concurrent edit of
+     * any other descriptor field. A failure is logged and swallowed rather than
+     * thrown: the turn has already been stored, and the next turn stamps again.
+     */
     @Override
     public void updateTimeStamp(String conversationId) {
         ConversationDescriptorMemo.forget(descriptorMemoInstance, conversationId);
+        long now = System.currentTimeMillis();
         try {
-            // Read the current descriptor, update the timestamp, and save it back
+            if (!descriptorStore.touchLastModified(conversationId, now)) {
+                LOGGER.debugf("No live descriptor to stamp for conversation %s", sanitize(conversationId));
+            }
+        } catch (UnsupportedOperationException e) {
+            updateTimeStampByRewrite(conversationId, now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not update lastModifiedOn of conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
+    /** For a storage backend that cannot update a single field. */
+    private void updateTimeStampByRewrite(String conversationId, long now) {
+        try {
             var resourceId = descriptorStore.getCurrentResourceId(conversationId);
             var descriptor = descriptorStore.readDescriptor(conversationId, resourceId.getVersion());
-            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
+            descriptor.setLastModifiedOn(new Date(now));
             descriptorStore.setDescriptor(conversationId, resourceId.getVersion(), descriptor);
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-            // Log and skip — same behavior as the MongoDB version when document not found
+            LOGGER.debugf("No live descriptor to stamp for conversation %s", sanitize(conversationId));
         }
     }
 
