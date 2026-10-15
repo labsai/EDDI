@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -287,12 +288,19 @@ public class AgentFactory implements IAgentFactory {
             }
         }
 
-        if (vaultGrantGate != null && !vaultGrantGate.mayDeploy(agentId, version)) {
+        var grantCheck = vaultGrantGate != null ? vaultGrantGate.checkForDeployment(agentId, version) : null;
+        if (grantCheck != null && grantCheck.blocked()) {
             // Refused: the agent names a vault secret it is not granted. Release the
             // placeholder we just claimed so the key does not stay IN_PROGRESS, and
             // report ERROR so the caller does not record a successful deployment.
+            //
+            // The reason is kept on the refused entry, so the deploy response and the
+            // detailed deployment status can say WHICH secret and how to grant it. It
+            // used to reach the server log only, and the API answered a bare ERROR. A
+            // later successful deploy replaces the entry, which clears it.
             var refused = createInProgressDummyAgent(agentId, version);
             refused.setDeploymentStatus(Deployment.Status.ERROR);
+            refused.setDeploymentFailure(grantCheck.toFailure(agentId, version));
             agentEnvironment.replace(id, placeholder, refused);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -332,16 +340,41 @@ public class AgentFactory implements IAgentFactory {
             lintCompatibility((Agent) agent, agentId, version);
         } catch (ServiceException e) {
             log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + e.getMessage(), e);
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
         } catch (IllegalAccessException e) {
             // The placeholder is still published; mark it ERROR so a retry is not
             // mistaken for a deployment still in flight.
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
             placeholder.setDeploymentStatus(Deployment.Status.ERROR);
             finalDeploymentProcess.completed(Deployment.Status.ERROR);
             throw new RuntimeException(e);
+        } catch (RuntimeException e) {
+            // Without this branch an unchecked failure while building the agent left
+            // the IN_PROGRESS placeholder published for good: every later deploy of
+            // this version answered "already in progress" and returned, and the only
+            // way out was a restart.
+            log.error("Agent deployment failed for " + sanitize(agentId) + " v" + version + ": " + sanitize(e.getMessage()), e);
+            placeholder.setDeploymentFailure(DeploymentFailure.generic(failureMessage(agentId, version)));
+            placeholder.setDeploymentStatus(Deployment.Status.ERROR);
+            finalDeploymentProcess.completed(Deployment.Status.ERROR);
+            logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
+            throw e;
         }
+    }
+
+    /**
+     * The message a {@link DeploymentFailure#DEPLOYMENT_FAILED} carries. Fixed on
+     * purpose: it reaches the waited deploy response, the detailed status and the
+     * MCP deploy result, and a cause's own message can hold a credential, a
+     * connection string or an internal path. The cause itself is in the server log,
+     * which is where this message sends the reader — as the waited deploy always
+     * has ("Check server logs for details").
+     */
+    static String failureMessage(String agentId, Integer version) {
+        return String.format("Agent '%s' v%s could not be deployed. Check the server log for details.", agentId, version);
     }
 
     private void lintCompatibility(Agent agent, String agentId, Integer version) {

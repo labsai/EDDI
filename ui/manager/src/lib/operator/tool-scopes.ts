@@ -129,6 +129,14 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /groups/{groupId}/conversations/{groupConversationId}",
   // Operations
   "GET /administration/{environment}/deploymentstatus/{agentId}",
+  // What would stop a deploy (EDDI 6.6.0+): the restricted vault keys an agent
+  // uses and is not granted. Read-only and secret-free (an editor gets counts,
+  // only an admin the ids on a grant). Its write counterpart — appending an
+  // agent to a grant, POST /secretstore/secrets/{tenantId}/{keyName}/grant/
+  // agents/{agentId} — is deliberately NOT on this list, nor anywhere else
+  // here: no LLM may widen a vault grant. Granting stays a human action in the
+  // Manager's grant dialog.
+  "GET /administration/{environment}/deploy/{agentId}/preflight",
   "GET /administration/coordinator/status",
   // The cluster console's read side (EDDI 6.6+): the health verdict and node
   // cards, the lease list, the activity timeline, the stuck-conversation
