@@ -539,7 +539,10 @@ public class A2ATaskHandler {
             return;
         }
 
-        conversationService.sayStreaming(conversationId, DETAILED, true, null, inputData,
+        // The agent-qualified overload, as the non-streaming path's say() above:
+        // A2A is driven by a peer agent, not by the signed-in owner of a stored
+        // conversation, so the caller-facing ownership check does not apply here.
+        conversationService.sayStreaming(Environment.production, prepared.agentId(), conversationId, DETAILED, true, null, inputData,
                 new StreamingResponseHandler() {
                     private boolean firstChunk = true;
 
