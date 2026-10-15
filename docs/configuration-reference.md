@@ -379,6 +379,22 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.templating.max-output-chars` | `2000000` | Upper bound for what one template render may produce, and for any single string an expression evaluates to while rendering. `0` disables it. See [security.md](security.md#runtime-template-engine) |
 | `eddi.templating.max-iterations` | `100000` | Upper bound for loop iterations per template render, summed over nested loops. `0` disables it |
 
+### Outbound HTTP client
+
+EDDI's own outbound requests (the built-in tools, the RAG crawler, OAuth token requests and attachment downloads so far) go through one facade, which applies the SSRF checks, redirect rules, cross-origin credential stripping, deadlines and body caps. More callers are moving onto it: `httpcalls.json`, LLM providers, A2A and remote sync still use their own clients today, and these settings do not reach them yet.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.http.outbound.engine` | `jdk` | The HTTP engine. `jdk` (`java.net.http`) is the only one in this release; any other value fails startup |
+| `eddi.http.outbound.default.connect-timeout` | value of `httpClient.connectTimeoutInMillis` (10 s) | TCP + TLS connect timeout per hop, as a duration (`10s`, `500ms`) |
+| `eddi.http.outbound.default.total-timeout` | 3 × connect timeout | Least wall-clock budget of one exchange, every redirect hop and buffered body included. A request whose own timeout is longer gets that instead |
+| `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2` |
+| `eddi.http.outbound.default.tls.configuration-name` | *(empty)* | A named Quarkus TLS configuration (`quarkus.tls.<name>.*`) for trust and client certificates. Empty uses the JVM's default trust store. An unknown name fails the first request |
+| `eddi.http.outbound.proxy.host` | *(empty)* | Forward proxy for all of the above. Empty means no proxy |
+| `eddi.http.outbound.proxy.port` | *(none)* | Required when `eddi.http.outbound.proxy.host` is set |
+| `eddi.http.outbound.proxy.non-proxy-hosts` | *(empty)* | `\|`-separated hosts that bypass the proxy; `*` is a wildcard at either end, e.g. `localhost\|*.internal` |
+| `eddi.http.outbound.proxy.credentials` | *(empty)* | `user:password` for the proxy, ideally a `${vault:...}` reference. Answered only to the proxy's challenges, never a target server's. An unresolvable vault reference fails closed. The JDK does not send Basic credentials when tunnelling HTTPS through a proxy unless `jdk.http.auth.tunneling.disabledSchemes` allows it |
+
 ---
 
 ## Attachments

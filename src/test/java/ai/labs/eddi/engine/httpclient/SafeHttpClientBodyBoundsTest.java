@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.httpclient;
 
+import ai.labs.eddi.engine.httpclient.outbound.CallerFrames;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,7 +24,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -35,7 +35,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -148,7 +147,7 @@ class SafeHttpClientBodyBoundsTest {
         // Created on the client's executor: the caller's own frames ride along as a
         // suppressed exception, so a log shows who made the call.
         boolean callerFramesAttached = Arrays.stream(e.getSuppressed())
-                .filter(SafeHttpClient.CallerFrames.class::isInstance)
+                .filter(CallerFrames.class::isInstance)
                 .flatMap(s -> Arrays.stream(s.getStackTrace()))
                 .anyMatch(frame -> frame.getClassName().startsWith(SafeHttpClientBodyBoundsTest.class.getName()));
         assertTrue(callerFramesAttached, "the caller's stack frames must be attached to the rethrown exception");
@@ -240,59 +239,6 @@ class SafeHttpClientBodyBoundsTest {
         assertTrue(redirectBodyCutOff.await(5, TimeUnit.SECONDS), "the redirect body must not be read to the end");
     }
 
-    @Test
-    @DisplayName("the budget is three connect timeouts, or the request's own timeout when longer")
-    void totalBudget() {
-        SafeHttpClient client = new SafeHttpClient(10_000);
-        URI uri = URI.create("https://example.com/");
-
-        assertEquals(Duration.ofSeconds(30), client.totalBudget(HttpRequest.newBuilder(uri).build()));
-        assertEquals(Duration.ofSeconds(30), client.totalBudget(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).build()));
-        // A caller that asked for a long timeout (an A2A peer configured for 120s)
-        // must not be cut short by the default budget.
-        assertEquals(Duration.ofSeconds(120), client.totalBudget(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(120)).build()));
-    }
-
-    @Test
-    @DisplayName("discard: a body under the limit is drained and completes with null")
-    void discardDrainsSmallBody() {
-        var cancelled = new boolean[1];
-        var requested = new long[1];
-        var subscriber = new SafeHttpClient.DiscardingSubscriber<String>(10, OptionalLong.empty());
-        subscriber.onSubscribe(subscription(requested, cancelled));
-        subscriber.onNext(List.of(ByteBuffer.wrap(new byte[6])));
-        subscriber.onComplete();
-
-        assertEquals(Long.MAX_VALUE, requested[0]);
-        assertFalse(cancelled[0]);
-        assertNull(subscriber.getBody().toCompletableFuture().join());
-    }
-
-    @Test
-    @DisplayName("discard: past the limit the connection is dropped and the body still completes normally")
-    void discardStopsPastLimitWithoutFailing() {
-        var cancelled = new boolean[1];
-        var subscriber = new SafeHttpClient.DiscardingSubscriber<String>(10, OptionalLong.empty());
-        subscriber.onSubscribe(subscription(new long[1], cancelled));
-        subscriber.onNext(List.of(ByteBuffer.wrap(new byte[6]), ByteBuffer.wrap(new byte[6])));
-
-        assertTrue(cancelled[0]);
-        assertNull(subscriber.getBody().toCompletableFuture().join());
-    }
-
-    @Test
-    @DisplayName("discard: a declared Content-Length above the limit reads nothing and completes normally")
-    void discardRefusesOversizedDeclaredLength() {
-        var cancelled = new boolean[1];
-        var requested = new long[1];
-        var subscriber = new SafeHttpClient.DiscardingSubscriber<String>(10, OptionalLong.of(11));
-        subscriber.onSubscribe(subscription(requested, cancelled));
-
-        assertEquals(0, requested[0]);
-        assertTrue(cancelled[0]);
-        assertNull(subscriber.getBody().toCompletableFuture().join());
-    }
-
     private void finalOk() {
         server.createContext("/final", exchange -> {
             byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
@@ -300,20 +246,6 @@ class SafeHttpClientBodyBoundsTest {
             exchange.getResponseBody().write(body);
             exchange.close();
         });
-    }
-
-    private static Flow.Subscription subscription(long[] requested, boolean[] cancelled) {
-        return new Flow.Subscription() {
-            @Override
-            public void request(long n) {
-                requested[0] = n;
-            }
-
-            @Override
-            public void cancel() {
-                cancelled[0] = true;
-            }
-        };
     }
 
     /** A handler's own failure type, which must reach the caller unchanged. */
