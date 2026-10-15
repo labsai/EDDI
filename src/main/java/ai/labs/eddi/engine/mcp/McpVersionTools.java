@@ -23,6 +23,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
  *
  * @since 6.5.0
  */
+@McpErrorResults
 @ApplicationScoped
 public class McpVersionTools {
 
