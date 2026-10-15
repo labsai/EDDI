@@ -45,6 +45,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import ai.labs.eddi.utils.PageBounds;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -256,9 +257,10 @@ public class RestConversationStore implements IRestConversationStore {
         if (limit == null || limit < 1) {
             limit = 20;
         }
-        if (limit > 100) {
-            limit = 100;
-        }
+        // Above the deployment-wide page ceiling the request is refused, not clamped
+        // (this used to clamp silently at 100): a client that asked for more than a
+        // page can hold must not mistake the truncated page for the whole.
+        PageBounds.requireLimit(limit);
         if ((long) index * limit > MAX_RESULT_OFFSET) {
             throw new BadRequestException(format("index * limit must not exceed %d. To reach older conversations, narrow the "
                     + "listing with agentId, conversationState or filter.", MAX_RESULT_OFFSET));
