@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ChevronDown, ChevronUp, Check } from "lucide-react";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { MessageSquareQuote, Copy, CheckCircle2, Code, ArrowRight, ArrowDown, ChevronDown, ChevronUp, Check } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
@@ -172,6 +172,15 @@ export function DiscussionTranscript({
   const [synthCollapsible, setSynthCollapsible] = useState(false);
   const synthRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The pause banner (approval or a member's turn) — scrolled to and focused
+  // when the discussion reaches an AWAITING_* state, so the thing that unblocks
+  // it is not left below the fold of a long transcript.
+  const pauseBannerRef = useRef<HTMLDivElement>(null);
+  // Whether the reader is at the bottom: new entries only pull the view down
+  // while they are. Scrolled up reading an earlier phase, the view stays put
+  // and a "new messages" button offers the way back.
+  const nearBottomRef = useRef(true);
+  const [hasNewBelow, setHasNewBelow] = useState(false);
 
   // Resolve theme colors
   const style = discussionStyle || "ROUND_TABLE";
@@ -235,12 +244,57 @@ export function DiscussionTranscript({
   // Memoize phases to avoid re-grouping on every render
   const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
 
-  // Auto-scroll to bottom when new entries arrive during streaming (smooth)
+  const handleBodyScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+    nearBottomRef.current = atBottom;
+    if (atBottom) setHasNewBelow(false);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    nearBottomRef.current = true;
+    setHasNewBelow(false);
+  }, []);
+
+  // Follow new entries while streaming — but only for a reader who is at the
+  // bottom. It used to scroll down on every entry, yanking someone reading an
+  // earlier phase away from what they were reading. Instant rather than smooth:
+  // a smooth scroll is re-targeted by every entry and is indistinguishable from
+  // the reader scrolling, which would make "at the bottom" flap.
   useEffect(() => {
-    if (isStreaming && scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }
+    const el = scrollRef.current;
+    if (!isStreaming || !el) return;
+    if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+    else setHasNewBelow(true);
   }, [isStreaming, effectiveTranscript.length]);
+
+  // A new discussion (or a different one) starts at its own top.
+  const conversationKey = conversation?.id ?? streamState?.conversationId ?? null;
+  useEffect(() => {
+    nearBottomRef.current = true;
+    setHasNewBelow(false);
+  }, [conversationKey]);
+
+  // The discussion has stopped on a human: bring the banner into view and move
+  // focus to it (unless the reader is typing somewhere), so the pause is neither
+  // below the fold nor silent to a screen reader.
+  const awaitingHuman = effectiveState === "AWAITING_APPROVAL" || effectiveState === "AWAITING_HUMAN_INPUT";
+  useEffect(() => {
+    if (!awaitingHuman) return;
+    const el = pauseBannerRef.current;
+    if (!el) return;
+    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    const active = document.activeElement;
+    const typing =
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+    if (!typing) el.focus({ preventScroll: true });
+  }, [awaitingHuman, effectiveState]);
 
   // Measure synthesis content for collapsible
   useEffect(() => {
@@ -358,6 +412,8 @@ export function DiscussionTranscript({
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
               <button
+                type="button"
+                aria-pressed={allowHtml}
                 onClick={() => setAllowHtml((v) => !v)}
                 className={cn(
                   "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] transition-colors border",
@@ -454,8 +510,28 @@ export function DiscussionTranscript({
         </div>
       )}
 
-      {/* Transcript body */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* Transcript body. `role="log"` is a polite live region: new entries are
+          announced as they are ADDED (`aria-relevant`), not every token of one
+          that is still being written. */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      <div
+        ref={scrollRef}
+        onScroll={handleBodyScroll}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label={t("groups.transcriptLabel", "Discussion transcript")}
+        className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
+      >
+        {/* Said once when the discussion stops on a human, in addition to the
+            banner: the state chip changing is not announced by anything else. */}
+        {awaitingHuman && (
+          <p className="sr-only" role="status" data-testid="transcript-pause-announcement">
+            {effectiveState === "AWAITING_APPROVAL"
+              ? t("groups.announceAwaitingApproval", "The discussion is paused and waiting for your approval.")
+              : t("groups.announceAwaitingHuman", "The discussion is waiting for a member's response.")}
+          </p>
+        )}
         {/* Task Board — placed at top for better visibility */}
         {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
           <TaskBoard
@@ -634,7 +710,13 @@ export function DiscussionTranscript({
 
         {/* HITL Approval Banner */}
         {effectiveState === "AWAITING_APPROVAL" && (
-          <div className="px-6 py-4">
+          <div
+            ref={pauseBannerRef}
+            tabIndex={-1}
+            aria-live="off"
+            className="px-6 py-4 focus:outline-none"
+            data-testid="approval-banner-anchor"
+          >
             <ApprovalBanner
               surface="group"
               pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
@@ -674,7 +756,13 @@ export function DiscussionTranscript({
           const phaseName = pending?.phaseName ?? conversation?.pausedPhaseName ?? undefined;
           if (!displayName) return null;
           return (
-            <div className="px-6 py-4">
+            <div
+              ref={pauseBannerRef}
+              tabIndex={-1}
+              aria-live="off"
+              className="px-6 py-4 focus:outline-none"
+              data-testid="human-turn-banner-anchor"
+            >
               <HumanTurnBanner
                 displayName={displayName}
                 renderedPrompt={persisted?.renderedPrompt ?? ""}
@@ -697,6 +785,18 @@ export function DiscussionTranscript({
             <span className="text-sm text-destructive font-medium">⚠️ {streamError}</span>
           </div>
         )}
+      </div>
+      {hasNewBelow && (
+        <button
+          type="button"
+          onClick={jumpToLatest}
+          className="absolute bottom-3 inset-x-0 mx-auto z-10 flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-lg hover:bg-muted"
+          data-testid="transcript-new-messages"
+        >
+          <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("groups.newMessages", "New messages")}
+        </button>
+      )}
       </div>
     </div>
   );

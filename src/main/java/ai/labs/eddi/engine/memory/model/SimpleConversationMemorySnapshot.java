@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.model.TurnError;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
 import java.util.Date;
@@ -45,7 +47,12 @@ public class SimpleConversationMemorySnapshot {
      * as its {@code task_failed} event, so a plain REST caller no longer receives
      * HTTP 200 with an ERROR state and nothing to say why. The full per-task digest
      * stays in the turn's {@code conversationOutputs[…].taskErrors}.
+     * <p>
+     * It is the one {@link TurnError} object everywhere: the failing task
+     * ({@code taskId}, {@code taskType}, {@code errorType}) together with the
+     * machine-readable {@code code}, {@code retryable} and {@code retryAfterMs}.
      */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private TurnError error;
     private Instant hitlPausedAt;
     /**
@@ -212,23 +219,6 @@ public class SimpleConversationMemorySnapshot {
 
     public void setError(TurnError error) {
         this.error = error;
-    }
-
-    /**
-     * A failed turn's reason, shaped like the streaming {@code task_failed} event.
-     *
-     * @param taskId
-     *            the failing lifecycle task, e.g. {@code eddi://ai.labs.llm}
-     * @param taskType
-     *            its type, e.g. {@code langchain}
-     * @param errorType
-     *            the failure class used for metrics and audit (e.g.
-     *            {@code LifecycleException}), when known
-     * @param message
-     *            sanitized description — URLs, stack frames and credentials are
-     *            stripped before it leaves the server
-     */
-    public record TurnError(String taskId, String taskType, String errorType, String message) {
     }
 
     public void setEndReason(String endReason) {

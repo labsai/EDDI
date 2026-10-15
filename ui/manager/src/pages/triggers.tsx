@@ -278,11 +278,20 @@ function TriggerDialog({
     initial?.agentDeployments ?? [{ environment: "production", agentId: "" }],
   );
 
+  const validDeps = deployments.filter((d) => d.agentId.trim());
+  // Why Save is unavailable, said out loud. With only the intent filled in the
+  // button stayed enabled and clicking it did nothing at all.
+  const blockedReason = !intent.trim()
+    ? t("triggers.needIntent", "Enter an intent to save.")
+    : validDeps.length === 0
+      ? t("triggers.needAgent", "Choose at least one agent to save.")
+      : null;
+
   const handleSave = useCallback(() => {
     if (!intent.trim()) return;
-    const validDeps = deployments.filter((d) => d.agentId.trim());
-    if (validDeps.length === 0) return;
-    onSave({ intent: intent.trim(), agentDeployments: validDeps });
+    const deps = deployments.filter((d) => d.agentId.trim());
+    if (deps.length === 0) return;
+    onSave({ intent: intent.trim(), agentDeployments: deps });
   }, [intent, deployments, onSave]);
 
   const dialogTitle = initial ? t("triggers.editTitle", "Edit Trigger") : t("triggers.createTitle", "Create Trigger");
@@ -311,8 +320,8 @@ function TriggerDialog({
           />
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">{t("triggers.deployments", "Agent Deployments")}</label>
+        <div className="space-y-2" role="group" aria-labelledby="trigger-deployments-label">
+          <span id="trigger-deployments-label" className="block text-xs font-medium text-muted-foreground">{t("triggers.deployments", "Agent Deployments")}</span>
           {deployments.map((dep, i) => (
             <div key={i} className="flex gap-2 items-center">
               <AgentPicker
@@ -358,9 +367,15 @@ function TriggerDialog({
           </button>
         </div>
 
+        {blockedReason && (
+          <p id="trigger-save-reason" className="text-xs text-muted-foreground" data-testid="trigger-save-reason">
+            {blockedReason}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose} size="sm">{t("common.cancel")}</Button>
-          <Button onClick={handleSave} disabled={isPending || !intent.trim()} size="sm" data-testid="trigger-save-btn">
+          <Button onClick={handleSave} disabled={isPending || blockedReason !== null} aria-describedby={blockedReason ? "trigger-save-reason" : undefined} size="sm" data-testid="trigger-save-btn">
             {isPending ? t("common.saving", "Saving...") : t("common.save")}
           </Button>
         </div>

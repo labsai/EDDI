@@ -35,11 +35,16 @@ interface BackendOptions {
   startStatus?: number;
   /** Delay the start response, to leave a window for a second click. */
   startDelayMs?: number;
+  /** Snapshot returned by a conversation GET once a stream has been sent. */
+  snapshotAfterStream?: Record<string, unknown>;
+  /** Status for a conversation GET once a stream has been sent. */
+  readStatusAfterStream?: number;
 }
 
 function mockBackend(options: BackendOptions = {}) {
   const calls: Call[] = [];
   let started = 0;
+  let streamed = false;
   globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -68,6 +73,7 @@ function mockBackend(options: BackendOptions = {}) {
       return new Response("Forbidden", { status: 403 });
     }
     if (url.includes("/stream")) {
+      streamed = true;
       const enc = new TextEncoder();
       return new Response(
         new ReadableStream({
@@ -81,6 +87,12 @@ function mockBackend(options: BackendOptions = {}) {
     }
     if (url.includes("/endConversation")) {
       return new Response(null, { status: 200 });
+    }
+    if (streamed && options.readStatusAfterStream) {
+      return new Response("unavailable", { status: options.readStatusAfterStream });
+    }
+    if (streamed && options.snapshotAfterStream) {
+      return new Response(JSON.stringify(options.snapshotAfterStream), { status: 200 });
     }
     return new Response(
       JSON.stringify(
@@ -427,5 +439,51 @@ describe("image output items", () => {
       "src",
       "https://cdn.example/a.png",
     );
+  });
+});
+
+describe("a done event whose payload cannot be read", () => {
+  // A proxy that truncates the frame, say. The turn finished on the server, so
+  // the reply must still appear — and the message must not be handed back as
+  // if it had never been sent.
+  const unreadableDone = 'event: done\ndata: {"conversationState":"REA\n\n';
+
+  it("shows the reply and quick replies from the conversation re-read", async () => {
+    mockBackend({
+      frames: [unreadableDone],
+      snapshotAfterStream: {
+        agentId: "agent-1",
+        agentVersion: 1,
+        conversationState: "READY",
+        conversationOutputs: [
+          {
+            input: "what can you do",
+            output: [{ type: "text", text: "I can book a table." }],
+            quickReplies: [{ value: "Book now", expressions: "book" }],
+          },
+        ],
+        undoAvailable: true,
+      },
+    });
+    renderAt("/chat/production/agent-1");
+
+    await send("what can you do");
+
+    expect(await screen.findByText("I can book a table.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Book now" })).toBeInTheDocument();
+    expect(screen.getByText("what can you do")).toBeInTheDocument();
+    expect((screen.getByTestId("chat-input") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("ends the turn with a notice, keeping the sent message, when the re-read fails too", async () => {
+    mockBackend({ frames: [unreadableDone], readStatusAfterStream: 503 });
+    renderAt("/chat/production/agent-1");
+
+    await send("what can you do");
+
+    expect(await screen.findByText(/response may be incomplete/i)).toBeInTheDocument();
+    expect(screen.getByText("what can you do")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("chat-input")).not.toBeDisabled());
+    expect((screen.getByTestId("chat-input") as HTMLTextAreaElement).value).toBe("");
   });
 });

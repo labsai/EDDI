@@ -20,13 +20,24 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!name.trim()) return;
     try {
       const result = await createAgent.mutateAsync({
         agent: { workflows: [], channels: [] },
-        name,
+        name: name.trim(),
         description,
       });
-      toast.success(t("agents.createSuccess", "Agent created successfully"));
+      if (result.namingFailed) {
+        // The agent exists — carry on to it and say the name did not stick.
+        toast.warning(
+          t(
+            "agents.createNamingFailed",
+            "Agent created, but its name could not be saved. Rename it from its page."
+          )
+        );
+      } else {
+        toast.success(t("agents.createSuccess", "Agent created successfully"));
+      }
       setName("");
       setDescription("");
       onClose();
@@ -68,6 +79,9 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
             placeholder={t("agents.namePlaceholder", "My Agent")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             autoFocus
+            required
+            aria-required="true"
+            data-testid="agent-name-input"
           />
         </div>
 
@@ -109,7 +123,7 @@ export function CreateAgentDialog({ open, onClose }: CreateAgentDialogProps) {
           </button>
           <button
             type="submit"
-            disabled={createAgent.isPending}
+            disabled={createAgent.isPending || !name.trim()}
             className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {createAgent.isPending

@@ -33,6 +33,7 @@ import {
   setBaseUrl,
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
+import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
 import {
   isDemoMode,
   demoStartConversation,
@@ -57,6 +58,7 @@ import {
   isTurnPaused,
   parseToolCallName,
   UNCONSUMED_STREAM_ERROR_CODES,
+  type DoneSnapshot,
   type OutputImage,
 } from "@/api/sse-events";
 import type {
@@ -83,13 +85,19 @@ interface TurnContext {
   stateBeforeSend: ConversationState | null;
   /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
   userMessageId: string | null;
+  /**
+   * The stream ended with a `done` whose payload could not be parsed. The turn
+   * finished on the server, but its outputs, quick replies and state are not
+   * known yet: the caller re-reads the conversation and applies that instead.
+   */
+  doneUnreadable: boolean;
 }
 
 function newTurn(
   stateBeforeSend: ConversationState | null,
   userMessageId: string | null = null,
 ): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId };
+  return { tokenCount: 0, stateBeforeSend, userMessageId, doneUnreadable: false };
 }
 
 function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
@@ -168,28 +176,60 @@ const COLOR_PARAM_MAP: Record<string, string[]> = {
   fontFamily:   ["--chat-font"],
 };
 
+/**
+ * Whether a `?…Color=` value is a plain colour. The value lands in a CSS
+ * custom property, and a custom property takes ANY token sequence — so an
+ * unchecked `?bgColor=url(https://tracker/x)` made the widget fetch a URL the
+ * link's author chose, and a garbage value silently broke the theme. Accepted:
+ * hex (#rgb, #rgba, #rrggbb, #rrggbbaa), rgb()/rgba()/hsl()/hsla() with plain
+ * numeric arguments, and named colours (letters only — `transparent`,
+ * `rebeccapurple`). Nothing with a URL, quote, semicolon or nested function.
+ */
+export function isSafeCssColor(value: string): boolean {
+  const v = value.trim();
+  if (!v || v.length > 64) return false;
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return true;
+  if (/^(?:rgb|rgba|hsl|hsla)\(\s*[-+0-9.%\s,/deg]+\)$/i.test(v)) return true;
+  return /^[a-z]{3,30}$/i.test(v);
+}
+
+/**
+ * Whether a `?fontFamily=` value is a plain font list: names, spaces, commas,
+ * hyphens and quotes — no parentheses, so no url() or other function.
+ */
+export function isSafeFontFamily(value: string): boolean {
+  const v = value.trim();
+  return !!v && v.length <= 200 && /^[a-z0-9 ,'"_-]+$/i.test(v);
+}
+
 /** Apply color overrides from query params as CSS custom properties */
-function applyColorOverrides(params: URLSearchParams): void {
+export function applyColorOverrides(params: URLSearchParams): void {
   const root = document.documentElement;
   for (const [param, vars] of Object.entries(COLOR_PARAM_MAP)) {
     const value = params.get(param);
-    if (value) {
-      for (const cssVar of vars) {
-        root.style.setProperty(cssVar, value);
-      }
+    if (!value) continue;
+    const valid = param === "fontFamily" ? isSafeFontFamily(value) : isSafeCssColor(value);
+    if (!valid) {
+      console.warn(`[eddi-chat] ignoring ${param}: not a plain ${param === "fontFamily" ? "font list" : "colour"}`);
+      continue;
+    }
+    for (const cssVar of vars) {
+      root.style.setProperty(cssVar, value.trim());
     }
   }
-  // accentColor also derives soft/hover variants automatically
+  // accentColor also derives soft/hover variants automatically, from a valid
+  // accent only.
   const accent = params.get("accentColor");
-  if (accent) {
+  if (accent && isSafeCssColor(accent)) {
+    const color = accent.trim();
     // color-mix works for any CSS color — a named color, rgb(), hsl() — where
     // appending a hex alpha only ever worked for a 6-digit #rrggbb.
     const tint = (percent: number) =>
-      `color-mix(in srgb, ${accent} ${percent}%, transparent)`;
+      `color-mix(in srgb, ${color} ${percent}%, transparent)`;
     root.style.setProperty("--chat-accent-soft", tint(13));
     root.style.setProperty("--chat-qr-border", tint(40));
     root.style.setProperty("--chat-qr-bg", tint(18));
-    root.style.setProperty("--chat-qr-text", accent);
+    root.style.setProperty("--chat-qr-text", color);
     root.style.setProperty("--chat-qr-hover", tint(33));
   }
 }
@@ -222,30 +262,11 @@ export function sanitizeApiServer(raw: string | null): string | null {
   return raw;
 }
 
-/**
- * Origins allowed to hand the widget a bearer token via postMessage, read from
- * `?tokenOrigin=` (comma-separated, exact `scheme://host[:port]` each). This is
- * an explicit operator opt-in: with no value, no postMessage token is accepted.
- * A malformed entry is dropped rather than widening the allow-list.
- */
-export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
-  const raw = params.get("tokenOrigin");
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((o) => o.trim())
-    .filter((o) => {
-      if (!o) return false;
-      try {
-        return new URL(o).origin === o;
-      } catch {
-        return false;
-      }
-    });
-}
+// Re-exported: the helpers' tests and older imports name it from here.
+export { parseAllowedTokenOrigins };
 
 /** Read feature toggles from query parameters */
-function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
+export function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   const cfg: Partial<ChatConfig> = {};
   if (params.get("hideUndo") === "true") cfg.enableUndo = false;
   if (params.get("hideRedo") === "true") cfg.enableRedo = false;
@@ -254,9 +275,13 @@ function parseConfigFromQuery(params: URLSearchParams): Partial<ChatConfig> {
   if (params.get("hideStreaming") === "true") cfg.enableStreaming = false;
   if (params.get("hideLogo") === "true") cfg.showLogo = false;
   if (params.get("hideAgentName") === "true") cfg.showAgentName = false;
-  if (params.get("theme")) cfg.theme = params.get("theme") as ChatConfig["theme"];
+  // Only the three modes the theme hook knows. Anything else was written into
+  // data-theme verbatim, matched no stylesheet and left the widget unstyled.
+  const theme = params.get("theme");
+  if (theme === "dark" || theme === "light" || theme === "system") cfg.theme = theme;
   if (params.get("title")) cfg.title = params.get("title")!;
-  if (params.get("accentColor")) cfg.accentColor = params.get("accentColor")!;
+  const accent = params.get("accentColor");
+  if (accent && isSafeCssColor(accent)) cfg.accentColor = accent.trim();
   return cfg;
 }
 
@@ -397,60 +422,143 @@ export function ChatWidget() {
     // login-CSRF vector — a crafted link can silently authenticate the widget as
     // someone else's session. Fully closing this needs a PKCE/OIDC login flow
     // (out of scope here). Prefer the postMessage handshake below, or config.
-    setAuthToken(urlToken ?? state.config.authToken ?? null);
+    //
+    // Only a token that is actually present is installed: clearing it here
+    // would wipe one the host handed over by postMessage.
+    const explicit = urlToken ?? state.config.authToken ?? null;
+    if (explicit) setAuthToken(explicit);
   }, [urlToken, state.config.authToken]);
 
-  /* ─── Accept a token via postMessage from an allow-listed parent ──
-     Safer than the URL: the token never touches the address bar, history or
-     Referer. Only origins named in ?tokenOrigin= are honoured, and only when
-     the message comes from our own parent frame. */
+  /* ─── Token hand-off from an allow-listed host page ──
+     See api/embed-auth.ts for the protocol. The widget announces itself to
+     the parent (at an allow-listed origin, never "*"), accepts a token only
+     from that parent at an allow-listed origin, asks again before the token
+     expires, and answers a 401 by asking for a fresh one and repeating the
+     request once — so a conversation started before the host's first token
+     arrived, or a turn sent after it expired, still goes through. */
   useEffect(() => {
-    const allowed = tokenOriginParam
-      ? parseAllowedTokenOrigins(new URLSearchParams({ tokenOrigin: tokenOriginParam }))
-      : [];
-    if (allowed.length === 0) return;
-    let received = false;
-    const onMessage = (event: MessageEvent) => {
-      if (!allowed.includes(event.origin)) return;
-      if (event.source !== window.parent) return;
-      const data = event.data as unknown;
-      if (
-        data &&
-        typeof data === "object" &&
-        (data as { type?: unknown }).type === "eddi-chat-token" &&
-        typeof (data as { token?: unknown }).token === "string"
-      ) {
-        setAuthToken((data as { token: string }).token);
-        received = true;
-        setTokenReady(true);
-      }
-    };
-    window.addEventListener("message", onMessage);
-
-    // Handshake: tell the parent we can take the token now. Posted to each
-    // allowed origin by name — never "*" — so only a page the operator listed
-    // learns that this widget is waiting. Repeated while waiting because the
-    // parent's listener may not exist yet when the first one goes out.
-    const announceReady = () => {
-      if (window.parent === window) return;
-      for (const origin of allowed) {
-        window.parent.postMessage({ type: "eddi-chat-ready" }, origin);
-      }
-    };
-    announceReady();
+    const allowedOrigins = parseAllowedTokenOrigins(
+      new URLSearchParams(tokenOriginParam ? { tokenOrigin: tokenOriginParam } : {}),
+    );
+    if (allowedOrigins.length === 0) return;
+    const embed = startEmbedAuth({ allowedOrigins, onToken: () => setTokenReady(true) });
+    // Repeat the ready signal while the start is held: the parent's listener
+    // may not exist yet when the first one goes out.
     const repeat = setInterval(() => {
-      if (received || tokenReadyRef.current) clearInterval(repeat);
-      else announceReady();
+      if (tokenReadyRef.current) clearInterval(repeat);
+      else embed.announce();
     }, READY_REPEAT_MS);
     // A parent that never answers must not leave the widget on a blank start
     // for good: go ahead unauthenticated, so the failure is the clear 401 copy.
     const giveUp = setTimeout(() => setTokenReady(true), TOKEN_WAIT_MS);
     return () => {
-      window.removeEventListener("message", onMessage);
+      embed.stop();
       clearInterval(repeat);
       clearTimeout(giveUp);
     };
   }, [tokenOriginParam]);
+
+  /* ─── Apply a finished turn ───────────────────
+     The `done` payload, or — when that was unreadable — the conversation
+     re-read after the stream, which carries the same two fields.        */
+  const applyDoneSnapshot = useCallback(
+    (snapshot: DoneSnapshot | null, turn: TurnContext): void => {
+      const lastOutput = snapshot?.conversationOutputs?.length
+        ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
+        : undefined;
+      const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
+      const outputImages = extractOutputImages(lastOutput?.output);
+      const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
+
+      // A requested input field (a password prompt) arrives here on the
+      // streaming path, which is the default. Reading it only from the
+      // non-streaming snapshot meant the key went into the plain textarea,
+      // was shown in clear and was sent without `secretInput`. A skipped
+      // turn carries the PREVIOUS step's outputs, so it must not re-apply.
+      const inputField = skipped ? null : findInputField(lastOutput?.output);
+      if (inputField) {
+        dispatch({ type: "SET_INPUT_FIELD", field: inputField });
+      }
+
+      if (skipped) {
+        // The server dropped this turn without consuming it. The payload
+        // carries the PREVIOUS step's outputs, so its quick replies must
+        // not be applied — doing so re-offered stale buttons as if new.
+        //
+        // The user's own bubble must go too: leaving it there asserts the
+        // message was sent when it never reached the agent. Withdrawing it
+        // also hands the text back to the composer so it can be resent.
+        const pending = turn.userMessageId
+          ? pendingTurnsRef.current.get(turn.userMessageId)
+          : undefined;
+        if (turn.userMessageId) {
+          pendingTurnsRef.current.delete(turn.userMessageId);
+          dispatch({
+            type: "WITHDRAW_LAST_USER_MESSAGE",
+            messageId: turn.userMessageId,
+            draft: pending?.text,
+            attachments: pending?.attachments,
+            wasSecret: pending?.isSecret,
+          });
+        } else {
+          dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+        }
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: makeNotice(
+            skippedTurnMessage(snapshot?.conversationState),
+          ),
+        });
+      } else if (turn.tokenCount === 0) {
+        // No tokens, but the turn WAS accepted. Any text lives only in the
+        // done payload — including HITL's pending-approval placeholder,
+        // which arrives as a bare string. Dropping it left a paused turn
+        // rendering as "No response".
+        dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+        if (outputText || outputImages.length) {
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage(outputText, outputImages),
+          });
+        }
+        if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
+          dispatch({
+            type: "SET_QUICK_REPLIES",
+            replies: lastOutput?.quickReplies ?? [],
+          });
+        }
+      } else if (snapshot?.conversationOutputs?.length) {
+        // Tokens already rendered the answer, but responseValidation can
+        // SUPERSEDE them (fallback text) after the fact. The snapshot is
+        // authoritative.
+        if (outputText) {
+          dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+        }
+        // Images never stream as tokens; the snapshot is their only source.
+        if (outputImages.length) {
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: makeAgentMessage("", outputImages),
+          });
+        }
+        dispatch({
+          type: "SET_QUICK_REPLIES",
+          replies: lastOutput?.quickReplies ?? [],
+        });
+      }
+
+      if (snapshot?.conversationState) {
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: snapshot.conversationState,
+        });
+      }
+
+      dispatch({ type: "FINISH_STREAMING" });
+      dispatch({ type: "SET_PROCESSING", value: false });
+    },
+    [dispatch],
+  );
 
   /* ─── SSE event handler (declared early to avoid reference issues) ──
      Returns `true` when the stream is logically complete (done / error),
@@ -515,99 +623,17 @@ export function ChatWidget() {
 
         case "done": {
           const snapshot = parseDoneSnapshot(event.data);
-          const lastOutput = snapshot?.conversationOutputs?.length
-            ? snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1]
-            : undefined;
-          const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
-          const outputImages = extractOutputImages(lastOutput?.output);
-          const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
-
-          // A requested input field (a password prompt) arrives here on the
-          // streaming path, which is the default. Reading it only from the
-          // non-streaming snapshot meant the key went into the plain textarea,
-          // was shown in clear and was sent without `secretInput`. A skipped
-          // turn carries the PREVIOUS step's outputs, so it must not re-apply.
-          const inputField = skipped ? null : findInputField(lastOutput?.output);
-          if (inputField) {
-            dispatch({ type: "SET_INPUT_FIELD", field: inputField });
+          if (!snapshot) {
+            // The turn finished on the server, but its payload is unreadable
+            // (a proxy truncated it, say). Applying it as an empty snapshot
+            // ended a zero-token turn with no reply and no quick replies, and
+            // treating it as a stream failure would hand back a draft the agent
+            // already consumed. Stop reading; the caller re-reads the
+            // conversation and applies that instead.
+            turn.doneUnreadable = true;
+            return true;
           }
-
-          if (skipped) {
-            // The server dropped this turn without consuming it. The payload
-            // carries the PREVIOUS step's outputs, so its quick replies must
-            // not be applied — doing so re-offered stale buttons as if new.
-            //
-            // The user's own bubble must go too: leaving it there asserts the
-            // message was sent when it never reached the agent. Withdrawing it
-            // also hands the text back to the composer so it can be resent.
-            const pending = turn.userMessageId
-              ? pendingTurnsRef.current.get(turn.userMessageId)
-              : undefined;
-            if (turn.userMessageId) {
-              pendingTurnsRef.current.delete(turn.userMessageId);
-              dispatch({
-                type: "WITHDRAW_LAST_USER_MESSAGE",
-                messageId: turn.userMessageId,
-                draft: pending?.text,
-                attachments: pending?.attachments,
-                wasSecret: pending?.isSecret,
-              });
-            } else {
-              dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            }
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: makeNotice(
-                skippedTurnMessage(snapshot?.conversationState),
-              ),
-            });
-          } else if (turn.tokenCount === 0) {
-            // No tokens, but the turn WAS accepted. Any text lives only in the
-            // done payload — including HITL's pending-approval placeholder,
-            // which arrives as a bare string. Dropping it left a paused turn
-            // rendering as "No response".
-            dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-            if (outputText || outputImages.length) {
-              dispatch({
-                type: "ADD_MESSAGE",
-                message: makeAgentMessage(outputText, outputImages),
-              });
-            }
-            if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
-              dispatch({
-                type: "SET_QUICK_REPLIES",
-                replies: lastOutput?.quickReplies ?? [],
-              });
-            }
-          } else if (snapshot?.conversationOutputs?.length) {
-            // Tokens already rendered the answer, but responseValidation can
-            // SUPERSEDE them (fallback text) after the fact. The snapshot is
-            // authoritative.
-            if (outputText) {
-              dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
-            }
-            // Images never stream as tokens; the snapshot is their only source.
-            if (outputImages.length) {
-              dispatch({
-                type: "ADD_MESSAGE",
-                message: makeAgentMessage("", outputImages),
-              });
-            }
-            dispatch({
-              type: "SET_QUICK_REPLIES",
-              replies: lastOutput?.quickReplies ?? [],
-            });
-          }
-
-          if (snapshot?.conversationState) {
-            dispatch({
-              type: "SET_CONVERSATION_STATE",
-              state: snapshot.conversationState,
-            });
-          }
-
-          dispatch({ type: "FINISH_STREAMING" });
-          dispatch({ type: "SET_PROCESSING", value: false });
+          applyDoneSnapshot(snapshot, turn);
           return true;
         }
 
@@ -674,7 +700,7 @@ export function ChatWidget() {
           return false;
       }
     },
-    [dispatch],
+    [dispatch, applyDoneSnapshot],
   );
 
   /* ─── Process conversation snapshot ─────────── */
@@ -1052,6 +1078,7 @@ export function ChatWidget() {
           for await (const event of events) {
             if (handleSSEEvent(event, demoTurn)) demoDone = true;
           }
+          if (demoTurn.doneUnreadable) applyDoneSnapshot(null, demoTurn);
           // Safety net: finish streaming if the stream closed without a done event
           if (!demoDone) dispatch({ type: "FINISH_STREAMING" });
 
@@ -1148,6 +1175,10 @@ export function ChatWidget() {
               true,
             );
             if (gen !== generationRef.current) return;
+            // The `done` payload could not be read, so nothing of the turn's
+            // outcome has been applied yet. This read of the current step
+            // carries the same two fields — state and outputs — so it stands in.
+            if (turn.doneUnreadable && !stopped()) applyDoneSnapshot(after, turn);
             dispatch({
               type: "SET_UNDO_REDO",
               undoAvailable: after.undoAvailable ?? false,
@@ -1176,6 +1207,23 @@ export function ChatWidget() {
           } catch {
             // Availability refresh is best-effort; a failure here must not
             // sink an otherwise successful turn.
+            //
+            // Unless it was also the only source of the turn's outcome: then
+            // end the turn, and say so when nothing of the reply is on screen.
+            // The message WAS consumed, so the draft is not handed back.
+            if (
+              turn.doneUnreadable &&
+              gen === generationRef.current &&
+              !stopped()
+            ) {
+              applyDoneSnapshot(null, turn);
+              if (turn.tokenCount === 0) {
+                dispatch({
+                  type: "ADD_MESSAGE",
+                  message: makeNotice(`⚠️ ${t("send.connectionLost")}`),
+                });
+              }
+            }
           }
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
@@ -1194,6 +1242,11 @@ export function ChatWidget() {
           dispatch({ type: "SET_PROCESSING", value: false });
         }
       } catch (err) {
+        // A failure that lands after New Conversation belongs to the turn the
+        // user abandoned. Every branch below writes into the transcript —
+        // withdrawing a bubble, restoring a draft, a warning, a state re-read —
+        // and would otherwise do so in the conversation that replaced it.
+        if (sendGen !== generationRef.current) return;
         // Stop (or New conversation) ended this turn on purpose — the abort
         // surfaces here as a rejected fetch. The UI was reset by whoever
         // stopped it, and what happens next must not be reported as a failure.
@@ -1355,6 +1408,7 @@ export function ChatWidget() {
       dispatch,
       processSnapshot,
       handleSSEEvent,
+      applyDoneSnapshot,
       isDemo,
       isManagedAgent,
       intent,
@@ -1436,6 +1490,8 @@ export function ChatWidget() {
       if (gen !== generationRef.current) return;
       applyHistorySnapshot(snapshot, { undoAvailable: false, redoAvailable: true });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       // 409 is expected while the conversation is paused or a turn is running —
       // undo/redo availability is deliberately NOT pause-aware server-side, so
       // the button can be enabled while the operation is refused.
@@ -1448,7 +1504,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
 
@@ -1472,6 +1530,8 @@ export function ChatWidget() {
       if (gen !== generationRef.current) return;
       applyHistorySnapshot(snapshot, { undoAvailable: true, redoAvailable: false });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       dispatch({
         type: "ADD_MESSAGE",
         message: makeNotice(
@@ -1481,7 +1541,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, isDemo, applyHistorySnapshot]);
 
@@ -1578,9 +1640,13 @@ export function ChatWidget() {
 
   const handleCancel = useCallback(async () => {
     if (!state.conversationId) return;
+    const gen = generationRef.current;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
       await cancelConversation(state.conversationId);
+      // "This request was cancelled." and EXECUTION_INTERRUPTED describe the
+      // conversation that was cancelled, not one started since.
+      if (gen !== generationRef.current) return;
       dispatch({ type: "SET_APPROVAL_STATUS", status: null });
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
       dispatch({
@@ -1588,6 +1654,7 @@ export function ChatWidget() {
         message: makeNotice(t("send.cancelled")),
       });
     } catch (err) {
+      if (gen !== generationRef.current) return;
       if (err instanceof ApiError && err.status === 409) {
         // Nothing to cancel — it resolved between render and click.
         dispatch({ type: "SET_APPROVAL_STATUS", status: null });
@@ -1595,7 +1662,9 @@ export function ChatWidget() {
         console.error("Cancel failed:", err);
       }
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId]);
 
@@ -1622,6 +1691,8 @@ export function ChatWidget() {
       // Retry re-reads the same step that failed; its output is already shown.
       processSnapshot(snapshot, { dedupe: true });
     } catch (err) {
+      // Abandoned by New Conversation: its error is not the new one's.
+      if (gen !== generationRef.current) return;
       dispatch({
         type: "ADD_MESSAGE",
         message: makeNotice(
@@ -1631,7 +1702,9 @@ export function ChatWidget() {
         ),
       });
     } finally {
-      dispatch({ type: "SET_PROCESSING", value: false });
+      if (gen === generationRef.current) {
+        dispatch({ type: "SET_PROCESSING", value: false });
+      }
     }
   }, [dispatch, state.conversationId, processSnapshot]);
 
@@ -1649,8 +1722,12 @@ export function ChatWidget() {
     dispatch({ type: "SET_THINKING", value: false });
 
     if (!state.conversationId || isDemo) return;
+    const gen = generationRef.current;
     try {
       await cancelConversation(state.conversationId);
+      // New Conversation while the cancel was in flight: the fresh
+      // conversation is not interrupted.
+      if (gen !== generationRef.current) return;
       dispatch({ type: "SET_CONVERSATION_STATE", state: "EXECUTION_INTERRUPTED" });
     } catch (err) {
       // 409 = nothing to cancel; the turn finished as we clicked.

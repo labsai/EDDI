@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { JsonEditor } from "./json-editor";
@@ -53,6 +54,12 @@ export interface ConfigEditorLayoutProps {
   jsonSchema?: object;
   /** Called when user wants to compare versions (opens diff dialog) */
   onCompare?: () => void;
+  /**
+   * Reports the working copy whenever it changes. For a host that must act on
+   * unsaved edits from outside the layout: the Studio asks before it replaces
+   * this editor with another stage's, and saves from there if asked to.
+   */
+  onDraftChange?: (draft: { data: string; dirty: boolean }) => void;
 }
 
 type EditorTab = "form" | "json";
@@ -83,6 +90,7 @@ export function ConfigEditorLayout({
   renderFormEditor,
   jsonSchema,
   onCompare,
+  onDraftChange,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
   const hasFormEditor = !!(renderFormEditor || children);
@@ -127,6 +135,10 @@ export function ConfigEditorLayout({
 
   const isDirty = editedData !== data;
 
+  useEffect(() => {
+    onDraftChange?.({ data: editedData, dirty: editedData !== data });
+  }, [editedData, data, onDraftChange]);
+
   // Discard confirmation state
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
 
@@ -150,11 +162,18 @@ export function ConfigEditorLayout({
       setInvalidJson(null);
       return true;
     } catch (e) {
-      setInvalidJson(e instanceof Error ? e.message : String(e));
+      const detail = e instanceof Error ? e.message : String(e);
+      setInvalidJson(detail);
       setActiveTab("json");
+      // Also a toast: the refusal is easy to miss when the user saved from the
+      // form tab, which is not where the inline message renders.
+      toast.error(
+        t("editor.invalidJsonSave", "Not saved — the JSON is invalid. Fix it in the JSON tab."),
+        { description: detail },
+      );
       return false;
     }
-  }, [editedData]);
+  }, [editedData, t]);
 
   const handleSave = useCallback(() => {
     if (!validJsonOrExplain()) return;
@@ -174,8 +193,29 @@ export function ConfigEditorLayout({
     setInvalidJson(null);
   }, []);
 
+  // Ctrl/Cmd+S saves, as in every editor. Re-bound on each change so it never
+  // saves stale data.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const busy = isSaving || isSaveAndDeploying;
+  useEffect(() => {
+    if (readOnly) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        // Only for the editor that has focus: several can be mounted at once
+        // (the Studio mounts a desktop and a mobile panel), and an unfocused
+        // one must not save on a shortcut meant for another.
+        const target = e.target instanceof Node ? e.target : document.activeElement;
+        if (!containerRef.current || !target || !containerRef.current.contains(target)) return;
+        e.preventDefault();
+        if (isDirty && !busy) handleSave();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [readOnly, isDirty, busy, handleSave]);
+
   return (
-    <div className="space-y-4" data-testid="config-editor-layout">
+    <div ref={containerRef} className="space-y-4" data-testid="config-editor-layout">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -184,12 +224,20 @@ export function ConfigEditorLayout({
             <h2 className="text-lg font-semibold text-foreground">{typeName}</h2>
             <p className="font-mono text-xs text-muted-foreground">{resourceId}</p>
           </div>
-          <VersionPicker
-            versions={versions}
-            current={currentVersion}
-            onChange={onVersionChange}
-            disabled={isDirty || isSaving || isSaveAndDeploying}
-          />
+          <span
+            title={
+              isDirty
+                ? t("editor.versionLockedDirty", "Save or discard your changes to switch versions")
+                : undefined
+            }
+          >
+            <VersionPicker
+              versions={versions}
+              current={currentVersion}
+              onChange={onVersionChange}
+              disabled={isDirty || isSaving || isSaveAndDeploying}
+            />
+          </span>
           {onCompare && versions.length > 1 && (
             <button
               onClick={onCompare}
@@ -211,12 +259,12 @@ export function ConfigEditorLayout({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          {saveSuccess && (
+          {saveSuccess && !isDirty && (
             <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400" data-testid="save-success">
               ✓ {t("editor.saved", "Saved successfully")}
             </span>
           )}
-          {saveError && (
+          {saveError && !invalidJson && (
             <span className="text-xs font-medium text-destructive" data-testid="save-error">
               {saveError}
             </span>

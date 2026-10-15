@@ -50,12 +50,14 @@ final class OpenAiTestFixtures {
         int modelCacheSeconds = 30;
         boolean exposeStatelessVariants = true;
         boolean adoptLegacyHeaderMappings = false;
+        String chatKeyFallback = OpenAiCompatConfig.CHAT_KEY_FALLBACK_HISTORY;
+        int maxConversationSteps = 0;
 
         OpenAiCompatConfig build() {
             return new OpenAiCompatConfig(enabled, Optional.ofNullable(apiKey), httpPolicy,
                     trustUserHeaders, allowAnonymous, defaultUser, environment, requestTimeoutSeconds,
                     maxConcurrentRequests, modelCacheSeconds, exposeStatelessVariants,
-                    adoptLegacyHeaderMappings);
+                    adoptLegacyHeaderMappings, chatKeyFallback, maxConversationSteps);
         }
     }
 }

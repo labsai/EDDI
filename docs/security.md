@@ -10,13 +10,18 @@ This document describes the security measures applied to EDDI's AI Agent Tooling
 
 **Version: ≥6.0.0**
 
-EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) using the Quarkus OIDC extension. Authentication is **disabled by default** — the system runs open (no login required) unless explicitly enabled.
+EDDI authenticates requests via [Keycloak](https://www.keycloak.org/) (or another OIDC provider) using the Quarkus OIDC extension. Enforcement is switched by `quarkus.oidc.tenant-enabled`, which defaults to `false` — but EDDI does **not** silently run open in production. In production launch mode (the packaged jar and the Docker image; `quarkus:dev` and tests are exempt) two startup guards refuse to boot an unauthenticated instance:
+
+- **`AuthStartupGuard`** fails startup when OIDC is off unless the operator opts out explicitly with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`. With that opt-out it boots, logs a `[SECURITY]` ERROR at startup and repeats a WARN every hour.
+- **`HighValueSurfaceGuard`** fails startup when `authorization.enabled` is false (it follows `quarkus.oidc.tenant-enabled`) unless each of the two most sensitive surfaces is opted out on its own: `EDDI_MCP_ALLOW_UNAUTHENTICATED=true` for `/mcp` and `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true` for `/secretstore`. The general opt-out above does not cover them.
+
+The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick start works, and binds EDDI to `127.0.0.1` for that reason. For anything reachable from another machine, remove them and set `QUARKUS_OIDC_TENANT_ENABLED=true` instead.
 
 ### Architecture
 
 EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
 
-The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` handshake from an allow-listed parent origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. With `?tokenOrigin=` set, the widget announces `{"type":"eddi-chat-ready"}` to each allowed origin by name (never `*`), holds the start of the conversation until the host answers with `{"type":"eddi-chat-token","token":"…"}` (up to 5 seconds, then it starts without a token), and accepts the token only from its own parent window; the full handshake is in the [Chat UI README](https://github.com/labsai/EDDI/blob/main/ui/chat/README.md#passing-a-token-from-the-embedding-page). A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
 
 ```
 Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
