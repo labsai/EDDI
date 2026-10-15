@@ -684,6 +684,8 @@ quarkus.http.ssl-port=8443
 quarkus.http.insecure-requests=disabled
 ```
 
+For post-quantum key exchange (`X25519MLKEM768`) and what the JDK supports today, see [Cryptography → TLS key exchange](cryptography.md#tls-key-exchange).
+
 ### Internal Traffic
 
 If EDDI and its database run on the same host or within a private network,
@@ -761,3 +763,4 @@ are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-ba
 - [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide
 - [EU AI Act Compliance](eu-ai-act-compliance.md) — EU AI Act compliance
 - [Compliance Data Flow](compliance-data-flow.md) — Data flow diagram for auditors
+- [Cryptography](cryptography.md) — Algorithm inventory and post-quantum readiness
