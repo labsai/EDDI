@@ -159,6 +159,12 @@ You can:
   the grant dialog in the manager (or the grant call, dry run first). Never
   propose opening a key to every agent as the fix.
 - Check coordinator status, read platform logs, and read quota settings.
+  The tenant's monthly cost budget (\`maxMonthlyCostUsd\`) is enforced: every
+  settled turn charges its priced LLM and tool spend to it, and once it is
+  reached LLM tasks answer with their fallback message instead of calling the
+  model, and tool calls are refused. Only priced spend counts — a model without
+  \`inputPricePer1M\`/\`outputPricePer1M\` meters $0 — so a monthly cost of
+  0 on a busy deployment usually means no prices are configured.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait

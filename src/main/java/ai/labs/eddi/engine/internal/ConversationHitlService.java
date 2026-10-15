@@ -416,7 +416,16 @@ class ConversationHitlService {
             final AtomicReference<ConversationState> committedResumeState = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
-                    handler != null ? returnMemory -> {
+                    returnMemory -> {
+                        // Settle point of a resumed turn: charge what the resume added
+                        // to the step's priced spend (the pre-pause part was charged
+                        // when the pause settled — audit:metered_cost says how much).
+                        // Runs with or without a client handler: an internally driven
+                        // resume (timeout policy) spends just the same.
+                        conversationService.meterTurnCost(returnMemory);
+                        if (handler == null) {
+                            return;
+                        }
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
                         memorySnapshot.setEnvironment(environment);
                         if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -431,7 +440,7 @@ class ConversationHitlService {
                         }
                         conversationService.cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         handler.onComplete(memorySnapshot);
-                    } : null);
+                    });
 
             Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
 

@@ -442,8 +442,11 @@ public class MemberTurnExecutor {
 
                     // Wave 0, F5: harvest this member's tracked cost so far.
                     // Attributed under the CONVERSATION key, not the agent id: costs
-                    // are per-conversation (AUDIT_COST is that conversation's running
-                    // total), and GroupCostLedger replaces rather than adds. A turn in
+                    // are per-conversation, and GroupCostLedger replaces rather than
+                    // adds. (AUDIT_COST itself is a per-STEP total — the cost of this
+                    // turn, not of the conversation so far. Tenant metering does NOT
+                    // happen here: this member turn already went through
+                    // ConversationService.say, whose settle point charged it.) A turn in
                     // a separate conversation attributed to the agent's own key would
                     // overwrite that agent's real accumulated cost with this
                     // conversation's smaller one — silently shrinking totalCost and

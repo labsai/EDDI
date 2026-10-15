@@ -13,19 +13,14 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
 
 import java.util.List;
-
-import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * REST implementation for tenant quota management.
  */
 @ApplicationScoped
 public class RestTenantQuota implements IRestTenantQuota {
-
-    private static final Logger LOGGER = Logger.getLogger(RestTenantQuota.class);
 
     private final ITenantQuotaStore quotaStore;
     private final TenantQuotaService quotaService;
@@ -77,31 +72,7 @@ public class RestTenantQuota implements IRestTenantQuota {
         // what drops the stale entry so the new limits apply to the very next turn.
         quotaService.setQuota(storedQuota);
 
-        // After the write returns, not before it. The warning asserts that the limit
-        // *is* stored and will apply once cost recording is wired; emitted first, a
-        // store failure left that claim in the log with nothing written behind it —
-        // the operator reading it would go looking for a row that does not exist.
-        warnIfCostBudgetIsUnenforceable(storedQuota);
         return Response.ok(storedQuota).build();
-    }
-
-    /**
-     * Say out loud that a monthly cost budget is accepted but not enforced.
-     * <p>
-     * {@code TenantQuotaService.checkCostBudget} reads an accumulator only
-     * {@code recordCost} writes, and {@code recordCost} has no production caller —
-     * so the recorded cost is always 0 and the gate always allows. Storing the
-     * value silently let an admin set a budget, see it in the UI, and believe a
-     * tenant was capped. The value is still stored (it is configuration a future
-     * release will enforce, and rejecting it would break existing rows); the
-     * operator is simply told.
-     */
-    private static void warnIfCostBudgetIsUnenforceable(TenantQuota quota) {
-        if (quota.enabled() && quota.maxMonthlyCostUsd() != UNLIMITED) {
-            LOGGER.warnf("Tenant '%s' was given maxMonthlyCostUsd=%.2f, but the monthly cost budget is NOT enforced yet "
-                    + "(nothing records tool cost against it). The limit is stored and will apply once cost recording is wired.",
-                    sanitize(quota.tenantId()), quota.maxMonthlyCostUsd());
-        }
     }
 
     /**

@@ -329,8 +329,18 @@ eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_quota_unavailable_total{tenant,type} # Refusals caused by the quota store failing, not by a limit
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
-eddi_tenant_usage_cost_total                # Cost usage (per tenant)
+eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
+eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable)
 ```
+
+`eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
+**priced** spend is charged to an enabled tenant quota — see
+[Tenant Quotas → The monthly cost budget](tenant-quotas.md#the-monthly-cost-budget).
+An unpriced model meters $0, so a flat line on a busy deployment usually means
+the models carry no `inputPricePer1M` / `outputPricePer1M`. A rising
+`outcome="unavailable"` means turns spent money the counter could not record —
+the quota store was down when they settled.
 
 Denials carry `tenant` and `type` (`conversation` / `api_call` / `agent` / `cost`);
 aggregate at query time rather than expecting an untagged total:

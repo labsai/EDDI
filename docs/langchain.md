@@ -847,7 +847,7 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
-| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
@@ -1696,6 +1696,14 @@ fires on a genuine hang.
 prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
+
+**Prices drive the tenant budget.** Each settled turn charges its priced cost —
+LLM tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step prices) plus
+tracked tool cost — to the tenant's `maxMonthlyCostUsd`. Once that budget is spent,
+every LLM task serves its fallback answer (`responseValidation.fallbackMessage`, or
+the default sentence) instead of calling its model, and records
+`llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 and is never
+bounded by it. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
 
 Enforcement is **opt-in**: a configured ceiling records cost but refuses nothing
 until you add `enforceBudget: true`. Built-in tools priced at $0.00 until the

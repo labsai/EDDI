@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.TurnCostMeter;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -191,6 +192,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     TurnIdempotencyService turnIdempotency;
+
+    /**
+     * Charges each settled turn's priced spend to the tenant's monthly cost counter
+     * (see {@link TurnCostMeter}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} (a directly constructed instance)
+     * meters nothing.
+     */
+    @Inject
+    TurnCostMeter turnCostMeter;
 
     /**
      * Verifies a {@code groupId} found only on an earlier step before group memory
@@ -500,6 +510,9 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             var conversationMemory = conversation.getConversationMemory();
             conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
+            // Settle point of the CONVERSATION_START turn, which runs inline and never
+            // reaches admitTurn's completion callback (an LLM greeting costs too).
+            meterTurnCost(conversationMemory);
             // A behavior rule may pause on the CONVERSATION_START turn — this path
             // needs the same HITL bookkeeping as the say path (bookmark BEFORE the
             // store, then counter + timeout schedule) or a finite timeout policy
@@ -847,6 +860,18 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
+     * Charge the current step's not-yet-metered priced spend to the tenant. Runs
+     * from the completion callback, before the turn is persisted, so the step's
+     * {@code audit:metered_cost} marker is stored with the cost it describes. Never
+     * throws.
+     */
+    void meterTurnCost(IConversationMemory memory) {
+        if (turnCostMeter != null) {
+            turnCostMeter.meterSettledStep(memory);
+        }
+    }
+
+    /**
      * What a finished turn tells its caller and its own step: the {@code error}
      * object when it failed, or the idempotency record when it settled.
      * <p>
@@ -1161,6 +1186,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 listener.leaseLost(memorySnapshot, returnConversationMemory.getFenceToken());
                                 return;
                             }
+                            // Settle point: charge the turn's priced spend to the tenant.
+                            // After the lease check — a turn stopped by lease loss stores
+                            // nothing, and the node that took the conversation over runs
+                            // (and meters) it again. A replayed idempotent turn never gets
+                            // here: it is answered from the stored outcome.
+                            meterTurnCost(returnConversationMemory);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);

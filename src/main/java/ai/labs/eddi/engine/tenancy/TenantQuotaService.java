@@ -345,14 +345,12 @@ public class TenantQuotaService {
      * an acquisition. The {@code quota.allowed} metric only counts slot
      * acquisitions.
      * <p>
-     * <strong>Currently cannot deny.</strong> This gate reads
-     * {@link ITenantQuotaStore#getMonthlyCost}, and nothing in production ever
-     * writes to that counter — see {@link #recordCost} for the missing half. Until
-     * cost metering is wired, {@code currentCost} is always {@code 0.0} and this
-     * method always returns OK, whatever {@code maxMonthlyCostUsd} is configured
-     * to. It is wired (AgentOrchestrator calls it before each LLM turn) and will
-     * start enforcing the moment {@code recordCost} has a caller — no change is
-     * needed here.
+     * Called before every tool call ({@code ToolLoopRunner}) and once before the
+     * model phase of every LLM task ({@code LlmSpendGate}). It denies once the
+     * month's metered cost — written by {@link #recordCost} from
+     * {@code TurnCostMeter} at every turn-settle point and from Dream runs —
+     * reaches {@link TenantQuota#maxMonthlyCostUsd()}. Only priced spend is
+     * metered, so a deployment whose models carry no prices never reaches it.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
         TenantQuota quota;
@@ -382,28 +380,13 @@ public class TenantQuotaService {
      * whether the budget has been exceeded. Use the returned result to decide
      * whether to block subsequent calls or emit metrics.
      * <p>
-     * <strong>NOT WIRED — this method has no production callers.</strong> It is
-     * reachable only from tests. Consequently the monthly cost counter is never
-     * written, {@link #checkCostBudget} always sees {@code 0.0}, and
-     * {@code eddi.tenant.quota.max-monthly-cost-usd} is unenforceable today. Do not
-     * read the presence of this method as "cost budgets work".
-     * <p>
-     * It is deliberately kept rather than deleted: it is the post-call half of a
-     * design whose pre-call half ({@code checkCostBudget}) IS wired, and its store
-     * counterpart {@link ITenantQuotaStore#tryAddCost} is implemented and tested in
-     * all three backends. Deleting it would remove the seam without removing the
-     * gap.
-     * <p>
-     * Two things must land before this can be called for real:
-     * <ol>
-     * <li><em>Per-call cost figures that are not zero.</em> Built-in tool
-     * executions are currently priced at $0.00, and there is no token-cost metering
-     * for LLM turns at all — so wiring this today would meter nothing but add write
-     * load.</li>
-     * <li><em>A decision on where to meter.</em> The candidate seams are the
-     * ChatResponse-holding call sites tracked as C5 in
-     * {@code planning/manager-coverage-backend-design.md}.</li>
-     * </ol>
+     * Callers: {@code TurnCostMeter} (the priced spend of every settled
+     * conversation turn, metered once per step) and {@code DreamService} (priced
+     * consolidation calls, which run outside any conversation). The cost is always
+     * added, even past the budget — the spend already happened; a denied result
+     * only tells the caller the budget is now exhausted, and the pre-call gate
+     * ({@link #checkCostBudget}) is what stops the next call. Callers must not fail
+     * the work that already ran over a denied or unavailable result.
      * <p>
      * Note: internally calls {@link ITenantQuotaStore#tryAddCost} which resets all
      * expired time windows (minute, day, month) under the per-tenant lock. This is
