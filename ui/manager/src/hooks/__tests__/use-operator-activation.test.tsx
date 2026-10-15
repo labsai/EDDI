@@ -301,7 +301,7 @@ describe("useActivateOperator — gate read-back enforcement", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error?.message).toMatch(/application\/x-tar/);
-    expect(result.current.error?.message).toMatch(new RegExp(`${AGENT_ID}.*still deployed`));
+    expect(result.current.error?.message).toMatch(new RegExp(`${AGENT_ID}.*still exists`));
   });
 
   it("lets a read_only activation through when the gate does verify", async () => {
