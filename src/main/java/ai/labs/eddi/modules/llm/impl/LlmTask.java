@@ -133,9 +133,9 @@ public class LlmTask implements ILifecycleTask {
     private LlmCircuitBreakers circuitBreakers;
 
     /**
-     * The pre-model-call spend gate (tenant monthly budget). Field-injected, so the
-     * many direct-construction unit tests are unaffected; null leaves every task
-     * ungated.
+     * The pre-model-call spend gate (the agent's per-conversation cost ceiling and
+     * the tenant monthly budget). Field-injected, so the many direct-construction
+     * unit tests are unaffected; null leaves every task ungated.
      */
     @Inject
     LlmSpendGate spendGate;

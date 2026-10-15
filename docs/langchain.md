@@ -1705,6 +1705,38 @@ the default sentence) instead of calling its model, and records
 `llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 and is never
 bounded by it. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
 
+#### Per-conversation LLM cost ceiling
+
+`maxCostPerConversationUsd` is an **agent-level** setting (on the agent configuration, next to
+`workflows`, not on an LLM task) that bounds what one conversation may spend:
+
+```json
+{
+  "workflows": ["eddi://ai.labs.workflow/workflowstore/workflows/0123456789abcdef01234567?version=1"],
+  "maxCostPerConversationUsd": 0.50
+}
+```
+
+What counts is the conversation's **priced** spend — the sum of every step's `audit:cost`: LLM
+tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step and judge prices) plus tracked
+tool cost. It is checked
+
+- **before each LLM task calls its model** (plain, streaming, tool loop or cascade): once the
+  conversation has spent the ceiling, the model is not called; the task serves its fallback answer
+  (`responseValidation.fallbackMessage`, or the default sentence) whatever its `onError`, the step
+  records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
+  `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
+- **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
+  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
+  answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
+  cascade's own step prices apply at the next task-level check.
+
+The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
+(the default) means unlimited; `0` allows no priced spend; a negative value is treated as
+unlimited. An unpriced model adds nothing and is never bounded. This is unrelated to the task-level
+`maxBudgetPerConversation` (tool cost only, opt-in with `enforceBudget`), which is unchanged.
+
 Enforcement is **opt-in**: a configured ceiling records cost but refuses nothing
 until you add `enforceBudget: true`. Built-in tools priced at $0.00 until the
 canonical-slug fix in this release, so enforcing automatically would make those

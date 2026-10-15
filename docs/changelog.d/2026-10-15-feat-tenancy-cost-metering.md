@@ -66,3 +66,42 @@ metering does not use it).
 ```decision-log
 | 2026-10-15 | Tenant cost is metered per settled step from the completion callback, with an `audit:metered_cost` marker; LLM tasks get a soft pre-call gate (fallback answer) | `recordCost` had no caller; the tool-call gate alone never stopped a tool-less agent | Metering per LLM task (double counts — `audit:cost` is already a per-step total); metering in `GroupCostLedger` (member turns already settle through `say`); failing the turn on refusal (the tool gate is soft; a deterministic reply is friendlier) |
 ```
+
+## 💰 feat(llm): per-conversation LLM cost ceiling `maxCostPerConversationUsd` (2026-10-15)
+
+**Repo:** EDDI (`feat/tenancy-cost-metering`)
+
+### What changed and why
+
+A new optional **agent-level** field, `maxCostPerConversationUsd` on
+[`AgentConfiguration`](../../src/main/java/ai/labs/eddi/configs/agents/model/AgentConfiguration.java),
+bounds the priced spend of one conversation — the sum of every step's `audit:cost`. Absent (every
+existing agent) means unlimited and behaviour is unchanged; `0` allows no priced spend; a negative
+value is unlimited. The task-level, tool-only `maxBudgetPerConversation` is untouched.
+
+- **Carrier.** `AgentStoreClientLibrary` copies it onto the deployed `Agent`, which puts it on the
+  memory in `startConversation` and in `continueConversation` (every say, rerun and HITL resume
+  passes there, so the running version's value always wins and a version without one clears it).
+  The memory carrier is transient and typed `OptionalDouble`, not a nullable `Double`: a mocked
+  memory hands back `0.0` for a `Double`, which here means "no spend allowed".
+- **Checks.** `LlmSpendGate` compares the conversation's spend with the ceiling before the tenant
+  budget, once per LLM task before any model call (plain, streaming, tool loop, cascade); a refusal
+  serves the fallback answer and records `llm:spend_refused:<taskId>` with
+  `reason: conversation_ceiling`. Because that gate only sees a tool loop's cost when the loop ends,
+  `ToolLoopRunner` repeats the check between rounds (prior spend + the loop's tokens at the task's
+  prices + its tool cost) and ends the loop with a fixed answer saying the completed calls took
+  effect. Counted on `eddi.llm.spend.refused{reason="conversation_ceiling"}`.
+- **Docs.** [`langchain.md`](../langchain.md#per-conversation-llm-cost-ceiling) (new section),
+  `tenant-quotas.md`, `metrics.md`.
+
+**Tests:** `ConversationCostCeilingTest` (old JSON without the field, round trip, carrier set and
+cleared, spend summed over steps without the metering marker, gate order and edge values),
+`LlmTaskSpendGateTest` (ceiling refuses without asking the tenant budget; no ceiling sums nothing),
+`ToolLoopRunnerCostCeilingTest` (stops at the ceiling, prior spend counts, no ceiling unchanged),
+`AgentStoreClientLibraryMemoryToolsTest` (deployed agent carries the value).
+
+### Not done
+
+No Manager field: the agent editor has no cost/limits section and no nullable-number input, and
+`turnDeadlineMs` — the nearest agent-level setting — is not editable there either. The value can be
+set through the agent JSON. Follow-up: a "Limits" section for both.

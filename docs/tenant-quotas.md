@@ -67,6 +67,10 @@ These calls are **not** metered today, priced or not:
 A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
 metered again.
 
+To bound one conversation rather than the whole tenant, set the agent-level
+`maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost
+ceiling](langchain.md#per-conversation-llm-cost-ceiling).
+
 ## Failing closed
 
 If the quota store cannot be read — the database is down, a query fails — the gate **denies** the
