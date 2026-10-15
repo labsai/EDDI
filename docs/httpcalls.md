@@ -138,6 +138,11 @@ its rollback could not write that version back. The check covers the whole docum
 editor can neither add the reference nor edit a call that already carries it.
 `${caller:userId}` is a name, not a credential, and stays open to editors.
 
+The token is released only to a `${caller:token}` written **in the header
+itself**. A header whose `${vars:…}` or `${vault:…}` value resolves to the
+reference fails the call: the save-time check reads the configuration as
+written, and a variable can be changed after the configuration was saved.
+
 Widen the roles (`eddi.caller-identity.author-roles=eddi-admin,eddi-editor`) only
 when every editor is trusted with the privileges of every user who chats with
 their agents.

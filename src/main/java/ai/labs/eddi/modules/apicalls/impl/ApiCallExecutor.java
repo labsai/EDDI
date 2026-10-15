@@ -1245,6 +1245,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             boolean callerTokenReferenced = headerValue != null && headerValue.contains(CALLER_TOKEN_REFERENCE);
+            if (callerTokenReferenced && !CallerIdentityResolver.containsTokenReference(headers.get(headerName))) {
+                // Only an author role may save ${caller:token} (CallerTokenAuthorPolicy),
+                // and that check reads the configuration as written. A reference that
+                // arrives through a ${vars:...} or ${vault:...} value bypasses it, and a
+                // variable can be changed after the config was saved — so the token is
+                // released only to a reference written in the header itself.
+                throw new CallerIdentityResolver.CallerIdentityException("Header '" + headerName + "' receives ${caller:token} from a "
+                        + "${vars:...} or ${vault:...} value. Write ${caller:token} in the header itself, where saving it is "
+                        + "restricted to eddi.caller-identity.author-roles.");
+            }
             String beforeCallerResolution = headerValue;
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
             if (callerTokenReferenced) {
