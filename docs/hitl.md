@@ -60,6 +60,8 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
        └→ Remaining tasks (output, templating, …) execute normally
 ```
 
+**Ordering guarantee — the pause is durable before you are told about it.** A turn that ends `AWAITING_HUMAN` is answered (the synchronous `say` response, the streaming `done` event, and the response to a `resume` that re-pauses) only *after* the pause has been committed. When a client reacts to that answer by calling `GET /agents/{conversationId}/approval-status`, `pending-approvals` or `resume`, it therefore always finds the pause it was told about, with its `pauseId` and `pauseDetails`. If the commit does not happen — a concurrent end or cancel won the race, or the store failed — the answer carries the state the store actually holds (for example `ENDED` or `EXECUTION_INTERRUPTED`), never a phantom `AWAITING_HUMAN`. Ordinary turns are unaffected: they are answered as soon as the pipeline finishes, as before. Group member turns that pause get the same guarantee, since they run through the same `say`.
+
 **While paused, user input is rejected without being consumed**: `POST /agents/{conversationId}` returns `409 Conflict` immediately with a body directing to the resume endpoint — the message is *not* queued and *not* processed. The same applies if a pause commits in the narrow window after a message was accepted (the turn is skipped and answered with `409` instead of executing against the paused conversation). Chat clients should render "awaiting approval" and disable input until the decision lands.
 
 ### Configuration

@@ -375,6 +375,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     static final class ProcessingTurn {
         private final AtomicInteger counter;
         private final AtomicBoolean released = new AtomicBoolean(false);
+        /**
+         * The client-visible completion of a turn that ended AWAITING_HUMAN, held back
+         * until the pause is persisted — see {@link DeferredDelivery}.
+         */
+        final DeferredDelivery deferredDelivery = new DeferredDelivery();
 
         private ProcessingTurn(AtomicInteger counter) {
             this.counter = counter;
@@ -1156,12 +1161,10 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 return;
                             }
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
-                            cacheConversationState(conversationId, memorySnapshot.getConversationState());
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                            processingTurn.release();
-                            listener.completed(memorySnapshot);
+                            completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
                         });
 
                 if (conversation.isEnded()) {
@@ -2265,6 +2268,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
     }
 
+    ConversationState committedStateOrError(String conversationId) {
+        return conversationStepRunner.committedStateOrError(conversationId);
+    }
+
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
         conversationStepRunner.logConversationError(loggingContext, conversationId, t);
     }
@@ -2285,6 +2292,48 @@ public class ConversationService implements IConversationService, UserErasurePar
     @Override
     public void resetConversationState(String conversationId, ConversationState targetState) {
         setConversationState(conversationId, targetState);
+    }
+
+    /**
+     * Completes a turn towards the client — the single place that decides WHEN the
+     * sync response / streaming {@code done} may be sent.
+     * <p>
+     * <b>Ordering contract.</b>
+     * <ul>
+     * <li>A turn that ends {@code AWAITING_HUMAN} is NOT delivered here. Its pause
+     * is only written afterwards by the runtime's {@code onComplete}
+     * ({@code ConversationStepRunner.runGuardedConversationStep}), and a client
+     * told "paused" before that write reads {@code approval-status} /
+     * {@code pending-approvals} and finds no pause (or one with no details). The
+     * delivery is deferred and runs from that persistence step, with the state the
+     * store really holds — so a pause that was not committed (lost CAS, cancel
+     * race, store failure) is reported as what it became, never as a phantom pause.
+     * The state cache is updated from the same committed state.</li>
+     * <li>Every other turn is delivered immediately, exactly as before: its
+     * snapshot already matches what the store will hold (or a revision-conflict
+     * handler corrects it), and the next turn of the conversation is serialized
+     * behind this one by the coordinator, so holding it back would add latency for
+     * no consistency gain.</li>
+     * </ul>
+     * The delivery runs at most once; the turn's {@code finally} and its failure
+     * callback flush a still-pending one, so the stream always terminates.
+     */
+    private void completeTurn(ProcessingTurn processingTurn, String conversationId, SimpleConversationMemorySnapshot memorySnapshot,
+                              Consumer<SimpleConversationMemorySnapshot> clientCompletion) {
+        if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+            processingTurn.deferredDelivery.defer(committedState -> {
+                if (committedState != null) {
+                    memorySnapshot.setConversationState(committedState);
+                    cacheConversationState(conversationId, committedState);
+                }
+                processingTurn.release();
+                clientCompletion.accept(memorySnapshot);
+            });
+            return;
+        }
+        cacheConversationState(conversationId, memorySnapshot.getConversationState());
+        processingTurn.release();
+        clientCompletion.accept(memorySnapshot);
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {
