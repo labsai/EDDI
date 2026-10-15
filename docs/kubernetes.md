@@ -346,7 +346,48 @@ Three ways to manage it:
      --from-file=application-secrets.properties="$secrets_file"
    ```
 
-3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.
+3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc. With Helm, point the chart at the synced Secret — see [Bringing your own Secrets](#bringing-your-own-secrets-helm) — and no credential ever passes through a values file.
+
+### Bringing your own Secrets (Helm)
+
+Every credential the chart renders can instead come from a Secret you manage
+(External Secrets Operator, Sealed Secrets, `kubectl create secret`). Name it in
+the matching `existingSecret` value and the chart renders **no** Secret of its
+own for that component; the corresponding password value is then ignored and
+need not be set:
+
+| Value | Replaces | Keys the Secret must carry |
+|---|---|---|
+| `eddi.existingSecret` | `<release>-eddi-secrets` | `application-secrets.properties` — a Quarkus properties file with `eddi.vault.master-key=…` and the datastore line (`mongodb.connectionString=…` for MongoDB, percent-encoding the password; `quarkus.datasource.username=` / `.password=` for an external PostgreSQL), plus `eddi.nats.username=` / `eddi.nats.password=` for an in-chart NATS with auth |
+| `mongodb.existingSecret` | `<release>-eddi-mongodb` | `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`. Requires `eddi.existingSecret` too: the chart can no longer build EDDI's connection string without the password, so it refuses to render otherwise |
+| `postgres.existingSecret` | `<release>-eddi-postgres` | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `postgres-secrets.properties` (`quarkus.datasource.username=` / `quarkus.datasource.password=`) |
+| `keycloak.existingSecret` | `<release>-eddi-keycloak` | `password` — the bootstrap admin password, the same shape as the Kustomize overlay's `keycloak-admin` Secret |
+
+The chart's own Keycloak Secret is where `keycloak.adminPassword` now lands: the
+StatefulSet reads `KC_BOOTSTRAP_ADMIN_PASSWORD` through a `secretKeyRef`, never
+as a plain `value:` in the pod spec (which showed the master-realm superuser
+password in every `kubectl get sts -o yaml` and in the release manifest). The
+reference is not `optional`, so a missing Secret leaves the pod in
+`CreateContainerConfigError` rather than booting with no admin.
+
+> **`start-dev` behind an Ingress.** The in-chart Keycloak runs in development
+> mode (embedded H2 on one PVC, no HA, no production hardening). The chart
+> therefore refuses `keycloak.enabled=true` together with `ingress.enabled=true`
+> unless you set `keycloak.devModeAcknowledged=true` — a demo or staging cluster
+> you understand. For production, run Keycloak with `start` against an external
+> database and point `eddi.oidc.authServerUrl` at it with `keycloak.enabled=false`.
+> Setting `keycloak.publicOrigin` also strips the `http://localhost:*` redirect
+> URIs and the `+` wildcard web origin from the realm's `eddi-frontend` client, so
+> a realm published under a real hostname no longer completes a login for a page
+> on the operator's own machine; the `eddi-mcp` client keeps its loopback
+> redirects, which is how MCP clients sign in.
+>
+> With an Ingress and OIDC on, the chart also pins the MCP resource identifier
+> EDDI advertises (`QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE`) to
+> `https://<ingress.hosts[0].host>/mcp` (`http://` when neither `ingress.tls` nor
+> `eddi.oidc.resourceMetadata.forceHttpsScheme` is set) instead of deriving it
+> from each request's `Host` header. An explicit `eddi.oidc.resourceMetadata.resource`
+> still wins.
 
 > **No manifest ever writes this Secret.** `k8s/base/eddi-secret.yaml.example` is
 > a commented template that kustomize does not include, and `k8s/quickstart.yaml`
@@ -395,7 +436,9 @@ kubectl create secret generic keycloak-admin -n eddi \
 `secretKeyRef` with no default, so a missing Secret fails closed — the pod stays
 in `CreateContainerConfigError` with `secret "keycloak-admin" not found` rather
 than coming up with a known password. Helm asks for the same value as
-`keycloak.adminPassword`, which `required` refuses to default.
+`keycloak.adminPassword`, which `required` refuses to default, renders it into
+the `<release>-eddi-keycloak` Secret and reads it the same way; or name your own
+Secret in `keycloak.existingSecret` (see [Bringing your own Secrets](#bringing-your-own-secrets-helm)).
 
 **2. Give the `eddi` account a password after the first boot.** The realm seeds
 it with the `eddi-admin`, `eddi-editor` and `eddi-viewer` roles and **no
