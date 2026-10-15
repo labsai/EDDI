@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -229,12 +230,15 @@ public class OutboundHttp {
     }
 
     /**
-     * The wall-clock budget for one exchange, redirects and buffered bodies
-     * included: the profile's floor (three connect timeouts unless configured), or
-     * the per-hop timeout when the caller asked for longer. The per-hop timeout
-     * alone is no bound — the JDK stops timing once the response headers arrive, so
-     * a server that sent headers and then trickled the body a byte at a time held
-     * the call open for as long as it liked.
+     * The wall-clock budget for reaching the final response: every hop's headers
+     * and every discarded redirect body. The profile's floor (three connect
+     * timeouts unless configured), or the per-hop timeout when the caller asked for
+     * longer. The final body is not inside it: it has its own read budget of
+     * {@value #BODY_READ_TIMEOUT_FACTOR} × the per-hop timeout, so a large response
+     * on a slow link is legitimate while a body that never ends is not. Neither
+     * bound alone is enough — the JDK stops timing once the response headers
+     * arrive, so a server that sent headers and then trickled the body a byte at a
+     * time used to hold the call open for as long as it liked.
      */
     public Duration totalBudget(Profile profile, Duration hopTimeout) {
         Duration floor = settings.profile(profile).budgetFloor();
@@ -292,10 +296,21 @@ public class OutboundHttp {
             if (location == null || location.isBlank()) {
                 throw new IOException("Redirect " + status + " without Location header from: " + uri);
             }
-            URI target = uri.resolve(location);
+            URI target;
+            try {
+                target = uri.resolve(location);
+            } catch (IllegalArgumentException e) {
+                // A server-chosen header that is not a URI is a broken redirect, not a
+                // refused target: OutboundBlockedException is an IllegalArgumentException
+                // too, and callers read that as "SSRF said no".
+                throw new IOException("Redirect " + status + " with an unparsable Location header from: " + withoutQuery(uri), e);
+            }
             // Prevents SSRF via 302 → internal.
             checkHop(ssrf, request.hopValidator(), target);
-            LOGGER.debugf("Following redirect %d/%d: %s → %s", hops, follow.maxHops(), withoutQuery(uri), withoutQuery(target));
+            // Both URIs come from the server (Location): sanitized so a crafted header
+            // cannot forge log lines.
+            LOGGER.debugf("Following redirect %d/%d: %s → %s", hops, follow.maxHops(), LogSanitizer.sanitize(withoutQuery(uri)),
+                    LogSanitizer.sanitize(withoutQuery(target)));
 
             boolean preserved = action == MethodRule.Action.FOLLOW_PRESERVING;
             headers = redirectHeaders(headers, isSameOrigin(uri, target), preserved, request.callerDerivedHeaders());

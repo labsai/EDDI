@@ -72,8 +72,9 @@ public record OutboundSettings(String engine, Map<Profile, ProfileSettings> prof
      * @param connectTimeout
      *            TCP + TLS connect timeout, per hop
      * @param totalTimeout
-     *            the least wall-clock budget of one exchange, redirects and body
-     *            included; {@code null} means three connect timeouts
+     *            the least wall-clock budget for reaching the final response, every
+     *            redirect hop included; {@code null} means three connect timeouts.
+     *            The final body has its own read budget
      * @param tlsConfigurationName
      *            a named {@code quarkus.tls.<name>} configuration, or {@code null}
      *            for the JVM's default trust

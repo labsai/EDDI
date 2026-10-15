@@ -387,7 +387,7 @@ Requests made through `SafeHttpClient` (the built-in tools, the RAG crawler, OAu
 |---|---|---|
 | `eddi.http.outbound.engine` | `jdk` | The HTTP engine. `jdk` (`java.net.http`) is the only one in this release; any other value fails startup |
 | `eddi.http.outbound.default.connect-timeout` | value of `httpClient.connectTimeoutInMillis` (10 s) | TCP + TLS connect timeout per hop, as a duration (`10s`, `500ms`) |
-| `eddi.http.outbound.default.total-timeout` | 3 × connect timeout | Least wall-clock budget of one exchange, every redirect hop and buffered body included. A request whose own timeout is longer gets that instead |
+| `eddi.http.outbound.default.total-timeout` | 3 × connect timeout | Least wall-clock budget for reaching the final response, every redirect hop included. A request whose own timeout is longer gets that instead. The final response body is bounded separately, by 4 × the request's per-hop timeout |
 | `eddi.http.outbound.default.protocol` | `auto` | `auto` (HTTP/2 via ALPN, else HTTP/1.1), `http1` or `http2` |
 | `eddi.http.outbound.default.tls.configuration-name` | *(empty)* | A named Quarkus TLS configuration (`quarkus.tls.<name>.*`) for trust and client certificates. Empty uses the JVM's default trust store. An unknown name fails the first request |
 | `eddi.http.outbound.proxy.host` | *(empty)* | Forward proxy for all of the above. Empty means no proxy |

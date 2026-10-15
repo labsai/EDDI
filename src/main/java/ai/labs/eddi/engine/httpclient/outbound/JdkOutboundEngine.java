@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.httpclient.outbound;
 
 import ai.labs.eddi.engine.httpclient.outbound.OutboundSettings.ProfileSettings;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundSettings.ProxySettings;
+import org.jboss.logging.Logger;
 
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
@@ -40,6 +41,8 @@ import java.util.function.UnaryOperator;
  * and hand every body back unread as a stream.
  */
 final class JdkOutboundEngine implements OutboundEngine {
+
+    private static final Logger LOGGER = Logger.getLogger(JdkOutboundEngine.class);
 
     /** Headers the JDK client sets itself and refuses to be given. */
     private static final Set<String> RESTRICTED_HEADERS = Set.of("host", "content-length", "connection", "expect", "upgrade");
@@ -171,6 +174,13 @@ final class JdkOutboundEngine implements OutboundEngine {
             builder.proxy(new NonProxyHostsSelector(new InetSocketAddress(proxy.host(), proxy.port()), proxy.nonProxyHosts()));
             if (proxy.credentials() != null) {
                 builder.authenticator(proxyAuthenticator(secretResolver.apply(proxy.credentials())));
+                // The JDK refuses Basic proxy credentials on an HTTPS tunnel (CONNECT)
+                // unless the JVM was started with jdk.http.auth.tunneling.disabledSchemes
+                // cleared; it is a JVM-wide switch, so EDDI does not flip it. Say so once,
+                // instead of letting every HTTPS call fail with a 407 that names nothing.
+                LOGGER.warnf("Outbound proxy credentials are configured. They are sent for plain-HTTP targets; for HTTPS "
+                        + "targets the JDK withholds Basic proxy credentials unless the JVM runs with "
+                        + "-Djdk.http.auth.tunneling.disabledSchemes= (empty). Profile: %s", profile.key());
             }
         }
         return builder.build();
