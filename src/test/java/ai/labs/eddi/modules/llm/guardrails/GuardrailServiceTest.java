@@ -417,14 +417,16 @@ class GuardrailServiceTest {
         }
 
         @Test
-        @DisplayName("a guardrail that throws degrades to a warn outcome; the answer passes")
-        void runOutput_guardrailThrowsRuntimeException_degradesToWarn() throws Exception {
+        @DisplayName("failMode=open: a guardrail that throws degrades to a warn outcome; the answer passes")
+        void runOutput_guardrailThrowsRuntimeException_failOpen() throws Exception {
             var broken = new Scripted("broken", BOTH, t -> {
                 throw new IllegalStateException("boom");
             });
             var service = new GuardrailService(List.of(broken), new SimpleMeterRegistry());
             List<GuardrailOutcome> outcomes = new ArrayList<>();
-            var result = service.runOutput(List.of(config("broken", "block")), "original", null, CONTEXT, outcomes::add);
+            var cfg = config("broken", "block");
+            cfg.setParameters(Map.of("failMode", "open"));
+            var result = service.runOutput(List.of(cfg), "original", null, CONTEXT, outcomes::add);
             assertEquals("original", result.text());
             assertEquals(1, outcomes.size());
             assertEquals(GuardrailAction.WARN, outcomes.get(0).action());
@@ -441,6 +443,159 @@ class GuardrailServiceTest {
             service.runOutput(List.of(cfg), "text", null, CONTEXT, o -> {
             });
             assertEquals(Map.of("maxChars", "10"), guardrail.parameters.get(0));
+        }
+    }
+
+    @Nested
+    @DisplayName("fail mode (a guardrail that throws or returns no verdict)")
+    class FailMode {
+
+        private Scripted broken() {
+            return new Scripted("broken", BOTH, t -> {
+                throw new IllegalStateException("connection timeout");
+            });
+        }
+
+        private GuardrailConfig cfg(String action, String failMode) {
+            var cfg = config("broken", action);
+            cfg.setBlockMessage("Cannot verify.");
+            if (failMode != null) {
+                cfg.setParameters(Map.of("failMode", failMode));
+            }
+            return cfg;
+        }
+
+        @Test
+        @DisplayName("input, block, default: fails closed — blocked with reason guardrail_error")
+        void input_block_failsClosedByDefault() {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            List<GuardrailOutcome> outcomes = new ArrayList<>();
+            var result = service.runInput(List.of(cfg("block", null)), conversation("hello"), CONTEXT, outcomes::add);
+            assertTrue(result.isBlocked());
+            assertEquals("Cannot verify.", result.blockMessage());
+            assertEquals(GuardrailService.REASON_ERROR, result.blocked().reason());
+            assertEquals(GuardrailAction.BLOCK, outcomes.get(0).action());
+        }
+
+        @Test
+        @DisplayName("input, block, failMode=open: warn, the message passes")
+        void input_block_failOpen() {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            List<GuardrailOutcome> outcomes = new ArrayList<>();
+            var result = service.runInput(List.of(cfg("block", "open")), conversation("hello"), CONTEXT, outcomes::add);
+            assertFalse(result.isBlocked());
+            assertEquals(GuardrailAction.WARN, outcomes.get(0).action());
+            assertEquals(GuardrailService.REASON_ERROR, outcomes.get(0).reason());
+        }
+
+        @Test
+        @DisplayName("input, redact, default: fails open; failMode=closed blocks")
+        void input_redact_defaultOpen_closedOnRequest() {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            assertFalse(service.runInput(List.of(cfg("redact", null)), conversation("hello"), CONTEXT, o -> {
+            }).isBlocked());
+            assertTrue(service.runInput(List.of(cfg("redact", "CLOSED")), conversation("hello"), CONTEXT, o -> {
+            }).isBlocked());
+        }
+
+        @Test
+        @DisplayName("a null verdict is a guardrail error, not a pass")
+        void nullVerdict_isAnError() throws Exception {
+            var silent = new Scripted("broken", BOTH, t -> null);
+            var service = new GuardrailService(List.of(silent), new SimpleMeterRegistry());
+            assertTrue(service.runOutput(List.of(cfg("block", null)), "answer", null, CONTEXT, o -> {
+            }).isBlocked());
+        }
+
+        @Test
+        @DisplayName("output, block, default: fails closed")
+        void output_block_failsClosed() throws Exception {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            var result = service.runOutput(List.of(cfg("block", null)), "answer", null, CONTEXT, o -> {
+            });
+            assertTrue(result.isBlocked());
+            assertEquals("Cannot verify.", result.text());
+            assertEquals(GuardrailService.REASON_ERROR, result.blocked().reason());
+        }
+
+        @Test
+        @DisplayName("output, reprompt, default: fails closed without a model call (it cannot verify any answer)")
+        void output_reprompt_failsClosedWithoutReprompting() throws Exception {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            AtomicInteger asked = new AtomicInteger();
+            var result = service.runOutput(List.of(cfg("reprompt", null)), "answer", (r, c) -> {
+                asked.incrementAndGet();
+                return new Reprompter.Attempt("again", Map.of());
+            }, CONTEXT, o -> {
+            });
+            assertTrue(result.isBlocked());
+            assertEquals(0, asked.get());
+        }
+
+        @Test
+        @DisplayName("output, redact, default: fails open — warn, the answer passes")
+        void output_redact_failsOpen() throws Exception {
+            var service = new GuardrailService(List.of(broken()), new SimpleMeterRegistry());
+            var result = service.runOutput(List.of(cfg("redact", null)), "answer", null, CONTEXT, o -> {
+            });
+            assertFalse(result.isBlocked());
+            assertEquals("answer", result.text());
+        }
+
+        @Test
+        @DisplayName("history: an earlier message a closed guardrail cannot check is withheld; failMode=open leaves it")
+        void history_failMode() {
+            var brokenOnOld = new Scripted("broken", BOTH, t -> {
+                if (t.startsWith("old")) {
+                    throw new IllegalStateException("boom");
+                }
+                return GuardrailVerdict.allow();
+            });
+            var service = new GuardrailService(List.of(brokenOnOld), new SimpleMeterRegistry());
+            var closed = service.runInput(List.of(cfg("block", null)), conversation("old message", "new"), CONTEXT, o -> {
+            });
+            assertEquals(GuardrailService.HISTORY_PLACEHOLDER, ((UserMessage) closed.messages().get(1)).singleText());
+            var open = service.runInput(List.of(cfg("block", "open")), conversation("old message", "new"), CONTEXT, o -> {
+            });
+            assertEquals("old message", ((UserMessage) open.messages().get(1)).singleText());
+        }
+    }
+
+    @Nested
+    @DisplayName("pre-screen reuse")
+    class Prescreen {
+
+        @Test
+        @DisplayName("an unchanged current message reuses the pre-screen: not evaluated or recorded again")
+        void unchangedMessage_reusesPrescreen() {
+            var pii = rewriting("pii", "secret", "[X]");
+            var service = new GuardrailService(List.of(pii), new SimpleMeterRegistry());
+            var configs = List.of(config("pii", "redact"));
+            List<GuardrailOutcome> outcomes = new ArrayList<>();
+            var pre = service.screenInput(configs, "my secret", CONTEXT, outcomes::add);
+            assertEquals("my [X]", pre.text());
+
+            var result = service.runInput(configs, conversation("my secret"), CONTEXT, outcomes::add, pre);
+
+            assertEquals("my [X]", ((UserMessage) result.messages().get(1)).singleText());
+            assertEquals(1, pii.calls.get());
+            assertEquals(1, outcomes.size());
+        }
+
+        @Test
+        @DisplayName("a model-facing message that differs from the raw input is screened again")
+        void changedMessage_isScreenedAgain() {
+            var pii = rewriting("pii", "secret", "[X]");
+            var service = new GuardrailService(List.of(pii), new SimpleMeterRegistry());
+            var configs = List.of(config("pii", "redact"));
+            var pre = service.screenInput(configs, "my secret", CONTEXT, o -> {
+            });
+
+            var result = service.runInput(configs, conversation("Template: my secret"), CONTEXT, o -> {
+            }, pre);
+
+            assertEquals("Template: my [X]", ((UserMessage) result.messages().get(1)).singleText());
+            assertEquals(2, pii.calls.get());
         }
     }
 

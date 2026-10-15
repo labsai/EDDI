@@ -60,6 +60,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -383,6 +384,24 @@ public class LlmTask implements ILifecycleTask {
         String userInput = extractUserInput(memory);
         String taskId = task.getId() != null ? task.getId() : "default";
 
+        // === Input guardrails, first pass (WS4) ===
+        // The user's raw message is screened BEFORE retrieval: a blocked message issues
+        // no retrieval query and no httpCall, and a redacted one is what the RAG query
+        // (possibly an external embedding provider) sees. The model-facing message is
+        // assembled later; when it is still exactly this text the second pass below
+        // reuses this result instead of evaluating again.
+        GuardrailService.TextResult inputPrescreen = null;
+        if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails()) && userInput != null) {
+            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+            accumulateCost(currentStep, inputPrescreen.costUsd());
+            if (inputPrescreen.isBlocked()) {
+                answerInputBlocked(memory, currentStep, task, processedParams, templateDataObjects, inputPrescreen.blockMessage());
+                return;
+            }
+            userInput = inputPrescreen.text();
+        }
+
         // Finding F7: maxContextTokens explicitly excludes the system prompt, so
         // nothing bounded the RAG blocks appended to it. Both appends below are capped
         // by the task's maxRagContextChars.
@@ -502,16 +521,17 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
 
-        // === Input guardrails (WS4) ===
-        // After the prompt is assembled (RAG, counterweight, identity masking, history,
-        // attachments) and before the model is built, preRequest runs or the circuit is
-        // consulted: a blocked message costs no model call and mutates no property.
-        // Redaction rewrites what the model sees; conversation memory keeps the message
-        // as the user sent it.
+        // === Input guardrails, second pass (WS4) ===
+        // On the assembled prompt (RAG, counterweight, identity masking, history,
+        // attachments), before the model is built, preRequest runs or the circuit is
+        // consulted: a blocked message costs no model call and mutates no property. The
+        // current message reuses the first pass when unchanged; the earlier user
+        // messages of the window are screened again. Redaction rewrites what the model
+        // sees; conversation memory keeps the message as the user sent it.
         GuardrailService.InputResult inputScreening = null;
         if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
             inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
-                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen);
             accumulateCost(currentStep, inputScreening.costUsd());
             if (inputScreening.isBlocked()) {
                 answerInputBlocked(memory, currentStep, task, processedParams, templateDataObjects, inputScreening.blockMessage());
@@ -624,6 +644,11 @@ public class LlmTask implements ILifecycleTask {
                 ? circuitBreakers.acquire(circuitKey, task.getCircuitBreaker())
                 : LlmCircuitBreakers.Ticket.DISABLED;
         FormatRetryRunner.ReaskGate circuitGate = circuitTicket::reaskAllowed;
+        // A guardrail reprompt is another call to the same model: it asks the breaker
+        // first and settles its own ticket, exactly like the primary call (R8).
+        RepromptCircuit repromptCircuit = circuitGuarded
+                ? new RepromptCircuit(() -> circuitBreakers.acquire(circuitKey, task.getCircuitBreaker()), processedParams, convertObject)
+                : RepromptCircuit.NONE;
         try {
             if (!circuitTicket.allowed()) {
                 recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", circuitTicket.denial().failure().label(), 0L);
@@ -742,7 +767,7 @@ public class LlmTask implements ILifecycleTask {
                     usedToolMode = true;
                     if (outputGuarded) {
                         outputReprompter = toolLoopReprompter(chatModel, agentSystemMessage, chatMessagesWithoutSystem, outcome.toolExchange(), task,
-                                memory, jsonPolicy);
+                                memory, jsonPolicy, repromptCircuit);
                     }
                 } else {
                     var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
@@ -755,7 +780,7 @@ public class LlmTask implements ILifecycleTask {
                         eventSink.onToken(responseContent);
                     }
                     if (outputGuarded) {
-                        outputReprompter = plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy);
+                        outputReprompter = plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy, repromptCircuit);
                     }
                 }
 
@@ -768,8 +793,8 @@ public class LlmTask implements ILifecycleTask {
                 if (outputGuarded) {
                     outputReprompter = outcome != null
                             ? toolLoopReprompter(chatModel, agentSystemMessage, chatMessagesWithoutSystem, outcome.toolExchange(), task, memory,
-                                    jsonPolicy)
-                            : plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy);
+                                    jsonPolicy, repromptCircuit)
+                            : plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy, repromptCircuit);
                 }
                 if (outcome != null) {
                     responseContent = outcome.response();
@@ -1809,7 +1834,7 @@ public class LlmTask implements ILifecycleTask {
                 // reprompt is one call over the resumed transcript — no tool runs twice.
                 if (fallbackServed == null && outputGuarded && responseContent != null) {
                     Reprompter reprompter = result != null && !result.resumeTranscript().isEmpty()
-                            ? transcriptReprompter(chatModel, result.resumeTranscript(), task, memory, jsonPolicy)
+                            ? transcriptReprompter(chatModel, result.resumeTranscript(), task, memory, jsonPolicy, RepromptCircuit.NONE)
                             : null;
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, reprompter,
                             guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()),
@@ -2522,28 +2547,61 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
+     * How a guardrail reprompt consults the per-model circuit breaker (R8): a fresh
+     * ticket per reprompt, settled with the reprompt's own outcome — the primary
+     * call's ticket is already settled by then. {@link #NONE} for an unguarded task
+     * and for the HITL resume, which neither consults nor settles a circuit (R12).
+     *
+     * @param acquire
+     *            asks the breaker; a denied ticket stops the reprompts
+     * @param params
+     *            the model's parameters, for classifying an invalid-JSON reply
+     * @param convertObject
+     *            whether the reply must be a JSON object
+     */
+    private record RepromptCircuit(Supplier<LlmCircuitBreakers.Ticket> acquire, Map<String, String> params, boolean convertObject) {
+        static final RepromptCircuit NONE = new RepromptCircuit(() -> LlmCircuitBreakers.Ticket.DISABLED, Map.of(), false);
+    }
+
+    /**
      * A reprompter over {@code baseMessages}: the request, the rejected answer as
      * the assistant's turn, the corrective message as a user turn — the corrective
-     * shape of a format re-ask ({@link FormatRetryRunner#withCorrective}).
+     * shape of a format re-ask ({@link FormatRetryRunner#withCorrective}). Returns
+     * no answer (the guardrail then blocks) when the turn is out of time or the
+     * model's circuit is open.
      */
-    private static Reprompter reprompter(List<ChatMessage> baseMessages, FormatRetryRunner.Asker asker, IConversationMemory memory, Task task) {
+    private Reprompter reprompter(List<ChatMessage> baseMessages, FormatRetryRunner.Asker asker, IConversationMemory memory, Task task,
+                                  RepromptCircuit circuit) {
         return (rejectedReply, correctiveMessage) -> {
             if (!repromptMayStart(memory, task)) {
                 return null;
             }
+            var ticket = circuit.acquire().get();
+            if (!ticket.allowed()) {
+                recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", ticket.denial().failure().label(), 0L);
+                LOGGER.infof("Guardrail reprompt for task '%s' skipped: the model's circuit is open", task.getId());
+                return null;
+            }
             var request = FormatRetryRunner.withCorrective(baseMessages, rejectedReply, "", correctiveMessage);
-            var attempt = asker.ask(request, null);
+            FormatRetryRunner.Attempt attempt;
+            try {
+                attempt = asker.ask(request, null);
+            } catch (LifecycleException | RuntimeException e) {
+                settleCircuit(ticket, e);
+                throw e;
+            }
+            settleCircuit(ticket, attempt.text(), circuit.convertObject(), circuit.params(), task);
             return new Reprompter.Attempt(attempt.text(), attempt.metadata());
         };
     }
 
     /** Plain chat: the same model over the same request. */
     private Reprompter plainReprompter(ChatModel chatModel, List<ChatMessage> requestMessages, Task task, IConversationMemory memory,
-                                       JsonResponseFormatPolicy jsonPolicy) {
+                                       JsonResponseFormatPolicy jsonPolicy, RepromptCircuit circuit) {
         return reprompter(requestMessages, (msgs, maxTokens) -> {
             var result = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, memory.getTurnDeadline());
             return new FormatRetryRunner.Attempt(result.response(), result.responseMetadata());
-        }, memory, task);
+        }, memory, task, circuit);
     }
 
     /**
@@ -2551,28 +2609,29 @@ public class LlmTask implements ILifecycleTask {
      * already holds the tool results — no tool runs twice.
      */
     private Reprompter toolLoopReprompter(ChatModel chatModel, String systemMessage, List<ChatMessage> historyOnly, List<ChatMessage> toolExchange,
-                                          Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy) {
+                                          Task task, IConversationMemory memory, JsonResponseFormatPolicy jsonPolicy, RepromptCircuit circuit) {
         List<ChatMessage> transcript = CascadingModelExecutor.toolTranscript(systemMessage, historyOnly,
                 toolExchange != null ? toolExchange : List.of());
-        return transcriptReprompter(chatModel, transcript, task, memory, jsonPolicy);
+        return transcriptReprompter(chatModel, transcript, task, memory, jsonPolicy, circuit);
     }
 
     /** A final-answer re-ask over a tool transcript (live or resumed). */
     private Reprompter transcriptReprompter(ChatModel chatModel, List<ChatMessage> transcript, Task task, IConversationMemory memory,
-                                            JsonResponseFormatPolicy jsonPolicy) {
+                                            JsonResponseFormatPolicy jsonPolicy, RepromptCircuit circuit) {
         return reprompter(transcript, (msgs, maxTokens) -> {
             var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
             if (reply == null) {
                 throw new LifecycleException("The tool loop cannot re-ask its final answer");
             }
             return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
-        }, memory, task);
+        }, memory, task, circuit);
     }
 
     /**
      * Cascade: the reprompt goes to the step whose answer was accepted, built
-     * lazily — only when a guardrail actually reprompts. Agent-mode steps re-ask
-     * their final answer over their tool transcript.
+     * lazily — only when a guardrail actually reprompts — and admitted by that
+     * step's circuit, keyed as the cascade keys it. Agent-mode steps re-ask their
+     * final answer over their tool transcript.
      */
     private Reprompter cascadeReprompter(LlmConfiguration.ModelCascadeConfig cascadeConfig, CascadingModelExecutor.CascadeResult cascadeResult,
                                          Task task, Map<String, String> processedParams, Map<String, Object> templateDataObjects,
@@ -2587,6 +2646,13 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> base = agentResult != null
                 ? CascadingModelExecutor.toolTranscript(agentSystemMessage, chatMessagesWithoutSystem, agentResult.toolExchange())
                 : requestMessages;
+        RepromptCircuit circuit = circuitBreakers == null ? RepromptCircuit.NONE : new RepromptCircuit(() -> {
+            var stepModel = cascadingModelExecutor.resolveStepModel(step, task, processedParams, templateDataObjects, memory, "Cascade step");
+            String modelName = globalVariableResolver.resolveValue(resolveModelName(stepModel.params(), stepModel.modelType()));
+            return circuitBreakers.acquire(
+                    new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), stepModel.modelType(), modelName),
+                    task.getCircuitBreaker());
+        }, processedParams, jsonMode);
         return reprompter(base, (msgs, maxTokens) -> {
             var stepModel = cascadingModelExecutor.resolveStepModel(step, task, processedParams, templateDataObjects, memory, "Cascade step");
             ChatModel stepChat;
@@ -2616,7 +2682,7 @@ public class LlmTask implements ILifecycleTask {
             Double outPrice = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascadeConfig.getOutputPricePer1M();
             priced.put(KEY_REPROMPT_COST, TokenPricing.cost(inPrice, outPrice, priced.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null));
             return new FormatRetryRunner.Attempt(text, priced);
-        }, memory, task);
+        }, memory, task, circuit);
     }
 
     /**
