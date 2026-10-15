@@ -41,16 +41,25 @@ COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_tot
                      r"http_server_requests_seconds_count)")
 
 
-def sh(*cmd, check=False, capture=True, env=None):
+# How long one docker/git call may take. `docker compose up` pulls images on a first run, so it gets
+# room; a hung daemon still ends the run with a message instead of blocking it forever.
+COMMAND_TIMEOUT_S = 900
+
+
+def sh(*cmd, check=False, capture=True, env=None, timeout=COMMAND_TIMEOUT_S):
     # An argument list, never a shell string: the callers pass `docker compose …` and `git …` with this
     # script's own file paths and the operator's CLI options, so nothing is interpreted by a shell.
-    r = subprocess.run(cmd, capture_output=capture, text=True, env=env, encoding="utf-8", errors="replace")  # nosec B603
+    try:
+        r = subprocess.run(cmd, capture_output=capture, text=True, env=env, encoding="utf-8", errors="replace",  # nosec B603
+                           timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"command did not finish within {timeout} s: {' '.join(cmd[:4])} …")
     if check and r.returncode != 0:
         raise SystemExit(f"command failed ({r.returncode}): {' '.join(cmd)}\n{r.stdout}\n{r.stderr}")
     return r
 
 
-def compose(args, *cmd, check=True, capture=True):
+def compose(args, *cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S):
     files = ["-f", os.path.join(HERE, "docker-compose.loadtest.yml")]
     env = dict(os.environ)
     state = load_state()
@@ -61,7 +70,7 @@ def compose(args, *cmd, check=True, capture=True):
     image = getattr(args, "image", None) or state.get("image")
     if image:
         env["LOADTEST_EDDI_IMAGE"] = image
-    return sh("docker", "compose", *files, *cmd, check=check, capture=capture, env=env)
+    return sh("docker", "compose", *files, *cmd, check=check, capture=capture, env=env, timeout=timeout)
 
 
 def http(method, url, body=None, timeout=30):
@@ -250,7 +259,7 @@ def cmd_run(args, label=None):
     k6 = ["run", "--rm", "-e", f"AGENT_ID={agent}", "-e", f"SCENARIO={args.scenario}", "-e", f"VUS={args.vus}",
           "-e", f"TURNS={args.turns}", "-e", f"THINK_MS={args.think_ms}", "-e", f"OUT={name}.k6.json",
           "-e", f"RAMP={args.ramp}", "-e", f"HOLD={args.hold}", "k6", "run", "--quiet", "/scripts/turns.js"]
-    r = compose(args, "--profile", "k6", *k6, check=False, capture=False)
+    r = compose(args, "--profile", "k6", *k6, check=False, capture=False, timeout=args.k6_timeout)
     elapsed = time.time() - t0
     sampler.stop.set()
     sampler.join(5)
@@ -306,13 +315,14 @@ def report(results, path, args):
              f"think time {args.think_ms} ms. Image `{load_state().get('image') or 'labsai/eddi:6.5.0'}`"
              f"{' with the local build mounted' if load_state().get('app') else ''}; commit `{git_head()}`.", "",
              "| Concurrent conv. | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | 503 | 408 | 5xx other | no response | "
-             + "Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | Mongo ops/turn (q/u/i/cmd) |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             + "200 with TurnError | Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | Mongo ops/turn (q/u/i/cmd) |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         e, o, lat = r["errors"], r["mongo_ops_per_turn"], r["latency_ms"]
         lines.append(f"| {r['vus']} | {r['turns_ok']:.0f} | {r['turns_per_s'] or 0:.1f} | {fmt(lat['med'])} | {fmt(lat['p(95)'])} | "
                      f"{fmt(lat['p(99)'])} | {e['turns_503']:.0f} | {e['turns_408']:.0f} | {e['turns_5xx_other']:.0f} | "
-                     f"{e['turns_no_response']:.0f} | {peak(r, 'eddi_runtime_executor_active', 'managed')} | "
+                     f"{e['turns_no_response']:.0f} | {e.get('turns_app_error', 0):.0f} | "
+                     f"{peak(r, 'eddi_runtime_executor_active', 'managed')} | "
                      f"{peak(r, 'eddi_runtime_executor_queued', 'managed')} | {peak(r, 'eddi_processing_conversation_count')} | "
                      f"{peak(r, 'jvm_threads_live_threads')} | {o.get('query', '-')}/{o.get('update', '-')}/{o.get('insert', '-')}/"
                      f"{o.get('command', '-')} |")
@@ -363,6 +373,8 @@ def main():
         p.add_argument("--hold", default="60s")
         p.add_argument("--label", default="run")
         p.add_argument("--agent", help="agent id (default: the one `up` created)")
+        p.add_argument("--k6-timeout", type=int, default=7200,
+                       help="seconds a k6 run may take before the driver gives up (default 7200; long-conversation needs room)")
     args = ap.parse_args()
     if args.cmd in ("run", "matrix") and args.turns is None:
         args.turns = 200 if args.scenario == "long-conversation" else 10
