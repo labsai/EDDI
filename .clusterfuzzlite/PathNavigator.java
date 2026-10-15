@@ -37,6 +37,13 @@ public class PathNavigator {
     private static final Pattern SEGMENT_PATTERN = Pattern.compile("([^.\\[]+)(?:\\[(-?\\d+)])?");
 
     /**
+     * Most {@code +}/{@code -} operands one arithmetic or concatenation expression
+     * may have; beyond it the expression resolves to null. See
+     * {@link #evaluateExpression}.
+     */
+    static final int MAX_OPERANDS = 64;
+
+    /**
      * Navigate a dot-separated path through a Map/List structure and return the
      * value.
      *
@@ -162,6 +169,14 @@ public class PathNavigator {
         List<Operand> operands = tokenize(expression, operators);
         if (operators.isEmpty()) {
             return null; // no operator: plain navigation already answered
+        }
+        if (operands.size() > MAX_OPERANDS) {
+            // The longest-prefix searches below try every operand range, so the work
+            // grows with the square of the operand count — and each probe is a regex
+            // pass over the range. An expression with more operands than this is not
+            // a path anyone wrote by hand; it resolves to nothing instead of burning
+            // the CPU on it.
+            return null;
         }
         for (Operand operand : operands) {
             if (isBlank(expression, operand.start(), operand.end())) {
