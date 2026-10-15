@@ -15,13 +15,14 @@ import argparse
 import datetime
 import json
 import os
+from http.client import HTTPConnection  # the module name would clash with http() below
 import re
-import subprocess
+# The driver's job is to run `docker compose` and `git`: fixed argument lists, no shell.
+import subprocess  # nosec B404
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -41,7 +42,9 @@ COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_tot
 
 
 def sh(*cmd, check=False, capture=True, env=None):
-    r = subprocess.run(cmd, capture_output=capture, text=True, env=env, encoding="utf-8", errors="replace")
+    # An argument list, never a shell string: the callers pass `docker compose …` and `git …` with this
+    # script's own file paths and the operator's CLI options, so nothing is interpreted by a shell.
+    r = subprocess.run(cmd, capture_output=capture, text=True, env=env, encoding="utf-8", errors="replace")  # nosec B603
     if check and r.returncode != 0:
         raise SystemExit(f"command failed ({r.returncode}): {' '.join(cmd)}\n{r.stdout}\n{r.stderr}")
     return r
@@ -62,26 +65,35 @@ def compose(args, *cmd, check=True, capture=True):
 
 
 def http(method, url, body=None, timeout=30):
+    """One request to the local stack. Plain http only: every target is EDDI or WireMock on 127.0.0.1."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "http" or not parts.hostname:
+        raise ValueError(f"only http:// URLs are used here, got {url!r}")
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"} if data else {})
+    path = parts.path + ("?" + parts.query if parts.query else "")
+    conn = HTTPConnection(parts.hostname, parts.port or 80, timeout=timeout)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, dict(r.headers), r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers), e.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError) as e:
+        conn.request(method, path or "/", body=data, headers={"Content-Type": "application/json"} if data else {})
+        r = conn.getresponse()
+        return r.status, dict(r.getheaders()), r.read().decode("utf-8", "replace")
+    except OSError as e:  # refused, reset, timed out: the stack is not (yet) answering
         return 0, {}, str(e)
+    finally:
+        conn.close()
 
 
 def wait_until(fn, timeout, interval=1.0):
     end = time.time() + timeout
+    last_error = None
     while time.time() < end:
         try:
             if fn():
                 return True
-        except Exception:
-            pass
+        except Exception as e:  # a probe that throws (no JSON yet, connection refused) is "not yet"
+            last_error = e
         time.sleep(interval)
+    if last_error is not None:
+        print(f"gave up waiting; last probe error: {last_error}", file=sys.stderr)
     return False
 
 
