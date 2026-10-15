@@ -6202,5 +6202,19 @@
     "cancelled": "デプロイされていません: 保管庫キーが付与されませんでした。エージェントは作成済みです。もう一度試して付与とデプロイを行うか、各エージェントのページからデプロイしてください。",
     "failed": "作成済みですが未デプロイ: {{names}}。{{reason}} もう一度試すか、各エージェントのページからデプロイしてください。",
     "memberCancelled": "デプロイされていません: 保管庫キーが付与されませんでした"
+  },
+  "webhook": {
+    "signingSecretHint": "必須。共有 HMAC シークレット。シークレット保管庫に保存し ${vault:…} として参照します。",
+    "signatureScheme": "署名方式",
+    "conversationStrategy": "会話戦略",
+    "correlationKeyPath": "相関キー(JSON ポインター)",
+    "inputTemplate": "入力テンプレート",
+    "inputTemplateHint": "ターンの入力テキスト。既定値は event:<type>。イベント全体はエージェントから {context.event} として参照できます。",
+    "eventTypeHeader": "イベント種別ヘッダー(例: X-GitHub-Event)",
+    "eventTypePath": "イベント種別の JSON ポインター(例: /action)",
+    "signingInstructions": "リクエスト本文をそのまま署名シークレットで署名し、このヘッダーで送信してください。未署名・期限切れ・改ざんされたリクエストは 401 で拒否されます。",
+    "formatsHint": "CloudEvents 1.0(構造化モードまたはバイナリモード)と 256 KB までのプレーン JSON を受け付けます。conversationId を付けて 202 を返し、重複したイベント ID には 200 を返します。",
+    "triggerHint": "このターゲットに振り分けるイベント種別 — 完全一致、または \"*\" で終わるプレフィックス(例: com.github.*)",
+    "endpointHint": "署名済みイベントをこの URL に POST で送信してください。"
   }
 }

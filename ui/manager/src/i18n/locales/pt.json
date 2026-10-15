@@ -6272,5 +6272,19 @@
     "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
     "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
     "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
+  },
+  "webhook": {
+    "signingSecretHint": "Obrigatório. O segredo HMAC partilhado, guardado no cofre de segredos e referenciado como ${vault:…}.",
+    "signatureScheme": "Esquema de assinatura",
+    "conversationStrategy": "Estratégia de conversa",
+    "correlationKeyPath": "Chave de correlação (ponteiro JSON)",
+    "inputTemplate": "Modelo de entrada",
+    "inputTemplateHint": "O texto de entrada do turno. Padrão: event:<type>. O evento completo fica disponível para o agente como {context.event}.",
+    "eventTypeHeader": "Cabeçalho do tipo de evento (ex. X-GitHub-Event)",
+    "eventTypePath": "Ponteiro JSON do tipo de evento (ex. /action)",
+    "signingInstructions": "Assine o corpo original do pedido com o segredo de assinatura e envie a assinatura neste cabeçalho. Pedidos não assinados, expirados ou adulterados são recusados com 401.",
+    "formatsHint": "Aceita CloudEvents 1.0 (modo estruturado ou binário) e JSON simples até 256 KB. Responde 202 com o conversationId; um id de evento repetido recebe 200.",
+    "triggerHint": "Tipos de evento encaminhados para este destino — exatos, ou um prefixo terminado em \"*\" (ex. com.github.*)",
+    "endpointHint": "Envie eventos assinados para este URL com POST."
   }
 }

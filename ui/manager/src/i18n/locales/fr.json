@@ -6272,5 +6272,19 @@
     "cancelled": "Non déployés : la clé du coffre n'a pas été accordée. Les agents ont été créés – réessayez pour l'accorder et les déployer, ou déployez-les depuis leurs pages d'agent.",
     "failed": "Créés mais non déployés : {{names}}. {{reason}} Réessayez, ou déployez-les depuis leurs pages d'agent.",
     "memberCancelled": "Non déployé : la clé du coffre n'a pas été accordée"
+  },
+  "webhook": {
+    "signingSecretHint": "Obligatoire. Le secret HMAC partagé, stocké dans le coffre de secrets et référencé comme ${vault:…}.",
+    "signatureScheme": "Schéma de signature",
+    "conversationStrategy": "Stratégie de conversation",
+    "correlationKeyPath": "Clé de corrélation (pointeur JSON)",
+    "inputTemplate": "Modèle d'entrée",
+    "inputTemplateHint": "Le texte d'entrée du tour. Par défaut : event:<type>. L'événement complet est disponible pour l'agent sous {context.event}.",
+    "eventTypeHeader": "En-tête du type d'événement (ex. X-GitHub-Event)",
+    "eventTypePath": "Pointeur JSON du type d'événement (ex. /action)",
+    "signingInstructions": "Signez le corps brut de la requête avec le secret de signature et envoyez la signature dans cet en-tête. Les requêtes non signées, expirées ou altérées sont refusées avec 401.",
+    "formatsHint": "Accepte CloudEvents 1.0 (mode structuré ou binaire) et le JSON simple jusqu'à 256 Ko. Répond 202 avec le conversationId ; un identifiant d'événement répété reçoit 200.",
+    "triggerHint": "Types d'événements routés vers cette cible — exacts, ou un préfixe se terminant par \"*\" (ex. com.github.*)",
+    "endpointHint": "Envoyez des événements signés à cette URL avec POST."
   }
 }

@@ -6202,5 +6202,19 @@
     "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
+  },
+  "webhook": {
+    "signingSecretHint": "Erforderlich. Das gemeinsame HMAC-Geheimnis, im Secrets-Tresor gespeichert und als ${vault:…} referenziert.",
+    "signatureScheme": "Signaturverfahren",
+    "conversationStrategy": "Konversationsstrategie",
+    "correlationKeyPath": "Korrelationsschlüssel (JSON-Pointer)",
+    "inputTemplate": "Eingabevorlage",
+    "inputTemplateHint": "Der Eingabetext des Turns. Standard: event:<type>. Das vollständige Ereignis steht dem Agenten als {context.event} zur Verfügung.",
+    "eventTypeHeader": "Header für den Ereignistyp (z. B. X-GitHub-Event)",
+    "eventTypePath": "JSON-Pointer für den Ereignistyp (z. B. /action)",
+    "signingInstructions": "Signieren Sie den unveränderten Request-Body mit dem Signaturgeheimnis und senden Sie die Signatur in diesem Header. Unsignierte, veraltete oder manipulierte Anfragen werden mit 401 abgelehnt.",
+    "formatsHint": "Akzeptiert CloudEvents 1.0 (strukturiert oder binär) und reines JSON bis 256 KB. Antwortet 202 mit der conversationId; eine wiederholte Ereignis-ID erhält 200.",
+    "triggerHint": "Ereignistypen, die an dieses Ziel geleitet werden — exakt oder ein Präfix mit \"*\" am Ende (z. B. com.github.*)",
+    "endpointHint": "Senden Sie signierte Ereignisse per POST an diese URL."
   }
 }

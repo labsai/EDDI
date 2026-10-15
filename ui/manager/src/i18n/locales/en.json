@@ -6202,5 +6202,19 @@
     "cancelled": "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
     "failed": "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
     "memberCancelled": "Not deployed: the vault key was not granted"
+  },
+  "webhook": {
+    "signingSecretHint": "Required. The shared HMAC secret, stored in the secrets vault and referenced as ${vault:…}.",
+    "signatureScheme": "Signature scheme",
+    "conversationStrategy": "Conversation strategy",
+    "correlationKeyPath": "Correlation key (JSON pointer)",
+    "inputTemplate": "Input template",
+    "inputTemplateHint": "The turn's input text. Defaults to event:<type>. The full event is available to the agent as {context.event}.",
+    "eventTypeHeader": "Event type header (e.g. X-GitHub-Event)",
+    "eventTypePath": "Event type JSON pointer (e.g. /action)",
+    "signingInstructions": "Sign the raw request body with the signing secret and send the signature in this header. Unsigned, stale or tampered requests are refused with 401.",
+    "formatsHint": "Accepts CloudEvents 1.0 (structured or binary mode) and plain JSON up to 256 KB. Answers 202 with the conversationId; a repeated event id answers 200.",
+    "triggerHint": "Event types routed to this target — exact, or a prefix ending in \"*\" (e.g. com.github.*)",
+    "endpointHint": "Send signed events to this URL with POST."
   }
 }

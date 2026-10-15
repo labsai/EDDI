@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { CreateChannelDialog } from "@/components/channels/create-channel-dialog";
 
@@ -159,5 +159,20 @@ describe("CreateChannelDialog", () => {
         "Right-click a Slack channel → View channel details → copy the Channel ID"
       )
     ).toBeInTheDocument();
+  });
+  it("asks a webhook integration for its signing secret instead of Slack credentials", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateChannelDialog open={true} onOpenChange={vi.fn()} />);
+    await user.type(screen.getByTestId("create-channel-name"), "GitHub events");
+    await user.selectOptions(screen.getByTestId("create-channel-type"), "webhook");
+    await user.click(screen.getByTestId("create-channel-next"));
+
+    expect(screen.queryByTestId("create-channel-id")).toBeNull();
+    expect(screen.getByTestId("create-webhook-scheme")).toBeInTheDocument();
+    // The secret is required for a webhook: no secret, no next step.
+    expect(screen.getByTestId("create-channel-next")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("create-webhook-signing-secret-input"), { target: { value: "${vault:hook}" } });
+    expect(screen.getByTestId("create-channel-next")).not.toBeDisabled();
   });
 });

@@ -11,6 +11,7 @@ import { StepDots } from "@/components/shared/step-dots";
 import { useCreateChannel } from "@/hooks/use-channels";
 import {
   CHANNEL_TYPES,
+  WEBHOOK_SIGNATURE_SCHEMES,
   createDefaultTarget,
   type ChannelIntegrationConfiguration,
 } from "@/lib/api/channels";
@@ -40,6 +41,7 @@ export function CreateChannelDialog({
   const [channelId, setChannelId] = useState("");
   const [botToken, setBotToken] = useState("");
   const [signingSecret, setSigningSecret] = useState("");
+  const [signatureScheme, setSignatureScheme] = useState("eddi-v1");
   const [targetAgentId, setTargetAgentId] = useState(defaultAgentId ?? "");
 
   const reset = useCallback(() => {
@@ -49,9 +51,11 @@ export function CreateChannelDialog({
     setChannelId("");
     setBotToken("");
     setSigningSecret("");
+    setSignatureScheme("eddi-v1");
     setTargetAgentId(defaultAgentId ?? "");
   }, [defaultAgentId]);
 
+  const isWebhook = channelType === "webhook";
   const stepIndex = STEPS.indexOf(step);
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
@@ -62,6 +66,9 @@ export function CreateChannelDialog({
       // Both credentials are optional here, but if given they must be vault
       // references: see `plaintextSecretFields`.
       case "credentials":
+        // A webhook is authenticated by its signature alone, so its secret is
+        // required (the backend refuses to save one without it).
+        if (isWebhook) return signingSecret.trim().length > 0 && isEmptyOrReference(signingSecret);
         return channelId.trim().length > 0 && isEmptyOrReference(botToken) && isEmptyOrReference(signingSecret);
       case "target": return targetAgentId.trim().length > 0;
     }
@@ -74,11 +81,13 @@ export function CreateChannelDialog({
     const config: ChannelIntegrationConfiguration = {
       name: name.trim(),
       channelType,
-      platformConfig: {
-        channelId: channelId.trim(),
-        botToken: botToken.trim(),
-        signingSecret: signingSecret.trim(),
-      },
+      platformConfig: isWebhook
+        ? { signingSecret: signingSecret.trim(), signatureScheme }
+        : {
+            channelId: channelId.trim(),
+            botToken: botToken.trim(),
+            signingSecret: signingSecret.trim(),
+          },
       targets: [createDefaultTarget(targetAgentId.trim())],
       defaultTargetName: "default",
     };
@@ -149,7 +158,28 @@ export function CreateChannelDialog({
           )}
 
           {/* Step 2: Credentials */}
-          {step === "credentials" && (
+          {step === "credentials" && isWebhook && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">{t("channels.signingSecret", "Signing Secret")}</label>
+                <SecretKeyPicker referenceOnly testId="create-webhook-signing-secret" value={signingSecret} onChange={setSigningSecret} placeholder="${vault:webhook-signing-secret}" />
+                <p className="text-xs text-muted-foreground">{t("webhook.signingSecretHint", "Required. The shared HMAC secret, stored in the secrets vault and referenced as ${vault:…}.")}</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground" htmlFor="create-webhook-scheme">{t("webhook.signatureScheme", "Signature scheme")}</label>
+                <select
+                  id="create-webhook-scheme"
+                  data-testid="create-webhook-scheme"
+                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 py-1 text-sm text-foreground"
+                  value={signatureScheme}
+                  onChange={(e) => setSignatureScheme(e.target.value)}
+                >
+                  {WEBHOOK_SIGNATURE_SCHEMES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                </select>
+              </div>
+            </>
+          )}
+          {step === "credentials" && !isWebhook && (
             <>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground" htmlFor="create-channel-id">

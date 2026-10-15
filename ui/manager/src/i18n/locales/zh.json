@@ -6202,5 +6202,19 @@
     "cancelled": "未部署：保管库密钥尚未授权。智能体已创建——请重试以授权并部署它们，或从各自的智能体页面部署。",
     "failed": "已创建但未部署：{{names}}。{{reason}} 请重试，或从各自的智能体页面部署。",
     "memberCancelled": "未部署：保管库密钥尚未授权"
+  },
+  "webhook": {
+    "signingSecretHint": "必填。共享的 HMAC 密钥,存放在密钥保管库中并以 ${vault:…} 引用。",
+    "signatureScheme": "签名方案",
+    "conversationStrategy": "会话策略",
+    "correlationKeyPath": "关联键(JSON 指针)",
+    "inputTemplate": "输入模板",
+    "inputTemplateHint": "本轮的输入文本。默认为 event:<type>。完整事件可在智能体中通过 {context.event} 访问。",
+    "eventTypeHeader": "事件类型请求头(例如 X-GitHub-Event)",
+    "eventTypePath": "事件类型 JSON 指针(例如 /action)",
+    "signingInstructions": "使用签名密钥对原始请求体签名,并在此请求头中发送签名。未签名、过期或被篡改的请求将以 401 拒绝。",
+    "formatsHint": "接受 CloudEvents 1.0(结构化或二进制模式)和最大 256 KB 的普通 JSON。返回 202 及 conversationId;重复的事件 ID 返回 200。",
+    "triggerHint": "路由到此目标的事件类型——精确匹配,或以 \"*\" 结尾的前缀(例如 com.github.*)",
+    "endpointHint": "使用 POST 将已签名的事件发送到此 URL。"
   }
 }
