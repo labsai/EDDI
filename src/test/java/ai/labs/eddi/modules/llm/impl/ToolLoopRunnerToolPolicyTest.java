@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.ToolRepeatGuardConfig;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -181,6 +182,67 @@ class ToolLoopRunnerToolPolicyTest {
         run(request, Map.of("discover_tools", (req, id) -> json.toString()), memory("conv-1"), true, builtIns, active);
 
         assertEquals(30, active.size(), "every discovered tool is activated");
+    }
+
+    @Nested
+    @DisplayName("repeat guard")
+    class RepeatGuardTests {
+
+        private final AtomicInteger executed = new AtomicInteger();
+        private final List<ChatRequest> requests = new ArrayList<>();
+
+        private AgentOrchestrator.ToolSetup setup(String result) {
+            ToolExecutor failing = (request, memoryId) -> {
+                executed.incrementAndGet();
+                return result;
+            };
+            var spec = ToolSpecification.builder().name("getUser").description("d").build();
+            return new AgentOrchestrator.ToolSetup(List.of(spec), Map.of("getUser", failing), Map.of("getUser", "http"), List.of(spec),
+                    Map.of(), Map.of(), Map.of());
+        }
+
+        /**
+         * A model that sends the same call every round, with the key order shuffled.
+         */
+        private ChatModel stubbornModel() {
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                String args = requests.size() % 2 == 0 ? "{\"a\":1,\"b\":2}" : "{\"b\":2,\"a\":1}";
+                return ChatResponse.builder().aiMessage(AiMessage
+                        .from(ToolExecutionRequest.builder().id("call_" + requests.size()).name("getUser").arguments(args).build())).build();
+            });
+            return model;
+        }
+
+        private AgentOrchestrator.ExecutionResult runStubborn() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            return runner.executeWithTools(stubbornModel(), null, List.of(UserMessage.from("go")),
+                    setup("{\"httpCode\":403,\"body\":\"no\"}"), task, memory("conv-1"), null, -1, 0, null);
+        }
+
+        @Test
+        @DisplayName("a repeated 403 runs once, is refused, and the turn ends with the escalation message after 3 refusals")
+        void repeatedTerminalFailureIsRefusedThenEscalates() throws Exception {
+            var result = runStubborn();
+
+            assertEquals(1, executed.get(), "the failing tool must run exactly once");
+            assertEquals(4, requests.size(), "1 executed round + 3 refused rounds, then no further model request");
+            assertEquals(ToolRepeatGuard.stoppedMessage(3), result.response());
+        }
+
+        @Test
+        @DisplayName("enabled:false restores the old behaviour: the call runs every round up to the iteration cap")
+        void disabledGuardRunsEveryRound() throws Exception {
+            var config = new ToolRepeatGuardConfig();
+            config.setEnabled(false);
+            task.setToolRepeatGuard(config);
+
+            runStubborn();
+
+            assertEquals(10, executed.get());
+        }
     }
 
     @Nested

@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -374,6 +375,11 @@ class ToolLoopRunner {
             int perTurnCap = effectiveCallCap(task.getMaxToolCallsPerTurn(), DEFAULT_MAX_TOOL_CALLS_PER_TURN);
             int toolCallsThisTurn = countToolCalls(trace);
 
+            // Repeat guard: stack-local on purpose (the runner is a shared singleton),
+            // so a HITL resume, which is a new run of this method, starts a fresh one.
+            // Null when the task switched it off.
+            ToolRepeatGuard repeatGuard = ToolRepeatGuard.forTask(task, toolCanonicalNames);
+
             // Engine-enforced counterweight: strict mode caps iterations
             var counterweight = task.getCounterweight();
             if (counterweight != null && counterweight.isEnabled()
@@ -519,12 +525,10 @@ class ToolLoopRunner {
                                         exchangeRecorder)) {
                                     continue;
                                 }
-                                addResult(currentMessages, aiMessage, allowedReq,
-                                        executeSingleToolCallResult(allowedReq, memory, trace, toolExecutors, toolRateLimits,
-                                                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
-                                                enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs,
-                                                activeSpecs),
-                                        exchangeRecorder);
+                                executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                                        () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
+                                                toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                                                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -590,13 +594,22 @@ class ToolLoopRunner {
                             continue;
                         }
 
-                        addResult(currentMessages, aiMessage, toolRequest,
-                                executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                                        toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
-                                        enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs),
-                                exchangeRecorder);
+                        executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
+                                () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
+                                        toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
+                                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
+
+                    // The model keeps re-sending calls the guard has to refuse: stop
+                    // asking it. Every call of this round has its result, so the
+                    // transcript is well-formed; completed calls are kept as they are.
+                    if (repeatGuard != null && repeatGuard.shouldEscalate()) {
+                        LOGGER.warnf("Tool repeat guard stopped the loop after %d refused repeated calls (conversation %s)",
+                                repeatGuard.refusals(), sanitize(conversationId));
+                        trace.add(Map.of("type", "tool_repeat_stopped", "refusals", repeatGuard.refusals()));
+                        return finish(currentMessages, transcriptOut, ToolRepeatGuard.stoppedMessage(repeatGuard.refusals()));
+                    }
                 } else {
                     return finish(currentMessages, transcriptOut, aiMessage.text());
                 }
@@ -915,6 +928,43 @@ class ToolLoopRunner {
     }
 
     /**
+     * Runs one tool call through the repeat guard and appends its result. A call
+     * the guard refuses is answered with a {@code NOT_EXECUTED} result and traced
+     * as {@code tool_repeat_refused}; it never reaches an executor. Otherwise the
+     * call runs, its RAW result is classified, and the outcome is recorded. With no
+     * guard this is exactly "run it and append the governed result".
+     * <p>
+     * The one place both live execution sites share, so a rule enforced on the
+     * ungated half of a gated batch cannot be missing from the main loop.
+     */
+    private static void executeGuarded(ToolRepeatGuard guard, ToolExecutionRequest request, AiMessage call,
+                                       List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
+                                       Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
+                                       Supplier<ToolCallResult> execution) {
+        if (guard == null) {
+            addResult(currentMessages, call, request, execution.get().governed(), exchangeRecorder);
+            return;
+        }
+        ToolRepeatGuard.Refusal refusal = guard.check(request.name(), request.arguments());
+        if (refusal != null) {
+            LOGGER.warnf("Refusing repeated tool call '%s' (%s): %s", sanitize(request.name()), refusal.reasonCode(), refusal.text());
+            addResult(currentMessages, call, request, ToolRepeatGuard.refusalEnvelope(refusal), exchangeRecorder);
+            trace.add(Map.of("type", "tool_repeat_refused", "tool", request.name(), "lastOutcome", refusal.lastOutcome().name(), "reason",
+                    refusal.reasonCode()));
+            String source = toolSources == null ? null : toolSources.get(request.name());
+            Metrics.globalRegistry.counter("eddi.tool.repeat.refused", "source", source != null ? source : "unknown", "reason",
+                    refusal.reasonCode()).increment();
+            return;
+        }
+        ToolCallResult result = execution.get();
+        ToolOutcomeClassifier.Outcome outcome = result.notExecuted()
+                ? ToolOutcomeClassifier.Outcome.NOT_EXECUTED
+                : ToolOutcomeClassifier.classify(result.raw());
+        guard.record(request.name(), request.arguments(), outcome, result.raw());
+        addResult(currentMessages, call, request, result.governed(), exchangeRecorder);
+    }
+
+    /**
      * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
      * honest and actionable rather than apologetic: what stopped, what state the
      * work is in, and how to go on. The cap itself is configurable per task
@@ -947,6 +997,44 @@ class ToolLoopRunner {
                                        boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+        return executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit,
+                maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)
+                .governed();
+    }
+
+    /**
+     * One tool call's result in both forms the loop needs.
+     *
+     * @param governed
+     *            what the model is shown: truncated, and wrapped by the tool-result
+     *            guardrail
+     * @param raw
+     *            what the tool returned, before truncation and before the guardrail
+     *            envelope — the form {@link ToolOutcomeClassifier} must see,
+     *            because the envelope hides the shapes it recognises
+     * @param notExecuted
+     *            true when the loop itself refused the call (budget, tenant quota,
+     *            expired turn deadline): the tool never ran, so the call says
+     *            nothing about whether it would succeed
+     */
+    record ToolCallResult(String governed, String raw, boolean notExecuted) {
+        ToolCallResult(String refusal) {
+            this(refusal, refusal, true);
+        }
+    }
+
+    /**
+     * {@link #executeSingleToolCallResult} with the raw result kept alongside the
+     * governed one. The only addition over that method's contract is the record.
+     */
+    ToolCallResult executeToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
+                                   List<Map<String, Object>> trace,
+                                   Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                   Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
+                                   int defaultRateLimit, Double maxBudget, String conversationId,
+                                   boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
+                                   LlmConfiguration.Task task, boolean isLazy,
+                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         // Live "Using {tool}…" signal for streaming clients — name only, before
         // execution, so the status line moves the moment work starts rather than
         // when the whole loop summarizes at turn end.
@@ -999,7 +1087,7 @@ class ToolLoopRunner {
             budgetStep.put("error", budgetError);
             trace.add(budgetStep);
 
-            return "Error: " + budgetError;
+            return new ToolCallResult("Error: " + budgetError);
         }
 
         // Check tenant-level monthly cost budget (MCP governance)
@@ -1023,7 +1111,7 @@ class ToolLoopRunner {
                 quotaStep.put("error", costCheck.reason());
                 trace.add(quotaStep);
 
-                return "Error: " + costCheck.reason();
+                return new ToolCallResult("Error: " + costCheck.reason());
             }
         }
 
@@ -1031,9 +1119,11 @@ class ToolLoopRunner {
         // tracking
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
+        boolean notExecuted = false;
         if (executor != null && memory != null && memory.getTurnDeadline() != null && memory.getTurnDeadline().isExpired()) {
             Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "tool").increment();
             toolResult = "Error: the turn deadline has passed; tool '" + toolRequest.name() + "' was not run";
+            notExecuted = true;
         } else if (executor != null) {
             // A built-in is DISPATCHED under its @Tool method name ("calculate") but
             // CONFIGURED under its whitelist slug ("calculator"). Resolve the slug once,
@@ -1147,7 +1237,7 @@ class ToolLoopRunner {
             trace.add(guardrailStep);
         }
 
-        return outcome.result();
+        return new ToolCallResult(outcome.result(), untruncatedResult, notExecuted);
     }
 
     /**
