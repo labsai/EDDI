@@ -55,6 +55,12 @@ export function SourceContents({
   );
   const total = documents.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // A run can remove documents while a later page is open; the refetch then
+  // reports fewer pages, and the page asked for is past the end.
+  const hasData = Boolean(documents.data);
+  useEffect(() => {
+    if (hasData && page > pages - 1) setPage(pages - 1);
+  }, [hasData, page, pages]);
 
   return (
     <div className="rounded-lg border border-border/60" data-testid={`${testId}-contents`}>

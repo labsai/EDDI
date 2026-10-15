@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderPage } from "@/test/test-utils";
+import { createTestQueryClient, renderPage } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 
@@ -215,6 +215,37 @@ describe("RAG ingestion — what the knowledge base holds", () => {
     await waitFor(() => expect(chunks).toHaveTextContent("Chunk 1"));
     expect(chunks).toHaveTextContent("EDDI is a config-driven engine for conversational AI.");
     expect(chunks).toHaveTextContent("Chunk 2");
+  });
+
+  it("steps back to the last page when a refetch leaves fewer pages", async () => {
+    let total = 30;
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/documents", ({ request }) => {
+        const offset = Number(new URL(request.url).searchParams.get("offset") ?? 0);
+        const all = Array.from({ length: total }, (_, i) => ({
+          documentId: `https://example.com/p${i}`,
+          label: `https://example.com/p${i}`,
+          url: `https://example.com/p${i}`,
+          missedRuns: 0,
+          tombstoned: false,
+        }));
+        return HttpResponse.json({ total, truncated: false, documents: all.slice(offset, offset + 25) });
+      }),
+    );
+    const client = createTestQueryClient();
+    const user = userEvent.setup();
+    renderPage(`/manage/resources/rag/res1`, <ResourceDetailPage />, "/manage/resources/:type/:id", client);
+    await openFirstSource(user);
+    await user.click(await screen.findByTestId("ingestion-source-0-contents-toggle"));
+    await user.click(await screen.findByTestId("ingestion-source-0-contents-next"));
+    await screen.findByTestId("ingestion-source-0-doc-https://example.com/p29");
+
+    // A run removed documents: only one page is left.
+    total = 3;
+    await client.invalidateQueries({ queryKey: ["ingestion", "documents"] });
+
+    await screen.findByTestId("ingestion-source-0-doc-https://example.com/p0");
+    expect(screen.queryByTestId("ingestion-source-0-contents-next")).not.toBeInTheDocument();
   });
 
   it("runs a test retrieval and shows each chunk with its score and origin", async () => {

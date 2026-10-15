@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CalendarClock, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,22 @@ export function CronField({
   const current = value ?? "";
   const matchingPreset = CRON_PRESETS.find((p) => p.cron === current.trim());
   const [custom, setCustom] = useState(!matchingPreset);
+  // The last value this field itself sent. A value that arrives from anywhere else
+  // — Discard, a version switch, an edit in the JSON tab — re-derives the mode, or
+  // a preset could keep showing the custom input and a custom cron could hide it.
+  // A value the operator typed keeps the custom input open even when it happens
+  // to match a preset.
+  const emitted = useRef<string | null>(null);
+  const isPreset = Boolean(matchingPreset);
+  useEffect(() => {
+    if (emitted.current === current) return;
+    emitted.current = null;
+    setCustom(!isPreset);
+  }, [current, isPreset]);
+  const emit = (next: string | undefined) => {
+    emitted.current = next ?? "";
+    onChange(next);
+  };
   const debounced = useDebounced(current, PREVIEW_DEBOUNCE_MS);
   const preview = useCronPreview(debounced);
 
@@ -52,7 +68,7 @@ export function CronField({
             return;
           }
           setCustom(false);
-          onChange(e.target.value || undefined);
+          emit(e.target.value || undefined);
         }}
         disabled={disabled}
         aria-label={t("ragEditor.sources.cron", "Schedule (cron)")}
@@ -69,7 +85,7 @@ export function CronField({
       {custom && (
         <Input
           value={current}
-          onChange={(e) => onChange(e.target.value || undefined)}
+          onChange={(e) => emit(e.target.value || undefined)}
           disabled={disabled}
           placeholder="0 2 * * *"
           aria-label={t("ragEditor.schedule.customCron", "Cron expression")}
