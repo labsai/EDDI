@@ -1,0 +1,35 @@
+{
+  "mappings": [
+    {
+      "name": "chat completions",
+      "request": { "method": "POST", "urlPathPattern": "/v1/chat/completions" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": {
+          "id": "chatcmpl-loadtest",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "mock-1",
+          "choices": [
+            {
+              "index": 0,
+              "message": { "role": "assistant", "content": "Load test reply." },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+        }
+      }
+    },
+    {
+      "name": "models",
+      "request": { "method": "GET", "urlPathPattern": "/v1/models" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "object": "list", "data": [ { "id": "mock-1", "object": "model" } ] }
+      }
+    }
+  ]
+}
