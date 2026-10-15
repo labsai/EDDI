@@ -134,6 +134,15 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 > **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
+
+### More Parameters, and Which Model Accepts Them
+
+Beyond the table above every provider reads many more settings: sampling (`topP`, `topK`, `seed`, `stopSequences`, penalties), reasoning (`reasoningEffort`, `thinkingType`, `thinkingBudgetTokens`, `thinkingLevel`, `effort`), caching (`cacheSystemMessages`, `promptCacheKey`), safety (`safetySettings`, Bedrock guardrails), connection (`customHeaders`, `customQueryParams`) and `customParameters`, an escape hatch that adds extra top-level fields to the request body of OpenAI, the OpenAI-compatible providers and Anthropic. The full per-provider list, with value formats, ranges and the model versions that reject or ignore each one, is the generated **[LLM Parameters Reference](llm-parameters.md)**; the Manager shows it as typed controls under **Model settings**.
+
+All values are strings. Lists are a JSON array (`"[\"END\"]"`) or a comma list; maps (`customHeaders`, `metadata`, `safetySettings`) are JSON objects. A value that cannot be parsed is ignored with a warning and the provider default stays.
+
+**Model-aware.** Parameters are not valid for every model of a provider: OpenAI reasoning models reject `temperature` and `topP`, newer Claude models reject non-default sampling settings and manual thinking budgets, newer Gemini models ignore sampling settings. EDDI keeps a catalog of this (`model-parameters.json`) and, when a model is first built, **removes parameters the configured model would reject** (one warning naming the parameter, the model and the reason) instead of letting every turn fail with an HTTP 400. Parameters with no effect are kept and warned about. Set `eddi.llm.parameter-catalog.drop-rejected=false` to only warn. Where vendor documentation is silent or contradictory no rule is written, so an unknown model is never restricted. On Azure OpenAI set `baseModel` (never sent) to name the underlying model, because the deployment name does not identify it.
+
 ### Output Token Limits
 
 The `maxTokens` parameter controls the **maximum number of output tokens** the LLM can generate per response. This is a ceiling, not a target — the model generates only what it needs and stops. Setting it higher does not increase cost unless the model actually produces more tokens; the `timeout` parameter is the real cost safety net.
@@ -147,8 +156,9 @@ The `maxTokens` parameter controls the **maximum number of output tokens** the L
 |----------|------------|----------------------|--------------------------|-------|
 | **Anthropic** | `maxTokens` | 8,192 (standard) / 128,000 (with extended thinking) | **16,384** | Required by API. Set higher for thinking models |
 | **Gemini** | `maxOutputTokens` | 65,536 | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
-| **OpenAI** | `maxTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | |
-| **Azure OpenAI** | `maxTokens` | Same as OpenAI | Provider SDK default | |
+| **Vertex AI Gemini** | `maxOutputTokens` | Model-dependent | Provider SDK default | Use `maxOutputTokens` (not `maxTokens`) |
+| **OpenAI** | `maxTokens`, or `maxCompletionTokens` | 4,096–16,384 (model-dependent) | Provider SDK default | Reasoning models (o-series, GPT-5 and later) reject `maxTokens`: use `maxCompletionTokens`. The cap also covers hidden reasoning tokens |
+| **Azure OpenAI** | `maxTokens`, or `maxCompletionTokens` | Same as OpenAI | Provider SDK default | Same rule as OpenAI |
 | **Bedrock** | `maxTokens` | Model-dependent | Provider SDK default | |
 | **Mistral** | `maxTokens` | 32,768 | Provider SDK default | |
 | **Oracle GenAI** | `maxTokens` | Model-dependent | Provider SDK default | |

@@ -14,6 +14,7 @@ import { CascadeStepCard } from "./cascade/cascade-step-card";
 import { CascadeJudgeModelEditor } from "./cascade/cascade-judge-model";
 import { CascadeHeuristicEditor } from "./cascade/cascade-heuristic";
 import { CascadeCeilings } from "./cascade/cascade-ceilings";
+import { modelParamSpec } from "./model-params";
 
 /**
  * Model Cascade configuration section — sequential escalation through
@@ -75,7 +76,13 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
     updateCascade({
       steps: [
         ...steps,
-        { type: task.type ?? "openai", parameters: { model: "" }, confidenceThreshold: 0.7, timeoutMs: 30000 },
+        {
+          type: task.type ?? "openai",
+          // The provider's own model key; `model` is read only by Ollama.
+          parameters: { [modelParamSpec(task.type).modelKey]: "" },
+          confidenceThreshold: 0.7,
+          timeoutMs: 30000,
+        },
       ],
     });
   };
@@ -244,6 +251,7 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
                     index={si}
                     totalSteps={steps.length}
                     taskType={task.type}
+                    taskParameters={task.parameters}
                     issues={cascadeIssuesForStep(issues, si)}
                     onChange={(patch) => updateStep(si, patch)}
                     onMoveUp={() => moveStep(si, -1)}

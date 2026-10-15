@@ -4,23 +4,42 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.utils.LogSanitizer;
+
 import dev.langchain4j.http.client.HttpClient;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.googleai.GeminiHarmBlockThreshold;
+import dev.langchain4j.model.googleai.GeminiHarmCategory;
+import dev.langchain4j.model.googleai.GeminiMediaResolutionLevel;
+import dev.langchain4j.model.googleai.GeminiThinkingConfig;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyLong;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanOrNull;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.booleanValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.doubleValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.intValue;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.objectMap;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringList;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringMap;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringValue;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
@@ -34,6 +53,24 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_TIMEOUT = "timeout";
     static final String KEY_RETURN_THINKING = "returnThinking";
     static final String KEY_SEND_THINKING = "sendThinking";
+    static final String KEY_BASE_URL = "baseUrl";
+    static final String KEY_TOP_P = "topP";
+    static final String KEY_TOP_K = "topK";
+    static final String KEY_SEED = "seed";
+    static final String KEY_FREQUENCY_PENALTY = "frequencyPenalty";
+    static final String KEY_PRESENCE_PENALTY = "presencePenalty";
+    static final String KEY_STOP_SEQUENCES = "stopSequences";
+    static final String KEY_THINKING_LEVEL = "thinkingLevel";
+    static final String KEY_THINKING_BUDGET = "thinkingBudget";
+    static final String KEY_ALLOW_GOOGLE_SEARCH = "allowGoogleSearch";
+    static final String KEY_ALLOW_GOOGLE_MAPS = "allowGoogleMaps";
+    static final String KEY_ALLOW_URL_CONTEXT = "allowUrlContext";
+    static final String KEY_SAFETY_SETTINGS = "safetySettings";
+    static final String KEY_MEDIA_RESOLUTION = "mediaResolution";
+    static final String KEY_CACHED_CONTENT = "cachedContentName";
+    static final String KEY_CUSTOM_HEADERS = "customHeaders";
+
+    private static final Logger LOGGER = Logger.getLogger(GeminiLanguageModelBuilder.class);
 
     /**
      * Both thinking flags default to {@code true}, the opposite of langchain4j's
@@ -87,7 +124,209 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_API_KEY, KEY_MODEL_NAME, KEY_TEMPERATURE, KEY_LOG_REQUESTS_AND_RESPONSES,
-                KEY_MAX_OUTPUT_TOKENS, KEY_ALLOW_CODE_EXECUTION, KEY_TIMEOUT, KEY_RETURN_THINKING, KEY_SEND_THINKING);
+                KEY_MAX_OUTPUT_TOKENS, KEY_ALLOW_CODE_EXECUTION, KEY_TIMEOUT, KEY_RETURN_THINKING, KEY_SEND_THINKING,
+                KEY_BASE_URL, KEY_TOP_P, KEY_TOP_K, KEY_SEED, KEY_FREQUENCY_PENALTY, KEY_PRESENCE_PENALTY,
+                KEY_STOP_SEQUENCES, KEY_THINKING_LEVEL, KEY_THINKING_BUDGET, KEY_ALLOW_GOOGLE_SEARCH,
+                KEY_ALLOW_GOOGLE_MAPS, KEY_ALLOW_URL_CONTEXT, KEY_SAFETY_SETTINGS, KEY_MEDIA_RESOLUTION,
+                KEY_CACHED_CONTENT, KEY_CUSTOM_HEADERS);
+    }
+
+    /**
+     * The settings added on top of the original handful, shared by the synchronous
+     * and the streaming client (both extend the same base builder).
+     * <p>
+     * {@code includeThoughts} is deliberately not offered: thought parts are what
+     * the signature note above warns about, so
+     * {@code thinkingLevel}/{@code thinkingBudget} steer how hard the model thinks
+     * without ever asking for the thoughts back.
+     */
+    private static void applyExtras(GoogleAiGeminiChatModel.GoogleAiGeminiChatModelBuilder b, Map<String, String> p) {
+        String baseUrl = stringValue(p, KEY_BASE_URL);
+        if (baseUrl != null) {
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            b.baseUrl(baseUrl);
+        }
+        Double topP = doubleValue(p, KEY_TOP_P);
+        if (topP != null)
+            b.topP(topP);
+        Integer topK = intValue(p, KEY_TOP_K);
+        if (topK != null)
+            b.topK(topK);
+        Integer seed = intValue(p, KEY_SEED);
+        if (seed != null)
+            b.seed(seed);
+        Double frequencyPenalty = doubleValue(p, KEY_FREQUENCY_PENALTY);
+        if (frequencyPenalty != null)
+            b.frequencyPenalty(frequencyPenalty);
+        Double presencePenalty = doubleValue(p, KEY_PRESENCE_PENALTY);
+        if (presencePenalty != null)
+            b.presencePenalty(presencePenalty);
+        List<String> stop = stringList(p, KEY_STOP_SEQUENCES);
+        if (stop != null)
+            b.stopSequences(stop);
+
+        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
+        Integer budget = intValue(p, KEY_THINKING_BUDGET);
+        if (level != null && budget != null) {
+            LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");
+            budget = null;
+        }
+        if (level != null || budget != null) {
+            var thinking = GeminiThinkingConfig.builder();
+            if (level != null)
+                thinking.thinkingLevel(level);
+            if (budget != null)
+                thinking.thinkingBudget(budget);
+            b.thinkingConfig(thinking.build());
+        }
+
+        Boolean search = booleanOrNull(p, KEY_ALLOW_GOOGLE_SEARCH);
+        if (search != null)
+            b.allowGoogleSearch(search);
+        Boolean maps = booleanOrNull(p, KEY_ALLOW_GOOGLE_MAPS);
+        if (maps != null)
+            b.allowGoogleMaps(maps);
+        Boolean urlContext = booleanOrNull(p, KEY_ALLOW_URL_CONTEXT);
+        if (urlContext != null)
+            b.allowUrlContext(urlContext);
+
+        Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safety = safetySettings(p);
+        if (safety != null)
+            b.safetySettings(safety);
+
+        String mediaResolution = stringValue(p, KEY_MEDIA_RESOLUTION);
+        if (mediaResolution != null) {
+            GeminiMediaResolutionLevel resolved = enumConstant(GeminiMediaResolutionLevel.class, "MEDIA_RESOLUTION_",
+                    mediaResolution);
+            if (resolved != null) {
+                b.mediaResolution(resolved);
+            } else {
+                LOGGER.warnf("Gemini mediaResolution must be one of %s - ignoring it.",
+                        Arrays.toString(GeminiMediaResolutionLevel.values()));
+            }
+        }
+        String cached = stringValue(p, KEY_CACHED_CONTENT);
+        if (cached != null)
+            b.cachedContentName(cached);
+        Map<String, String> headers = stringMap(p, KEY_CUSTOM_HEADERS);
+        if (headers != null)
+            b.customHeaders(headers);
+    }
+
+    private static void applyExtras(GoogleAiGeminiStreamingChatModel.GoogleAiGeminiStreamingChatModelBuilder b,
+                                    Map<String, String> p) {
+        String baseUrl = stringValue(p, KEY_BASE_URL);
+        if (baseUrl != null) {
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            b.baseUrl(baseUrl);
+        }
+        Double topP = doubleValue(p, KEY_TOP_P);
+        if (topP != null)
+            b.topP(topP);
+        Integer topK = intValue(p, KEY_TOP_K);
+        if (topK != null)
+            b.topK(topK);
+        Integer seed = intValue(p, KEY_SEED);
+        if (seed != null)
+            b.seed(seed);
+        Double frequencyPenalty = doubleValue(p, KEY_FREQUENCY_PENALTY);
+        if (frequencyPenalty != null)
+            b.frequencyPenalty(frequencyPenalty);
+        Double presencePenalty = doubleValue(p, KEY_PRESENCE_PENALTY);
+        if (presencePenalty != null)
+            b.presencePenalty(presencePenalty);
+        List<String> stop = stringList(p, KEY_STOP_SEQUENCES);
+        if (stop != null)
+            b.stopSequences(stop);
+
+        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
+        Integer budget = intValue(p, KEY_THINKING_BUDGET);
+        if (level != null && budget != null) {
+            LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");
+            budget = null;
+        }
+        if (level != null || budget != null) {
+            var thinking = GeminiThinkingConfig.builder();
+            if (level != null)
+                thinking.thinkingLevel(level);
+            if (budget != null)
+                thinking.thinkingBudget(budget);
+            b.thinkingConfig(thinking.build());
+        }
+
+        Boolean search = booleanOrNull(p, KEY_ALLOW_GOOGLE_SEARCH);
+        if (search != null)
+            b.allowGoogleSearch(search);
+        Boolean maps = booleanOrNull(p, KEY_ALLOW_GOOGLE_MAPS);
+        if (maps != null)
+            b.allowGoogleMaps(maps);
+        Boolean urlContext = booleanOrNull(p, KEY_ALLOW_URL_CONTEXT);
+        if (urlContext != null)
+            b.allowUrlContext(urlContext);
+
+        Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safety = safetySettings(p);
+        if (safety != null)
+            b.safetySettings(safety);
+
+        String mediaResolution = stringValue(p, KEY_MEDIA_RESOLUTION);
+        if (mediaResolution != null) {
+            GeminiMediaResolutionLevel resolved = enumConstant(GeminiMediaResolutionLevel.class, "MEDIA_RESOLUTION_",
+                    mediaResolution);
+            if (resolved != null) {
+                b.mediaResolution(resolved);
+            } else {
+                LOGGER.warnf("Gemini mediaResolution must be one of %s - ignoring it.",
+                        Arrays.toString(GeminiMediaResolutionLevel.values()));
+            }
+        }
+        String cached = stringValue(p, KEY_CACHED_CONTENT);
+        if (cached != null)
+            b.cachedContentName(cached);
+        Map<String, String> headers = stringMap(p, KEY_CUSTOM_HEADERS);
+        if (headers != null)
+            b.customHeaders(headers);
+    }
+
+    /**
+     * {@code {"HARASSMENT":"BLOCK_ONLY_HIGH"}}: category names with or without the
+     * {@code HARM_CATEGORY_} prefix, thresholds as the enum name. Entries that do
+     * not resolve are dropped with a warning rather than failing the model build.
+     */
+    static Map<GeminiHarmCategory, GeminiHarmBlockThreshold> safetySettings(Map<String, String> p) {
+        Map<String, Object> raw = objectMap(p, KEY_SAFETY_SETTINGS);
+        if (raw == null) {
+            return null;
+        }
+        Map<GeminiHarmCategory, GeminiHarmBlockThreshold> result = new LinkedHashMap<>();
+        raw.forEach((category, threshold) -> {
+            GeminiHarmCategory c = enumConstant(GeminiHarmCategory.class, "HARM_CATEGORY_", category);
+            GeminiHarmBlockThreshold t = enumConstant(GeminiHarmBlockThreshold.class, "", String.valueOf(threshold));
+            if (c != null && t != null) {
+                result.put(c, t);
+            } else {
+                LOGGER.warnf("Gemini safetySettings entry for %s is not a valid category/threshold pair - skipped.",
+                        LogSanitizer.sanitize(category));
+            }
+        });
+        return result.isEmpty() ? null : result;
+    }
+
+    /**
+     * The constant of {@code type} named {@code name} (trimmed, upper-cased,
+     * {@code -} and space read as {@code _}), with or without {@code prefix};
+     * {@code null} when none matches. Shared with
+     * {@link VertexGeminiLanguageModelBuilder}, whose safety settings take the same
+     * JSON shape.
+     */
+    static <E extends Enum<E>> E enumConstant(Class<E> type, String prefix, String name) {
+        String wanted = name.trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        for (E candidate : type.getEnumConstants()) {
+            String constant = candidate.name();
+            if (constant.equals(wanted) || constant.equals(prefix + wanted)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -122,6 +361,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
         builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
+        applyExtras(builder, parameters);
 
         // executeWithRetry is the single retry owner; library retries multiply it.
         builder.maxRetries(NO_LIBRARY_RETRIES);
@@ -155,6 +395,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
         builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
+        applyExtras(builder, parameters);
 
         return builder.build();
     }
