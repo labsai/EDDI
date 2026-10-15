@@ -266,6 +266,17 @@ class OutboundHttpTest {
         }
 
         @Test
+        @DisplayName("an unparsable Location is a broken redirect (IOException), not an SSRF refusal")
+        void unparsableLocation() {
+            ScriptedEngine engine = new ScriptedEngine().redirect(302, "https://api.example.com/a b|{c}");
+            IOException e = assertThrows(IOException.class, () -> facade(engine).send(get(ORIGIN).build(), text()));
+
+            assertTrue(e.getMessage().contains("unparsable Location"), e.getMessage());
+            assertFalse(e.getMessage().contains("s3cret"), "the origin's query must not leak: " + e.getMessage());
+            assertEquals(1, engine.hops.size());
+        }
+
+        @Test
         @DisplayName("NEVER hands the 3xx back with its body")
         void neverFollows() throws Exception {
             ScriptedEngine engine = new ScriptedEngine().redirect(307, "https://elsewhere.example/");
