@@ -247,6 +247,19 @@ export function isProvisionableByTeamSetup(providerId: string): boolean {
 }
 
 /**
+ * For provider pickers that have no base URL or model-parameter field of their
+ * own (the rolling-summary provider, a group's summarizer, the cascade judge): a
+ * self-hosted OpenAI-compatible endpoint cannot work there, because it has no
+ * default URL to fall back on. It is still offered when one of `keep` names it —
+ * the parent task is itself `openai-compatible` (the summarizer then inherits its
+ * baseUrl and key), or the stored value already is, so opening and saving a
+ * config never rewrites it.
+ */
+export function offeredWithoutBaseUrl(providerId: string, ...keep: (string | undefined)[]): boolean {
+  return providerId !== SELF_HOSTED_PROVIDER_ID || keep.includes(SELF_HOSTED_PROVIDER_ID);
+}
+
+/**
  * `providerId` when the setup flows offer it, otherwise `fallback`. A stored
  * value such as an operator configured on `gemini-vertex` before it was hidden
  * would otherwise render a provider select with no matching option, showing

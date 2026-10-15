@@ -62,6 +62,29 @@ describe("TaskMemorySection", () => {
     expect(screen.getByText("Conversation Memory")).toBeInTheDocument();
   });
 
+  it("offers a self-hosted summary provider only when the task itself is openai-compatible", async () => {
+    const user = userEvent.setup();
+    const options = () =>
+      Array.from((screen.getByTestId("summary-provider-select") as HTMLSelectElement).options).map((o) => o.value);
+
+    const view = renderWithProviders(<TaskMemorySection task={taskWithSummary} onChange={onChange} />);
+    if (!screen.queryByTestId("summary-provider-select")) await user.click(screen.getByText("Conversation Memory"));
+    // No base URL field here, and an openai task has none to inherit.
+    expect(options()).not.toContain("openai-compatible");
+    expect(options()).toContain("ollama");
+    view.unmount();
+
+    renderWithProviders(
+      <TaskMemorySection
+        task={{ ...taskWithSummary, type: "openai-compatible", parameters: { baseUrl: "http://vllm:8000/v1", modelName: "m" } }}
+        onChange={onChange}
+      />,
+    );
+    if (!screen.queryByTestId("summary-provider-select")) await user.click(screen.getByText("Conversation Memory"));
+    // Same provider as the task: the summarizer inherits its baseUrl and key.
+    expect(options()).toContain("openai-compatible");
+  });
+
   it("renders Retry Configuration section", () => {
     renderWithProviders(
       <TaskMemorySection task={emptyTask} onChange={onChange} />

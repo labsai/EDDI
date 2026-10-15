@@ -6,6 +6,7 @@ import {
   isBaseUrlRequired,
   isProvisionableBySetup,
   isProvisionableByTeamSetup,
+  offeredWithoutBaseUrl,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
 import { SELF_HOSTED_PROVIDER_ID } from "@/lib/llm-provider-catalog";
@@ -154,6 +155,13 @@ describe("setup-provisionable providers", () => {
     expect(isProvisionableByTeamSetup("openai-compatible")).toBe(false);
     expect(isProvisionableByTeamSetup("gemini-vertex")).toBe(false);
     expect(isProvisionableByTeamSetup("ollama")).toBe(true);
+  });
+
+  it("hides the self-hosted type where there is no base URL, unless kept", () => {
+    expect(offeredWithoutBaseUrl("openai-compatible")).toBe(false);
+    expect(offeredWithoutBaseUrl("openai-compatible", "openai", undefined)).toBe(false);
+    expect(offeredWithoutBaseUrl("openai-compatible", undefined, "openai-compatible")).toBe(true);
+    expect(offeredWithoutBaseUrl("ollama")).toBe(true);
   });
 
   it("offers an optional token for Jlama only", () => {
