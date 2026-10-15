@@ -844,8 +844,8 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
-| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
-| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
+| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
+| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
@@ -967,7 +967,7 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
-| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits` | `fetch_page` / `fetch_tool_response_page` |
+| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits`. Pages are scoped to the conversation that produced them; another conversation's `responseId` is not found | `fetch_page` / `fetch_tool_response_page` |
 | **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
@@ -1584,7 +1584,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (t
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
-| **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
+| **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
 
 #### Tool names: dispatch name vs. configuration slug
@@ -1697,19 +1697,21 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
-Enforcement is **opt-in**: a configured ceiling records cost but refuses nothing
-until you add `enforceBudget: true`. Built-in tools priced at $0.00 until the
-canonical-slug fix in this release, so enforcing automatically would make those
-ceilings bind for the first time and start aborting tool calls mid-conversation
-on upgrade.
+Enforcement is the **default** (since 6.6.0): a configured ceiling refuses the
+tool call after the one that crosses it. To keep a ceiling advisory, opt out with
+`enforceBudget: false` on the task, or `eddi.tools.budget.enforce-by-default=false`
+for the whole deployment — cost is still tracked and reported
+(`GET /llm/tools/costs`, `eddi.tool.costs`), nothing is refused, and every task
+whose ceiling is opted out is named once in a WARN so an advisory ceiling is a
+visible decision rather than a silent one. The effective default is reported by
+the MCP `get_agent` and `deploy_agent` tools (`toolBudgetEnforcedByDefault`).
 
-That choice has a real cost, which is why the engine warns rather than staying
-quiet: http, MCP, A2A and dynamic tools dispatch under their configured name, so
-a tool called `websearch` **was** priced and refused before `enforceBudget`
-existed. If you relied on such a ceiling, add the flag — every task carrying a
-ceiling without it is named once in a startup WARN. Cost is tracked and reported
-(`GET /llm/tools/costs`, `eddi.tool.costs`) either way. The deployment-wide
-default comes from `eddi.tools.budget.enforce-by-default` (default `false`).
+Before 6.6.0 enforcement was an opt-in, and the deployment key was not declared,
+so every stored ceiling without an explicit `enforceBudget: true` was advisory
+(security review 2026-10-15, finding M8). The reason for the opt-in — built-in
+tools priced at $0.00 until the canonical-slug fix — has passed; a deployment
+that upgrades with ceilings on built-in-only agents will see them bind for the
+first time.
 
 The check runs *before* each call and uses `<=`, so the call that crosses the
 ceiling still completes and the next one is refused with

@@ -9,6 +9,10 @@ import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import dev.langchain4j.model.chat.request.json.JsonStringSchema;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
+import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -83,6 +87,25 @@ class A2ADescriptionGovernanceTest {
         plantAgentCard(Map.of("name", "peer", "description", "Answers billing questions."));
 
         assertEquals("Answers billing questions.", onlyTool().description());
+    }
+
+    @Test
+    @DisplayName("M7: a directive inside a tool's parameter schema is redacted on the A2A side too")
+    void governsParameterSchemas() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        manager.meterRegistry = registry;
+        var spec = ToolSpecification.builder().name("peer_lookup").description("ok")
+                .parameters(JsonObjectSchema.builder().addStringProperty("message", INJECTION).build()).build();
+
+        var governed = manager.governSchema(spec, "peer", new ToolSchemaGovernor.ServerBudget(Long.MAX_VALUE));
+
+        String description = ((JsonStringSchema) governed.parameters().properties().get("message")).description();
+        assertFalse(description.contains("Ignore all previous instructions"), description);
+        assertEquals(1.0, registry.counter("eddi.a2a.tool-schema.governed", "outcome", "redacted").count());
+        // The schema EDDI builds for a card-discovered tool is benign and survives
+        // whole.
+        plantAgentCard(Map.of("name", "peer", "description", "Answers billing questions."));
+        assertTrue(onlyTool().parameters().properties().containsKey("message"));
     }
 
     private ToolSpecification onlyTool() {

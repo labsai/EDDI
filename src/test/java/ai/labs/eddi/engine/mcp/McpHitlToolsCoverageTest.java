@@ -74,6 +74,8 @@ class McpHitlToolsCoverageTest {
         Principal p = mock(Principal.class);
         lenient().when(p.getName()).thenReturn("alice");
         lenient().when(identity.getPrincipal()).thenReturn(p);
+        // L5: the HITL tools carry the REST HITL role tier; alice is an approver.
+        lenient().when(identity.hasRole("eddi-approver")).thenReturn(true);
         tools = build(true, true);
     }
 
