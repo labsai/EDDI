@@ -430,6 +430,20 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
 > instead of being followed. For MCP servers and A2A peers only the configured
 > target is checked while protection is off; turn it on to stop a redirect there.
+>
+> **Configured endpoints beyond httpCalls are covered by the same switch.** LLM
+> provider `baseUrl`/`endpoint`/`apiEndpoint` in every builder, embedding
+> endpoints, vector-store addresses (Elasticsearch, Chroma as URLs; pgvector,
+> Qdrant and every host in a MongoDB connection string as bare hosts, opened as
+> raw connections) and the OpenAPI spec location of endpoint discovery and the
+> setup wizard all go through `OutboundTargetPolicy`: the metadata service is
+> refused always, and with protection on any private, loopback or link-local
+> address is too — with one exemption, a URL on this deployment's own origin
+> (`eddi.self.base-url`), so an agent may still call EDDI's own `/v1` API. The
+> spec document is fetched by EDDI itself (`OpenApiSpecFetcher`: every redirect
+> hop checked, body capped at 16 MB) rather than by swagger-parser. Residual:
+> `$ref`s inside a fetched spec are resolved by swagger-parser's own resolver,
+> which checks each reference's URL but follows that URL's redirects itself.
 
 ### Scheme Allowlist
 

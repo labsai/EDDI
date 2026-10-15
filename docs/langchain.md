@@ -705,8 +705,10 @@ Moonshot fixes `temperature` on `kimi-k2.7-code` and `kimi-k2.6`, so do not set 
 
 **Precedence.**
 - Endpoint: an explicit `baseUrl`, then the `region` parameter (a region id from the table), then
-  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is still
-  checked against the cloud-metadata block list.
+  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is always
+  checked against the cloud-metadata block list, and with `eddi.security.ssrf-protection.enabled`
+  it must also be a public address (or this deployment's own `eddi.self.base-url`) — the same
+  rule as for every provider's `baseUrl`/`endpoint`, see [security.md](security.md#ssrf-protection--urlvalidationutils).
 - Model: `modelName`, then the provider default.
 - Any parameter you set beats the preset's defaults (below).
 - `apiKey` is required. Use a vault reference, for example `${vault:xai-key}`; the error names

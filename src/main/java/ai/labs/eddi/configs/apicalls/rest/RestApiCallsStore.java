@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.engine.mcp.OpenApiSpecFetcher;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -54,6 +55,12 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Fetches the spec at a discovery request's specUrl under the deployment's
+    // eddi.security.ssrf-protection.enabled setting (every redirect hop checked,
+    // body capped). Null outside CDI, where the protection-off fetcher is used.
+    @Inject
+    OpenApiSpecFetcher specFetcher;
 
     // Field-injected so the direct constructions in tests keep compiling; the
     // initializer is the property's own default.
@@ -240,7 +247,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef, null,
+                    specFetcher != null ? specFetcher : OpenApiSpecFetcher.permissive());
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();

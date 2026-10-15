@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -67,11 +67,25 @@ public class EmbeddingModelFactory {
     private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to every endpoint built
+     * here.
+     */
+    private final OutboundTargetPolicy targetPolicy;
+
+    /**
+     * Direct construction (tests): protection off, as before the policy existed.
+     */
+    public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this(globalVariableResolver, secretResolver, OutboundTargetPolicy.permissive());
+    }
 
     @Inject
-    public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+    public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            OutboundTargetPolicy targetPolicy) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.targetPolicy = targetPolicy;
     }
 
     /**
@@ -266,7 +280,7 @@ public class EmbeddingModelFactory {
                 .apiKey(params.get("apiKey"));
         String baseUrl = params.get("baseUrl");
         if (!isBlank(baseUrl)) {
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            targetPolicy.validateUrl(baseUrl);
             builder.baseUrl(baseUrl);
         }
         applyTimeout(params, builder::timeout);
@@ -301,7 +315,7 @@ public class EmbeddingModelFactory {
 
         String endpoint = params.get("endpoint");
         if (!isBlank(endpoint)) {
-            UrlValidationUtils.rejectCloudMetadataTarget(endpoint);
+            targetPolicy.validateUrl(endpoint);
             builder.endpoint(endpoint);
         }
         applyTimeout(params, builder::timeout);
@@ -327,9 +341,9 @@ public class EmbeddingModelFactory {
      */
     private EmbeddingModel buildOllama(Map<String, String> params) {
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:11434");
-        // Never let the embedding endpoint point at the cloud instance-metadata
-        // service (always-on, independent of eddi.security.ssrf-protection.enabled).
-        UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+        // Never the cloud instance-metadata service; with
+        // eddi.security.ssrf-protection.enabled no private address either.
+        targetPolicy.validateUrl(baseUrl);
         var builder = OllamaEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "nomic-embed-text"))
                 .baseUrl(baseUrl);
         applyTimeout(params, builder::timeout);
@@ -465,7 +479,7 @@ public class EmbeddingModelFactory {
             // A bare host[:port], not a URL: wrapped so the same metadata guard applies
             // as for every other endpoint this factory accepts. The value checked is the
             // value the client gets.
-            UrlValidationUtils.rejectCloudMetadataTarget(endpoint.contains("://") ? endpoint : "https://" + endpoint);
+            targetPolicy.validateUrl(endpoint.contains("://") ? endpoint : "https://" + endpoint);
             builder.endpoint(endpoint);
         }
         applyInt(params, "maxRetries", builder::maxRetries);
@@ -480,10 +494,10 @@ public class EmbeddingModelFactory {
         return value == null || value.isBlank();
     }
 
-    private static void applyBaseUrl(Map<String, String> params, Consumer<String> setter) {
+    private void applyBaseUrl(Map<String, String> params, Consumer<String> setter) {
         String baseUrl = params.get("baseUrl");
         if (!isBlank(baseUrl)) {
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            targetPolicy.validateUrl(baseUrl);
             setter.accept(baseUrl);
         }
     }

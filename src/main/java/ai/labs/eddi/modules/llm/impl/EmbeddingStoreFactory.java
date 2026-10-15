@@ -9,7 +9,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -125,11 +125,28 @@ public class EmbeddingStoreFactory {
 
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to every store address
+     * built here. A vector store is opened as a raw connection to whatever
+     * host:port the knowledge base names — EDDI's own MongoDB or PostgreSQL
+     * included — so with protection on a private host is refused before a client is
+     * built (and before pgvector would {@code CREATE TABLE} there).
+     */
+    private final OutboundTargetPolicy targetPolicy;
+
+    /**
+     * Direct construction (tests): protection off, as before the policy existed.
+     */
+    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this(globalVariableResolver, secretResolver, OutboundTargetPolicy.permissive());
+    }
 
     @Inject
-    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            OutboundTargetPolicy targetPolicy) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.targetPolicy = targetPolicy;
     }
 
     /**
@@ -245,7 +262,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
-        guardMetadataHost(host);
+        guardStoreHost(host, "pgvector");
         int port = parseIntParam(params, "port", 5432);
         String database = params.getOrDefault("database", "eddi");
         String user = params.getOrDefault("user", "eddi");
@@ -283,6 +300,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String connectionString = requireParam(params, "connectionString", "mongodb-atlas");
+        guardConnectionStringHosts(connectionString);
         String databaseName = params.getOrDefault("databaseName", "eddi");
         String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         String indexName = params.getOrDefault("indexName", "vector_index");
@@ -325,7 +343,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
-        UrlValidationUtils.rejectCloudMetadataTarget(serverUrl);
+        targetPolicy.validateUrl(serverUrl);
         String indexName = physicalName(params, "indexName", ragConfigId, config);
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
@@ -365,7 +383,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
-        guardMetadataHost(host);
+        guardStoreHost(host, "qdrant");
         int port = parseIntParam(params, "port", 6334);
         String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
@@ -402,7 +420,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
-        UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+        targetPolicy.validateUrl(baseUrl);
         String tenantName = params.getOrDefault("tenantName", "default_tenant");
         String databaseName = params.getOrDefault("databaseName", "default_database");
         String collectionName = physicalName(params, "collectionName", ragConfigId, config);
@@ -542,18 +560,38 @@ public class EmbeddingStoreFactory {
 
     /**
      * Refuses a vector-store host that is, or resolves to, the cloud
-     * instance-metadata service. The value is a bare host (no scheme), so it is
-     * wrapped in a URL for the check; other private/internal hosts stay allowed —
-     * this is a metadata guard, not an SSRF lockout of legitimate internal stores.
+     * instance-metadata service — always — and, with
+     * {@code eddi.security.ssrf-protection.enabled}, one that is or resolves to any
+     * private, loopback or link-local address. The value is a bare host (no
+     * scheme), opened as a raw connection, so
+     * {@link OutboundTargetPolicy#validateHost} is the check, not the URL one. The
+     * message names the store type so an operator sees which knowledge base setting
+     * to change.
      */
-    private static void guardMetadataHost(String host) {
-        if (host == null || host.isBlank()) {
+    private void guardStoreHost(String host, String storeType) {
+        try {
+            targetPolicy.validateHost(host);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(storeType + " storeParameters.host refused: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@link #guardStoreHost} for every host a MongoDB connection string names,
+     * {@code mongodb+srv://} seed names included. Parsed by the driver's own
+     * {@link ConnectionString} so what is checked is what the client will dial; a
+     * string the driver cannot parse is left for the client to refuse.
+     */
+    private void guardConnectionStringHosts(String connectionString) {
+        ConnectionString parsed;
+        try {
+            parsed = new ConnectionString(connectionString);
+        } catch (IllegalArgumentException e) {
             return;
         }
-        String bare = host.trim();
-        // Bracket a bare IPv6 literal so URI parsing accepts it.
-        String authority = bare.indexOf(':') >= 0 && !bare.startsWith("[") ? "[" + bare + "]" : bare;
-        UrlValidationUtils.rejectCloudMetadataTarget("http://" + authority);
+        for (String hostAndPort : parsed.getHosts()) {
+            guardStoreHost(hostAndPort, "mongodb-atlas");
+        }
     }
 
     /** The 6.5.0 pgvector table name — see {@link KnowledgeBaseStorage}. */
