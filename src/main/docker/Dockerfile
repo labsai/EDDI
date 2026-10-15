@@ -127,6 +127,11 @@ FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:5161ac11d66
 # which used to certify an image carrying whatever this literal happened to say.
 ARG EDDI_VERSION=dev
 ARG EDDI_RELEASE=1
+# The git commit this image was built from. Surfaced at runtime as
+# eddi.build.commit (GET /administration/version, the get_eddi_version MCP tool),
+# so an operator can tell which build is running even after an upgrade. A sentinel
+# default: BuildInfo reports `unknown` for anything that is not a hex commit.
+ARG EDDI_COMMIT=unknown
 
 LABEL name="labsai/eddi" \
       vendor="LABS.AI" \
@@ -141,11 +146,12 @@ LABEL name="labsai/eddi" \
       maintainer="LABS.AI GmbH <contact@labs.ai>" \
       url="https://eddi.labs.ai" \
       org.opencontainers.image.source="https://github.com/labsai/EDDI" \
+      org.opencontainers.image.revision="${EDDI_COMMIT}" \
       io.k8s.display-name="EDDI AI Platform" \
       io.k8s.description="Multi-Agent AI Orchestration Middleware" \
       io.openshift.tags="ai,conversational-ai,llm,chatbot,multi-agent,quarkus"
 
-ENV LANG='C.utf8' LANGUAGE='C.utf8'
+ENV LANG='C.utf8' LANGUAGE='C.utf8' EDDI_BUILD_COMMIT="${EDDI_COMMIT}"
 
 USER root
 
