@@ -54,11 +54,20 @@ class StringTemplateExtensionsOutputLimitTest {
     }
 
     @Test
-    @DisplayName("replace: a shrinking or same-size replacement is never refused")
-    void shrinkingReplacement() {
-        TemplateOutputLimit.configure(10);
+    @DisplayName("replace: a shrinking or same-size replacement on a source within the bound is never refused")
+    void shrinkingReplacementWithinTheBound() {
         assertEquals("b".repeat(30), StringTemplateExtensions.replace(SIXTY, "a", ""));
         assertEquals("xb".repeat(30), StringTemplateExtensions.replace(SIXTY, "a", "x"));
+    }
+
+    @Test
+    @DisplayName("replace: a source already past the bound is checked even when the replacement shrinks it")
+    void shrinkingReplacementOnAnOversizedSource() {
+        TemplateOutputLimit.configure(10);
+        // 60 → 30 characters: still over 10, refused before allocating.
+        assertThrows(TemplateLimitExceededException.class, () -> StringTemplateExtensions.replace(SIXTY, "a", ""));
+        // 60 → 0 characters: within the bound, allowed.
+        assertEquals("", StringTemplateExtensions.replace(SIXTY, "ab", ""));
     }
 
     @Test

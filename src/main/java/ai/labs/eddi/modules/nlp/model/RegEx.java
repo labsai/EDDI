@@ -29,7 +29,7 @@ public class RegEx extends DictionaryEntry implements IDictionary.IRegEx {
      * token simply does not match — a miss, not an error, since nothing a
      * dictionary legitimately matches takes anywhere near this long.
      */
-    static final long MATCH_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(200);
+    public static final long MATCH_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(200);
 
     private final Pattern regEx;
 
@@ -45,8 +45,13 @@ public class RegEx extends DictionaryEntry implements IDictionary.IRegEx {
 
     @Override
     public boolean match(String lookup) {
+        return match(lookup, System.nanoTime() + MATCH_BUDGET_NANOS);
+    }
+
+    @Override
+    public boolean match(String lookup, long deadlineNanos) {
         try {
-            return regEx.matcher(RegexDeadline.guard(lookup, MATCH_BUDGET_NANOS)).matches();
+            return regEx.matcher(RegexDeadline.guardUntil(lookup, deadlineNanos)).matches();
         } catch (MatchDeadlineExceededException e) {
             LOGGER.warnf("Dictionary regEx '%s' did not finish matching a %d-character token within its time budget; treated as no match",
                     sanitize(regEx.pattern()), lookup.length());

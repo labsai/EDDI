@@ -54,12 +54,14 @@ public class StringTemplateExtensions {
         if (str == null) {
             return null;
         }
-        if (target != null && replacement != null && replacement.length() > target.length()) {
-            // Only a growing replacement can pass the bound; the size it will produce is
-            // known before a character is copied. An empty target matches between
-            // every pair of characters and at both ends.
+        int limit = TemplateOutputLimit.maxChars();
+        if (target != null && replacement != null && limit > 0 && (replacement.length() > target.length() || str.length() > limit)) {
+            // A growing replacement can pass the bound from inside it; a shrinking one
+            // can stay past it when the source already is. Either way the size it will
+            // produce is known before a character is copied. An empty target matches
+            // between every pair of characters and at both ends.
             long occurrences = target.isEmpty() ? str.length() + 1L : countOccurrences(str, target);
-            TemplateOutputLimit.requireWithin(str.length() + occurrences * (replacement.length() - target.length()), "replace");
+            TemplateOutputLimit.requireWithin(str.length() + occurrences * ((long) replacement.length() - target.length()), "replace");
         }
         return str.replace(target, replacement);
     }

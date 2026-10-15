@@ -199,7 +199,9 @@ class ExpressionProviderBoundsTest {
             var e = assertThrows(ExpressionLimitExceededException.class, () -> new ExpressionLimits(5, 0).check("abcdef"));
             assertEquals(6, e.getMeasured());
             assertEquals(5, e.getLimit());
-            assertTrue(e instanceof IllegalArgumentException);
+            // An IllegalArgumentException, so a pipeline task that parses it fails the turn
+            // like any other bad input and no caller has to know the subtype.
+            assertEquals(IllegalArgumentException.class, e.getClass().getSuperclass());
         }
     }
 

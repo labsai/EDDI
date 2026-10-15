@@ -77,6 +77,17 @@ class RestDictionaryStoreRegExValidationTest {
     }
 
     @Test
+    void missingPatternIsRefused() throws Exception {
+        // The provider drops a null regEx with a WARN at deploy, so the entry would
+        // be saved and then silently absent from the dictionary.
+        Response response = store.createRegularDictionary(dictionaryWith(null));
+
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getEntity().toString().contains("no regEx"), response.getEntity().toString());
+        verify(dictionaryStore, never()).create(any());
+    }
+
+    @Test
     void validPatternsAreSaved() throws Exception {
         var created = mock(IResourceStore.IResourceId.class);
         when(created.getId()).thenReturn(ID);

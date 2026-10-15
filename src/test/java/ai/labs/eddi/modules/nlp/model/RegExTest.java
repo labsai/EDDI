@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.model;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.utils.RegexDeadline;
 import ai.labs.eddi.utils.RegexDeadline.MatchDeadlineExceededException;
 import org.junit.jupiter.api.DisplayName;
@@ -60,6 +61,23 @@ class RegExTest {
         // The budget is 200 ms, sampled every 1024 character reads; an unbudgeted
         // run of this input takes well over ten seconds.
         assertTrue(elapsedMillis < 3_000, "match took " + elapsedMillis + " ms — the deadline is not applied");
+    }
+
+    @Test
+    @DisplayName("a dictionary's patterns share one budget per lookup, so many slow patterns cost one budget, not one each")
+    void patternsShareOneBudgetPerLookup() {
+        var dictionary = new RegularDictionary();
+        for (int i = 0; i < 5; i++) {
+            dictionary.addRegex(EVIL_PATTERN, new Expressions());
+        }
+
+        long started = System.nanoTime();
+        var found = dictionary.lookupTerm(ALMOST_MATCHING);
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+        assertTrue(found.isEmpty());
+        // One shared 200 ms deadline; five separate budgets would be a second or more.
+        assertTrue(elapsedMillis < 700, "lookup took " + elapsedMillis + " ms — the patterns are not sharing a deadline");
     }
 
     @Test

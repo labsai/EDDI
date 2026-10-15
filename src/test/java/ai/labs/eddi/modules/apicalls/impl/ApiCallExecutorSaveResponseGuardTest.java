@@ -109,7 +109,8 @@ class ApiCallExecutorSaveResponseGuardTest {
         executor.execute(callWithoutResponseObjectName(), memory, new HashMap<>(), "http://example.com");
 
         verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("nullError"), any());
-        verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("nullErrorHttpCode"), any());
+        // The status key is responseObjectName + "HttpCode" — with no name, "nullHttpCode".
+        verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq("nullHttpCode"), any());
     }
 
     private static ApiCall callWithoutResponseObjectName() {

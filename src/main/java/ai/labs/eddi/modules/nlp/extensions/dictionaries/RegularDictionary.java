@@ -90,7 +90,10 @@ public class RegularDictionary implements IDictionary {
         }
 
         if (ret.isEmpty() || lookupIfKnown) {
-            regExs.stream().filter(regEx -> regEx.match(lookup))
+            // One deadline for ALL the patterns of this lookup: a per-pattern budget
+            // would let ten slow patterns cost ten budgets per token.
+            long deadline = System.nanoTime() + RegEx.MATCH_BUDGET_NANOS;
+            regExs.stream().filter(regEx -> regEx.match(lookup, deadline))
                     .forEach(regEx -> ret.add(new FoundRegEx(new Word(lookup, regEx.getExpressions(), regEx.getLanguageCode()), regEx)));
         }
 

@@ -38,7 +38,14 @@ public final class RegexDeadline {
      * from this call.
      */
     public static CharSequence guard(String content, long budgetNanos) {
-        long deadline = System.nanoTime() + budgetNanos;
+        return guardUntil(content, System.nanoTime() + budgetNanos);
+    }
+
+    /**
+     * Like {@link #guard}, but against an absolute {@link System#nanoTime()}
+     * instant — so several matches can share one deadline.
+     */
+    public static CharSequence guardUntil(String content, long deadline) {
         return new CharSequence() {
             private int accesses;
 

@@ -111,7 +111,9 @@ public class RestDictionaryStore implements IRestDictionaryStore {
         for (var regExConfig : configuration.getRegExs()) {
             String regEx = regExConfig != null ? regExConfig.getRegEx() : null;
             if (regEx == null) {
-                continue;
+                // The provider drops a null pattern with a WARN at deploy, so the entry
+                // would be saved and then silently absent from the dictionary.
+                return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "a regExs entry has no regEx")).build();
             }
             try {
                 Pattern.compile(regEx);
