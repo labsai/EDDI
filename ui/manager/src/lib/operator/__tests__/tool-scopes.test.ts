@@ -17,6 +17,8 @@ import {
   grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
+  grantedPatchEndpoints,
+  grantsCredentialSafeEdits,
 } from "../tool-scopes";
 
 describe("tool-scopes", () => {
@@ -220,6 +222,11 @@ describe("tool-scopes", () => {
         "POST /apicallstore/apicalls",
         "PUT /mcpcallsstore/mcpcalls/{id}",
         "POST /mcpcallsstore/mcpcalls",
+        // Credential-safe partial edits (RFC 6902): the stores whose documents hold
+        // ${vault:…} references, which a full PUT cannot round-trip.
+        "PATCH /llmstore/llms/{id}",
+        "PATCH /apicallstore/apicalls/{id}",
+        "PATCH /mcpcallsstore/mcpcalls/{id}",
       ]);
     });
 
@@ -313,6 +320,7 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).toContain("POST /llmstore/llms");
       // Still no DELETE and no duplicate-by-id, same as every other store.
       expect(WRITE_ENDPOINTS.filter((e) => e.includes("/llmstore/")).sort()).toEqual([
+        "PATCH /llmstore/llms/{id}",
         "POST /llmstore/llms",
         "PUT /llmstore/llms/{id}",
       ]);
@@ -493,6 +501,57 @@ describe("tool-scopes", () => {
     it("agrees with the real read_write endpoint set", () => {
       expect(grantsAgentCreation(endpointsForScope("read_write"))).toBe(true);
       expect(grantsAgentCreation(endpointsForScope("read_only"))).toBe(false);
+    });
+  });
+
+  describe("credential-safe edits (PATCH)", () => {
+    const PATCHES = [
+      "PATCH /llmstore/llms/{id}",
+      "PATCH /apicallstore/apicalls/{id}",
+      "PATCH /mcpcallsstore/mcpcalls/{id}",
+    ];
+
+    it("grants a PATCH on exactly the stores whose documents hold credential references", () => {
+      const granted = WRITE_ENDPOINTS.filter((e) => e.startsWith("PATCH /") && !e.includes("descriptorstore"));
+      expect(granted).toEqual(PATCHES);
+    });
+
+    it("every patchable store is also writable and readable — a patch is applied to a document the operator can read", () => {
+      for (const entry of PATCHES) {
+        const store = entry.replace(/^PATCH \//, "").replace(/\/\{id\}$/, "");
+        expect(WRITE_ENDPOINTS, store).toContain(`PUT /${store}/{id}`);
+        expect(READ_ENDPOINTS, store).toContain(`GET /${store}/{id}`);
+      }
+    });
+
+    it("keeps the full-document PUT — it still works for documents with no reference", () => {
+      for (const entry of PATCHES) {
+        expect(WRITE_ENDPOINTS).toContain(entry.replace("PATCH", "PUT"));
+      }
+    });
+
+    it("never PATCHes a store that cannot carry a reference, or one that is not granted at all", () => {
+      for (const store of ["rulestore/rulesets", "outputstore/outputsets", "propertysetterstore/propertysetters", "dictionarystore/dictionaries"]) {
+        expect(WRITE_ENDPOINTS).not.toContain(`PATCH /${store}/{id}`);
+      }
+      expect(WRITE_ENDPOINTS.filter((e) => e.includes("/ragstore/"))).toEqual([]);
+      expect(WRITE_ENDPOINTS).not.toContain("PATCH /agentstore/agents/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("PATCH /groupstore/groups/{id}");
+    });
+
+    it("is gated like every other write — http.patch is among the patterns that require approval", () => {
+      expect(buildToolApprovals().requireApproval).toContain("http.patch:*");
+    });
+
+    it("reports exactly the granted PATCH endpoints, in a stable order", () => {
+      expect(grantedPatchEndpoints(endpointsForScope("read_write"))).toEqual(PATCHES);
+      expect(grantedPatchEndpoints(endpointsForScope("read_only"))).toEqual([]);
+      expect(grantedPatchEndpoints([...READ_ENDPOINTS, "PATCH /mcpcallsstore/mcpcalls/{id}"])).toEqual([
+        "PATCH /mcpcallsstore/mcpcalls/{id}",
+      ]);
+      // The descriptor metadata PATCH is a different verb with a different body.
+      expect(grantsCredentialSafeEdits(["PATCH /descriptorstore/descriptors/{id}"])).toBe(false);
+      expect(grantsCredentialSafeEdits(endpointsForScope("read_write"))).toBe(true);
     });
   });
 

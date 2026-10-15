@@ -239,6 +239,58 @@ describe("buildOperatorPromptBody", () => {
     });
   });
 
+  describe("credential-safe edits (PATCH)", () => {
+    const body = buildOperatorPromptBody(endpointsForScope("read_write"));
+
+    it("tells the operator to edit with PATCH and never to send back a document it read", () => {
+      expect(body).toContain("EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH, not PUT");
+      expect(body).toContain("never send back a document you read");
+    });
+
+    it("names the patch endpoints it actually holds, and no others", () => {
+      expect(body).toContain("/llmstore/llms/{id}, /apicallstore/apicalls/{id}, /mcpcallsstore/mcpcalls/{id}");
+      const llmOnly = buildOperatorPromptBody([
+        ...READ_ENDPOINTS,
+        "PUT /llmstore/llms/{id}",
+        "PATCH /llmstore/llms/{id}",
+      ]);
+      expect(llmOnly).toContain("PATCH endpoints you hold:\n  /llmstore/llms/{id}.");
+      expect(llmOnly).not.toContain("/apicallstore/apicalls/{id}, ");
+    });
+
+    it("says what a patch is, and how to write one", () => {
+      expect(body).toContain("RFC 6902");
+      expect(body).toContain('{"op":"add","path":"/tasks/0/knowledgeBases"');
+      expect(body).toContain("op is add, replace, remove or test");
+    });
+
+    it("says what is refused: copy and move, a written vault reference, toolApprovals in a patch", () => {
+      expect(body).toContain("Never use copy or move");
+      expect(body).toContain("Do NOT write a ${vault:…} reference in a patch");
+      expect(body).toContain('no operation may name "toolApprovals"');
+    });
+
+    it("explains a 409 as a newer version, and when PUT is still right", () => {
+      expect(body).toContain("A 409 means the document\n  has a newer version");
+      expect(body).toContain("Use PUT only for a document that holds no references");
+    });
+
+    it("is absent when no PATCH is granted, even if the PUTs are", () => {
+      const putOnly = buildOperatorPromptBody([...READ_ENDPOINTS, "PUT /llmstore/llms/{id}"]);
+      expect(putOnly).toContain("You can change an existing agent's system prompt");
+      expect(putOnly).not.toContain("RFC 6902");
+      expect(putOnly).not.toContain("with PATCH, not PUT");
+    });
+
+    it("is absent for a read-only operator", () => {
+      expect(buildOperatorPromptBody(endpointsForScope("read_only"))).not.toContain("RFC 6902");
+    });
+
+    it("sits next to the modification guidance, not appended as a second authoring section", () => {
+      expect(body.indexOf("RFC 6902")).toBeGreaterThan(body.indexOf("You can change an existing agent's system prompt"));
+    });
+  });
+
   it("shows only creation text when creation is granted but modification is not", () => {
     const endpoints = [...READ_ENDPOINTS, "POST /administration/agents/setup"];
     const body = buildOperatorPromptBody(endpoints);
@@ -847,6 +899,17 @@ describe("batched changes: the plan shape the operator is taught", () => {
       expect(body).not.toContain("cascadeAgentChanges");
       expect(body).not.toContain("Landing an edit is ONE call");
     });
+  });
+
+  it("reads as two approvals once credential-safe PATCH is granted: the editing rules come first, the batch defers to them", () => {
+    // The editing section teaches PATCH; the batching block names no method and
+    // points back at it, so batch 1 is two PATCH edits and batch 2 is the cascade.
+    const editingAt = full.indexOf("EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH");
+    const batchingAt = full.indexOf("Planning and batching changes:");
+    expect(editingAt, "PATCH editing rules missing from the full prompt").toBeGreaterThan(-1);
+    expect(editingAt).toBeLessThan(batchingAt);
+    expect(section(full)).toContain("each made as the editing rules above describe");
+    expect(section(full)).toContain('Say "2 approvals" up');
   });
 
   it("contains no braces, which the runtime Qute templating would parse as expressions", () => {

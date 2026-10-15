@@ -5043,7 +5043,13 @@
       "blockedGateCarrying": "Cette requête écrit une configuration LLM qui définit sa propre barrière d'approbation (toolApprovals), ce qui remplacerait la barrière qui l'examine. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et modifiez la barrière depuis la page de l'agent.",
       "blockedGateUnverifiable": "Cette requête écrit une configuration LLM dont le corps ne peut être lu intégralement — trop volumineux ou JSON invalide — ; on ne peut donc pas confirmer l'absence de remplacement de la barrière d'approbation. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
       "blockedGateUnpinned": "Cette requête écrit une configuration LLM mais n'est pas épinglée : ce qui s'exécute réellement peut différer de ce qui est affiché ici, et l'absence de remplacement de la barrière d'approbation ne peut être confirmée. L'approbation est indisponible pour tout le lot tant qu'elle est présente — rejetez, et effectuez cette modification depuis la page de l'agent.",
-      "blockedSelfStart": "L'opérateur ne peut pas se tester lui-même — démarrer une conversation avec son propre agent ({{agentId}}) réinjecterait sa sortie en entrée. L'approbation est indisponible pour tout le lot tant que cet appel est présent — rejetez et testez un autre agent."
+      "blockedSelfStart": "L'opérateur ne peut pas se tester lui-même — démarrer une conversation avec son propre agent ({{agentId}}) réinjecterait sa sortie en entrée. L'approbation est indisponible pour tout le lot tant que cet appel est présent — rejetez et testez un autre agent.",
+      "blockedGatePatchOp": "Cette requête applique à une configuration LLM un correctif contenant une opération que la vérification du garde-fou d'approbation ne peut pas évaluer (tout sauf add, replace, remove ou test — copy et move peuvent déplacer une partie du document stocké, y compris un remplacement du garde-fou, ailleurs). Tant qu'elle est présente, l'approbation est indisponible pour tout le lot — rejetez-la et demandez la modification sous forme d'opérations add, replace ou remove.",
+      "patchHeading": "Correctif pour {{type}} {{id}} — appliqué à la version {{version}}, enregistré comme version {{next}}",
+      "patchHeadingBare": "Opérations du correctif",
+      "showRawPatch": "Afficher le correctif brut",
+      "hideRawPatch": "Masquer le correctif brut",
+      "patchWholeDocument": "(document entier)"
     },
     "starters": {
       "whatsDeployed": "Qu'est-ce qui est déployé actuellement ?",

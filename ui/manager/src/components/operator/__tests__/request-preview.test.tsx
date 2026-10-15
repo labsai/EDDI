@@ -528,3 +528,125 @@ describe("RequestPreview — cascade summary", () => {
     expect(screen.queryByTestId("cascade-summary-c2")).not.toBeInTheDocument();
   });
 });
+
+describe("RequestPreview — PATCH (RFC 6902)", () => {
+  beforeEach(() => {
+    authState.roles = [];
+    authState.method = "none";
+    server.resetHandlers();
+  });
+
+  const OPS = [
+    { op: "add", path: "/tasks/0/knowledgeBases", value: [{ name: "eddi-docs" }] },
+    { op: "replace", path: "/tasks/0/parameters/modelName", value: "claude-sonnet-4-5" },
+    { op: "remove", path: "/tasks/0/parameters/temperature" },
+  ];
+
+  function patchPreview(overrides: Partial<ResolvedRequestPreview> = {}): ResolvedRequestPreview {
+    return {
+      method: "PATCH",
+      uri: "http://localhost:7070/llmstore/llms/82b0aa?version=4",
+      queryParams: { version: "4" },
+      headers: {},
+      body: JSON.stringify(OPS),
+      bodyTruncated: false,
+      ...overrides,
+    };
+  }
+
+  it("lists each operation with its op, path and value", () => {
+    renderWithProviders(<RequestPreview preview={patchPreview()} pinned callId="p1" />);
+
+    expect(screen.getByTestId("request-preview-patch-op-p1-0")).toHaveTextContent(
+      'add /tasks/0/knowledgeBases = [{"name":"eddi-docs"}]',
+    );
+    expect(screen.getByTestId("request-preview-patch-op-p1-1")).toHaveTextContent(
+      'replace /tasks/0/parameters/modelName = "claude-sonnet-4-5"',
+    );
+    // A remove carries no value, and none is invented.
+    expect(screen.getByTestId("request-preview-patch-op-p1-2").textContent).toBe("remove /tasks/0/parameters/temperature");
+  });
+
+  it("names the document and the version the patch applies to, and the version it will store", () => {
+    renderWithProviders(<RequestPreview preview={patchPreview()} pinned callId="p1" />);
+
+    const heading = screen.getByTestId("request-preview-patch-heading-p1");
+    expect(heading).toHaveTextContent("Patch to llm 82b0aa");
+    expect(heading).toHaveTextContent("82b0aa");
+    expect(heading).toHaveTextContent("applied to version 4, stored as version 5");
+  });
+
+  it("does not fetch the stored document — the patch is the diff", async () => {
+    let requested = false;
+    server.use(
+      http.get("*/llmstore/llms/82b0aa", () => {
+        requested = true;
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<RequestPreview preview={patchPreview()} pinned callId="p1" />);
+
+    expect(screen.queryByTestId("request-preview-diff-p1")).not.toBeInTheDocument();
+    await waitFor(() => expect(requested).toBe(false));
+  });
+
+  it("keeps the raw patch reachable behind a toggle, off by default", async () => {
+    renderWithProviders(<RequestPreview preview={patchPreview()} pinned callId="p1" />);
+
+    expect(screen.queryByTestId("request-preview-body-p1")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("request-preview-body-toggle-p1"));
+    expect(screen.getByTestId("request-preview-body-p1")).toHaveTextContent("knowledgeBases");
+    expect(screen.getByTestId("request-preview-body-toggle-p1")).toHaveTextContent("Hide the raw patch");
+  });
+
+  it("shows a whole-document operation as such, and a move's source", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={patchPreview({
+          body: JSON.stringify([
+            { op: "replace", path: "", value: { tasks: [] } },
+            { op: "move", from: "/tasks/0", path: "/tasks/1" },
+          ]),
+        })}
+        pinned
+        callId="p1"
+      />,
+    );
+    expect(screen.getByTestId("request-preview-patch-op-p1-0")).toHaveTextContent("replace (whole document) = {\"tasks\":[]}");
+    expect(screen.getByTestId("request-preview-patch-op-p1-1")).toHaveTextContent("move /tasks/1 ← /tasks/0");
+  });
+
+  it("falls back to the raw body for a PATCH that is not a patch — the descriptor metadata edit", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={patchPreview({
+          uri: "http://localhost:7070/descriptorstore/descriptors/d1?version=2",
+          body: JSON.stringify({ name: "New name" }),
+        })}
+        pinned
+        callId="p1"
+      />,
+    );
+    expect(screen.queryByTestId("request-preview-patch-p1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("request-preview-body-p1")).toHaveTextContent("New name");
+  });
+
+  it("does not list a truncated patch — a cut list reads as a shorter one", () => {
+    renderWithProviders(<RequestPreview preview={patchPreview({ bodyTruncated: true })} pinned callId="p1" />);
+    expect(screen.queryByTestId("request-preview-patch-p1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("request-preview-body-p1")).toBeInTheDocument();
+  });
+
+  it("still flags a literal credential written by a patch", () => {
+    renderWithProviders(
+      <RequestPreview
+        preview={patchPreview({
+          body: JSON.stringify([{ op: "replace", path: "/tasks/0/parameters/apiKey", value: "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789" }]),
+        })}
+        pinned
+        callId="p1"
+      />,
+    );
+    expect(screen.getByTestId("request-preview-escalations-p1")).toBeInTheDocument();
+  });
+});

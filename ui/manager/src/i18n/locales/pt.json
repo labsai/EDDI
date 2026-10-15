@@ -5043,7 +5043,13 @@
       "blockedGateCarrying": "Esta solicitação grava uma configuração de LLM que define o seu próprio portão de aprovação (toolApprovals), o que substituiria o portão que a está a rever. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e altere o portão a partir da página do próprio agente.",
       "blockedGateUnverifiable": "Esta solicitação grava uma configuração de LLM cujo corpo não pode ser lido por completo — é demasiado grande para ser apresentado ou não é JSON válido —, pelo que não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente.",
       "blockedGateUnpinned": "Esta solicitação grava uma configuração de LLM mas não está fixada, pelo que o que é realmente executado pode diferir do que é mostrado aqui e não é possível confirmar que não substitui o portão de aprovação. A aprovação fica indisponível para todo o lote enquanto estiver presente — rejeite e faça esta alteração a partir da página do próprio agente.",
-      "blockedSelfStart": "O operador não pode testar a si mesmo — iniciar uma conversa com o próprio agente ({{agentId}}) devolveria sua saída como entrada. Aprovar fica indisponível para todo o lote enquanto essa chamada estiver presente — rejeite e teste outro agente."
+      "blockedSelfStart": "O operador não pode testar a si mesmo — iniciar uma conversa com o próprio agente ({{agentId}}) devolveria sua saída como entrada. Aprovar fica indisponível para todo o lote enquanto essa chamada estiver presente — rejeite e teste outro agente.",
+      "blockedGatePatchOp": "Esta solicitação aplica a uma configuração LLM um patch com uma operação que a verificação da barreira de aprovação não consegue avaliar (qualquer uma além de add, replace, remove ou test — copy e move podem levar para outro lugar parte do documento armazenado, incluindo uma substituição da barreira). Enquanto estiver presente, não é possível aprovar o lote inteiro — rejeite e peça a alteração como operações add, replace ou remove.",
+      "patchHeading": "Patch para {{type}} {{id}} — aplicado à versão {{version}}, salvo como versão {{next}}",
+      "patchHeadingBare": "Operações do patch",
+      "showRawPatch": "Mostrar o patch bruto",
+      "hideRawPatch": "Ocultar o patch bruto",
+      "patchWholeDocument": "(documento inteiro)"
     },
     "starters": {
       "whatsDeployed": "O que está implantado neste momento?",
