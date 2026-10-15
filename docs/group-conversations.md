@@ -1187,13 +1187,16 @@ speaker and phase pairs.
 | `phase_start` / `phase_complete` | A phase opens / closes |
 | `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
 | `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn produced none — no content and an `outcome` of `TIMEOUT`, `SKIPPED` or `ERROR`. Every started turn is closed, including a parallel member released by the batch deadline |
-| `token` | Incremental token from a streaming member turn |
+| `token` | Declared but never emitted today: member turns are not streamed, so a client sees a member's answer whole in `speaker_complete`. Do not build on it |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
 | `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |
 | `decision_reached` | A `DecisionRecord` was set — vote tally, debate verdict, or negotiation agreement (I14/I11) |
 | `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
 | `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
 | `artifact_updated` | A shared artifact was created or revised (I17) |
+| `member_tool_call` | A member's tool loop is about to run a tool: `{agentId, displayName, tool}`. Name only, never arguments (the same rule as the 1:1 `tool_call`). A best-effort liveness signal while the member's non-streamed turn is running; it is dropped once the speaker was cancelled or timed out, and may trail `speaker_complete` of a turn already closed |
+| `cost_updated` | A cost attribution landed in the discussion ledger: `{attributionKey, displayName, attributedCost, totalCost}`. `attributedCost` is that key's cumulative cost, so a consumer overwrites per key rather than adding. Also fires for system spend (`system:...` keys that name no member) |
+| `stance_updated` | A member's one-line stance was recomputed at a phase boundary: `{agentId, displayName, stance, llmGenerated, coveredContributions}`. Fires only when the text changed |
 | `human_input_requested` | A HUMAN member's turn is pending (I6) |
 | `awaiting_approval` / `hitl_resume` | A HITL pause was committed / released |
 | `member_pause_skipped` | A member turn was skipped rather than paused |

@@ -2787,6 +2787,7 @@
     "question": "Frage",
     "readyToDiscuss": "Bereit zur Diskussion",
     "responding": "antwortet…",
+    "usingTool": "Verwendet {{tool}} …",
     "reviewMemberRoster": "Mitgliederliste",
     "reviewMembers": "Mitglieder",
     "reviewModerator": "Moderator",

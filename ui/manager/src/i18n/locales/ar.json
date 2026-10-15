@@ -2911,6 +2911,7 @@
     "question": "السؤال",
     "readyToDiscuss": "جاهز للنقاش",
     "responding": "يستجيب…",
+    "usingTool": "جارٍ استخدام {{tool}}…",
     "reviewMemberRoster": "قائمة الأعضاء",
     "reviewMembers": "الأعضاء",
     "reviewModerator": "المشرف",

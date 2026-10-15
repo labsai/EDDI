@@ -43,6 +43,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -193,6 +194,27 @@ public class MemberTurnExecutor {
         }
         listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
                 attributionKey, displayName, attributed, gc.getTotalCost()));
+    }
+
+    /**
+     * Fires {@code member_tool_call} for one tool a member's loop is about to run.
+     * Name only — the arguments never reach the group stream.
+     * <p>
+     * Runs on a COORDINATOR thread (the member's own turn), so it can fire after
+     * the orchestrator cancelled this speaker; a cancelled turn's event is dropped,
+     * as is one with no listener or no name. A listener that throws must not break
+     * the member's tool loop, so failures are swallowed here.
+     */
+    static void announceToolCall(GroupMember member, String toolName, GroupDiscussionEventListener listener,
+                                 GroupConversationService.MemberTurnCancellation cancellation) {
+        if (listener == null || toolName == null || (cancellation != null && cancellation.isCancelled())) {
+            return;
+        }
+        try {
+            listener.onMemberToolCall(new GroupConversationEventSink.MemberToolCallEvent(member.agentId(), member.displayName(), toolName));
+        } catch (RuntimeException e) {
+            LOGGER.debug("member_tool_call listener failed; ignoring", e);
+        }
     }
 
     /**
@@ -403,56 +425,64 @@ public class MemberTurnExecutor {
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
-                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
-                    if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                        memberPaused[0] = true;
-                        pausedSnapshot[0] = snapshot;
+                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, new ConversationResponseHandler() {
+                    @Override
+                    public Consumer<String> toolCallObserver() {
+                        return listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
                     }
 
-                    String response = contextBuilder.extractResponse(snapshot);
-                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
-                    // returns empty because there are no output keys — only pipeline metadata.
-                    // Surface the failure as explicit content so the transcript entry is not empty.
-                    if ((response == null || response.isEmpty()) && snapshot != null
-                            && snapshot.getConversationState() == ConversationState.ERROR) {
-                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    @Override
+                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                            memberPaused[0] = true;
+                            pausedSnapshot[0] = snapshot;
+                        }
+
+                        String response = contextBuilder.extractResponse(snapshot);
+                        // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
+                        // returns empty because there are no output keys — only pipeline metadata.
+                        // Surface the failure as explicit content so the transcript entry is not empty.
+                        if ((response == null || response.isEmpty()) && snapshot != null
+                                && snapshot.getConversationState() == ConversationState.ERROR) {
+                            response = "[Agent failed to produce output — conversation entered ERROR state]";
+                        }
+
+                        // This callback runs on a COORDINATOR thread, not the member-turn
+                        // thread (conversationService.say hands the turn to
+                        // conversationCoordinator.submitInOrder), so it can fire long after
+                        // the orchestrator gave up on this speaker while the loop is
+                        // serializing the same GroupConversation.
+                        //
+                        // The CME that used to cause is now prevented by the COLLECTIONS —
+                        // createdAgentIds/recruitedAgentIds/dynamicMembers are
+                        // CopyOnWriteArrayList, memberCosts and memberDisplayNames are
+                        // concurrent maps — NOT by skipping the work. An earlier attempt
+                        // returned early here on cancellation; that was over-correction and
+                        // lost two things that are not "abandoned bookkeeping":
+                        // propagateDynamicAgentTracking is the ONLY writer of
+                        // createdAgentIds, which teardown iterates to undeploy — dropping it
+                        // LEAKS a real production deployment the member created — and
+                        // accumulateMemberCost is the sole feed for the totals I1's ceiling
+                        // bounds, so a member that burned its full timeout budget would
+                        // report $0.
+                        // Propagate dynamic agent tracking data from the member's conversation
+                        // memory to the GroupConversation for lifecycle cleanup.
+                        GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
+
+                        // Wave 0, F5: harvest this member's tracked cost so far.
+                        // Attributed under the CONVERSATION key, not the agent id: costs
+                        // are per-conversation (AUDIT_COST is that conversation's running
+                        // total), and GroupCostLedger replaces rather than adds. A turn in
+                        // a separate conversation attributed to the agent's own key would
+                        // overwrite that agent's real accumulated cost with this
+                        // conversation's smaller one — silently shrinking totalCost and
+                        // loosening I1's ceiling.
+                        GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
+                        // Outside the ledger's monitor by construction — see announceCost.
+                        announceCost(gc, convKey, member.displayName(), listener);
+
+                        responseFuture.complete(response);
                     }
-
-                    // This callback runs on a COORDINATOR thread, not the member-turn
-                    // thread (conversationService.say hands the turn to
-                    // conversationCoordinator.submitInOrder), so it can fire long after
-                    // the orchestrator gave up on this speaker while the loop is
-                    // serializing the same GroupConversation.
-                    //
-                    // The CME that used to cause is now prevented by the COLLECTIONS —
-                    // createdAgentIds/recruitedAgentIds/dynamicMembers are
-                    // CopyOnWriteArrayList, memberCosts and memberDisplayNames are
-                    // concurrent maps — NOT by skipping the work. An earlier attempt
-                    // returned early here on cancellation; that was over-correction and
-                    // lost two things that are not "abandoned bookkeeping":
-                    // propagateDynamicAgentTracking is the ONLY writer of
-                    // createdAgentIds, which teardown iterates to undeploy — dropping it
-                    // LEAKS a real production deployment the member created — and
-                    // accumulateMemberCost is the sole feed for the totals I1's ceiling
-                    // bounds, so a member that burned its full timeout budget would
-                    // report $0.
-                    // Propagate dynamic agent tracking data from the member's conversation
-                    // memory to the GroupConversation for lifecycle cleanup.
-                    GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
-
-                    // Wave 0, F5: harvest this member's tracked cost so far.
-                    // Attributed under the CONVERSATION key, not the agent id: costs
-                    // are per-conversation (AUDIT_COST is that conversation's running
-                    // total), and GroupCostLedger replaces rather than adds. A turn in
-                    // a separate conversation attributed to the agent's own key would
-                    // overwrite that agent's real accumulated cost with this
-                    // conversation's smaller one — silently shrinking totalCost and
-                    // loosening I1's ceiling.
-                    GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
-                    // Outside the ledger's monitor by construction — see announceCost.
-                    announceCost(gc, convKey, member.displayName(), listener);
-
-                    responseFuture.complete(response);
                 });
 
                 // The only await point of a member turn — and therefore the lever for

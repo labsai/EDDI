@@ -898,6 +898,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                     public void skipped(SimpleConversationMemorySnapshot snapshot) {
                         responseHandler.onSkipped(snapshot);
                     }
+
+                    @Override
+                    public Consumer<String> toolCallObserver() {
+                        return responseHandler.toolCallObserver();
+                    }
                 });
     }
 
@@ -956,6 +961,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         /** Progress events for a streamed turn; {@code null} for a plain one. */
         default ConversationEventSink eventSink() {
+            return null;
+        }
+
+        /** Name-only tool-call observer for a plain turn; {@code null} for none. */
+        default Consumer<String> toolCallObserver() {
             return null;
         }
 
@@ -1142,6 +1152,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 if (listener.eventSink() != null) {
                     memory.setEventSink(listener.eventSink());
                 }
+                // Always assigned: a memory reused across turns must not keep the
+                // previous turn's observer.
+                memory.setToolCallObserver(listener.toolCallObserver());
 
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {

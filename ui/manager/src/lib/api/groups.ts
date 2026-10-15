@@ -1453,7 +1453,10 @@ export type GroupSSEEventType =
   | "cost_updated"
   // A member's one-line stance was recomputed at a phase boundary. NOT
   // terminal, and fires only when the stance TEXT actually changed.
-  | "stance_updated";
+  | "stance_updated"
+  // A member's tool loop is about to run a tool. NOT terminal. Name only, never
+  // arguments; a best-effort liveness signal for a turn that is not streamed.
+  | "member_tool_call";
 //
 // `token` and `synthesis_complete` are declared in the backend's
 // GroupConversationEventSink but no producer emits them; they are deliberately
@@ -1630,6 +1633,13 @@ export interface CostUpdatedPayload {
   displayName: string | null;
   attributedCost: number;
   totalCost: number;
+}
+
+/** Payload of `member_tool_call` — the tool's name, never its arguments. */
+export interface MemberToolCallPayload {
+  agentId: string;
+  displayName: string | null;
+  tool: string;
 }
 
 /** Payload of `stance_updated`. */
