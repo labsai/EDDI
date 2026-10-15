@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Scale } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { type CascadeJudgeModel } from "../types";
 import { modelParamSpec } from "../model-params";
@@ -21,6 +22,7 @@ export function CascadeJudgeModelEditor({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const owningAgentId = useOwningAgentId();
   const judge = value ?? {};
 
   const params = judge.parameters ?? {};
@@ -87,6 +89,7 @@ export function CascadeJudgeModelEditor({
           {t("llmEditor.cascadeJudgeApiKey", "Judge API Key")}
         </label>
         <SecretKeyPicker
+          agentId={owningAgentId}
           value={params.apiKey ?? ""}
           onChange={(v) => setParam("apiKey", v)}
           readOnly={readOnly}
