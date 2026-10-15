@@ -113,12 +113,12 @@ class VaultKeySafetyTest {
             // while the first is between generating a DEK and writing it.
             persistence.beforeNextInsertDek = () -> {
                 try {
-                    second.store(ref("acme", "key-b"), "value-b", null, null);
+                    second.store(ref("acme", "key-b"), "value-b", null, List.of("*"));
                 } catch (SecretProviderException e) {
                     throw new IllegalStateException(e);
                 }
             };
-            first.store(ref("acme", "key-a"), "value-a", null, null);
+            first.store(ref("acme", "key-a"), "value-a", null, List.of("*"));
 
             assertEquals(1, persistence.listDeks("acme").size());
             assertEquals("value-a", first.resolve(ref("acme", "key-a")));
@@ -137,7 +137,7 @@ class VaultKeySafetyTest {
         var second = provider(MASTER);
 
         assertArrayEquals(salt, persistedSalt());
-        first.store(ref("acme", "key"), "value", null, null);
+        first.store(ref("acme", "key"), "value", null, List.of("*"));
         assertEquals("value", second.resolve(ref("acme", "key")));
     }
 
@@ -156,9 +156,9 @@ class VaultKeySafetyTest {
         @DisplayName("an interrupted rotation is completed by re-running it with the same keys")
         void interruptedRotationIsCompletedByARetry() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("t1", "key"), "one", null, null);
-            provider.store(ref("t2", "key"), "two", null, null);
-            provider.store(ref("t3", "key"), "three", null, null);
+            provider.store(ref("t1", "key"), "one", null, List.of("*"));
+            provider.store(ref("t2", "key"), "two", null, List.of("*"));
+            provider.store(ref("t3", "key"), "three", null, List.of("*"));
 
             persistence.failDekRewrapsAfter = 1;
             var failure = assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
@@ -216,7 +216,7 @@ class VaultKeySafetyTest {
             var restarted = provider(NEW_MASTER);
             // A new tenant is not refused — this node's KEK is the announced one — and
             // its DEK is wrapped under the KEK the rotation is moving to.
-            restarted.store(ref("t9", "key"), "nine", null, null);
+            restarted.store(ref("t9", "key"), "nine", null, List.of("*"));
 
             assertEquals(3, restarted.rotateKek(MASTER, NEW_MASTER));
             var again = provider(NEW_MASTER);
@@ -235,11 +235,11 @@ class VaultKeySafetyTest {
         void staleReplicaRefusesToWrapANewDek() throws Exception {
             var rotating = provider(MASTER);
             var stale = provider(MASTER);
-            rotating.store(ref("t1", "key"), "one", null, null);
+            rotating.store(ref("t1", "key"), "one", null, List.of("*"));
 
             rotating.rotateKek(MASTER, NEW_MASTER);
 
-            var refusal = assertThrows(SecretProviderException.class, () -> stale.store(ref("t9", "key"), "nine", null, null));
+            var refusal = assertThrows(SecretProviderException.class, () -> stale.store(ref("t9", "key"), "nine", null, List.of("*")));
             assertTrue(refusal.getMessage().contains("no longer the vault's master key"), refusal.getMessage());
             assertTrue(persistence.listDeks("t9").isEmpty(), "nothing may be wrapped under the retired KEK");
         }
@@ -248,7 +248,7 @@ class VaultKeySafetyTest {
         @DisplayName("a DEK another replica wrapped under the old KEK during the rotation is caught up")
         void dekCreatedDuringRotationIsCaughtUp() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("t1", "key"), "one", null, null);
+            provider.store(ref("t1", "key"), "one", null, List.of("*"));
             byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(MASTER, persistedSalt());
 
             // A replica that read the KEK check just before the announcement, and wrapped
@@ -290,7 +290,7 @@ class VaultKeySafetyTest {
         @DisplayName("a DEK that opens with neither key stops the rotation before anything is written")
         void unopenableDekRefusesUpFront() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("t1", "key"), "one", null, null);
+            provider.store(ref("t1", "key"), "one", null, List.of("*"));
             String checkBefore = persistence.meta.get("vault-kek-check");
             seedTenant("t2", "two", EnvelopeCrypto.deriveKeyFromString("somebody-else-entirely", persistedSalt()));
 
@@ -344,8 +344,10 @@ class VaultKeySafetyTest {
         @Test
         @DisplayName("a new secret stored without a grant still defaults to every agent")
         void newSecretDefaultsToWildcard() throws Exception {
+            // No default any more: a create names its grant, or it is refused.
             var provider = provider(MASTER);
-            provider.store(ref("acme", "fresh"), "v1", null, null);
+            assertThrows(IllegalArgumentException.class, () -> provider.store(ref("acme", "fresh"), "v1", null, null));
+            provider.store(ref("acme", "fresh"), "v1", null, List.of("*"));
             assertEquals(List.of("*"), provider.getMetadata(ref("acme", "fresh")).allowedAgents());
         }
     }
@@ -360,8 +362,8 @@ class VaultKeySafetyTest {
         @DisplayName("a secret's ciphertext copied into another secret's row does not decrypt there")
         void swappedCiphertextIsRefused() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("acme", "admin-key"), "admin-secret", null, null);
-            provider.store(ref("acme", "public-key"), "public-value", null, null);
+            provider.store(ref("acme", "admin-key"), "admin-secret", null, List.of("*"));
+            provider.store(ref("acme", "public-key"), "public-value", null, List.of("*"));
 
             EncryptedSecret admin = persistence.secrets.get("acme/admin-key");
             EncryptedSecret victim = persistence.secrets.get("acme/public-key");
@@ -375,7 +377,7 @@ class VaultKeySafetyTest {
         @DisplayName("a row written before AAD existed still resolves, and a DEK rotation moves it onto the bound form")
         void legacyRowsKeepWorkingAndMigrate() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("acme", "bound"), "bound-value", null, null);
+            provider.store(ref("acme", "bound"), "bound-value", null, List.of("*"));
             byte[] kek = EnvelopeCrypto.deriveKeyFromString(MASTER, persistedSalt());
             EncryptedDek dek = persistence.deks.get("acme/1");
             byte[] rawDek = EnvelopeCrypto.decryptDek(dek.getEncryptedDek(), dek.getIv(), kek);
@@ -418,7 +420,7 @@ class VaultKeySafetyTest {
                 return first ? 3 : 0;
             });
             var provider = provider(MASTER, participants(participant));
-            provider.store(ref("acme", "key"), "value", null, null);
+            provider.store(ref("acme", "key"), "value", null, List.of("*"));
 
             assertEquals(1, provider.resetTenant("acme"));
 
@@ -434,7 +436,7 @@ class VaultKeySafetyTest {
             when(participant.discardAll(anyString())).thenThrow(new IllegalStateException("grant store down"));
             when(participant.sealedDataDescription()).thenReturn("OAuth connection grants");
             var provider = provider(MASTER, participants(participant));
-            provider.store(ref("acme", "key"), "value", null, null);
+            provider.store(ref("acme", "key"), "value", null, List.of("*"));
 
             var failure = assertThrows(SecretProviderException.class, () -> provider.resetTenant("acme"));
 
@@ -483,11 +485,11 @@ class VaultKeySafetyTest {
         @DisplayName("adopting the replacement key re-enables storing, resets the system tenant, and lists what needs a reset")
         void adoptionRecoversFromALostKey() throws Exception {
             var before = provider(LOST);
-            before.store(ref("t1", "key"), "one", null, null);
+            before.store(ref("t1", "key"), "one", null, List.of("*"));
             before.pinSystemValue("audit-hmac-key", "pinned-under-the-lost-key");
 
             var after = provider(REPLACEMENT);
-            var refused = assertThrows(SecretProviderException.class, () -> after.store(ref("t2", "key"), "two", null, null));
+            var refused = assertThrows(SecretProviderException.class, () -> after.store(ref("t2", "key"), "two", null, List.of("*")));
             assertTrue(refused.getMessage().contains("no longer the vault's master key"), refused.getMessage());
 
             var adoption = after.adoptCurrentMasterKey();
@@ -497,10 +499,10 @@ class VaultKeySafetyTest {
             // The checksum key was wrapped under the lost key: without discarding it every
             // store() below would fail on it for good.
             assertTrue(adoption.checksumKeyReset());
-            after.store(ref("t2", "key"), "two", null, null);
+            after.store(ref("t2", "key"), "two", null, List.of("*"));
             assertEquals("two", after.resolve(ref("t2", "key")));
             after.resetTenant("t1");
-            after.store(ref("t1", "key"), "one-again", null, null);
+            after.store(ref("t1", "key"), "one-again", null, List.of("*"));
             assertEquals("one-again", provider(REPLACEMENT).resolve(ref("t1", "key")));
             assertEquals("fresh", after.pinSystemValue("audit-hmac-key", "fresh"), "system values are re-created under the new key");
         }
@@ -514,7 +516,7 @@ class VaultKeySafetyTest {
         @DisplayName("re-running an interrupted adoption clears system values left without a system DEK")
         void rerunAdoptionClearsOrphanedSystemValues() throws Exception {
             var before = provider(LOST);
-            before.store(ref("t1", "key"), "one", null, null);
+            before.store(ref("t1", "key"), "one", null, List.of("*"));
             before.pinSystemValue("audit-hmac-key", "pinned-under-the-lost-key");
             String orphan = persistence.meta.get(VaultSecretProvider.SYSTEM_VALUE_META_PREFIX + "audit-hmac-key");
             var after = provider(REPLACEMENT);
@@ -536,14 +538,14 @@ class VaultKeySafetyTest {
 
             var after = provider(REPLACEMENT);
 
-            after.store(ref("t1", "key"), "one", null, null);
+            after.store(ref("t1", "key"), "one", null, List.of("*"));
             assertEquals("one", after.resolve(ref("t1", "key")));
         }
 
         @Test
         @DisplayName("a DEK the configured key cannot open names adopt-master-key as a recovery option")
         void decryptFailureNamesAdoption() throws Exception {
-            provider(LOST).store(ref("t1", "key"), "one", null, null);
+            provider(LOST).store(ref("t1", "key"), "one", null, List.of("*"));
 
             var failure = assertThrows(SecretProviderException.class, () -> provider(REPLACEMENT).resolve(ref("t1", "key")));
 
@@ -569,7 +571,7 @@ class VaultKeySafetyTest {
             assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
 
             var restarted = provider(NEW_MASTER);
-            restarted.store(ref("t9", "key"), "nine", null, null);
+            restarted.store(ref("t9", "key"), "nine", null, List.of("*"));
 
             // The legacy-salt derivation of NEW_MASTER opens none of these DEKs; the
             // pending-salt one opens all of them.
@@ -669,10 +671,10 @@ class VaultKeySafetyTest {
         void firstDekIsTakenBack() throws Exception {
             var rotating = provider(MASTER);
             var stale = provider(MASTER);
-            rotating.store(ref("t1", "key"), "one", null, null);
+            rotating.store(ref("t1", "key"), "one", null, List.of("*"));
 
             persistence.beforeNextInsertDek = () -> rotate(rotating);
-            var failure = assertThrows(SecretProviderException.class, () -> stale.store(ref("t9", "key"), "nine", null, null));
+            var failure = assertThrows(SecretProviderException.class, () -> stale.store(ref("t9", "key"), "nine", null, List.of("*")));
 
             assertTrue(failure.getMessage().contains("taken back"), failure.getMessage());
             assertTrue(persistence.listDeks("t9").isEmpty());
@@ -684,7 +686,7 @@ class VaultKeySafetyTest {
         void rotateDekOnAStaleReplica() throws Exception {
             var rotating = provider(MASTER);
             var stale = provider(MASTER);
-            stale.store(ref("t9", "key"), "nine", null, null);
+            stale.store(ref("t9", "key"), "nine", null, List.of("*"));
 
             persistence.beforeNextInsertDek = () -> rotate(rotating);
             assertThrows(SecretProviderException.class, () -> stale.rotateDek("t9"));
@@ -708,8 +710,8 @@ class VaultKeySafetyTest {
     @DisplayName("a DEK an unfinished rotation did not reach says to re-run the rotation, not to reset")
     void unfinishedRotationMessage() throws Exception {
         var provider = provider(MASTER);
-        provider.store(ref("t1", "key"), "one", null, null);
-        provider.store(ref("t2", "key"), "two", null, null);
+        provider.store(ref("t1", "key"), "one", null, List.of("*"));
+        provider.store(ref("t2", "key"), "two", null, List.of("*"));
         persistence.failDekRewrapsAfter = 1;
         assertThrows(SecretProviderException.class, () -> provider.rotateKek(MASTER, NEW_MASTER));
         persistence.failDekRewrapsAfter = -1;
@@ -776,7 +778,7 @@ class VaultKeySafetyTest {
         @DisplayName("a checksum key another replica created during the rotation is re-wrapped too")
         void checksumKeyCreatedMidRotationIsCaughtUp() throws Exception {
             var provider = provider(MASTER);
-            provider.store(ref("t1", "key"), "one", null, null);
+            provider.store(ref("t1", "key"), "one", null, List.of("*"));
             persistence.meta.remove(CHECKSUM_KEY_META);
             byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(MASTER, persistedSalt());
             byte[] raw = EnvelopeCrypto.generateDek();
@@ -794,7 +796,7 @@ class VaultKeySafetyTest {
         @Test
         @DisplayName("a node whose KEK is no longer the vault's does not create the checksum key")
         void staleNodeDoesNotCreateTheChecksumKey() throws Exception {
-            provider(MASTER).store(ref("t1", "key"), "one", null, null);
+            provider(MASTER).store(ref("t1", "key"), "one", null, List.of("*"));
             persistence.meta.remove(CHECKSUM_KEY_META);
             // A node that has not loaded the key yet.
             var provider = provider(MASTER);
@@ -804,7 +806,7 @@ class VaultKeySafetyTest {
             var announced = EnvelopeCrypto.encrypt("eddi-vault-kek-check", otherKek, "eddi-kek-check|v1".getBytes(StandardCharsets.UTF_8));
             persistence.meta.put(VaultSecretProvider.KEK_CHECK_META_KEY, announced.iv() + ":" + announced.ciphertext());
 
-            assertThrows(SecretProviderException.class, () -> provider.store(ref("t1", "other"), "two", null, null));
+            assertThrows(SecretProviderException.class, () -> provider.store(ref("t1", "other"), "two", null, List.of("*")));
 
             assertNull(persistence.meta.get(CHECKSUM_KEY_META), "nothing may be wrapped under the retired KEK");
         }

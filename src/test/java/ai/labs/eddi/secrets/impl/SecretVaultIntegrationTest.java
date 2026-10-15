@@ -218,7 +218,7 @@ class SecretVaultIntegrationTest {
             setupSecretMocking();
 
             var ref = new SecretReference("production", KEY_NAME);
-            provider.store(ref, SECRET_VALUE, "Prod key", null);
+            provider.store(ref, SECRET_VALUE, "Prod key", List.of("*"));
 
             String resolved = resolver.resolveValue("${vault:production/" + KEY_NAME + "}");
             assertEquals(SECRET_VALUE, resolved);
@@ -230,8 +230,8 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, "apiKey"), "key-123", null, null);
-            provider.store(new SecretReference(TENANT, "apiSecret"), "secret-456", null, null);
+            provider.store(new SecretReference(TENANT, "apiKey"), "key-123", null, List.of("*"));
+            provider.store(new SecretReference(TENANT, "apiSecret"), "secret-456", null, List.of("*"));
 
             String input = "key=${vault:apiKey}&secret=${vault:apiSecret}";
             String resolved = resolver.resolveValue(input);
@@ -257,7 +257,7 @@ class SecretVaultIntegrationTest {
             assertEquals("${vault:" + KEY_NAME + "}", result1);
 
             // Now store the secret
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // Second attempt — should now resolve successfully
             // The POINT of this test: we DON'T call invalidateAll()
@@ -272,7 +272,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // Resolve twice
             resolver.resolveValue("${vault:" + KEY_NAME + "}");
@@ -295,8 +295,8 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, "key1"), "value1", null, null);
-            provider.store(new SecretReference(TENANT, "key2"), "value2", null, null);
+            provider.store(new SecretReference(TENANT, "key1"), "value1", null, List.of("*"));
+            provider.store(new SecretReference(TENANT, "key2"), "value2", null, List.of("*"));
 
             // Verify pre-rotation
             assertEquals("value1", resolver.resolveValue("${vault:key1}"));
@@ -321,7 +321,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             Instant before = Instant.now();
             provider.rotateDek(TENANT);
@@ -337,7 +337,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
             // The sweep loses this row's guard on both attempts, so it stays on
             // generation 1 — the state an interrupted rotation leaves behind.
             // doReturn, not when(...): when() CALLS the mock, and setupSecretMocking's
@@ -360,7 +360,7 @@ class SecretVaultIntegrationTest {
             setupSecretMocking();
 
             // Store a secret to create the DEK, then remove it
-            provider.store(new SecretReference(TENANT, "setup"), "val", null, null);
+            provider.store(new SecretReference(TENANT, "setup"), "val", null, List.of("*"));
             secretStore.clear();
             when(persistence.listSecretsByTenant(TENANT)).thenReturn(List.of());
 
@@ -388,7 +388,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // Rotate KEK
             String newMasterKey = "brand-new-master-key-2024";
@@ -408,7 +408,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             clearInvocations(persistence); // only the rotation's own writes count below
 
@@ -440,7 +440,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             assertEquals(1.0, meterRegistry.counter("eddi.vault.store.count").count());
         }
@@ -451,7 +451,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
             provider.resolve(new SecretReference(TENANT, KEY_NAME));
 
             assertEquals(1.0, meterRegistry.counter("eddi.vault.resolve.count").count());
@@ -481,7 +481,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // First resolve — cache miss
             resolver.resolveValue("${vault:" + KEY_NAME + "}");
@@ -498,7 +498,7 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
             provider.rotateDek(TENANT);
 
             assertEquals(1.0, meterRegistry.counter("eddi.vault.rotate.count").count());
@@ -519,7 +519,7 @@ class SecretVaultIntegrationTest {
             when(persistence.findSecret(anyString(), anyString())).thenReturn(Optional.empty());
 
             assertThrows(ISecretProvider.SecretProviderException.class,
-                    () -> provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null));
+                    () -> provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*")));
         }
 
         @Test
@@ -554,12 +554,12 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), "old-value", null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), "old-value", null, List.of("*"));
 
             String v1 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals("old-value", v1);
 
-            provider.store(new SecretReference(TENANT, KEY_NAME), "new-value", null, null);
+            provider.store(new SecretReference(TENANT, KEY_NAME), "new-value", null, List.of("*"));
             resolver.invalidateCache(new SecretReference(TENANT, KEY_NAME));
 
             String v2 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
@@ -572,15 +572,15 @@ class SecretVaultIntegrationTest {
             setupDekMocking();
             setupSecretMocking();
 
-            provider.store(new SecretReference(TENANT, "k1"), "v1", null, null);
-            provider.store(new SecretReference(TENANT, "k2"), "v2", null, null);
+            provider.store(new SecretReference(TENANT, "k1"), "v1", null, List.of("*"));
+            provider.store(new SecretReference(TENANT, "k2"), "v2", null, List.of("*"));
 
             resolver.resolveValue("${vault:k1}");
             resolver.resolveValue("${vault:k2}");
 
             resolver.invalidateAll();
-            provider.store(new SecretReference(TENANT, "k1"), "v1-updated", null, null);
-            provider.store(new SecretReference(TENANT, "k2"), "v2-updated", null, null);
+            provider.store(new SecretReference(TENANT, "k1"), "v1-updated", null, List.of("*"));
+            provider.store(new SecretReference(TENANT, "k2"), "v2-updated", null, List.of("*"));
 
             assertEquals("v1-updated", resolver.resolveValue("${vault:k1}"));
             assertEquals("v2-updated", resolver.resolveValue("${vault:k2}"));
