@@ -10,13 +10,14 @@ import {
 import {
   deleteAgent,
   undeployAgent,
-  deployAgent,
   getDeploymentStatus,
   getAgent,
   getAgentCurrentVersion,
   type Agent,
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
+import { markOperatorDescriptor } from "./operator-marker";
+import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import {
   buildEndpointFilter,
   buildToolApprovals,
@@ -268,6 +269,152 @@ export function findMissingEndpoints(
   });
 }
 
+/**
+ * Request-body media types the backend's tool generator can send
+ * (`McpApiToolBuilder`). Keep in step with it: a body type absent here is one
+ * the generated tool cannot fill, which is the whole point of
+ * {@link findUnusableEndpoints}.
+ *
+ * The backend twin (`McpApiToolBuilder.findUnmappableInput`) follows the same
+ * rules, including the auth-header exemption: when auth is configured, a required
+ * header named like the auth header is not unusable, because the generated tool
+ * sends that header on every call. The Manager provisions with the default header
+ * name, `Authorization`, so that is the name exempted here.
+ */
+const SUPPORTED_BODY_MEDIA_TYPES: readonly string[] = [
+  "application/json",
+  "application/json-patch+json",
+  "text/plain",
+];
+
+type JsonObject = Record<string, unknown>;
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Follow one local `$ref` (`#/components/...`) in the raw spec; anything else is returned as is. */
+function resolveLocalRef(spec: FetchedSpec, node: unknown): unknown {
+  if (!isObject(node) || typeof node.$ref !== "string") return node;
+  if (!node.$ref.startsWith("#/")) return node;
+  let current: unknown = spec.raw;
+  for (const segment of node.$ref.slice(2).split("/")) {
+    if (!isObject(current)) return node;
+    current = current[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+  }
+  return current ?? node;
+}
+
+function baseMediaType(mediaType: string): string {
+  return mediaType.split(";")[0]!.trim().toLowerCase();
+}
+
+/**
+ * Why one operation would produce a tool that cannot send an input it requires,
+ * or `null` when it is fine. The client-side twin of the backend's
+ * `McpApiToolBuilder.findUnmappableInput`; both must agree, including the
+ * auth-header exemption described at {@link SUPPORTED_BODY_MEDIA_TYPES}.
+ */
+function unusableReason(
+  spec: FetchedSpec,
+  pathItem: JsonObject,
+  operation: unknown,
+  apiAuth?: string,
+): string | null {
+  if (!isObject(operation)) return null;
+  const authConfigured = apiAuth !== undefined && apiAuth.trim() !== "";
+
+  const body = resolveLocalRef(spec, operation.requestBody);
+  if (isObject(body) && body.required !== false && isObject(body.content)) {
+    const types = Object.keys(body.content);
+    if (
+      types.length > 0 &&
+      !types.some((t) => SUPPORTED_BODY_MEDIA_TYPES.includes(baseMediaType(t)))
+    ) {
+      return `requires a request body of type ${types.join(", ")}, which generated tools cannot send`;
+    }
+  }
+
+  const parameters = [
+    ...(Array.isArray(pathItem.parameters) ? pathItem.parameters : []),
+    ...(Array.isArray(operation.parameters) ? operation.parameters : []),
+  ];
+  for (const raw of parameters) {
+    const param = resolveLocalRef(spec, raw);
+    if (
+      isObject(param) &&
+      param.required === true &&
+      (param.in === "header" || param.in === "cookie")
+    ) {
+      if (
+        authConfigured &&
+        param.in === "header" &&
+        String(param.name).toLowerCase() === "authorization"
+      ) {
+        continue;
+      }
+      return `requires the ${String(param.in)} parameter '${String(param.name)}', which generated tools cannot send`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Allow-listed endpoints whose generated tool could not send an input the
+ * operation REQUIRES — a request body of a media type the generator does not
+ * map, or a required header/cookie parameter.
+ *
+ * Presence in the spec (`findMissingEndpoints`) is not enough: the tool for
+ * `PUT /agentstore/agents/{id}/updateResourceUri` once existed, was approved by
+ * the admin, and could only fail, because its `text/plain` body had no field on
+ * the tool. The backend now refuses to generate such a tool and reports it
+ * (`resources.unusableEndpoints` of the `setup-api` response, see
+ * {@link unusableEndpointsFromResult}); this pre-flight finds the same set from
+ * the spec before anything is created, and works against a backend too old to
+ * report it. Entries missing from the spec are left to `findMissingEndpoints`.
+ *
+ * `apiAuth` is the value the tools will send as the auth header (see
+ * `apiAuthForMode`); when set, a required `Authorization` header parameter is not
+ * counted against an endpoint.
+ *
+ * Returns `"METHOD /path: reason"` lines; empty means every tool is usable.
+ */
+export function findUnusableEndpoints(
+  spec: FetchedSpec,
+  endpoints: readonly string[],
+  apiAuth?: string,
+): string[] {
+  const unusable: string[] = [];
+  for (const entry of endpoints) {
+    const parsed = parseEndpoint(entry);
+    if (!parsed) continue;
+    const pathItem = spec.paths[parsed.path];
+    const operation = pathItem?.[parsed.method.toLowerCase()];
+    if (!pathItem || operation === undefined) continue;
+    const reason = unusableReason(spec, pathItem, operation, apiAuth);
+    if (reason) unusable.push(`${entry}: ${reason}`);
+  }
+  return unusable;
+}
+
+/**
+ * The tools the backend reported it could not generate, from a `setup-api`
+ * response. Empty on a backend that predates the report (the field is absent) —
+ * the pre-flight above is what protects that case.
+ */
+export function unusableEndpointsFromResult(result: SetupResult): string[] {
+  const reported = (result.resources as { unusableEndpoints?: unknown } | undefined)
+    ?.unusableEndpoints;
+  return Array.isArray(reported)
+    ? reported.filter((e): e is string => typeof e === "string")
+    : [];
+}
+
+/** The user-facing refusal, shared by the pre-flight and the post-provision check. */
+export function unusableEndpointsMessage(unusable: readonly string[]): string {
+  return `This EDDI deployment exposes ${unusable.length} endpoint(s) the operator needs whose tool would not be able to send a required input, so they would fail on every call: ${unusable.join("; ")}`;
+}
+
 /* ─── Provisioning ─── */
 
 export interface ProvisionOperatorParams {
@@ -295,7 +442,18 @@ export interface ProvisionOperatorParams {
 }
 
 /**
- * Create and deploy the operator agent.
+ * Create the operator agent — WITHOUT deploying it — and mark it as the operator.
+ *
+ * Not deployed here, deliberately (plan decision 5.3). A vault grant names
+ * agent ids, so an operator whose model key is restricted is on no grant the
+ * moment it is created, and a deploy in the same call was refused by
+ * construction — every time, including on every retry, each of which created
+ * another agent. Activation deploys it afterwards through the grant flow, where
+ * an admin can add THIS agent to the key's grant first.
+ *
+ * The descriptor is stamped with `OPERATOR_DESCRIPTOR_MARKER`, so an operator
+ * the config does not point at (a kept agent, a deleted variable) can still be
+ * found and managed from the operator screen.
  *
  * `apiBaseUrl` is `config.apiBaseUrl`, which the caller must already have
  * resolved with {@link resolveOperatorApiBaseUrl}: the address EDDI can reach
@@ -308,7 +466,7 @@ export async function provisionOperator(
 ): Promise<SetupResult> {
   const { agentName, config, apiKey, baseUrl, spec } = params;
 
-  return createApiAgent({
+  const result = await createApiAgent({
     agentName,
     // Same scope as the endpoint filter below, so the preamble describes the
     // boundary the agent is actually behind.
@@ -324,7 +482,7 @@ export async function provisionOperator(
     llmBaseUrl: baseUrl || undefined,
     apiAuth: apiAuthForMode(config.authMode),
     endpoints: buildEndpointFilter(config.scope),
-    deploy: true,
+    deploy: false,
     environment: config.environment,
     // Sent unconditionally — including for read_only. See buildToolApprovals:
     // installing the real gate now, on v1, is what verifyGateInstalled proves
@@ -344,25 +502,31 @@ export async function provisionOperator(
     // approval no matter how many rounds remain.
     maxToolIterations: OPERATOR_MAX_TOOL_ITERATIONS,
   });
+  if (result.agentId && result.agentId !== "unknown") {
+    const location = (result.resources as { agentLocation?: unknown } | undefined)?.agentLocation;
+    const version = typeof location === "string" ? parseVersionFromLocation(location) : null;
+    await markOperatorDescriptor(result.agentId, version ?? 1);
+  }
+  return result;
 }
 
 /**
- * Reject a provisioning result that did not actually produce a live operator.
+ * Reject a provisioning result that did not produce a manageable agent.
  *
- * `setup-api` answers 201 even when the deploy step failed, and falls back to
- * the literal id `"unknown"` when it cannot read the created agent's location.
- * Persisting either as `enabled: true` would leave the UI claiming a running
+ * `setup-api` falls back to the literal id `"unknown"` when it cannot read the
+ * created agent's location. Persisting that would leave the UI claiming an
  * operator whose status and undeploy calls address a nonexistent agent.
+ *
+ * Only the id. It used to reject `deployed: false` too, and it ran BEFORE the
+ * rollback below it — so a failed deploy threw past the cleanup and left the
+ * created operator behind, invisible, while a retry made a second one.
+ * Provisioning no longer deploys at all (`deploy: false`); activation deploys
+ * afterwards, inside the part that rolls back.
  */
 export function assertProvisioned(result: SetupResult): void {
   if (!result.agentId || result.agentId === "unknown") {
     throw new Error(
       "EDDI created the operator but did not return its agent id, so it cannot be managed. Check the platform logs and try again.",
-    );
-  }
-  if (result.deployed === false || result.deploymentStatus === "ERROR") {
-    throw new Error(
-      `The operator agent was created but failed to deploy (status: ${result.deploymentStatus ?? "unknown"}).`,
     );
   }
 }
@@ -926,7 +1090,8 @@ function looksLikeAuthFailure(result: string | undefined): boolean {
 /** Deployment status for the configured operator agent. */
 export async function readOperatorStatus(config: OperatorConfig) {
   if (!config.agentId || config.version == null) return null;
-  return getDeploymentStatus(config.environment, config.agentId, config.version);
+  // Detailed, so an ERROR says why (a refused vault grant, most often).
+  return getDeploymentStatus(config.environment, config.agentId, config.version, { detailed: true });
 }
 
 /**
@@ -943,7 +1108,26 @@ export async function reactivateOperator(
   if (!config.agentId || config.version == null) {
     throw new Error("The operator has no provisioned agent to re-enable.");
   }
-  await deployAgent(config.environment, config.agentId, config.version);
+  // Through the grant flow, like activation: an operator whose model key is
+  // restricted needs its agent on the grant to come back up, and a plain deploy
+  // here used to fail (or be refused) with no way to fix it from this screen.
+  const outcome = await runDeployWithGrants({
+    agentId: config.agentId,
+    version: config.version,
+    environment: config.environment,
+  });
+  if (outcome.kind === "cancelled") {
+    throw new Error(
+      "The Platform Operator was not enabled: its vault key was not granted to the agent. Nothing was changed - enable it again to grant the key.",
+    );
+  }
+  if (outcome.kind === "failed") {
+    throw new Error(
+      outcome.message
+        ? `The Platform Operator could not be enabled: ${outcome.message}`
+        : `The Platform Operator could not be enabled (status: ${outcome.result.status}).`,
+    );
+  }
   const next: OperatorConfig = { ...config, enabled: true };
   await writeOperatorConfig(next);
   return next;

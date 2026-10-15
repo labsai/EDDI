@@ -4,12 +4,20 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.math.BigDecimal;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -48,6 +56,8 @@ final class ModelParameterValues {
     private static final Set<String> PIPELINE_KEYS = Set.of(
             "systemMessage", "prompt", "logSizeLimit", "includeFirstAgentMessage",
             "convertToObject", "addToOutput", "responseSchema", "logRequests", "logResponses", "timeout");
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private ModelParameterValues() {
         // non-instantiable utility
@@ -95,7 +105,7 @@ final class ModelParameterValues {
         try {
             return Integer.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "integer");
+            return rejected(key, "integer");
         }
     }
 
@@ -108,7 +118,7 @@ final class ModelParameterValues {
         try {
             return Long.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "long");
+            return rejected(key, "long");
         }
     }
 
@@ -121,7 +131,7 @@ final class ModelParameterValues {
         try {
             return Double.valueOf(raw);
         } catch (NumberFormatException e) {
-            return rejected(key, raw, "decimal");
+            return rejected(key, "decimal");
         }
     }
 
@@ -241,6 +251,194 @@ final class ModelParameterValues {
      * reported as "not a valid integer" — a warning about a value the user never
      * really set. Trimming here also spares each parser its own trim.
      */
+
+    /**
+     * {@code overlay} laid over {@code base}, nested objects merged key by key
+     * rather than replaced: a user's {@code {"provider":{"zdr":true}}} must not
+     * wipe the {@code provider.order} a catalog field put there. Scalars and lists
+     * in the overlay win; neither argument is modified.
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> deepMerge(Map<String, Object> base, Map<String, Object> overlay) {
+        Map<String, Object> merged = new LinkedHashMap<>(base);
+        overlay.forEach((key, value) -> {
+            Object existing = merged.get(key);
+            if (existing instanceof Map<?, ?> existingMap && value instanceof Map<?, ?> valueMap) {
+                merged.put(key, deepMerge((Map<String, Object>) existingMap, (Map<String, Object>) valueMap));
+            } else {
+                merged.put(key, value);
+            }
+        });
+        return merged;
+    }
+
+    /** {@code true}/{@code false}, or {@code null} when absent or not a boolean. */
+    static Boolean booleanOrNull(Map<String, String> parameters, String key) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        if ("true".equalsIgnoreCase(raw)) {
+            return Boolean.TRUE;
+        }
+        if ("false".equalsIgnoreCase(raw)) {
+            return Boolean.FALSE;
+        }
+        return rejected(key, "boolean");
+    }
+
+    /** The trimmed value, or {@code null} when absent or blank. */
+    static String stringValue(Map<String, String> parameters, String key) {
+        return rawValue(parameters, key);
+    }
+
+    static void applyString(Map<String, String> parameters, String key, Consumer<String> setter) {
+        String value = rawValue(parameters, key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /**
+     * A string restricted to {@code allowed} (case-insensitive, returned in the
+     * canonical spelling from {@code allowed}); anything else is rejected with a
+     * warning naming the accepted values, and the provider default stays in place.
+     */
+    static String enumValue(Map<String, String> parameters, String key, Collection<String> allowed) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        for (String candidate : allowed) {
+            if (candidate.equalsIgnoreCase(raw)) {
+                return candidate;
+            }
+        }
+        LOGGER.warnv("LLM parameter ''{0}'' is not one of {1} — falling back to the model default.", sanitize(key), allowed);
+        return null;
+    }
+
+    /**
+     * A list of strings: either a JSON array ({@code ["END","
+
+    "]}, needed when an item contains a comma or a newline) or a comma-separated
+     * list. Blank items are dropped; {@code null} when nothing usable remains.
+     */
+    static List<String> stringList(Map<String, String> parameters, String key) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        List<String> items = new ArrayList<>();
+        if (raw.startsWith("[")) {
+            try {
+                for (String item : JSON.readValue(raw, new TypeReference<List<String>>() {
+                })) {
+                    if (item != null && !item.isEmpty()) {
+                        items.add(item);
+                    }
+                }
+            } catch (JsonProcessingException e) {
+                return rejected(key, "JSON array of strings");
+            }
+        } else {
+            for (String item : raw.split(",")) {
+                if (!item.trim().isEmpty()) {
+                    items.add(item.trim());
+                }
+            }
+        }
+        return items.isEmpty() ? null : List.copyOf(items);
+    }
+
+    static void applyStringList(Map<String, String> parameters, String key, Consumer<List<String>> setter) {
+        List<String> value = stringList(parameters, key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /**
+     * A JSON object. Only the key is ever logged on failure: the value of a header
+     * or body parameter can carry a credential.
+     */
+    static Map<String, Object> objectMap(Map<String, String> parameters, String key) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            Map<String, Object> parsed = JSON.readValue(raw, new TypeReference<LinkedHashMap<String, Object>>() {
+            });
+            return parsed == null || parsed.isEmpty() ? null : parsed;
+        } catch (JsonProcessingException e) {
+            return rejected(key, "JSON object");
+        }
+    }
+
+    /**
+     * A JSON object whose values are all coerced to strings (headers, labels,
+     * metadata).
+     */
+    static Map<String, String> stringMap(Map<String, String> parameters, String key) {
+        Map<String, Object> raw = objectMap(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        raw.forEach((k, v) -> {
+            if (k != null && !k.isBlank() && v != null) {
+                result.put(k, String.valueOf(v));
+            }
+        });
+        return result.isEmpty() ? null : result;
+    }
+
+    static void applyStringMap(Map<String, String> parameters, String key, Consumer<Map<String, String>> setter) {
+        Map<String, String> value = stringMap(parameters, key);
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    /**
+     * Any JSON value — object, array, string, number or boolean — as Jackson's
+     * plain Java form, for body fields whose shape the catalog only knows as
+     * "json". Only the key is logged on failure.
+     */
+    static Object jsonValue(Map<String, String> parameters, String key) {
+        String raw = rawValue(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return JSON.readValue(raw, Object.class);
+        } catch (JsonProcessingException e) {
+            return rejected(key, "JSON value");
+        }
+    }
+
+    /** A JSON object whose values are all integers (logit bias). */
+    static Map<String, Integer> intMap(Map<String, String> parameters, String key) {
+        Map<String, Object> raw = objectMap(parameters, key);
+        if (raw == null) {
+            return null;
+        }
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : raw.entrySet()) {
+            if (!(entry.getValue() instanceof Number number)) {
+                return rejected(key, "JSON object of integers");
+            }
+            try {
+                // exact: 1.9 must not become 1, nor 3000000000 wrap around
+                result.put(entry.getKey(), new BigDecimal(number.toString()).intValueExact());
+            } catch (ArithmeticException | NumberFormatException e) {
+                return rejected(key, "JSON object of integers");
+            }
+        }
+        return result;
+    }
+
     private static String rawValue(Map<String, String> parameters, String key) {
         if (parameters == null) {
             return null;
@@ -253,9 +451,12 @@ final class ModelParameterValues {
         return raw.isEmpty() ? null : raw;
     }
 
-    private static <T> T rejected(String key, String raw, String expected) {
-        LOGGER.warnv("LLM parameter ''{0}'' is not a valid {1} (''{2}'') — falling back to the model default.",
-                sanitize(key), expected, sanitize(raw));
+    /**
+     * Only the key and the expected type are logged, never the value: a parameter
+     * can carry a credential or a URL with one.
+     */
+    private static <T> T rejected(String key, String expected) {
+        LOGGER.warnv("LLM parameter ''{0}'' is not a valid {1} — falling back to the model default.", sanitize(key), expected);
         return null;
     }
 }

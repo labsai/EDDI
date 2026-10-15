@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore } from "./use-chat-drawer";
 import { useChatStore, useStartConversation } from "./use-chat";
-import { deployAgent, getDeploymentStatus } from "@/lib/api/agents";
+import { runDeployWithGrants } from "./use-deploy-with-grants";
+import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
 
 /**
  * Hook that provides a `saveAndDeploy` function.
@@ -52,57 +53,43 @@ export function useSaveAndDeploy() {
         const { newAgentVersion } = await opts.save();
         toast.success(t("editor.saved", "Saved successfully"));
 
-        // Step 2: Deploy
+        // Step 2: Deploy — grant-aware and waited. A restricted vault key this
+        // agent is not granted is asked about BEFORE the deploy (and again if
+        // the deploy is refused for one anyway), so the drawer never stops at a
+        // bare "Deployment failed" the user cannot act on.
         drawerStore.setStep("deploying");
-        await deployAgent("production", opts.agentId, newAgentVersion);
-
-        // Step 3: Poll deployment status (2s interval, 30s timeout)
-        const maxAttempts = 15;
-        let deployed = false;
-        let deployError = false;
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await sleep(2000);
-          if (abortRef.current?.signal.aborted) {
-            drawerStore.setStep("idle");
-            return;
-          }
-          let status: Awaited<ReturnType<typeof getDeploymentStatus>>;
-          try {
-            status = await getDeploymentStatus(
-              "production",
-              opts.agentId,
-              newAgentVersion
-            );
-          } catch (err) {
-            // A failed status READ is worth retrying; only the last one counts.
-            if (attempt === maxAttempts - 1) throw err;
-            continue;
-          }
-          if (status.status === "READY") {
-            deployed = true;
-            break;
-          }
-          /*
-           * ERROR is the backend's answer, not a flaky read — stop polling now.
-           * The throw used to sit inside the try above, whose catch swallowed
-           * it on every attempt but the last, so a failed deployment was
-           * polled for the full 30 s and then reported as "Deploy timed out".
-           */
-          if (status.status === "ERROR") {
-            deployError = true;
-            break;
-          }
+        const deployOptions = {
+          agentId: opts.agentId,
+          agentName: opts.agentName,
+          version: newAgentVersion,
+          environment: "production",
+          signal: controller.signal,
+        };
+        const outcome = await runDeployWithGrants(deployOptions);
+        if (abortRef.current?.signal.aborted) {
+          drawerStore.setStep("idle");
+          return;
         }
 
-        if (deployError) {
-          throw new Error(t("editor.deployFailed", "Deployment failed"));
-        }
-
-        if (!deployed) {
+        if (outcome.kind === "cancelled") {
           drawerStore.setStep(
             "error",
-            t("chatDrawer.timeout", "Deploy timed out")
+            t("grantRequired.cancelled", "Not deployed — the vault key was not granted.")
           );
+          return;
+        }
+
+        if (outcome.kind === "failed") {
+          // The backend's reason when it gave one (`failure.message`), and a
+          // Fix action for a grant refusal — reported here rather than thrown,
+          // so the toast can carry the action.
+          const refresh = () => {
+            queryClient.invalidateQueries({ queryKey: ["agents"] });
+            queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+          };
+          drawerStore.setStep("error", deployFailureMessage(outcome, t));
+          reportDeployOutcome(outcome, deployOptions, t, undefined, refresh);
+          refresh();
           return;
         }
 
@@ -138,8 +125,4 @@ export function useSaveAndDeploy() {
   );
 
   return { saveAndDeploy, isRunning };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

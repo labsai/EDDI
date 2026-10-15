@@ -32,6 +32,18 @@ export function isActiveConversationState(
   return state === "IN_PROGRESS" || state === "SYNTHESIZING";
 }
 
+/**
+ * States a page should keep re-reading even though the backend is not working:
+ * a discussion waiting on a human (approval or a member's turn) is decided from
+ * ANOTHER screen or user, and without the re-read this one stays on "awaiting"
+ * for good. Slower than the active-state poll — nothing is progressing.
+ */
+export function isAwaitingHumanConversationState(
+  state: GroupConversationState | undefined,
+): boolean {
+  return state === "AWAITING_APPROVAL" || state === "AWAITING_HUMAN_INPUT";
+}
+
 // ─── Group Config Hooks ──────────────────────────────────────────
 
 export function useGroupDescriptors(limit = 20, index = 0, filter = "") {
@@ -257,7 +269,11 @@ export function useGroupConversations(groupId: string, limit = 20, index = 0) {
     // Keep the list live while any discussion is still running, so its state
     // badge flips on its own instead of needing a manual reload.
     refetchInterval: (query) =>
-      query.state.data?.some((c) => isActiveConversationState(c.state)) ? 5000 : false,
+      query.state.data?.some(
+        (c) => isActiveConversationState(c.state) || isAwaitingHumanConversationState(c.state),
+      )
+        ? 5000
+        : false,
   });
 }
 
@@ -269,7 +285,11 @@ export function useGroupConversation(groupId: string, conversationId: string) {
     refetchInterval: (query) =>
       // Poll while the discussion is in progress — this is what keeps a
       // reloaded page (no SSE connection) following a running discussion.
-      isActiveConversationState(query.state.data?.state) ? 3000 : false,
+      isActiveConversationState(query.state.data?.state)
+        ? 3000
+        : isAwaitingHumanConversationState(query.state.data?.state)
+          ? 5000
+          : false,
   });
 }
 

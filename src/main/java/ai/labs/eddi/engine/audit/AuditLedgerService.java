@@ -4,21 +4,20 @@
  */
 package ai.labs.eddi.engine.audit;
 
+import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.nats.client.Connection;
-import io.nats.client.JetStream;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -30,7 +29,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.nio.file.*;
 import java.time.Duration;
 import java.time.Instant;
-import java.nio.charset.StandardCharsets;
 import com.fasterxml.jackson.core.type.TypeReference;
 import ai.labs.eddi.utils.LogSanitizer;
 import java.util.Map;
@@ -72,7 +70,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @ApplicationScoped
-public class AuditLedgerService {
+public class AuditLedgerService implements UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(AuditLedgerService.class);
     private static final int MAX_FLUSH_RETRIES = 3;
@@ -170,7 +168,13 @@ public class AuditLedgerService {
      * {@code BROKEN}.
      */
     private final Counter sequenceCollisionCounter;
-    private final Instance<Connection> natsConnectionInstance;
+    /**
+     * Cluster mode: shared chain positions, the shared dead-letter sink and the
+     * erasure broadcast; inert (or null, in tests) on a single node. Replaces an
+     * {@code Instance<Connection>} that nothing ever produced — a NATS connection
+     * bean added later would otherwise have silently switched the dead-letter path.
+     */
+    private final IAuditClusterSupport clusterSupport;
     private final String deadLetterPath;
     private final boolean agentSigningEnabled;
     private final String defaultTenantId;
@@ -251,10 +255,10 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy", defaultValue = "true") boolean recoverLegacyTimestamps,
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
             @ConfigProperty(name = "eddi.audit.erasure-mode", defaultValue = ERASURE_MODE_REDACT) String erasureMode,
-            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            MeterRegistry meterRegistry, IAuditClusterSupport clusterSupport,
             AgentSigningService agentSigningService, ObjectMapper objectMapper, AuditKeyring keyring) {
         this(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, deadLetterPath, agentSigningEnabled, defaultTenantId, maxQueueSize,
-                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, natsConnectionInstance, agentSigningService, objectMapper);
+                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, clusterSupport, agentSigningService, objectMapper);
         this.keyring = keyring;
         setErasureMode(erasureMode);
     }
@@ -272,7 +276,7 @@ public class AuditLedgerService {
             int maxQueueSize,
             boolean recoverLegacyTimestamps,
             int recoverLegacyMaxRows,
-            MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
+            MeterRegistry meterRegistry, IAuditClusterSupport clusterSupport,
             AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.recoverLegacyTimestamps = recoverLegacyTimestamps;
         this.recoverLegacyMaxRows = recoverLegacyMaxRows;
@@ -300,7 +304,7 @@ public class AuditLedgerService {
         // weakly, and an Integer above the box cache is collected and reads NaN.
         final int capacity = this.maxQueueSize;
         Gauge.builder("eddi_audit_queue_capacity", () -> capacity).register(meterRegistry);
-        this.natsConnectionInstance = natsConnectionInstance;
+        this.clusterSupport = clusterSupport;
         this.agentSigningService = agentSigningService;
         this.objectMapper = objectMapper;
     }
@@ -388,6 +392,9 @@ public class AuditLedgerService {
 
     @PostConstruct
     void init() {
+        if (clusterSupport != null) {
+            clusterSupport.onUserErased(this::markUserErasedHash);
+        }
         if (!enabled) {
             LOGGER.info("Audit Ledger is DISABLED (eddi.audit.enabled=false)");
             return;
@@ -786,6 +793,27 @@ public class AuditLedgerService {
         if (conversationId == null || conversationId.isBlank() || !auditStore.supportsSequence()) {
             return AuditEntry.UNSEQUENCED;
         }
+        if (clusterSupport != null && clusterSupport.isClustered()) {
+            // Cluster mode: one shared counter per conversation, so two replicas never
+            // hand out the same position (which verification grades BROKEN). NATS
+            // unreachable: unsequenced — honest UNAVAILABLE, never a guessed position.
+            try {
+                return clusterSupport.nextSequence(conversationId, () -> {
+                    try {
+                        return seedSequence(conversationId);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                }).orElse(AuditEntry.UNSEQUENCED);
+            } catch (IllegalStateException e) {
+                // The seed could not be read from the store: unsequenced, exactly as the
+                // single-node path below answers a failed seed — never an exception out of
+                // submit.
+                LOGGER.warnv("Could not seed the clustered audit sequence for conversation {0}: {1}", sanitize(conversationId),
+                        e.getMessage());
+                return AuditEntry.UNSEQUENCED;
+            }
+        }
 
         // Still full after eviction means every remaining counter belongs to a
         // conversation with entries in flight. Re-seeding one of those from the
@@ -843,6 +871,9 @@ public class AuditLedgerService {
     private void prewarmSequenceCounter(String conversationId) {
         if (conversationId == null || conversationId.isBlank() || !auditStore.supportsSequence()) {
             return;
+        }
+        if (clusterSupport != null && clusterSupport.isClustered()) {
+            return; // positions come from the shared counter
         }
         if (conversationSequences.containsKey(conversationId) || conversationSequences.size() >= MAX_TRACKED_CONVERSATIONS) {
             return;
@@ -1007,7 +1038,7 @@ public class AuditLedgerService {
                 continue;
             }
             sequenceCollisionCounter.increment();
-            LOGGER.warnv("Audit chain position {0} for conversation {1} is already stored, but this node's next "
+            LOGGER.warnv("Audit chain position {0} for conversation {1} is already stored, but this node''s next "
                     + "free position is {2} — another replica is allocating positions for the same conversation. "
                     + "Sequence allocation is not cluster-safe: route every turn of a conversation to the same "
                     + "node (conversation affinity), or /auditstore/verify will grade this conversation BROKEN. "
@@ -1478,8 +1509,10 @@ public class AuditLedgerService {
      * stores write into v5 rows — new entries are signed v5 — so a late entry does
      * not carry the unkeyed hash an offline guess could be tested against.
      * <p>
-     * Node-local: an entry produced on another replica after the erasure is not
-     * covered (documented residual, like the rest of the in-flight handling).
+     * On a single node this covers every late entry. In cluster mode the user is
+     * announced to the other nodes as well (by hash), which pseudonymise and redact
+     * that user's late entries the same way ({@link #markUserErasedHash}); see
+     * docs/clustering.md for the window before a slow node hears of it.
      */
     public void markUserErased(String userId) {
         if (userId == null) {
@@ -1494,11 +1527,66 @@ public class AuditLedgerService {
             return expired;
         });
         recentlyErasedUsers.put(userId, now.plus(ERASED_USER_REWRITE_WINDOW));
+        if (clusterSupport != null) {
+            // Cluster mode: every other node rewrites this user's late entries too.
+            clusterSupport.announceUserErased(userId);
+        }
         // Counting starts at the mark, not at the erasure's own flush: the GDPR cascade
         // marks the user first and only reaches the ledger step after every other
         // store, and the scheduled flush drains (and redacts) the user's queued entries
         // in between.
         redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+    }
+
+    /**
+     * Cluster mode: users erased on other nodes, by hash ({@code KvKeys.sha256}) —
+     * the raw id never travels between nodes.
+     */
+    private final ConcurrentHashMap<String, Instant> recentlyErasedUserHashes = new ConcurrentHashMap<>();
+
+    @Override
+    public String erasureStepName() {
+        return "auditLateEntries";
+    }
+
+    /**
+     * On the erasing node the cascade marks the user itself, before this step
+     * ({@link #markUserErased}); nothing more to do.
+     */
+    @Override
+    public int stopInFlightWork(String userId) {
+        return 0;
+    }
+
+    /**
+     * Cluster mode: part of the {@code gdpr-stop} the erasing node sends every node
+     * and waits for before it pseudonymises the stored audit rows. Marking the user
+     * here, before the reply, means an entry this node writes after that scrub is
+     * pseudonymised when it is queued or drained — not only once the
+     * {@code gdpr.user-erased} event happens to arrive.
+     */
+    @Override
+    public int stopInFlightWorkByHash(String userIdHash) {
+        markUserErasedHash(userIdHash);
+        return 0;
+    }
+
+    /** An erasure started on another node; see {@link #markUserErased}. */
+    public void markUserErasedHash(String userIdHash) {
+        if (userIdHash == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        recentlyErasedUserHashes.values().removeIf(until -> until.isBefore(now));
+        recentlyErasedUserHashes.put(userIdHash, now.plus(ERASED_USER_REWRITE_WINDOW));
+    }
+
+    private boolean erasedElsewhere(String userId) {
+        if (recentlyErasedUserHashes.isEmpty()) {
+            return false;
+        }
+        Instant until = recentlyErasedUserHashes.get(KvKeys.sha256(userId));
+        return until != null && !until.isBefore(Instant.now());
     }
 
     /**
@@ -1513,11 +1601,11 @@ public class AuditLedgerService {
      */
     AuditEntry pseudonymiseIfErased(AuditEntry entry, boolean queued) {
         String userId = entry.userId();
-        if (userId == null || recentlyErasedUsers.isEmpty()) {
+        if (userId == null || (recentlyErasedUsers.isEmpty() && recentlyErasedUserHashes.isEmpty())) {
             return entry;
         }
         Instant until = recentlyErasedUsers.get(userId);
-        if (until == null || until.isBefore(Instant.now())) {
+        if ((until == null || until.isBefore(Instant.now())) && !erasedElsewhere(userId)) {
             return entry;
         }
         AuditEntry rewritten = entry.withUserId(pseudonymForErasure(userId));
@@ -1528,7 +1616,7 @@ public class AuditLedgerService {
             // The submit path: nothing is signed yet, and the entry is signed right after
             // this — so it lands redacted and the sweep never sees its content. Count it
             // for the erasure that caused it.
-            DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+            DrainCounts counts = drainCountsFor(userId);
             (isSigningEnabled() ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
             return rewritten.withPayload(redactionMarker(null, null), null, null, null);
         }
@@ -1538,9 +1626,19 @@ public class AuditLedgerService {
         AuditVerificationStatus before = entry.hmac() != null ? verifyEntry(entry) : null;
         AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), before), null, null, null);
         boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
-        DrainCounts counts = redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts());
+        DrainCounts counts = drainCountsFor(userId);
         (verified ? counts.resealed() : counts.keptUnverified()).incrementAndGet();
         return verified ? reseal(redacted) : redacted;
+    }
+
+    /**
+     * The counters an erasure of {@code userId} reports for its late entries. Kept
+     * only for a user erased on this node: one erased on another node (cluster
+     * mode, {@link #erasedElsewhere}) is redacted just the same, but no erasure
+     * here reports or clears its counts, so keeping them would only leak.
+     */
+    private DrainCounts drainCountsFor(String userId) {
+        return recentlyErasedUsers.containsKey(userId) ? redactedOnDrain.computeIfAbsent(userId, k -> new DrainCounts()) : new DrainCounts();
     }
 
     // ==================== GDPR Art. 17: content redaction ====================
@@ -2007,22 +2105,21 @@ public class AuditLedgerService {
         // "this ledger never persisted these" instead of "someone deleted them".
         recordUndelivered(entries);
 
-        // Try NATS JetStream first
-        if (natsConnectionInstance != null && natsConnectionInstance.isResolvable()) {
-            try {
-                Connection conn = natsConnectionInstance.get();
-                if (conn.getStatus() == Connection.Status.CONNECTED) {
-                    JetStream js = conn.jetStream();
-                    for (AuditEntry entry : entries) {
-                        String payload = serializeDeadLetterEntry(entry, "audit_dead_letter");
-                        js.publish("eddi.deadletter.audit", payload.getBytes(StandardCharsets.UTF_8));
-                    }
-                    LOGGER.infov("Published {0} audit dead-letter entries to NATS JetStream", entries.size());
-                    return;
+        // Cluster mode: the shared dead-letter stream, readable from every node.
+        if (clusterSupport != null && clusterSupport.isClustered()) {
+            int published = 0;
+            for (AuditEntry entry : entries) {
+                if (!clusterSupport.publishDeadLetter(serializeDeadLetterEntry(entry, "audit_dead_letter"))) {
+                    break;
                 }
-            } catch (Exception e) {
-                LOGGER.warnv("NATS dead-letter publish failed, falling back to file: {0}", e.getMessage());
+                published++;
             }
+            if (published == entries.size()) {
+                LOGGER.infov("Published {0} audit dead-letter entries to the cluster dead-letter stream", entries.size());
+                return;
+            }
+            LOGGER.warn("Cluster dead-letter stream unavailable — writing the audit dead letters to the file instead");
+            entries = entries.subList(published, entries.size());
         }
 
         // Fallback: file-based dead-letter log

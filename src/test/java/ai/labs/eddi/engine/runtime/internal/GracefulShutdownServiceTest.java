@@ -20,7 +20,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -339,5 +342,50 @@ class GracefulShutdownServiceTest {
 
         assertTrue(finished.await(10, TimeUnit.SECONDS));
         assertTrue(drained.get(), "nothing was in flight, so an interrupted wait is still a clean drain");
+    }
+
+    /**
+     * Cluster mode: a turn still waiting for its conversation lease would otherwise
+     * hold the drain until its acquire timeout — longer than the drain — and fail
+     * after the container had gone. The coordinator is told before the first poll,
+     * and given its leases back after the drain even when the drain timed out.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("the coordinator is told before the drain polls, and completes its shutdown even after a timed-out drain")
+    void coordinatorShutdownBracketsTheDrain() {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        AtomicBoolean toldBeforeFirstPoll = new AtomicBoolean(false);
+        AtomicBoolean began = new AtomicBoolean(false);
+        AtomicInteger polls = new AtomicInteger();
+        doAnswer(inv -> {
+            began.set(true);
+            return null;
+        }).when(coordinator).beginShutdown();
+        when(coordinator.getQueueDepths()).thenAnswer(inv -> {
+            if (polls.getAndIncrement() == 0) {
+                toldBeforeFirstPoll.set(began.get());
+            }
+            return Map.of("stuck", 1);
+        });
+
+        var shutdownService = service(coordinator, 50);
+        shutdownService.onShutdown(null);
+
+        assertTrue(toldBeforeFirstPoll.get(), "beginShutdown must run before the drain looks at the queues");
+        verify(coordinator).completeShutdown();
+    }
+
+    @Test
+    @DisplayName("a coordinator that fails to start or complete its shutdown does not break the drain")
+    void coordinatorShutdownFailuresAreContained() {
+        IConversationCoordinator coordinator = mock(IConversationCoordinator.class);
+        when(coordinator.getQueueDepths()).thenReturn(Map.of());
+        doThrow(new IllegalStateException("boom")).when(coordinator).beginShutdown();
+        doThrow(new IllegalStateException("boom")).when(coordinator).completeShutdown();
+
+        var shutdownService = service(coordinator, 1_000);
+        assertDoesNotThrow(() -> shutdownService.onShutdown(null));
+        assertTrue(shutdownService.isShuttingDown());
     }
 }

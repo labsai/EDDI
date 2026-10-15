@@ -4,16 +4,25 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.vertexai.gemini.HarmCategory;
+import dev.langchain4j.model.vertexai.gemini.SafetyThreshold;
 import dev.langchain4j.model.vertexai.gemini.VertexAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyBoolean;
 import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyDouble;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyInt;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.applyStringMap;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.objectMap;
+import static ai.labs.eddi.modules.llm.impl.builder.ModelParameterValues.stringValue;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -41,13 +50,23 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
     private static final String KEY_LOCATION = "location";
     private static final String KEY_LOG_REQUESTS = "logRequests";
     private static final String KEY_LOG_RESPONSES = "logResponses";
+    static final String KEY_MAX_OUTPUT_TOKENS = "maxOutputTokens";
+    static final String KEY_TOP_P = "topP";
+    static final String KEY_TOP_K = "topK";
+    static final String KEY_SEED = "seed";
+    static final String KEY_SAFETY_SETTINGS = "safetySettings";
+    static final String KEY_USE_GOOGLE_SEARCH = "useGoogleSearch";
+    static final String KEY_LABELS = "labels";
+    static final String KEY_API_ENDPOINT = "apiEndpoint";
+    static final String KEY_CUSTOM_HEADERS = "customHeaders";
 
     private static final Logger LOGGER = Logger.getLogger(VertexGeminiLanguageModelBuilder.class);
 
     @Override
     public Set<String> recognisedParameters() {
         return Set.of(KEY_PUBLISHER, KEY_MODEL_ID, KEY_MODEL_ID_LEGACY, KEY_TEMPERATURE, KEY_PROJECT_ID, KEY_LOCATION,
-                KEY_LOG_REQUESTS, KEY_LOG_RESPONSES);
+                KEY_LOG_REQUESTS, KEY_LOG_RESPONSES, KEY_MAX_OUTPUT_TOKENS, KEY_TOP_P, KEY_TOP_K, KEY_SEED,
+                KEY_SAFETY_SETTINGS, KEY_USE_GOOGLE_SEARCH, KEY_LABELS, KEY_API_ENDPOINT, KEY_CUSTOM_HEADERS);
     }
 
     /**
@@ -122,7 +141,26 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = VertexAiGeminiChatModel.builder();
+        var builder = applyTo(VertexAiGeminiChatModel.builder(), parameters);
+
+        // executeWithRetry is the single retry owner; library retries multiply it.
+        builder.maxRetries(NO_LIBRARY_RETRIES);
+
+        return builder.build();
+    }
+
+    /**
+     * Applies the configured parameters to a Vertex builder and hands it back
+     * without building it: {@code build()} constructs a {@code VertexAI} client,
+     * which needs GCP credentials, so the unit tests assert on the populated
+     * builder instead.
+     * <p>
+     * Only the synchronous client exists for this provider. Should a streaming
+     * client be added: langchain4j's {@code VertexAiGeminiStreamingChatModel}
+     * builder has no {@code seed} setter (1.22.0-beta32).
+     */
+    static VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder applyTo(VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder builder,
+                                                                          Map<String, String> parameters) {
 
         if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {
             builder.project(parameters.get(KEY_PROJECT_ID));
@@ -142,22 +180,69 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         }
         warnIfGemini3(modelId);
 
-        // Parsed as a double and narrowed: this setter takes a float, and a separate
+        // Parsed as a double and narrowed: these setters take a float, and a separate
         // float helper would buy nothing — every value a float accepts, a double
         // accepts too.
         applyDouble(parameters, KEY_TEMPERATURE, temperature -> builder.temperature((float) temperature));
+        applyDouble(parameters, KEY_TOP_P, topP -> builder.topP((float) topP));
+        applyInt(parameters, KEY_MAX_OUTPUT_TOKENS, builder::maxOutputTokens);
+        applyInt(parameters, KEY_TOP_K, builder::topK);
+        applyInt(parameters, KEY_SEED, builder::seed);
+        applyBoolean(parameters, KEY_USE_GOOGLE_SEARCH, builder::useGoogleSearch);
+        applyBoolean(parameters, KEY_LOG_REQUESTS, builder::logRequests);
+        applyBoolean(parameters, KEY_LOG_RESPONSES, builder::logResponses);
 
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_REQUESTS))) {
-            builder.logRequests(Boolean.parseBoolean(parameters.get(KEY_LOG_REQUESTS)));
+        Map<HarmCategory, SafetyThreshold> safety = safetySettings(parameters);
+        if (safety != null) {
+            builder.safetySettings(safety);
         }
+        applyStringMap(parameters, KEY_LABELS, builder::labels);
+        applyStringMap(parameters, KEY_CUSTOM_HEADERS, builder::customHeaders);
 
-        if (!isNullOrEmpty(parameters.get(KEY_LOG_RESPONSES))) {
-            builder.logResponses(Boolean.parseBoolean(parameters.get(KEY_LOG_RESPONSES)));
+        String apiEndpoint = stringValue(parameters, KEY_API_ENDPOINT);
+        if (apiEndpoint != null) {
+            // Vertex takes a bare "host[:port]"; give the check a scheme so it sees the
+            // host. Never let it point at the cloud instance-metadata service (always-on,
+            // independent of eddi.security.ssrf-protection.enabled).
+            UrlValidationUtils.rejectCloudMetadataTarget(apiEndpoint.contains("://") ? apiEndpoint : "https://" + apiEndpoint);
+            builder.apiEndpoint(apiEndpoint);
         }
+        return builder;
+    }
 
-        // executeWithRetry is the single retry owner; library retries multiply it.
-        builder.maxRetries(NO_LIBRARY_RETRIES);
+    /**
+     * The same JSON shape as the {@code gemini} provider:
+     * {@code {"HARASSMENT":"BLOCK_ONLY_HIGH"}}, category names with or without the
+     * {@code HARM_CATEGORY_} prefix. Entries that do not resolve — including the
+     * protobuf placeholders {@code *_UNSPECIFIED} and {@code UNRECOGNIZED}, which
+     * the request mapping cannot send — are dropped with a warning rather than
+     * failing the model build.
+     */
+    static Map<HarmCategory, SafetyThreshold> safetySettings(Map<String, String> parameters) {
+        Map<String, Object> raw = objectMap(parameters, KEY_SAFETY_SETTINGS);
+        if (raw == null) {
+            return null;
+        }
+        Map<HarmCategory, SafetyThreshold> result = new LinkedHashMap<>();
+        raw.forEach((category, threshold) -> {
+            HarmCategory c = sendable(GeminiLanguageModelBuilder.enumConstant(HarmCategory.class, "HARM_CATEGORY_", category));
+            SafetyThreshold t = threshold == null
+                    ? null
+                    : sendable(GeminiLanguageModelBuilder.enumConstant(SafetyThreshold.class, "", String.valueOf(threshold)));
+            if (c != null && t != null) {
+                result.put(c, t);
+            } else {
+                LOGGER.warnf("gemini-vertex safetySettings entry for %s is not a valid category/threshold pair - skipped.",
+                        sanitize(category));
+            }
+        });
+        return result.isEmpty() ? null : result;
+    }
 
-        return builder.build();
+    private static <E extends Enum<E>> E sendable(E constant) {
+        if (constant == null || "UNRECOGNIZED".equals(constant.name()) || constant.name().endsWith("_UNSPECIFIED")) {
+            return null;
+        }
+        return constant;
     }
 }

@@ -426,7 +426,7 @@ When adding a new feature, use this guide to decide where configuration belongs:
 
 ### ConversationCoordinator
 
-**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `NatsConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (which one is active depends on deployment configuration)
+**Location**: `ai.labs.eddi.engine.runtime.IConversationCoordinator`, implemented by `InMemoryConversationCoordinator` and `ClusterConversationCoordinator` in `ai.labs.eddi.engine.runtime.internal` (both extend `AbstractQueuedConversationCoordinator`). `eddi.messaging.type` selects one at runtime: `in-memory` (the default, one replica) or `nats` (cluster mode — the queue additionally holds a cluster-wide lease per conversation from NATS JetStream; see [Clustering](clustering.md))
 
 **Purpose**: Ensures proper message ordering and concurrency control
 
@@ -681,8 +681,8 @@ EDDI publishes no benchmark figures, so measure on your own hardware and agents.
 ### Scalability
 
 - **Vertical**: Handles thousands of concurrent conversations per instance
-- **Horizontal**: Stateless design allows infinite horizontal scaling
-- **Bottleneck**: MongoDB becomes the bottleneck; use replica sets and sharding
+- **Horizontal**: with `eddi.messaging.type=nats`, any number of replicas behind a round-robin load balancer, coordinated through NATS JetStream (conversation leases with fencing, shared KV state, cache-invalidation events). With the default `in-memory` messaging EDDI runs one replica. See [Clustering](clustering.md)
+- **Bottleneck**: the database becomes the bottleneck; use MongoDB replica sets and sharding, or a replicated PostgreSQL
 
 ---
 
@@ -722,11 +722,12 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 
 ### How It Works
 
-1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag.
+1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag. An allow-listed endpoint whose tool could not send an input it requires — a request body that is neither JSON nor plain text, or a required header parameter — is skipped by the generator and reported as `resources.unusableEndpoints`; activation also checks the spec itself *before* creating anything and refuses, naming the endpoints, exactly as it does for an endpoint the spec lacks. (A `text/plain` body such as `updateResourceUri`'s URI is supported — see [MCP Server](mcp-server.md#how-create_api_agent-builds-a-write-tools-body).)
 2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, one `apicalls` config per group, LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
 3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate requires approval by HTTP *method* — `http.post:*`, `http.put:*`, `http.patch:*`, `http.delete:*` — and exempts `http.get:*`. Gating by method rather than by an enumerated list of tool names is what keeps it fail-safe: a write endpoint granted later is covered the moment it exists, with nobody having to remember to add its name.
 4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
+6. **Editing, not echoing**: a stored configuration holds credential *references* (`${vault:…}`), and an API call resolves those before it sends — so an edit that echoed a document back would write the plaintext secret, and is refused. The operator edits LLM, HTTP-call and MCP-call configurations with `PATCH` (RFC 6902) and sends only what changes; see [Editing a configuration that holds a reference](secrets-vault.md#editing-a-configuration-that-holds-a-reference-patch-not-echo). The Manager refuses any LLM-config patch that touches a task's `toolApprovals`, the same way it refuses a `PUT` that carries one.
 
 ### Keeping It Up to Date
 
@@ -738,6 +739,23 @@ The Manager tracks this with a **provisioning revision** (`ui/manager/src/lib/op
 - **In the server log**, EDDI logs a `WARN` at startup (`[OPERATOR] The Platform Operator on this deployment was set up by an older Manager…`), so it is visible without opening the UI. The backend reads the same revision file from its classpath.
 
 *Upgrade* rebuilds the operator with the same model, key, environment and access settings. Like *Reconfigure*, it is a replacement: the new operator passes every activation check before the old one is removed. The open operator chat ends, and conversations with the old operator no longer appear in its history. Instructions the admin never edited are replaced with the new default; edited ones are kept unless the admin chooses the new default. An operator whose model key was entered as plain text (never stored), or whose model-server address was not recorded, opens the activation form prefilled instead.
+
+### A restricted model key, and operators the Manager did not register
+
+**Activation creates, grants, then deploys.** The operator is created with `deploy: false` and given the descriptor marker `[eddi-platform-operator]`. Then the [deploy preflight](secrets-vault.md#preflight-before-deploying) runs against it. If the model key is a vault secret restricted to named agents, the activation dialog says so before anything is created. After creating the agent, it asks the administrator to add this agent to the key's grant (dry run, then append), and only then deploys. A grant that is refused or cancelled keeps that one agent: not deployed, not registered. The next attempt reuses it as long as the settings are unchanged, so retrying never leaves a second operator behind. Any other deploy failure removes the agent it just created.
+
+**The operator screen also finds operator agents it did not register.** Normally the screen knows the operator from the `platform.operator` global variable. That variable is missing, or points elsewhere, when the operator was created by the setup API or MCP, imported from another instance, or left behind by an older failed activation. In those cases the screen lists the operator agents it finds, using one descriptor listing:
+
+- an agent whose descriptor carries the marker counts as an operator;
+- an older agent named "operator" counts only if its stored approval gate is complete and one of its HTTP toolsets targets this instance.
+
+Each listed agent shows its deployment status and, for a refused deploy, the reason. The actions are:
+
+- **Adopt** writes `platform.operator` from the agent's own configuration, after verifying its gate.
+- **Fix grant and deploy** opens the grant dialog.
+- **Remove** undeploys and deletes the agent.
+
+The reverse case gets a banner: `platform.operator` names an agent that no longer exists, or one that is enabled but not deployed.
 
 ### Key Insight
 
@@ -1046,7 +1064,7 @@ EDDI's architecture is built on principles of **modularity**, **composability**,
 - Orchestrate multiple APIs and LLMs
 - Apply complex business logic through configurable rules
 - Maintain stateful, context-aware conversations
-- Scale horizontally in cloud environments
+- Scale horizontally in cloud environments (cluster mode on NATS JetStream)
 - Be assembled from reusable, version-controlled components
 
 The **Lifecycle Pipeline** is the heart of this architecture, providing a flexible, pluggable system where agent behavior is configuration, not code.

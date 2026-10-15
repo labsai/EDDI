@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.BatchRequestBuildingInstruction;
@@ -49,6 +50,11 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
 
+    // Field-injected, like the other optional collaborators, so the direct
+    // constructions in tests keep compiling.
+    @Inject
+    ConfigJsonPatcher jsonPatcher;
+
     // Field-injected so the direct constructions in tests keep compiling; the
     // initializer is the property's own default.
     @ConfigProperty(name = ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY, defaultValue = "1000")
@@ -88,6 +94,12 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             return invalid;
         }
         return restVersionInfo.update(id, version, httpCallsConfiguration);
+    }
+
+    @Override
+    public Response patchApiCalls(String id, Integer version, String jsonPatch) {
+        // The same pre-write check updateApiCalls runs.
+        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, this::validateBatchLimits);
     }
 
     @Override
@@ -242,6 +254,9 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             response.put("baseUrl", baseUrl != null ? baseUrl : "");
             response.put("endpointCount", result.endpointCount());
             response.put("groups", result.configsByGroup());
+            if (!result.unusableEndpoints().isEmpty()) {
+                response.put("unusableEndpoints", result.unusableEndpoints());
+            }
 
             return Response.ok(response).build();
         } catch (IllegalArgumentException e) {

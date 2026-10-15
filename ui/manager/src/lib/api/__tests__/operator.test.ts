@@ -8,6 +8,8 @@ import {
   resolveAgentVersion,
   parseVersionFromLocation,
   findMissingEndpoints,
+  findUnusableEndpoints,
+  unusableEndpointsFromResult,
   apiAuthForMode,
   defaultOperatorConfig,
   deactivateOperator,
@@ -181,6 +183,108 @@ describe("spec validation", () => {
   });
 });
 
+describe("findUnusableEndpoints — tools that could not send a required input", () => {
+  const text = { content: { "text/plain": { schema: { type: "string" } } } };
+  const json = { content: { "application/json": { schema: { type: "object" } } } };
+
+  function specOf(paths: Record<string, Record<string, unknown>>, components?: unknown): FetchedSpec {
+    return { raw: { paths, components }, paths };
+  }
+
+  it("accepts a JSON Patch body, so the PATCH endpoints stay allow-listed", () => {
+    const spec = specOf({
+      "/p/{id}": {
+        patch: {
+          requestBody: {
+            required: true,
+            content: { "application/json-patch+json": { schema: { type: "array" } } },
+          },
+        },
+      },
+    });
+    expect(findUnusableEndpoints(spec, ["PATCH /p/{id}"])).toEqual([]);
+  });
+
+  it("accepts the body types the generator can send (json, text/plain, with parameters)", () => {
+    const spec = specOf({
+      "/a": { put: { requestBody: { required: true, ...text } } },
+      "/b": { put: { requestBody: { required: true, ...json } } },
+      "/c": { put: { requestBody: { required: true, content: { "Text/Plain; charset=UTF-8": {} } } } },
+      "/d": { get: {} },
+    });
+    expect(
+      findUnusableEndpoints(spec, ["PUT /a", "PUT /b", "PUT /c", "GET /d"]),
+    ).toEqual([]);
+  });
+
+  it("names an endpoint whose only body type is one the generator cannot send", () => {
+    const spec = specOf({
+      "/import": {
+        post: { requestBody: { required: true, content: { "application/zip": {} } } },
+      },
+    });
+    const unusable = findUnusableEndpoints(spec, ["POST /import"]);
+    expect(unusable).toHaveLength(1);
+    expect(unusable[0]).toMatch(/^POST \/import: .*application\/zip/);
+  });
+
+  it("treats a body with no explicit required flag as required, and required:false as optional", () => {
+    const spec = specOf({
+      "/x": { post: { requestBody: { content: { "multipart/form-data": {} } } } },
+      "/y": { post: { requestBody: { required: false, content: { "multipart/form-data": {} } } } },
+    });
+    expect(findUnusableEndpoints(spec, ["POST /x", "POST /y"])).toHaveLength(1);
+  });
+
+  it("follows a $ref to components.requestBodies", () => {
+    const spec = specOf(
+      { "/z": { post: { requestBody: { $ref: "#/components/requestBodies/Zip" } } } },
+      { requestBodies: { Zip: { required: true, content: { "application/zip": {} } } } },
+    );
+    expect(findUnusableEndpoints(spec, ["POST /z"])).toHaveLength(1);
+  });
+
+  it("reports a required header parameter, from the operation or the path item", () => {
+    const spec = specOf({
+      "/h": { get: { parameters: [{ name: "X-Tenant", in: "header", required: true }] } },
+      "/p": { parameters: [{ name: "sid", in: "cookie", required: true }], get: {} },
+      "/ok": { get: { parameters: [{ name: "X-Opt", in: "header" }] } },
+    });
+    const unusable = findUnusableEndpoints(spec, ["GET /h", "GET /p", "GET /ok"]);
+    expect(unusable).toHaveLength(2);
+    expect(unusable[0]).toContain("X-Tenant");
+    expect(unusable[1]).toContain("sid");
+  });
+
+  it("exempts a required Authorization header when auth is configured, and only then", () => {
+    const spec = specOf({
+      "/a": { get: { parameters: [{ name: "authorization", in: "header", required: true }] } },
+      "/b": { get: { parameters: [{ name: "X-Tenant", in: "header", required: true }] } },
+    });
+    // caller-identity: the tools send Authorization themselves.
+    expect(findUnusableEndpoints(spec, ["GET /a"], "Bearer ${caller:token}")).toEqual([]);
+    // no auth configured: nothing sends it, so it is unusable.
+    expect(findUnusableEndpoints(spec, ["GET /a"])).toHaveLength(1);
+    expect(findUnusableEndpoints(spec, ["GET /a"], "  ")).toHaveLength(1);
+    // a different required header is never exempt.
+    expect(findUnusableEndpoints(spec, ["GET /b"], "Bearer x")).toHaveLength(1);
+  });
+
+  it("leaves endpoints missing from the spec to findMissingEndpoints", () => {
+    expect(findUnusableEndpoints(specOf({}), ["GET /nope", "garbage"])).toEqual([]);
+  });
+
+  it("reads the backend's report from a setup-api result, and an older backend's silence as none", () => {
+    expect(
+      unusableEndpointsFromResult({
+        resources: { unusableEndpoints: ["POST /import: nope", 7] },
+      } as never),
+    ).toEqual(["POST /import: nope"]);
+    expect(unusableEndpointsFromResult({ resources: {} } as never)).toEqual([]);
+    expect(unusableEndpointsFromResult({} as never)).toEqual([]);
+  });
+});
+
 describe("auth mode", () => {
   it("sends no Authorization header in 'none' mode", () => {
     expect(apiAuthForMode("none")).toBeUndefined();
@@ -344,7 +448,9 @@ describe("provisionOperator", () => {
     });
     expect(captured?.apiBaseUrl).toBe("http://127.0.0.1:7070");
     expect(captured?.apiBaseUrl).not.toBe("https://eddi.example");
-    expect(captured?.deploy).toBe(true);
+    // Created WITHOUT deploying: activation deploys afterwards through the
+    // grant flow, so a restricted model key can be granted to this agent first.
+    expect(captured?.deploy).toBe(false);
   });
 
   /** An admin override is used verbatim — they know something the server does not. */
@@ -872,15 +978,12 @@ describe("assertProvisioned", () => {
     expect(() => assertProvisioned({ ...base, agentId: "" })).toThrow(/agent id/i);
   });
 
-  // 201 is returned even when the deploy step failed.
-  it("rejects a created-but-undeployed agent", () => {
-    expect(() => assertProvisioned({ ...base, deployed: false })).toThrow(/deploy/i);
-  });
-
-  it("rejects an ERROR deployment status", () => {
-    expect(() =>
-      assertProvisioned({ ...base, deployed: true, deploymentStatus: "ERROR" }),
-    ).toThrow(/ERROR/);
+  // Provisioning no longer deploys (deploy:false), so an undeployed result is
+  // the expected one. The deploy is judged later, inside the part of
+  // activation that rolls the agent back — judging it here threw past that
+  // rollback and leaked the agent.
+  it("accepts a created-but-undeployed agent", () => {
+    expect(() => assertProvisioned({ ...base, deployed: false })).not.toThrow();
   });
 
   it("accepts a result that simply omits the deploy fields", () => {
@@ -1061,9 +1164,9 @@ describe("reactivateOperator", () => {
     let deployUrl = "";
     let saved: OperatorConfig | undefined;
     server.use(
-      http.post("*/administration/:env/deploy/:agentId", ({ request }) => {
+      http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
         deployUrl = request.url;
-        return new HttpResponse(null, { status: 200 });
+        return HttpResponse.json({ status: "READY", agentId: params.agentId, version: 3, environment: "test" });
       }),
       http.put(`${BASE}/${OPERATOR_VARIABLE_KEY}`, async ({ request }) => {
         const body = (await request.json()) as { value: string };
@@ -1078,6 +1181,8 @@ describe("reactivateOperator", () => {
 
     expect(deployUrl).toContain("/administration/test/deploy/op-1");
     expect(deployUrl).toContain("version=3");
+    // Waited for, so a refused deploy is an error rather than an operator that is "on".
+    expect(deployUrl).toContain("waitForCompletion=true");
     expect(result.enabled).toBe(true);
     expect(saved?.agentId).toBe("op-1");
   });

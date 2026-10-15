@@ -1,0 +1,16 @@
+# One NATS node at a time: R3 streams and buckets keep their quorum with two,
+# so a node drain never stops EDDI's coordination.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nats
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: eddi
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+      app.kubernetes.io/component: messaging

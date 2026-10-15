@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
 import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
@@ -66,47 +67,72 @@ const EMBEDDING_PROVIDERS = [
   { value: "gemini", label: "Google AI", hint: "gemini-embedding-2" },
 ] as const;
 
-/** Provider-specific parameter hints — shown as suggested keys in the embedding params editor */
-const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> = {
+/**
+ * A parameter the backend knows, and what it does when the parameter is absent.
+ *
+ * The distinction is the point. `EmbeddingModelFactory` and
+ * `EmbeddingStoreFactory` apply a default only to an ABSENT key
+ * (`params.getOrDefault`), so a hint that merely shows a sample value must not
+ * look like one that names the real default. These used to be one
+ * `placeholder` field: `nomic-embed-text` (the real default) and
+ * `${vault:openai-key}` (a name nobody created) rendered identically, and the
+ * second was written into the config as its value on a provider switch.
+ *
+ * Keep `defaultValue` in step with the two factories — it is a copy.
+ */
+interface ParamHint {
+  key: string;
+  /** What the backend uses when the key is absent. Shown as "Default: …". */
+  defaultValue?: string;
+  /** A sample only; leaving the field empty does not use it. Shown as "e.g. …". */
+  example?: string;
+  /** The backend refuses to build without it. */
+  required?: boolean;
+}
+
+/** Provider-specific parameters, mirroring `EmbeddingModelFactory`. */
+const EMBEDDING_PARAM_HINTS: Record<string, ParamHint[]> = {
   openai: [
-    { key: "model", placeholder: "text-embedding-3-small" },
-    { key: "apiKey", placeholder: "${vault:openai-key}" },
+    { key: "model", defaultValue: "text-embedding-3-small" },
+    { key: "apiKey", required: true },
     // Any OpenAI-compatible server. Honoured since 6.6 — before, it was ignored
     // and documents went to api.openai.com.
-    { key: "baseUrl", placeholder: "https://api.openai.com/v1" },
+    { key: "baseUrl", defaultValue: "https://api.openai.com/v1" },
   ],
   "azure-openai": [
-    { key: "endpoint", placeholder: "https://my.openai.azure.com/" },
-    { key: "apiKey", placeholder: "${vault:azure-key}" },
-    { key: "deploymentName", placeholder: "text-embedding-3-small" },
+    { key: "endpoint", example: "https://my-resource.openai.azure.com/", required: true },
+    { key: "apiKey", required: true },
+    { key: "deploymentName", defaultValue: "text-embedding-3-small" },
   ],
   ollama: [
-    { key: "model", placeholder: "nomic-embed-text" },
-    { key: "baseUrl", placeholder: "http://localhost:11434" },
+    { key: "model", defaultValue: "nomic-embed-text" },
+    { key: "baseUrl", defaultValue: "http://localhost:11434" },
   ],
   mistral: [
-    { key: "model", placeholder: "mistral-embed" },
-    { key: "apiKey", placeholder: "${vault:mistral-key}" },
+    { key: "model", defaultValue: "mistral-embed" },
+    { key: "apiKey", required: true },
   ],
   bedrock: [
-    { key: "model", placeholder: "amazon.titan-embed-text-v2:0" },
-    { key: "region", placeholder: "us-east-1" },
+    { key: "model", defaultValue: "amazon.titan-embed-text-v2:0" },
+    { key: "region", defaultValue: "us-east-1" },
   ],
   cohere: [
-    { key: "model", placeholder: "embed-english-v3.0" },
-    { key: "apiKey", placeholder: "${vault:cohere-key}" },
+    { key: "model", defaultValue: "embed-english-v3.0" },
+    { key: "apiKey", required: true },
   ],
   vertex: [
-    { key: "project", placeholder: "my-gcp-project" },
-    { key: "location", placeholder: "us-central1" },
-    { key: "model", placeholder: "text-embedding-005" },
+    { key: "project", example: "my-gcp-project", required: true },
+    { key: "location", defaultValue: "us-central1" },
+    { key: "model", defaultValue: "text-embedding-005" },
   ],
   gemini: [
-    { key: "apiKey", placeholder: "${eddivault:gemini-key}" },
-    { key: "model", placeholder: "gemini-embedding-2"},
-    { key: "taskType", placeholder: "RETRIEVAL_DOCUMENT"},
-    { key: "outputDimensionality", placeholder: "3072"},
-  ]
+    { key: "apiKey", required: true },
+    { key: "model", defaultValue: "gemini-embedding-2" },
+    // Unset, each call is tagged with its role — documents and queries embed
+    // differently (EmbeddingModelFactory.pinsNonRetrievalTaskType).
+    { key: "taskType", defaultValue: "RETRIEVAL_DOCUMENT / RETRIEVAL_QUERY" },
+    { key: "outputDimensionality", defaultValue: "3072" },
+  ],
 };
 
 const STORE_TYPES = [
@@ -118,44 +144,61 @@ const STORE_TYPES = [
   { value: "chroma", label: "Chroma", hint: "Fast, serverless, and scalable infrastructure supporting vector, full-text, regex, and metadata search." },
 ] as const;
 
-const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> = {
-  "in-memory": [],
-  pgvector: [
-    { key: "host", placeholder: "localhost" },
-    { key: "port", placeholder: "5432" },
-    { key: "database", placeholder: "eddi" },
-    { key: "table", placeholder: "embeddings" },
-    { key: "dimension", placeholder: "1536" },
-    { key: "user", placeholder: "${vault:pg-user}" },
-    { key: "password", placeholder: "${vault:pg-password}" },
-  ],
-  "mongodb-atlas": [
-    { key: "connectionString", placeholder: "${vault:mongo-uri}" },
-    { key: "databaseName", placeholder: "eddi" },
-    { key: "collectionName", placeholder: "product_docs" },
-    { key: "indexName", placeholder: "vector_index" },
-  ],
-  elasticsearch: [
-    { key: "serverUrl", placeholder: "http://localhost:9200" },
-    { key: "indexName", placeholder: "product-docs" },
-    { key: "apiKey", placeholder: "${vault:es-key}" },
-    { key: "userName", placeholder: "elastic" },
-    { key: "password", placeholder: "${vault:es-password}" },
-  ],
-  qdrant: [
-    { key: "host", placeholder: "localhost" },
-    { key: "port", placeholder: "6334" },
-    { key: "collectionName", placeholder: "kb-product-docs" },
-    { key: "apiKey", placeholder: "${vault:qdrant-key}" },
-    { key: "useTls", placeholder: "false" },
-  ],
-  chroma: [
-    { key: "baseUrl", placeholder: "http://localhost:8000" },
-    { key: "collectionName", placeholder: "kb-product-docs" },
-    { key: "tenantName", placeholder: "default_tenant" },
-    { key: "databaseName", placeholder: "default_database" },
-  ],
-};
+/**
+ * Store-specific parameters, mirroring `EmbeddingStoreFactory`.
+ *
+ * `perKb` is the table/collection/index name the factory derives from the
+ * knowledge base id when none is set — one per KB. The old hint showed a fixed
+ * sample (`embeddings`) instead, and a user who typed it into several KBs made
+ * them share one table.
+ */
+function storeParamHints(storeType: string, perKb: string): ParamHint[] {
+  switch (storeType) {
+    case "pgvector":
+      return [
+        { key: "host", defaultValue: "localhost" },
+        { key: "port", defaultValue: "5432" },
+        { key: "database", defaultValue: "eddi" },
+        { key: "table", defaultValue: perKb },
+        { key: "dimension", defaultValue: "1536" },
+        { key: "user", defaultValue: "eddi" },
+        { key: "password", required: true },
+      ];
+    case "mongodb-atlas":
+      return [
+        { key: "connectionString", required: true },
+        { key: "databaseName", defaultValue: "eddi" },
+        { key: "collectionName", defaultValue: perKb },
+        { key: "indexName", defaultValue: "vector_index" },
+      ];
+    case "elasticsearch":
+      return [
+        { key: "serverUrl", defaultValue: "http://localhost:9200" },
+        { key: "indexName", defaultValue: perKb },
+        { key: "apiKey" },
+        { key: "userName", example: "elastic" },
+        { key: "password" },
+      ];
+    case "qdrant":
+      return [
+        { key: "host", defaultValue: "localhost" },
+        { key: "port", defaultValue: "6334" },
+        { key: "collectionName", defaultValue: perKb },
+        { key: "apiKey" },
+        { key: "useTls", defaultValue: "false" },
+      ];
+    case "chroma":
+      return [
+        { key: "baseUrl", defaultValue: "http://localhost:8000" },
+        { key: "collectionName", defaultValue: perKb },
+        { key: "tenantName", defaultValue: "default_tenant" },
+        { key: "databaseName", defaultValue: "default_database" },
+        { key: "apiVersion", defaultValue: "V2" },
+      ];
+    default:
+      return [];
+  }
+}
 
 /**
  * Only `recursive` is implemented. `paragraph` and `sentence` were offered here
@@ -225,58 +268,173 @@ function Section({
 // ─── Key-Value Editor ───────────────────────────────────────────────────────
 
 /** Keys whose values should use SecretKeyPicker instead of a plain text input */
-const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token"]);
+const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token", "connectionstring"]);
 
 function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEYS.has(key.toLowerCase());
 }
 
+/** A parameter the editor has no hint for, as edited on screen. */
+interface CustomRow {
+  id: number;
+  key: string;
+  value: string;
+}
+
+/** Only complete rows reach the config; see {@link KeyValueEditor}. */
+const isComplete = (r: CustomRow) => r.key !== "" && r.value !== "";
+
+const serializeRows = (rows: CustomRow[]) =>
+  JSON.stringify(rows.filter(isComplete).map((r) => [r.key, r.value]));
+
+/**
+ * Edits a provider's or store's parameters.
+ *
+ * **An empty field is never saved.** Both factories default a parameter only
+ * when its key is ABSENT (`params.getOrDefault`), so `{"model": ""}` is not
+ * "use the default": it reaches the provider as an empty model name and fails
+ * at ingest. Clearing a field removes the key.
+ *
+ * Every known parameter (`hints`) is always shown as its own row, and an empty
+ * one says what happens: "Default: …" (the backend's value), "e.g. …" (a
+ * sample only), or "Required". Nothing is pre-filled. An earlier version wrote
+ * each hint's placeholder into the config on a provider switch, so knowledge
+ * bases referenced vault keys such as `${vault:openai-key}` that nobody had
+ * ever created.
+ *
+ * Other parameters (from an import, a hand edit, or "Add Parameter") are held
+ * as local rows so an unfinished one stays on screen, in place and focused,
+ * without its empty value reaching the config.
+ */
 function KeyValueEditor({
   entries,
   onChange,
   readOnly,
-  hints,
+  hints = [],
   label,
   testIdPrefix = "kv",
 }: {
   entries: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
   readOnly?: boolean;
-  hints?: { key: string; placeholder: string }[];
+  hints?: ParamHint[];
   label?: string;
   /** Prefix for data-testid attributes, avoids collisions when multiple editors share key names */
   testIdPrefix?: string;
 }) {
   const { t } = useTranslation();
-  const pairs = Object.entries(entries);
+  const owningAgentId = useOwningAgentId();
+  const nextId = useRef(0);
+  const hintKeys = new Set(hints.map((h) => h.key));
 
-  const addEntry = () => {
-    // Use next hint key, or generate unique key
-    const existingKeys = new Set(Object.keys(entries));
-    const nextHint = hints?.find((h) => !existingKeys.has(h.key));
-    const key = nextHint?.key ?? `param${pairs.length + 1}`;
-    onChange({ ...entries, [key]: "" });
-  };
+  const toRows = (source: Record<string, string>): CustomRow[] =>
+    Object.entries(source)
+      .filter(([k]) => !hintKeys.has(k))
+      .map(([key, value]) => ({ id: nextId.current++, key, value }));
 
-  const removeEntry = (key: string) => {
+  const [rows, setRows] = useState<CustomRow[]>(() => toRows(entries));
+
+  // Adopt a change made elsewhere (provider switch, the JSON tab). Our own
+  // emits come back equal to what the complete rows already say, so they never
+  // reset the rows and never drop an unfinished one.
+  const propRows = toComparable(entries, hintKeys);
+  if (propRows !== serializeRows(rows)) {
+    setRows(toRows(entries));
+  }
+
+  const hintEntries = (source: Record<string, string>) =>
+    Object.fromEntries(Object.entries(source).filter(([k, v]) => hintKeys.has(k) && v !== ""));
+
+  const emit = (hinted: Record<string, string>, custom: CustomRow[]) =>
+    onChange({
+      ...hintEntries(hinted),
+      ...Object.fromEntries(custom.filter(isComplete).map((r) => [r.key, r.value])),
+    });
+
+  const setHintValue = (key: string, value: string) => emit({ ...entries, [key]: value }, rows);
+
+  const resetHint = (key: string) => {
     const copy = { ...entries };
     delete copy[key];
-    onChange(copy);
+    emit(copy, rows);
   };
 
-  const updateKey = (newKey: string, idx: number) => {
-    const arr = Object.entries(entries);
-    // Prevent duplicate keys (except our own position)
-    if (arr.some(([k], i) => i !== idx && k === newKey)) return;
-    arr[idx] = [newKey, arr[idx]?.[1] ?? ""];
-    onChange(Object.fromEntries(arr));
+  const keyTaken = (key: string, exceptId: number) =>
+    hintKeys.has(key) || rows.some((r) => r.id !== exceptId && r.key === key);
+
+  const updateRow = (id: number, patch: Partial<CustomRow>) => {
+    if (patch.key !== undefined && patch.key !== "" && keyTaken(patch.key, id)) return;
+    const next = rows.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    setRows(next);
+    emit(entries, next);
   };
 
-  const updateValue = (key: string, value: string) => {
-    onChange({ ...entries, [key]: value });
+  const removeRow = (id: number) => {
+    const next = rows.filter((r) => r.id !== id);
+    setRows(next);
+    emit(entries, next);
   };
 
-  const isVaultRef = isVaultPlaceholder;
+  const addRow = () => {
+    let n = rows.length + 1;
+    while (keyTaken(`param${n}`, -1)) n++;
+    // Not emitted: it has no value yet.
+    setRows([...rows, { id: nextId.current++, key: `param${n}`, value: "" }]);
+  };
+
+  const describe = (hint: ParamHint, secret: boolean): string | undefined => {
+    if (hint.defaultValue !== undefined) {
+      return t("ragEditor.paramDefault", "Default: {{value}}", { value: hint.defaultValue });
+    }
+    if (secret) {
+      return hint.required
+        ? t("ragEditor.secretRequired", "Required — pick a vault secret")
+        : t("ragEditor.secretOptional", "Optional — pick a vault secret");
+    }
+    if (hint.example !== undefined) {
+      return hint.required
+        ? t("ragEditor.paramRequiredExample", "Required — e.g. {{value}}", { value: hint.example })
+        : t("ragEditor.paramExample", "e.g. {{value}}", { value: hint.example });
+    }
+    return hint.required ? t("ragEditor.paramRequired", "Required") : undefined;
+  };
+
+  const valueInput = (key: string, value: string, placeholder: string | undefined, onValue: (v: string) => void) =>
+    isSensitiveKey(key) ? (
+      <div className="flex-1">
+        {/* No `connections` here: embedding models and vector stores
+            need a bare credential and refuse ${connection:…}. */}
+        <SecretKeyPicker
+          agentId={owningAgentId}
+          value={value}
+          onChange={onValue}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          testId={`${testIdPrefix}-${key}`}
+        />
+      </div>
+    ) : (
+      <div className="relative flex-1">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onValue(e.target.value)}
+          readOnly={readOnly}
+          placeholder={placeholder ?? t("ragEditor.paramValuePlaceholder", "value")}
+          className={cn(
+            "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-1 focus:ring-ring",
+            isVaultPlaceholder(value) && "pe-7",
+          )}
+          data-testid={`${testIdPrefix}-value-${key}`}
+        />
+        {isVaultPlaceholder(value) && (
+          <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
+        )}
+      </div>
+    );
+
+  const keyBoxClass =
+    "h-7 w-32 shrink-0 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring";
 
   return (
     <div className="space-y-1.5">
@@ -285,90 +443,118 @@ function KeyValueEditor({
           {label}
         </span>
       )}
-      {pairs.map(([key, value], idx) => {
-        const hint = hints?.find((h) => h.key === key);
+
+      {hints.length > 0 && (
+        <p className="text-[10px] text-muted-foreground" data-testid={`${testIdPrefix}-defaults-note`}>
+          {t("ragEditor.paramsDefaultNote", "Leave a field empty to use the default shown in it.")}
+        </p>
+      )}
+
+      {/* Known parameters: always listed; empty means absent, so the default applies. */}
+      {hints.map((hint) => {
+        const stored = entries[hint.key];
+        const value = stored ?? "";
         return (
-          <div key={idx}>
+          <div
+            key={`hint-${hint.key}`}
+            data-testid={`${testIdPrefix}-row-${hint.key}`}
+            data-state={value !== "" ? "custom" : "default"}
+          >
             <div className="flex items-center gap-1.5">
-              <input
-                type="text"
-                value={key}
-                onChange={(e) => updateKey(e.target.value, idx)}
-                readOnly={readOnly}
-                placeholder="key"
-                className="h-7 w-32 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
+              <span className={cn(keyBoxClass, "flex items-center bg-muted/40")} title={hint.key}>
+                <span className="truncate">{hint.key}</span>
+                {hint.required && (
+                  <span className="ms-0.5 text-destructive" aria-hidden="true">*</span>
+                )}
+              </span>
               <span className="text-muted-foreground/40">=</span>
-              {isSensitiveKey(key) ? (
-                <div className="flex-1">
-                  {/* No `connections` here: embedding models and vector stores
-                      need a bare credential and refuse ${connection:…}. */}
-                  <SecretKeyPicker
-                    value={value}
-                    onChange={(v) => updateValue(key, v)}
-                    readOnly={readOnly}
-                    placeholder={hint?.placeholder || "${vault:...}"}
-                    testId={`${testIdPrefix}-${key}`}
-                  />
-                </div>
-              ) : (
-                <div className="relative flex-1">
-                  <input
-                    type="text"
-                    value={value}
-                    onChange={(e) => updateValue(key, e.target.value)}
-                    readOnly={readOnly}
-                    placeholder={hint?.placeholder || "value"}
-                    className={cn(
-                      "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-                      isVaultRef(value) && "pe-7",
-                    )}
-                  />
-                  {isVaultRef(value) && (
-                    <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
-                  )}
-                </div>
-              )}
+              {valueInput(hint.key, value, describe(hint, isSensitiveKey(hint.key)), (v) => setHintValue(hint.key, v))}
               {!readOnly && (
                 <button
                   type="button"
-                  onClick={() => removeEntry(key)}
-                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => resetHint(hint.key)}
+                  disabled={stored === undefined}
+                  aria-label={t("ragEditor.resetToDefault", "Reset to default")}
+                  title={t("ragEditor.resetToDefault", "Reset to default")}
+                  className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive disabled:invisible"
+                  data-testid={`${testIdPrefix}-reset-${hint.key}`}
                 >
                   <X className="h-3 w-3" />
                 </button>
               )}
             </div>
+            {/* Saved by an earlier version of this editor: the key is present with "",
+                which the backend uses as the value instead of its default. */}
+            {stored === "" && (
+              <p
+                className="mt-0.5 flex items-center gap-1 ps-1 text-[10px] text-amber-600 dark:text-amber-400"
+                data-testid={`${testIdPrefix}-empty-${hint.key}`}
+              >
+                <AlertCircle className="h-3 w-3 shrink-0" />
+                {t("ragEditor.emptySavedValue", "Saved as an empty value, so the default is not used.")}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => resetHint(hint.key)}
+                    className="font-medium underline underline-offset-2"
+                    data-testid={`${testIdPrefix}-use-default-${hint.key}`}
+                  >
+                    {t("ragEditor.useDefault", "Use default")}
+                  </button>
+                )}
+              </p>
+            )}
             <ConnectionReferenceWarning
               value={value}
               refused="model"
-              testId={`${testIdPrefix}-connection-warning-${idx}`}
+              testId={`${testIdPrefix}-connection-warning-${hint.key}`}
             />
           </div>
         );
       })}
-      {/* Auto-suggest missing hint keys */}
-      {!readOnly && hints && hints.some((h) => !(h.key in entries)) && (
-        <div className="flex flex-wrap gap-1 pt-1">
-          {hints
-            .filter((h) => !(h.key in entries))
-            .map((h) => (
+
+      {/* Everything else, in place until complete. */}
+      {rows.map((row) => (
+        <div key={`row-${row.id}`} data-testid={`${testIdPrefix}-custom-row`} data-key={row.key}>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={row.key}
+              onChange={(e) => updateRow(row.id, { key: e.target.value })}
+              readOnly={readOnly}
+              placeholder={t("ragEditor.paramKeyPlaceholder", "key")}
+              aria-label={t("ragEditor.paramKeyPlaceholder", "key")}
+              className={keyBoxClass}
+              data-testid={`${testIdPrefix}-custom-key`}
+            />
+            <span className="text-muted-foreground/40">=</span>
+            {valueInput(row.key, row.value, undefined, (v) => updateRow(row.id, { value: v }))}
+            {!readOnly && (
               <button
-                key={h.key}
                 type="button"
-                onClick={() => onChange({ ...entries, [h.key]: isVaultPlaceholder(h.placeholder) ? h.placeholder : "" })}
-                className="rounded-full border border-dashed border-muted-foreground/30 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                onClick={() => removeRow(row.id)}
+                aria-label={t("ragEditor.removeParam", "Remove parameter")}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
+                data-testid={`${testIdPrefix}-custom-remove`}
               >
-                + {h.key}
+                <X className="h-3 w-3" />
               </button>
-            ))}
+            )}
+          </div>
+          <ConnectionReferenceWarning
+            value={row.value}
+            refused="model"
+            testId={`${testIdPrefix}-connection-warning-${row.key}`}
+          />
         </div>
-      )}
+      ))}
+
       {!readOnly && (
         <button
           type="button"
-          onClick={addEntry}
+          onClick={addRow}
           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          data-testid={`${testIdPrefix}-add`}
         >
           <Plus className="h-3 w-3" />
           {t("ragEditor.addParam", "Add Parameter")}
@@ -376,6 +562,11 @@ function KeyValueEditor({
       )}
     </div>
   );
+}
+
+/** The non-hint part of `entries`, serialised the way {@link serializeRows} does. */
+function toComparable(entries: Record<string, string>, hintKeys: Set<string>): string {
+  return JSON.stringify(Object.entries(entries).filter(([k, v]) => !hintKeys.has(k) && v !== ""));
 }
 
 // ─── Ingestion Panel ────────────────────────────────────────────────────────
@@ -742,7 +933,21 @@ export function RagEditor({
 
   const selectedProvider = EMBEDDING_PROVIDERS.find((p) => p.value === data.embeddingProvider);
   const selectedStore = STORE_TYPES.find((s) => s.value === data.storeType);
-  const storeHints = STORE_PARAM_HINTS[data.storeType ?? "in-memory"] ?? [];
+  // What `KnowledgeBaseStorage.defaultPhysicalName` names a KB's
+  // table/collection/index when none is set. A KB with no id yet is new, and the
+  // server stamps every new KB with the per-id layout. Resource ids are lower-case
+  // hex, so the id sanitising leaves them as-is. The legacy (6.5) layout derives
+  // the name differently per store type, so it is spelled out only for a name
+  // every derivation leaves unchanged.
+  const perKbName =
+    !resourceId
+      ? t("ragEditor.perKbDefault", "one per knowledge base (eddi_kbid_<id>)")
+      : data.storeNamespace === "id"
+        ? `eddi_kbid_${resourceId.toLowerCase()}`
+        : data.name && data.name.length <= 50 && /^[a-z0-9_]*[a-z0-9]$/.test(data.name)
+          ? `eddi_kb_${data.name}`
+          : t("ragEditor.perKbLegacyDefault", "derived from the name (eddi_kb_…)");
+  const storeHints = storeParamHints(data.storeType ?? "in-memory", perKbName);
   const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
 
   const unknownChunkStrategy =
@@ -805,19 +1010,14 @@ export function RagEditor({
                 if (data.embeddingProvider && data.embeddingParameters) {
                   embeddingParamCache.current[data.embeddingProvider] = { ...data.embeddingParameters };
                 }
-                // Restore cached params or auto-populate from hints
+                // Restore what this provider had earlier in the session, else
+                // start empty: every parameter then shows its default or says
+                // it is required. Never pre-fill — see KeyValueEditor.
                 const cached = embeddingParamCache.current[newProvider];
-                const hints = EMBEDDING_PARAM_HINTS[newProvider] ?? [];
-                const newParams = cached ?? Object.fromEntries(
-                  hints.map((h) => [
-                    h.key,
-                    isVaultPlaceholder(h.placeholder) ? h.placeholder : "",
-                  ]),
-                );
                 onChange({
                   ...data,
                   embeddingProvider: newProvider,
-                  embeddingParameters: Object.keys(newParams).length > 0 ? newParams : undefined,
+                  embeddingParameters: cached && Object.keys(cached).length > 0 ? cached : undefined,
                 });
               }}
               disabled={readOnly}
@@ -841,6 +1041,7 @@ export function RagEditor({
               {t("ragEditor.embeddingParamsHint", "Model name, API key (use ${vault:...} for secrets), base URL, etc.")}
             </p>
             <KeyValueEditor
+              key={data.embeddingProvider ?? "openai"}
               entries={data.embeddingParameters ?? {}}
               onChange={(v) => onChange({ ...data, embeddingParameters: Object.keys(v).length > 0 ? v : undefined })}
               readOnly={readOnly}
@@ -875,18 +1076,13 @@ export function RagEditor({
                     if (data.storeType && data.storeParameters) {
                       storeParamCache.current[data.storeType] = { ...data.storeParameters };
                     }
-                    // Restore cached params or auto-populate from hints
+                    // Restore what this store had earlier in the session, else
+                    // start empty. Never pre-fill — see KeyValueEditor.
                     const cached = storeParamCache.current[st.value];
-                    const newParams = cached ?? Object.fromEntries(
-                      (STORE_PARAM_HINTS[st.value] ?? []).map((h) => [
-                        h.key,
-                        isVaultPlaceholder(h.placeholder) ? h.placeholder : "",
-                      ]),
-                    );
                     onChange({
                       ...data,
                       storeType: st.value,
-                      storeParameters: Object.keys(newParams).length > 0 ? newParams : undefined,
+                      storeParameters: cached && Object.keys(cached).length > 0 ? cached : undefined,
                     });
                   }}
                   className={cn(
@@ -913,6 +1109,7 @@ export function RagEditor({
                 {t("ragEditor.storeParams", "Connection Parameters")}
               </label>
               <KeyValueEditor
+                key={data.storeType}
                 entries={data.storeParameters ?? {}}
                 onChange={(v) =>
                   onChange({ ...data, storeParameters: Object.keys(v).length > 0 ? v : undefined })

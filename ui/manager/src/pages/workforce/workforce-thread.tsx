@@ -56,6 +56,7 @@ import { getAgentDescriptors } from "@/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
 import type { SimpleConversationStep } from "@/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
+import { PauseNotice } from "@/components/hitl/pause-notice";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
@@ -1454,7 +1455,18 @@ function WorkforceThread() {
               conversation, an expired token and a quota rejection all looked
               like the agent apologising, and the backend's own sentence went
               only to the console. It is not something the agent said. */}
-          {sendError && (
+          {sendError?.paused && conversationId && (
+            <div role="alert" data-testid="thread-send-error">
+              <PauseNotice
+                conversationId={conversationId}
+                headline={sendError.message}
+                testIdBase="thread-pause"
+                reviewTestId="thread-review-approvals"
+                onResolved={() => setSendError((current) => (current?.paused ? null : current))}
+              />
+            </div>
+          )}
+          {sendError && !(sendError.paused && conversationId) && (
             <div
               className={cn(
                 "flex items-start gap-2 rounded-xl border p-3 text-sm",

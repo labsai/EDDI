@@ -25,7 +25,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -57,6 +59,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.security.NoSuchAlgorithmException;
 import java.security.MessageDigest;
@@ -157,6 +160,9 @@ class ConversationHitlService {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
         }
+        // Cluster mode: the turn may be running on another node (the lease holder) —
+        // ask that node to signal it. Always false on a single node.
+        boolean remoteSignalled = inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
@@ -196,7 +202,7 @@ class ConversationHitlService {
             }
             return IConversationService.CancelOutcome.CANCELLED;
         }
-        if (inFlightMemory != null) {
+        if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
             return IConversationService.CancelOutcome.CANCELLED;
@@ -400,11 +406,29 @@ class ConversationHitlService {
             // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
             populateToolApprovalsConfig(memory);
 
+            // Ordering contract (same as the say path, see ConversationService
+            // .completeTurn): a resume that RE-PAUSES tells its client only after the
+            // re-pause is persisted by resumeFinished below, with the state the store
+            // holds — never "paused" while the store still reads IN_PROGRESS. Any other
+            // outcome is delivered immediately, as before.
+            final DeferredDelivery resumeDelivery = new DeferredDelivery();
+            // The state resumeFinished committed, once it has; read by its delivery step.
+            final AtomicReference<ConversationState> committedResumeState = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     handler != null ? returnMemory -> {
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
                         memorySnapshot.setEnvironment(environment);
+                        if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                            resumeDelivery.defer(committedState -> {
+                                if (committedState != null) {
+                                    memorySnapshot.setConversationState(committedState);
+                                    conversationService.cacheConversationState(conversationId, committedState);
+                                }
+                                handler.onComplete(memorySnapshot);
+                            });
+                            return;
+                        }
                         conversationService.cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         handler.onComplete(memorySnapshot);
                     } : null);
@@ -459,6 +483,18 @@ class ConversationHitlService {
             // zombie resume can never overwrite state written after its timeout.
             IRuntime.IFinishedExecution<Void> resumeFinished = new IRuntime.IFinishedExecution<>() {
                 public void onComplete(Void result) {
+                    try {
+                        persistResumeOutcome();
+                    } finally {
+                        // A re-pause is announced to the client only now, after the
+                        // persist above succeeded or was discarded (see resumeDelivery).
+                        // Runs on every exit; a no-op when nothing was deferred.
+                        ConversationState committed = committedResumeState.get();
+                        resumeDelivery.deliver(committed != null ? committed : conversationService.committedStateOrError(conversationId));
+                    }
+                }
+
+                private void persistResumeOutcome() {
                     if (memory.isCancelled()) {
                         // aborted before execution — the cancel path owns the state
                         return;
@@ -507,6 +543,7 @@ class ConversationHitlService {
                             return;
                         }
                         conversationService.cacheConversationState(conversationId, memory.getConversationState());
+                        committedResumeState.set(memory.getConversationState());
                         // Task 10 — AUTO_REJECT no-progress: the re-pause is now durably
                         // persisted (AWAITING_HUMAN); break the loop with a reject-all resume
                         // through the SAME resume path (journal-bearing, no shortcut). The
@@ -535,6 +572,16 @@ class ConversationHitlService {
                     }
                 }
                 public void onFailure(Throwable t) {
+                    try {
+                        handleResumeFailure(t);
+                    } finally {
+                        // The resumed pipeline already deferred a re-pause announcement;
+                        // this path commits nothing, so the caller hears the stored state.
+                        resumeDelivery.deliver(conversationService.committedStateOrError(conversationId));
+                    }
+                }
+
+                private void handleResumeFailure(Throwable t) {
                     // See the say path's onFailure: only the DEDICATED abandonment type
                     // means "the watchdog already recorded the outcome". A genuine
                     // InterruptedException from the body is a real failure and falls
@@ -554,8 +601,29 @@ class ConversationHitlService {
             // #4: guard the resume with the same watchdog the say path uses — a
             // hung LLM call or crashed executor must not leave the conversation
             // stuck IN_PROGRESS forever.
-            IDiscardableTask guardedResume = new IDiscardableTask() {
+            IDiscardableTask guardedResume = new ILeaseAwareTask() {
+                /** The cluster lease (cluster mode); null on a single node. */
+                private volatile LeaseHandle lease;
+
+                @Override
+                public void bindLease(LeaseHandle lease) {
+                    this.lease = lease;
+                }
+
                 public Void call() {
+                    LeaseHandle held = lease;
+                    if (held != null && held.fence() != null) {
+                        // Same fencing as a say turn: the resumed turn's write is refused if
+                        // another node took the conversation over, and losing the lease
+                        // cancels it at the next task boundary.
+                        memory.setFenceToken(held.fence());
+                        try {
+                            conversationMemoryStore.raiseFence(conversationId, held.fence());
+                        } catch (Exception e) {
+                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                        }
+                        held.onLost(() -> memory.setCancelled(true));
+                    }
                     try {
                         // The identities were captured on the REST request thread
                         // above, because this body already runs on a pool thread with
@@ -571,6 +639,12 @@ class ConversationHitlService {
                                                 callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),
                                         resumeFinished, null));
                     } finally {
+                        // Backstop: the runtime callbacks flush a deferred re-pause, but a
+                        // resume that reached neither (cancelled before it ran) must still
+                        // terminate its caller's handler. One-shot, so never a double event.
+                        if (resumeDelivery.isPending()) {
+                            resumeDelivery.deliver(conversationService.committedStateOrError(conversationId));
+                        }
                         // value-conditional: never evict a newer execution's registration
                         inFlightConversations.remove(conversationId, memory);
                     }

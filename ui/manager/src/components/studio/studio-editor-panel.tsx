@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { OwningAgentContext } from "@/hooks/use-owning-agent";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -354,6 +355,7 @@ export function StudioEditorPanel({
         className="mb-3"
       />
       )}
+      <OwningAgentContext.Provider value={agentId}>
       <ConfigEditorLayout
         typeName={typeName}
         resourceId={resourceId}
@@ -376,6 +378,7 @@ export function StudioEditorPanel({
         renderFormEditor={EDITOR_MAP[slug]}
         jsonSchema={jsonSchema}
       />
+      </OwningAgentContext.Provider>
     </div>
   );
 }

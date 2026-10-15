@@ -510,6 +510,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     requestRedactor.redactHeaders(headers, built.connectionOwnedHeaders()),
                     body == null ? null : body.toString(),
                     !canExecuteDivergeFromResolve(call)).withoutResolvedSecrets(built.resolvedSecrets());
+        } catch (ConfigReferenceRefusedException refused) {
+            // Passed through as itself, unlike every other failure here, because it is
+            // the one resolve() failure that is both deterministic and safe to read:
+            // execute() would refuse the very same request, and the message names a
+            // reference and a field, never a resolved value. The gate refuses the call
+            // on it BEFORE a human is asked to approve something that cannot run.
+            //
+            // Only for a call whose resolution IS what execute() builds. One that can
+            // diverge (pre-request property instructions, batching, retries) may render
+            // differently at execution, so its refusal here would be a guess — it falls
+            // through to the generic failure below and is approved unpinned, as before.
+            if (canExecuteDivergeFromResolve(call)) {
+                throw new LifecycleException(
+                        "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", refused);
+            }
+            throw refused;
         } catch (Exception e) {
             // Deliberately NOT logged here — throw only. Unlike execute(), the sole
             // caller of resolve() is the gate-time/pre-execution pinning path, which
