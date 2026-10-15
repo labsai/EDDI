@@ -386,9 +386,10 @@ eddi_coordinator_total_dead_lettered_total  # Turns dead-lettered (failed after 
 eddi_coordinator_dead_letters               # Dead letters retained right now (gauge; in cluster mode the shared stream's count)
 eddi_coordinator_dead_lettered_total        # The same count under the name the shipped alert rules use (both modes)
 eddi_coordinator_dead_letters_retained      # The same gauge under the name the shipped dashboards use (both modes)
-eddi_runtime_executor_active                # Conversation work running; tag: pool (managed|nested)
+eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
+eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit)
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
@@ -404,10 +405,18 @@ lists. Both coordinators register them; in cluster mode the gauge is the shared
 dead-letter stream's count, and the console at `/administration/cluster` lists it.
 
 `queue_depth` counts turns waiting behind an earlier turn of the **same**
-conversation. `eddi_runtime_executor_queued{pool="managed"}` counts turns
-waiting for a **thread**: above zero for minutes means the worker pool is
-saturated (alert `EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not
-see this work — they count only what is dispatched through Vert.x.
+conversation. The executor gauges count work by where it runs: `pool="turn"` is
+the coordinators' turns and `pool="nested"` their pipelines, both on virtual
+threads; `pool="managed"` is the bounded worker pool, which now carries deploys,
+retention sweeps and the parser endpoint, not turns. `queued{pool="managed"}`
+above zero for minutes means that pool is saturated (alert
+`EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not see this work —
+they count only what is dispatched through Vert.x.
+
+Turns are bounded by `eddi.conversation.max-in-flight-turns` instead of by
+threads: past it a turn is refused with 503 `capacity_exceeded` and counted in
+`eddi_turn_rejected_total{reason="in_flight_limit"}` (alert
+`EddiTurnCapacityReached`), against `eddi_processing_conversation_count`.
 
 ### Pipeline Metrics
 

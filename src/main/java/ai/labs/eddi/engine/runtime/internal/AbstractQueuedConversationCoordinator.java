@@ -210,7 +210,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * A failed turn is dead-lettered once and the queue moves on.
      */
     protected void execute(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable) {
-        runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
+        runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
             @Override
             public void onComplete(Void result) {
                 totalProcessed.incrementAndGet();

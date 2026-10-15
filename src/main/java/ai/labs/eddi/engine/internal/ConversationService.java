@@ -266,6 +266,17 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
     boolean captureDeadLetterInput = true;
+
+    /**
+     * Turns this node runs at once, queued or executing; one more is refused with
+     * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
+     * pool no longer bounds them — this does, and it is what keeps memory per
+     * in-flight turn times the number of turns inside the heap. {@code <= 0}
+     * disables the limit. Field-injected with the default in the initializer for
+     * the same reason as {@link #captureDeadLetterInput}.
+     */
+    @ConfigProperty(name = "eddi.conversation.max-in-flight-turns", defaultValue = "1000")
+    int maxInFlightTurns = 1000;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -381,9 +392,33 @@ public class ConversationService implements IConversationService, UserErasurePar
          */
         final DeferredDelivery deferredDelivery = new DeferredDelivery();
 
+        /** The counter has already been incremented for this turn. */
         private ProcessingTurn(AtomicInteger counter) {
             this.counter = counter;
-            counter.incrementAndGet();
+        }
+
+        /**
+         * Admits a turn against the in-flight limit, or refuses it. The limit is
+         * checked and the counter taken in one CAS, so concurrent admissions can never
+         * overshoot it (unlike the coordinator's deliberately soft conversation cap).
+         * The permit IS this token: {@link #release()} gives it back exactly once on
+         * every exit path, which is what C11 already guarantees for the gauge.
+         *
+         * @param limit
+         *            {@code eddi.conversation.max-in-flight-turns}; {@code <= 0} admits
+         *            everything
+         */
+        static ProcessingTurn admit(AtomicInteger counter, int limit) {
+            while (true) {
+                int current = counter.get();
+                if (limit > 0 && current >= limit) {
+                    throw new TurnCapacityExceededException("This node is already running " + limit
+                            + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+                }
+                if (counter.compareAndSet(current, current + 1)) {
+                    return new ProcessingTurn(counter);
+                }
+            }
         }
 
         void release() {
@@ -1101,6 +1136,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentNotReadyException(msg);
             }
 
+            // In-flight admission BEFORE the quota slot: a turn refused for capacity
+            // must not have spent the tenant's api-call quota. Every exit below
+            // releases it through releaseTurn / ProcessingTurn.release (C11).
+            admittedTurn = admitTurn(conversationId);
+            final ProcessingTurn processingTurn = admittedTurn;
+
             // Tenant quota — atomic slot acquisition AFTER cheap validations
             // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
             // agent-not-ready failures)
@@ -1114,9 +1155,6 @@ public class ConversationService implements IConversationService, UserErasurePar
                         ? new QuotaAccountingUnavailableException(quotaCheck.reason())
                         : new QuotaExceededException(quotaCheck.reason());
             }
-
-            admittedTurn = new ProcessingTurn(processingConversationCount);
-            final ProcessingTurn processingTurn = admittedTurn;
 
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
@@ -1204,7 +1242,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
-                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException | TurnCapacityExceededException e) {
             // All five are thrown before the turn is admitted, and none is an internal
             // fault of this class: the generic handler below logs a full ERROR stack
             // trace, which for the restriction-unavailable case meant every turn of
@@ -1254,6 +1292,25 @@ public class ConversationService implements IConversationService, UserErasurePar
     static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
             turn.release();
+        }
+    }
+
+    /**
+     * Admits one turn against {@code eddi.conversation.max-in-flight-turns}; a
+     * refusal is counted as {@code eddi.turn.rejected{reason="in_flight_limit"}}
+     * and never logged as an ERROR — it is backpressure, not a fault. Only at DEBUG
+     * here: the surface answering the 503 already logs it once (RestAgentEngine at
+     * WARN), and under overload a second line per refused turn would only double
+     * the flood. The counter is the signal.
+     */
+    ProcessingTurn admitTurn(String conversationId) {
+        try {
+            return ProcessingTurn.admit(processingConversationCount, maxInFlightTurns);
+        } catch (TurnCapacityExceededException e) {
+            meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
+            LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
+                    sanitize(conversationId), maxInFlightTurns);
+            throw e;
         }
     }
 
