@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.rest;
 import ai.labs.eddi.engine.api.IRestAgentSetup;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
+import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupForbiddenException;
 import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
@@ -39,6 +40,8 @@ public class RestAgentSetup implements IRestAgentSetup {
         try {
             SetupResult result = agentSetupService.setupAgent(request);
             return Response.status(Response.Status.CREATED).entity(result).build();
+        } catch (AgentSetupForbiddenException e) {
+            return Response.status(Response.Status.FORBIDDEN).entity(Map.of("error", e.getMessage())).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("Agent setup validation failed: %s", e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
@@ -54,6 +57,8 @@ public class RestAgentSetup implements IRestAgentSetup {
         try {
             SetupResult result = agentSetupService.createApiAgent(request);
             return Response.status(Response.Status.CREATED).entity(result).build();
+        } catch (AgentSetupForbiddenException e) {
+            return Response.status(Response.Status.FORBIDDEN).entity(Map.of("error", e.getMessage())).build();
         } catch (AgentSetupException e) {
             LOGGER.warnf("API agent setup validation failed: %s", e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
