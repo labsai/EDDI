@@ -1072,4 +1072,83 @@ class ChatModelRegistryTest {
                     "exactly two builds: the discarded stale one, then the cached one — the third call is a cache hit");
         }
     }
+
+    @Nested
+    @DisplayName("Model parameter catalog")
+    class ParameterCatalogTests {
+
+        private final AtomicReference<Map<String, String>> built = new AtomicReference<>();
+        private final AtomicReference<Map<String, String>> builtStreaming = new AtomicReference<>();
+
+        private ChatModelRegistry capturing() {
+            Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+            ILanguageModelBuilder capture = new ILanguageModelBuilder() {
+                @Override
+                public ChatModel build(Map<String, String> parameters) {
+                    built.set(new HashMap<>(parameters));
+                    return mockSyncModel;
+                }
+
+                @Override
+                public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                    builtStreaming.set(new HashMap<>(parameters));
+                    return mockStreamingModel;
+                }
+            };
+            builders.put("openai", () -> capture);
+            builders.put("gemini", () -> capture);
+            return passThroughRegistry(builders);
+        }
+
+        @Test
+        @DisplayName("a parameter the model rejects never reaches the builder, sync or streaming")
+        void rejectedIsDropped() throws Exception {
+            ChatModelRegistry reg = capturing();
+            var params = Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3", "maxCompletionTokens", "500");
+
+            reg.getOrCreate("openai", params);
+            assertFalse(built.get().containsKey("temperature"));
+            assertEquals("500", built.get().get("maxCompletionTokens"));
+
+            reg.getOrCreateStreaming("openai", params);
+            assertFalse(builtStreaming.get().containsKey("temperature"));
+            assertEquals("o3", builtStreaming.get().get("modelName"));
+        }
+
+        @Test
+        @DisplayName("a parameter the model accepts is passed on unchanged")
+        void acceptedIsKept() throws Exception {
+            ChatModelRegistry reg = capturing();
+            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "gpt-4o", "temperature", "0.3"));
+            assertEquals("0.3", built.get().get("temperature"));
+        }
+
+        @Test
+        @DisplayName("a parameter the model ignores is kept")
+        void ignoredIsKept() throws Exception {
+            ChatModelRegistry reg = capturing();
+            reg.getOrCreate("gemini", Map.of("apiKey", "k", "modelName", "gemini-3.8-flash", "temperature", "0.3"));
+            assertEquals("0.3", built.get().get("temperature"));
+        }
+
+        @Test
+        @DisplayName("with drop-rejected=false a rejected parameter is still sent")
+        void dropDisabled() throws Exception {
+            ChatModelRegistry reg = capturing();
+            reg.dropRejectedParameters = false;
+            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"));
+            assertEquals("0.3", built.get().get("temperature"));
+            reg.getOrCreateStreaming("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"));
+            assertEquals("0.3", builtStreaming.get().get("temperature"));
+        }
+
+        @Test
+        @DisplayName("the catalog gates on the resolved model, after global variables and secrets")
+        void gatesOnResolvedValues() throws Exception {
+            ChatModelRegistry reg = capturing();
+            reg.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "modelName", "o4-mini", "topP", "0.9"));
+            assertEquals("resolved-secret", built.get().get("apiKey"));
+            assertFalse(built.get().containsKey("topP"));
+        }
+    }
 }

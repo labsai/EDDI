@@ -71,13 +71,13 @@ class RestRagStoreInMemoryStoreTest {
     }
 
     private EmbeddingStore<TextSegment> storeWithOneSegment() {
-        var store = storeFactory.getOrCreateForIngestion(inMemoryKnowledgeBase(), KB_NAME);
+        var store = storeFactory.getOrCreateForIngestion(KB_ID, inMemoryKnowledgeBase());
         store.add(Embedding.from(new float[]{0.1f, 0.2f}), TextSegment.from("a fact"));
         return store;
     }
 
     private int segmentsNow() {
-        return storeFactory.getOrCreate(inMemoryKnowledgeBase(), KB_NAME)
+        return storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase())
                 .search(EmbeddingSearchRequest.builder()
                         .queryEmbedding(Embedding.from(new float[]{0.1f, 0.2f}))
                         .minScore(0.0)
@@ -107,8 +107,23 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.deleteRag(KB_ID, 1, false);
 
-        assertNotSame(store, storeFactory.getOrCreate(inMemoryKnowledgeBase(), KB_NAME));
+        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
         assertEquals(0, segmentsNow());
+    }
+
+    @Test
+    @DisplayName("deleting a knowledge base leaves a namesake's store alone")
+    void deleteSparesANamesake() throws Exception {
+        String otherId = "6b9c2d3e4f5a6b7c8d9e0f1a";
+        var namesake = storeFactory.getOrCreateForIngestion(otherId, inMemoryKnowledgeBase());
+        namesake.add(Embedding.from(new float[]{0.1f, 0.2f}), TextSegment.from("their fact"));
+        storeWithOneSegment();
+        when(ragStore.getCurrentResourceId(KB_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        restRagStore.deleteRag(KB_ID, 1, false);
+
+        assertEquals(0, segmentsNow());
+        assertSame(namesake, storeFactory.getOrCreate(otherId, inMemoryKnowledgeBase()));
     }
 
     @Test
@@ -119,7 +134,7 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.deleteRag(KB_ID, 1, false);
 
-        assertSame(store, storeFactory.getOrCreate(inMemoryKnowledgeBase(), KB_NAME));
+        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
         assertEquals(1, segmentsNow());
     }
 
@@ -132,7 +147,7 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.updateRag(KB_ID, 1, updated);
 
-        assertSame(store, storeFactory.getOrCreate(inMemoryKnowledgeBase(), KB_NAME));
+        assertSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
         assertEquals(1, segmentsNow());
     }
 
@@ -145,6 +160,6 @@ class RestRagStoreInMemoryStoreTest {
 
         restRagStore.updateRag(KB_ID, 1, renamed);
 
-        assertNotSame(store, storeFactory.getOrCreate(inMemoryKnowledgeBase(), KB_NAME));
+        assertNotSame(store, storeFactory.getOrCreate(KB_ID, inMemoryKnowledgeBase()));
     }
 }

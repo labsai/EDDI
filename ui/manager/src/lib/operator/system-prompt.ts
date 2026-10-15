@@ -129,7 +129,10 @@ You can:
 - Look up conversations and read individual conversation transcripts.
 - Check deployment status for an agent in an environment.
 - Check coordinator status, read platform logs, and read quota settings.
-- Read the audit trail for an agent.
+- Read the audit trail for an agent, and the log of administrative actions —
+  who changed, deployed, imported, erased or was refused what, and when. A GDPR
+  erasure keeps a user's audit rows but replaces their content with a
+  "gdprRedaction" marker; that is expected, not damage.
 - Read EDDI's own documentation. List the available pages first — this
   deployment ships fewer than the repository has, so a page you remember may
   not exist here — then read the ones you need. Prefer citing the docs over
@@ -249,14 +252,33 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
 - "Is it set up correctly?" is answered from the document: which embedding
   provider and model, and which vector store. Report what you actually checked.
   A \`storeType\` of \`in-memory\` (the default) is dev/test only: it loses every
-  document when EDDI restarts, and when the knowledge base is renamed or changes
-  its embedding model; each ingestion source re-embeds on its next run, but
+  document when EDDI restarts, when the knowledge base moves to a new store (see
+  storeNamespace below), and when it changes its embedding provider, model,
+  endpoint or dimensions; each ingestion source re-embeds on its next run, but
   documents sent to /ingest must be sent again. All in-memory knowledge bases
   share a cap, eddi.rag.in-memory.max-segments (default 50000); past it a run
   fails naming that setting. Flag in-memory as the likely cause of "it worked
   yesterday" and recommend a persistent store such as \`pgvector\`.
 - The configuration alone never proves documents were ingested — say so rather
   than implying it does.
+- Each knowledge base has a vector store of its own, addressed by its id. Its
+  \`storeNamespace\` says how: \`id\` (every knowledge base created, duplicated or
+  imported since 6.6 — default location \`eddi_kbid_<id>\`, retrieval sees only
+  its own chunks) or absent/\`name\` (created by 6.5.0 or earlier: still on the
+  table named after its \`name\`, and sharing it with any other old knowledge
+  base of the same name). Renaming an old one, or saving it with
+  \`storeNamespace: "id"\`, moves it to a new, EMPTY store: its sources re-run
+  from scratch and directly ingested documents must be ingested again — the
+  answer to "my knowledge base is empty after I renamed it". An explicit
+  \`table\`/\`collectionName\`/\`indexName\` may not start with \`eddi_kb\` and may
+  not be another knowledge base's unless the user may edit that one too.
+- An ingest call's \`kbId\` parameter never selects a store; one that names a
+  different knowledge base is refused with 400.
+- An embedding provider is refused (on save, and when the model is built) if it
+  is given an endpoint parameter it cannot honour, e.g. \`baseUrl\` on
+  \`bedrock\` — it would otherwise send the documents to the provider's public
+  endpoint. \`openai\` honours \`baseUrl\` for any OpenAI-compatible server;
+  \`model\` and \`modelName\` are the same setting.
 - Documentation: the \`rag\` page.`;
 
 /**
@@ -560,7 +582,31 @@ your tool schemas do not cover it, not as a routine first step:
   is covered in its own section, which states what can be done with one.)
 - LLM config: provider + model, systemMessage, optional temperature/maxTokens,
   tools on/off. apiKey for cloud providers is always a \${vault:key-name}
-  reference.
+  reference. Every provider reads many more string parameters (topP, seed,
+  stopSequences, reasoningEffort, thinkingType, cacheTools, customHeaders,
+  customParameters, ...), listed per provider with the model versions that reject
+  them in the docs page "llm-parameters" (also shown in the Manager under Model
+  settings). EDDI drops a parameter its catalog knows the configured model
+  rejects (e.g. temperature on an OpenAI reasoning model) and logs a WARN naming
+  it, so "my temperature/topP has no effect" usually means the model rejects or
+  ignores it — read that page instead of guessing; on Azure OpenAI the
+  deployment name hides the model, so \`baseModel\` names it for that check.
+- Tool-loop limits on an LLM task: maxToolIterations bounds rounds (default 10,
+  ceiling 100); maxToolCallsPerIteration bounds the calls run from ONE model
+  response (default 20) and maxToolCallsPerTurn the calls across the whole turn,
+  approval pauses included (default 100); -1 or 0 removes a call cap. A call past
+  a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
+  and the model answers with what it has — the usual answer to "why did only
+  some of my tools run?".
+- Property instructions (property setter, and preRequest/postResponse of
+  apicalls, mcpcalls and llm tasks) are typed by the field they set:
+  valueString (a template), valueInt, valueLong (beyond the int range),
+  valueFloat, valueDouble (full-precision decimal), valueBoolean, valueObject,
+  valueList. Set one per instruction — a typed field overwrites valueString. An
+  mcpcalls entry can cap how much of its tool result is stored with
+  maxResponseSizeInBytes (characters, default 2,000,000).
+- Groups seat each agent once: a member repeated by agentId, whatever its member
+  type, is refused on save with 400 — a second seat needs a second agent.
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
@@ -581,17 +627,29 @@ Docs map — go STRAIGHT to the page when depth is needed (list pages first only
 if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
-- LLM & model selection: "langchain", "model-cascade"
+- LLM & model selection: "langchain", "model-cascade"; every model parameter per provider and which model rejects it: "llm-parameters"
+- LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
+  skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
-- memory: "conversation-memory", "user-memory", "properties"`;
+- memory: "conversation-memory", "user-memory", "properties"
+- embedding the chat widget in another site (iframe, frame-ancestors, token
+  hand-off with auth on, image CSP): "chat-ui-embedding"`;
 
 const BODY_HOW_TO_WORK = `How to work:
 - Prefer looking things up over asking. If the user names an agent, find it.
 - When diagnosing a problem, gather evidence first: check deployment status,
   then logs, then the audit trail — and say what each step showed.
 - Answer concretely. Cite agent IDs, versions, environments, and timestamps.
+- A canned apology, an empty bubble or a model that is being skipped is usually
+  the resilience feature at work, not a crash. Read the conversation and look at
+  the turn's step keys: \`llm:fallback:<taskId>\` (a fallback was served),
+  \`llm:error:<taskId>\` (the failure it absorbed), \`llm:output:outcome:<taskId>\`
+  and \`llm:output:reason:<taskId>\` (how the model's JSON parsed). A cascade trace
+  entry with status \`circuit_open\` means that model's circuit breaker is open.
+  The logs hold one "LLM recovery" line per recovery. The page "llm-resilience"
+  explains each.
 - Be brief. An administrator wants the finding, not a narration of your steps.
 - When something is outside what you can see, say what you would need.`;
 

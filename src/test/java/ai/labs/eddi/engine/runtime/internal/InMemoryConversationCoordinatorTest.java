@@ -331,6 +331,29 @@ class InMemoryConversationCoordinatorTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void deadLettersAreVisibleAsMetrics() {
+        IRuntime localRuntime = mock(IRuntime.class);
+        var registry = new SimpleMeterRegistry();
+        // maxDeadLetters = 2: the counter keeps counting past the cap, the gauge
+        // reports what is retained.
+        var capped = new InMemoryConversationCoordinator(localRuntime, registry, 10000, 2);
+        capped.initMetrics();
+
+        causeDeadLetter(capped, localRuntime, "conv-1", mock(Callable.class));
+        causeDeadLetter(capped, localRuntime, "conv-2", mock(Callable.class));
+        causeDeadLetter(capped, localRuntime, "conv-3", mock(Callable.class));
+
+        assertEquals(3.0, registry.get("eddi.coordinator.dead_lettered").functionCounter().count());
+        assertEquals(2.0, registry.get("eddi.coordinator.dead_letters_retained").gauge().value());
+
+        capped.purgeDeadLetters();
+        assertEquals(3.0, registry.get("eddi.coordinator.dead_lettered").functionCounter().count(),
+                "the counter is cumulative — a purge must not rewind it");
+        assertEquals(0.0, registry.get("eddi.coordinator.dead_letters_retained").gauge().value());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void shouldNotCapDeadLettersWhenDisabled() {
         IRuntime localRuntime = mock(IRuntime.class);
         // maxDeadLetters = -1 → unbounded

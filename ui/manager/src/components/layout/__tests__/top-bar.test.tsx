@@ -444,13 +444,67 @@ describe("TopBar", () => {
   it("closes dropdown on outside click", async () => {
     renderTopBarWithAuth(keycloakAuth);
 
-    const user = userEvent.setup();
+    // The open Radix menu is modal and sets `pointer-events: none` on <body>,
+    // which is exactly what makes a click outside dismiss it — user-event's guard
+    // would otherwise refuse to click there.
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
     await user.click(screen.getByTestId("user-menu-trigger"));
     expect(screen.getByTestId("user-menu-dropdown")).toBeInTheDocument();
 
     // Click outside (on the body)
     await user.click(document.body);
     expect(screen.queryByTestId("user-menu-dropdown")).not.toBeInTheDocument();
+  });
+
+  it("user menu is a real menu: arrow keys move between items, Escape returns focus", async () => {
+    renderTopBarWithAuth(keycloakAuth);
+
+    const user = userEvent.setup();
+    const trigger = screen.getByTestId("user-menu-trigger");
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    const items = screen.getAllByRole("menuitem");
+    expect(items.length).toBe(2);
+    // Opening from the keyboard lands on the first item already.
+    await waitFor(() => expect(document.activeElement).toBe(items[0]));
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(items[1]);
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(items[0]);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("language selector has an accessible name", () => {
+    renderWithProviders(<TopBar onMenuClick={() => {}} sidebarVisible={false} />);
+    expect(screen.getByRole("combobox", { name: "Language" })).toBe(
+      screen.getByTestId("language-selector"),
+    );
+  });
+
+  it("keeps the current page name visible on phones while ancestors are hidden", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/agents" },
+    );
+    const current = screen.getByText("Agents");
+    // The ancestors carry `hidden md:flex`; the current page's wrapper does not.
+    expect(current.parentElement?.className).not.toContain("hidden");
+    expect(screen.getByText("Dashboard").closest("span.hidden")).not.toBeNull();
+    expect(screen.getByTestId("platform-status-compact")).toBeInTheDocument();
+  });
+
+  it("labels a group wizard as such, not as the Agent Wizard", () => {
+    renderWithProviders(
+      <TopBar onMenuClick={() => {}} sidebarVisible={false} />,
+      { initialRoute: "/manage/groups/wizard" },
+    );
+    expect(screen.getByText("Group Setup Wizard")).toBeInTheDocument();
+    expect(screen.queryByText("Agent Wizard")).not.toBeInTheDocument();
   });
 
   it("user menu trigger has aria-expanded attribute", async () => {

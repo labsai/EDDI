@@ -225,7 +225,7 @@ public class CapabilityMatchCondition implements IRuleCondition {
             return value;
         }
         try {
-            Map<String, Object> templateData = memoryItemConverter.convert(memory);
+            Map<String, Object> templateData = TemplateDataScope.templateData(memory, memoryItemConverter);
             return templatingEngine.processTemplate(value, templateData);
         } catch (ITemplatingEngine.TemplateEngineException e) {
             LOGGER.warnf("Template resolution failed for '%s': %s", value, e.getMessage());

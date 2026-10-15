@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.mcpcalls.impl;
 
+import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
@@ -38,8 +39,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
-
-import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 /**
  * Lifecycle task for deterministic (action-triggered) MCP tool calls.
@@ -89,12 +88,6 @@ public class McpCallsTask implements ILifecycleTask {
      * throwing when the per-conversation rate limit rejects the call.
      */
     private static final String RATE_LIMIT_ERROR_PREFIX = "Error: Rate limit exceeded for tool: ";
-
-    /**
-     * Sentinel {@link ToolExecutionService#executeToolWrapped} returns instead of
-     * propagating an exception raised inside the wrapper itself.
-     */
-    private static final String TOOL_ERROR_PREFIX = "Error executing tool: ";
 
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
@@ -263,12 +256,25 @@ public class McpCallsTask implements ILifecycleTask {
                     responseObjectName = callName + "Response";
                 }
 
-                // Try to parse as JSON, fallback to raw string
+                // Capped before it reaches memory, like an httpcall response. A result over
+                // the cap is stored as its truncated text (a cut JSON document no longer
+                // parses), so the stored object never exceeds the cap either.
                 Object responseObject;
-                try {
-                    responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
-                } catch (IOException e) {
-                    responseObject = toolResult;
+                int maxSize = mcpCall.effectiveMaxResponseSizeInBytes();
+                if (toolResult.length() > maxSize) {
+                    LOGGER.warnf("MCP call '%s' returned %d chars, more than its maxResponseSizeInBytes of %d — truncating before "
+                            + "storing it in memory.", callName, toolResult.length(), maxSize);
+                    // Never end on the first half of a surrogate pair: a lone surrogate is not
+                    // valid UTF-16 and does not survive the memory store's encoding.
+                    int end = Character.isHighSurrogate(toolResult.charAt(maxSize - 1)) ? maxSize - 1 : maxSize;
+                    responseObject = toolResult.substring(0, end);
+                } else {
+                    // Try to parse as JSON, fallback to raw string
+                    try {
+                        responseObject = jsonSerialization.deserialize(toolResult.trim(), Object.class);
+                    } catch (IOException e) {
+                        responseObject = toolResult;
+                    }
                 }
 
                 templateDataObjects.put(responseObjectName, responseObject);
@@ -314,8 +320,8 @@ public class McpCallsTask implements ILifecycleTask {
      * cost tracking) <em>without</em> losing the failure signal.
      * <p>
      * {@code executeToolWrapped} catches every exception and <em>returns</em> an
-     * {@code "Error executing tool: …"} string. Trusting its return value would
-     * make {@link RetryConfiguration#executeWithRetry} never retry, the
+     * {@code "Error: …"} string. Trusting its return value would make
+     * {@link RetryConfiguration#executeWithRetry} never retry, the
      * {@code <name>Error} memory entry never appear and {@code continueOnError}
      * never be consulted — a failed MCP call would be stored as a successful
      * response and {@code postResponse} would run with HTTP 200. So the executor's
@@ -363,7 +369,8 @@ public class McpCallsTask implements ILifecycleTask {
      */
     private static boolean isMeteringFailure(String wrappedResult, String toolName) {
         return wrappedResult != null
-                && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName) || wrappedResult.startsWith(TOOL_ERROR_PREFIX));
+                && (wrappedResult.equals(RATE_LIMIT_ERROR_PREFIX + toolName)
+                        || ToolExecutionService.isInternalFailure(wrappedResult, toolName));
     }
 
     /**
@@ -453,11 +460,7 @@ public class McpCallsTask implements ILifecycleTask {
 
     @Override
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
-        Object uriObj = configuration.get("uri");
-        if (isNullOrEmpty(uriObj)) {
-            throw new WorkflowConfigurationException("No resource URI has been defined for McpCalls!");
-        }
-        URI uri = URI.create(uriObj.toString());
+        URI uri = ResourceUris.require(configuration == null ? null : configuration.get("uri"), ID);
         try {
             McpCallsConfiguration config = resourceClientLibrary.getResource(uri, McpCallsConfiguration.class);
             // Findings I3/A10: settings the engine cannot honour (unimplemented

@@ -13,7 +13,7 @@ import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UnsavedChangesDialog, UnsavedChangesPrompt } from "@/components/ui/unsaved-changes-dialog";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { CompatibleVersionCheckbox } from "@/components/agents/compatible-version-checkbox";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 
@@ -178,7 +178,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
   // The dialog covers the four in-app exits of the sheet. Reloading or closing
   // the tab is a fifth (the browser asks), and navigating the PAGE away — a
   // sidebar link, Back — a sixth, held by the router's blocker (prompt below).
-  const unsavedGuard = useUnsavedChangesGuard(isDirty);
+  useUnsavedChangesGuard(isDirty);
 
   /**
    * Every exit runs through here.
@@ -732,7 +732,6 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
           "You have unsaved changes. Discard?",
         )}
       />
-      <UnsavedChangesPrompt guard={unsavedGuard} />
     </>
   );
 }

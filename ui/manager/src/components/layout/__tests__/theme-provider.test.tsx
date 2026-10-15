@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "@/components/layout/theme-provider";
 import { userEvent } from "@/test/test-utils";
 
@@ -118,5 +118,33 @@ describe("ThemeProvider", () => {
       </ThemeProvider>
     );
     expect(screen.getByTestId("child")).toBeInTheDocument();
+  });
+});
+
+describe("ThemeProvider — unavailable storage", () => {
+  it("still renders, and still switches theme, when localStorage throws", async () => {
+    const getSpy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const setSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    try {
+      function Probe() {
+        const { theme, setTheme } = useTheme();
+        return <button onClick={() => setTheme("dark")}>{theme}</button>;
+      }
+      render(
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-throws">
+          <Probe />
+        </ThemeProvider>,
+      );
+      const button = screen.getByRole("button", { name: "light" });
+      fireEvent.click(button);
+      expect(screen.getByRole("button", { name: "dark" })).toBeInTheDocument();
+    } finally {
+      getSpy.mockRestore();
+      setSpy.mockRestore();
+    }
   });
 });

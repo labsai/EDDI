@@ -129,7 +129,15 @@ class ToolLoopResumer {
 
         String conversationId = memory.getConversationId();
         String pauseEpoch = batch.getPauseEpoch();
+        // Seeded with what the turn already did before the pause, so one list is the
+        // turn's trace for everything downstream: the per-turn tool-call cap counts
+        // the calls made before the pause (it used to restart from zero here), and a
+        // continuation that pauses again freezes the whole turn, not just its own
+        // part, into the next batch.
         List<Map<String, Object>> trace = new ArrayList<>();
+        if (batch.getTraceSoFar() != null) {
+            trace.addAll(batch.getTraceSoFar());
+        }
 
         // Tool-cost baseline, snapshotted BEFORE the verdict loop below — that loop
         // runs every human-approved gated call through executeToolWrapped, which
@@ -337,24 +345,35 @@ class ToolLoopResumer {
         // rather than widening resumeToolLoop's signature for the primary knob, which
         // governs the initial pause.
         TokenUsage[] tokenHolder = new TokenUsage[1];
+        List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
-                jsonPolicy, null, null);
-
-        // ── Step 5: merge the pre-pause trace with the resume trace ──
-        List<Map<String, Object>> mergedTrace = new ArrayList<>();
-        if (batch.getTraceSoFar() != null) {
-            mergedTrace.addAll(batch.getTraceSoFar());
-        }
-        mergedTrace.addAll(trace);
+                jsonPolicy, finalTranscript, null);
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
             responseMetadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(tokenHolder[0]));
         }
         responseMetadata.put("toolCostUsd", toolLoopRunner.toolCostDelta(conversationId, toolCostBefore));
-        return new AgentOrchestrator.ExecutionResult(response, mergedTrace, responseMetadata);
+        return new AgentOrchestrator.ExecutionResult(response, trace, responseMetadata, List.of(), answeredFrom(finalTranscript));
+    }
+
+    /**
+     * What the model saw when it gave its final answer: the loop's final message
+     * list without that answer (a text-only assistant message at the end). Nothing
+     * here is replayed to a tool — it is only the request a same-model re-ask of
+     * the answer is built on.
+     */
+    static List<ChatMessage> answeredFrom(List<ChatMessage> finalTranscript) {
+        if (finalTranscript.isEmpty()) {
+            return List.of();
+        }
+        ChatMessage last = finalTranscript.get(finalTranscript.size() - 1);
+        if (last instanceof AiMessage ai && !ai.hasToolExecutionRequests()) {
+            return List.copyOf(finalTranscript.subList(0, finalTranscript.size() - 1));
+        }
+        return List.copyOf(finalTranscript);
     }
 
     /**

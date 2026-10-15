@@ -16,15 +16,24 @@ pipeline skips a page whose content hash is unchanged, and the hashes outlived t
 ### What changed
 
 - **Data and clients are kept apart.** In-memory stores live in their own registry in
-  `EmbeddingStoreFactory`, keyed by knowledge base id (its name, as every caller passes), with no
-  TTL, no size eviction and no reaction to secret or variable changes. External stores stay in the
-  evicting client cache, unchanged.
+  `EmbeddingStoreFactory`, with no TTL, no size eviction and no reaction to secret or variable
+  changes. The registry is keyed exactly as knowledge-base isolation (#945) addresses every other
+  store: the RAG configuration's id, plus the name for a knowledge base still in the 6.5.0 name
+  layout (`inMemoryKey`). Two knowledge bases with one name never share an in-memory store, and
+  deleting one cannot empty another. External stores stay in the evicting client cache, unchanged.
 - **An entry is dropped only when the knowledge base goes, or its vectors stop being valid:** the
   last version is deleted (`RestRagStore.deleteRag`, same "no current version left" rule as the
-  schedules); an update renames it, moves it to another `storeType`, or changes the embedding
-  provider/model/deployment (`RestRagStore.updateRag`); or a write arrives under a different
-  embedding configuration (`getOrCreateForIngestion`, the safety net for imports and other write
-  paths). Retrieval (`getOrCreate`) never replaces a store.
+  schedules); an update moves it to another key (a rename in the name layout, a switch to
+  `storeNamespace: "id"`), to another `storeType`, or changes its embedding signature
+  (`RestRagStore.updateRag`); or a write arrives under a different embedding signature
+  (`getOrCreateForIngestion`, the safety net for imports and other write paths). Retrieval and
+  removals (`getOrCreate`) never replace a store; `/ingest`, pipeline runs and scheduled runs write
+  through `getOrCreateForIngestion`.
+- **Embedding signature** (`embeddingSignature`): store type, provider, the model as
+  `EmbeddingParameters.modelName` resolves it (`model` and its alias `modelName` are one setting),
+  Azure `deploymentName`, the endpoint (`baseUrl`, or `endpoint`) and the vector size
+  (`dimensions`/`outputDimensionality`). The endpoint counts because an OpenAI-compatible server
+  decides for itself what a model name means; keys, timeouts, retries and task types do not.
 - **Store epoch.** Every in-memory store gets an epoch at creation. Ingestion records the store
   fingerprint (`store-epoch=<uuid>`) per source in a new `rag_ingestion_sources` collection/table
   (`IIngestionStateStore.storeFingerprint` / `recordStoreFingerprint`, removed by `purgeSource`).
@@ -40,7 +49,7 @@ pipeline skips a page whose content hash is unchanged, and the hashes outlived t
 
 ### Design decisions
 
-- **A new version with the same name and embedding configuration keeps the data.** Versions are
+- **A new version with the same store key and embedding signature keeps the data.** Versions are
   not part of the registry key: nothing else a version can change (chunking, retrieval settings,
   sources) invalidates stored vectors. A rotated embedding API key is not a new model.
 - **Only writes replace a store whose embedding configuration differs.** An agent still pinned to

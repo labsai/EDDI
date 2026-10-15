@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -49,6 +50,7 @@ public class RestRagStore implements IRestRagStore {
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
     private final RagSourceIngestionService sourceIngestionService;
     private final EmbeddingStoreFactory embeddingStoreFactory;
+    private final KnowledgeBaseStorageGuard storageGuard;
 
     @Inject
     public RestRagStore(IRagStore ragStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -59,6 +61,9 @@ public class RestRagStore implements IRestRagStore {
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.sourceIngestionService = sourceIngestionService;
         this.embeddingStoreFactory = embeddingStoreFactory;
+        // Built here from collaborators this class already has, rather than injected,
+        // so every way of constructing it applies the same storage rules.
+        this.storageGuard = new KnowledgeBaseStorageGuard(ragStore, documentDescriptorStore, resourceAccessGuard);
     }
 
     @Override
@@ -90,10 +95,11 @@ public class RestRagStore implements IRestRagStore {
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.
         RagConfiguration previous = readQuietly(id, version);
+        storageGuard.prepareUpdate(id, previous, ragConfiguration);
         Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
         releaseSupersededInMemoryStore(id, previous, ragConfiguration);
-        forgetIngestionStateOnRename(id, previous, ragConfiguration);
+        forgetIngestionStateOnMove(id, previous, ragConfiguration);
         // Before the schedules, and only once the write succeeded: a source that is
         // gone from the document must not leave its documents answering questions.
         discardRemovedSources(id, previous, ragConfiguration);
@@ -102,20 +108,21 @@ public class RestRagStore implements IRestRagStore {
     }
 
     /**
-     * Frees the in-memory vector store an update leaves behind — renamed, moved to
-     * another store type, or re-pointed at another embedding model. Its documents
+     * Frees the in-memory vector store an update leaves behind — moved to another
+     * key (a rename in the 6.5.0 name layout, a switch to {@code storeNamespace:
+     * "id"}), to another store type, or to another embedding model. Its documents
      * are unreachable or meaningless from now on, and an in-memory store is never
      * evicted on its own, so it would otherwise hold memory, and count against the
      * deployment's in-memory segment cap, until the next restart. An update that
-     * keeps the name and the embedding configuration keeps the data.
+     * keeps the store's key and the embedding configuration keeps the data.
      * <p>
-     * Unlike the persistent stores, nothing is lost that the rename rule below
+     * Unlike the persistent stores, nothing is lost that the move rule below
      * protects: an in-memory store does not survive a restart in any case, and the
      * sources re-embed into the store the knowledge base now addresses.
      */
     private void releaseSupersededInMemoryStore(String id, RagConfiguration previous, RagConfiguration updated) {
         try {
-            embeddingStoreFactory.dropSupersededInMemoryStore(previous, updated);
+            embeddingStoreFactory.dropSupersededInMemoryStore(id, previous, updated);
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Could not release the in-memory vector store knowledge base %s no longer uses",
                     LogSanitizer.sanitize(id));
@@ -123,33 +130,39 @@ public class RestRagStore implements IRestRagStore {
     }
 
     /**
-     * Forgets what each source has ingested when the knowledge base is renamed.
+     * Forgets what each source has ingested when an update moves the knowledge
+     * base's vectors to another location.
      *
      * <p>
-     * The vector store is addressed by the knowledge base's <em>name</em> while
-     * ingestion state is keyed by its id, so a rename moves retrieval to a new,
-     * empty namespace while every document still looks "unchanged" — runs keep
-     * reporting success and the agent retrieves nothing, for ever. Clearing the
-     * state makes the next run repopulate the new namespace.
+     * Ingestion state is keyed by the knowledge base's id, so a move — a 6.5.0
+     * name-layout knowledge base being renamed or switched to the per-id layout, a
+     * changed store type or explicit table — sends retrieval to a new, empty
+     * location while every document still looks "unchanged": runs keep reporting
+     * success and the agent retrieves nothing, for ever. Clearing the state makes
+     * the next run repopulate the new location. Renaming a knowledge base in the
+     * per-id layout does not move it, and keeps its state.
      *
      * <p>
-     * The chunks under the old name are left where they are: they are no longer
-     * reachable through this configuration, and deleting data on a rename is worse
-     * than leaving it. Purge the old knowledge base if it is not wanted.
+     * The chunks in the old location are left where they are: they are no longer
+     * reachable through this configuration, and deleting data on a save is worse
+     * than leaving it. Drop the old table or collection if it is not wanted.
      */
-    private void forgetIngestionStateOnRename(String id, RagConfiguration previous, RagConfiguration updated) {
-        if (previous == null || updated == null || previous.getName() == null
-                || previous.getName().equals(updated.getName())) {
+    private void forgetIngestionStateOnMove(String id, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null) {
+            return;
+        }
+        String before = KnowledgeBaseStorage.locationKey(id, previous);
+        String after = KnowledgeBaseStorage.locationKey(id, updated);
+        if (Objects.equals(before, after)) {
             return;
         }
         if (updated.getSources() == null || updated.getSources().isEmpty()) {
             return;
         }
-        LOGGER.warnf("Knowledge base %s was renamed from '%s' to '%s'. Its vector store is addressed by name, so "
-                + "ingestion state is being cleared and the next run of each source will re-ingest into the new "
-                + "store. Chunks stored under the old name are left untouched.",
-                LogSanitizer.sanitize(id), LogSanitizer.sanitize(previous.getName()),
-                LogSanitizer.sanitize(updated.getName()));
+        LOGGER.warnf("Knowledge base %s now stores its vectors somewhere else (it was renamed in the 6.5.0 name layout, "
+                + "switched layout, or its store changed), so ingestion state is being cleared and the next run of each "
+                + "source will re-ingest into the new location. Chunks in the old location are left untouched.",
+                LogSanitizer.sanitize(id));
         for (var source : updated.getSources()) {
             try {
                 // Not the run-claimed purge: a rename cannot wait for a run to end,
@@ -184,6 +197,7 @@ public class RestRagStore implements IRestRagStore {
     @Override
     public Response createRag(RagConfiguration ragConfiguration) {
         prepareForWrite(ragConfiguration);
+        storageGuard.prepareNew(ragConfiguration, true);
         Response response = restVersionInfo.create(ragConfiguration);
         syncIngestionSchedules(response, null, ragConfiguration, Set.of());
         return response;
@@ -481,7 +495,7 @@ public class RestRagStore implements IRestRagStore {
             // Same rule as the schedules: deleting an old version of a knowledge base
             // that is still live at a newer one must not empty its in-memory store.
             try {
-                embeddingStoreFactory.dropInMemoryStore(deleted);
+                embeddingStoreFactory.dropInMemoryStore(id, deleted);
             } catch (RuntimeException e) {
                 LOGGER.errorf(e, "Could not release the in-memory vector store of deleted knowledge base %s",
                         LogSanitizer.sanitize(id));
@@ -498,12 +512,16 @@ public class RestRagStore implements IRestRagStore {
         // document must not be refused just because the rules tightened after it was
         // stored.
         normalizeLegacyChunkStrategy(config);
-        // A copy must not inherit its original's ingestion identity. Vector stores are
-        // keyed by the knowledge base NAME, which a duplicate shares, so a copied
-        // source with the same id and cron would run against the original's documents
-        // — replacing and tombstoning them while the original's state still says
-        // "unchanged".
+        // A copy must not inherit its original's ingestion identity. When a copy could
+        // share the original's store (6.5.0 keyed stores by the NAME a duplicate
+        // inherits; an explicit table is copied too), a copied source with the same id
+        // and cron would run against the original's documents — replacing and
+        // tombstoning them while the original's state still says "unchanged".
         detachIngestionSources(config);
+        // A copy is a new knowledge base, so it gets a store of its own. A copy of a
+        // 6.5.0 name-layout knowledge base used to share the original's store
+        // through the name it inherits — and so read, and overwrite, its documents.
+        storageGuard.prepareNew(config, false);
         return restVersionInfo.create(config);
     }
 

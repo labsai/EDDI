@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.rag.model.EmbeddingParameters;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
@@ -16,6 +18,7 @@ import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.Ticker;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
 import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
@@ -34,6 +37,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -43,10 +47,8 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Map;
-import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -66,16 +68,20 @@ import java.util.regex.Pattern;
  * more.
  * <p>
  * An {@code in-memory} store <em>is</em> its data, so it is never in that
- * cache. It lives in a registry keyed by knowledge base id (the knowledge
- * base's name, which is what every caller passes) with no TTL, no size eviction
- * and no reaction to secret or variable changes — it holds no credential. Its
+ * cache. It lives in a registry with no TTL, no size eviction and no reaction
+ * to secret or variable changes — it holds no credential. The registry is keyed
+ * the way every other store is addressed ({@link #inMemoryKey}): by the RAG
+ * configuration's id, plus, for a knowledge base still in the 6.5.0 name
+ * layout, its name. So two knowledge bases never share an in-memory store,
+ * whatever their names, and deleting one cannot empty another. Its
  * {@code storeParameters} are not part of the key, because an in-memory store
  * has none that mean anything. An entry is dropped only when:
  * <ul>
  * <li>the knowledge base is deleted and no readable version is left
  * ({@link #dropInMemoryStore});</li>
- * <li>an update renames the knowledge base, moves it off {@code in-memory}, or
- * changes its {@linkplain #embeddingSignature embedding configuration} — the
+ * <li>an update moves it to another key — a rename in the name layout, a
+ * {@code storeNamespace} switch to {@code id} — moves it off {@code in-memory},
+ * or changes its {@linkplain #embeddingSignature embedding configuration}: the
  * old store is unreachable or its vectors are meaningless to the new
  * model;</li>
  * <li>a write arrives under a different embedding configuration than the one
@@ -83,7 +89,7 @@ import java.util.regex.Pattern;
  * for writes that did not come through the REST update (an import, a store
  * written directly). Retrieval never replaces a store.</li>
  * </ul>
- * A new version of a knowledge base with the same name and the same embedding
+ * A new version of a knowledge base with the same key and the same embedding
  * configuration keeps its data: versions are not part of the key, because the
  * vectors depend on nothing else a version can change (chunking settings only
  * shape what the next run writes).
@@ -103,9 +109,6 @@ public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
     private static final MongoDriverInformation DRIVER_INFO = MongoDriverInfoFactory.build();
-
-    private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
-    private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
 
     /** Ceiling on cached external-store clients across every knowledge base. */
     static final int MAX_STORES = 50;
@@ -277,22 +280,33 @@ public class EmbeddingStoreFactory {
 
     /**
      * Returns the embedding store to <em>read</em> from — retrieval, and removals —
-     * for the given configuration and knowledge base id.
+     * for a knowledge base.
+     * <p>
+     * The store is addressed by the RAG configuration's <em>id</em>, never by a
+     * name or by anything a request carries. Up to 6.5.0 this took a free-form
+     * {@code kbId} — the knowledge base's name, or whatever {@code ?kbId=} an
+     * ingestion request named — so two knowledge bases with one name shared a
+     * store, and an editor of one could write into another's by naming it. Where
+     * the vectors physically live is decided by {@link KnowledgeBaseStorage}.
      * <p>
      * For an in-memory knowledge base this never replaces an existing store, even
      * when the embedding configuration differs from {@code config}: only a write
      * decides that stored vectors are obsolete (see
      * {@link #getOrCreateForIngestion}).
+     *
+     * @param ragConfigId
+     *            the RAG configuration's id (the same for every version)
      */
-    public EmbeddingStore<TextSegment> getOrCreate(RagConfiguration config, String kbId) {
+    public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
         if (isInMemory(config)) {
-            return inMemoryStores.computeIfAbsent(kbId, id -> newInMemoryStore(config, id)).store();
+            return inMemoryStores.computeIfAbsent(inMemoryKey(ragConfigId, config), key -> newInMemoryStore(config, key)).store();
         }
         // Include storeParameters in cache key (different connection params = different
         // store)
         String paramsKey = config.getStoreParameters() != null ? new TreeMap<>(config.getStoreParameters()).toString() : "";
-        String cacheKey = config.getStoreType() + ":" + kbId + ":" + paramsKey;
-        return cache.get(cacheKey, k -> build(config, kbId));
+        String cacheKey = config.getStoreType() + ":" + ragConfigId + ":" + namespaceOf(config) + ":" + paramsKey;
+        return cache.get(cacheKey, k -> build(ragConfigId, config));
     }
 
     /**
@@ -301,11 +315,12 @@ public class EmbeddingStoreFactory {
      * it replaces a store built under a different embedding configuration: adding
      * another model's vectors to it would make every search over it meaningless.
      */
-    public EmbeddingStore<TextSegment> getOrCreateForIngestion(RagConfiguration config, String kbId) {
+    public EmbeddingStore<TextSegment> getOrCreateForIngestion(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
         if (isInMemory(config)) {
-            return inMemoryStoreForWrite(config, kbId).store();
+            return inMemoryStoreForWrite(ragConfigId, config).store();
         }
-        return getOrCreate(config, kbId);
+        return getOrCreate(ragConfigId, config);
     }
 
     /**
@@ -321,11 +336,12 @@ public class EmbeddingStoreFactory {
      *
      * @return the fingerprint, or {@code null} when there is nothing to compare
      */
-    public String ingestionFingerprint(RagConfiguration config, String kbId) {
+    public String ingestionFingerprint(String ragConfigId, RagConfiguration config) {
         if (!isInMemory(config)) {
             return null;
         }
-        return FINGERPRINT_EPOCH_PREFIX + inMemoryStoreForWrite(config, kbId).store().epoch();
+        requireId(ragConfigId);
+        return FINGERPRINT_EPOCH_PREFIX + inMemoryStoreForWrite(ragConfigId, config).store().epoch();
     }
 
     /**
@@ -333,11 +349,12 @@ public class EmbeddingStoreFactory {
      * creates and replaces nothing. When a write would start a fresh store it
      * returns {@link #FINGERPRINT_NO_STORE}, which no recorded fingerprint equals.
      */
-    public String previewIngestionFingerprint(RagConfiguration config, String kbId) {
+    public String previewIngestionFingerprint(String ragConfigId, RagConfiguration config) {
         if (!isInMemory(config)) {
             return null;
         }
-        InMemoryKnowledgeBase existing = inMemoryStores.get(kbId);
+        requireId(ragConfigId);
+        InMemoryKnowledgeBase existing = inMemoryStores.get(inMemoryKey(ragConfigId, config));
         if (existing == null || !existing.embeddingSignature().equals(embeddingSignature(config))) {
             return FINGERPRINT_NO_STORE;
         }
@@ -346,18 +363,21 @@ public class EmbeddingStoreFactory {
 
     /**
      * Forgets an in-memory knowledge base's store, and with it every document in it
-     * — for a knowledge base that was deleted, or that its old name or store type
-     * no longer reaches. Does nothing for a configuration that is not in-memory.
+     * — for a knowledge base that was deleted, or that an update moved away from
+     * this store. Addressed exactly as {@link #getOrCreate} addresses it, so it can
+     * only ever drop this knowledge base's own store. Does nothing for a
+     * configuration that is not in-memory.
      *
      * @return whether a store was dropped
      */
-    public boolean dropInMemoryStore(RagConfiguration config) {
-        if (config == null || !isInMemory(config) || config.getName() == null) {
+    public boolean dropInMemoryStore(String ragConfigId, RagConfiguration config) {
+        if (config == null || !isInMemory(config) || ragConfigId == null || ragConfigId.isBlank()) {
             return false;
         }
-        InMemoryKnowledgeBase dropped = inMemoryStores.remove(config.getName());
+        String key = inMemoryKey(ragConfigId, config);
+        InMemoryKnowledgeBase dropped = inMemoryStores.remove(key);
         if (dropped != null) {
-            LOGGER.infof("Dropped the in-memory vector store of knowledge base '%s' (%d segments)", sanitize(config.getName()),
+            LOGGER.infof("Dropped the in-memory vector store of knowledge base %s (%d segments)", sanitize(key),
                     dropped.store().size());
         }
         return dropped != null;
@@ -365,20 +385,21 @@ public class EmbeddingStoreFactory {
 
     /**
      * Drops the in-memory store of {@code previous} when an update leaves it
-     * behind: the knowledge base was renamed (the store is keyed by name), moved to
-     * another store type, or changed its embedding configuration (the vectors were
-     * made by another model). An update that changes none of these — a new version
-     * with other chunking, sources or retrieval settings — keeps the data.
+     * behind: the knowledge base moved to another key (a rename in the 6.5.0 name
+     * layout, a {@code storeNamespace} switch to {@code id}), to another store
+     * type, or to another embedding model. An update that changes none of these — a
+     * new version with other chunking, sources or retrieval settings, or a rename
+     * in the id layout — keeps the data.
      *
      * @return whether a store was dropped
      */
-    public boolean dropSupersededInMemoryStore(RagConfiguration previous, RagConfiguration updated) {
-        if (previous == null || updated == null || !isInMemory(previous)) {
+    public boolean dropSupersededInMemoryStore(String ragConfigId, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null || !isInMemory(previous) || ragConfigId == null || ragConfigId.isBlank()) {
             return false;
         }
-        boolean sameStore = Objects.equals(previous.getName(), updated.getName())
+        boolean sameStore = isInMemory(updated) && inMemoryKey(ragConfigId, previous).equals(inMemoryKey(ragConfigId, updated))
                 && embeddingSignature(previous).equals(embeddingSignature(updated));
-        return !sameStore && dropInMemoryStore(previous);
+        return !sameStore && dropInMemoryStore(ragConfigId, previous);
     }
 
     /** Segments held by every in-memory store together. */
@@ -391,45 +412,91 @@ public class EmbeddingStoreFactory {
     }
 
     /**
+     * The registry key of an in-memory store: the knowledge base's id and its
+     * namespace, exactly the parts {@link #getOrCreate} keys every other store type
+     * on (store parameters aside, which an in-memory store has none of). In the id
+     * layout that is the id alone; a knowledge base still in the 6.5.0 name layout
+     * adds its name, so a rename there moves it to a new, empty store — as it does
+     * for every external store type.
+     */
+    static String inMemoryKey(String ragConfigId, RagConfiguration config) {
+        return ragConfigId + ":" + namespaceOf(config);
+    }
+
+    private static String namespaceOf(RagConfiguration config) {
+        return KnowledgeBaseStorage.usesIdNamespace(config)
+                ? KnowledgeBaseStorage.NAMESPACE_ID
+                : KnowledgeBaseStorage.NAMESPACE_NAME + "=" + config.getName();
+    }
+
+    /**
      * The part of a knowledge base's configuration that decides whether vectors
-     * already stored are comparable with new ones: store type, embedding provider,
-     * and the parameters that pick the model ({@code model}, Azure's
-     * {@code deploymentName}). Credentials, endpoints and task types are left out —
-     * rotating a key does not change a vector.
+     * already stored are comparable with new ones:
+     * <ul>
+     * <li>the store type and the embedding provider;</li>
+     * <li>the model, as the embedding factory resolves it —
+     * {@link EmbeddingParameters#modelName}, so {@code model} and its alias
+     * {@code modelName} are one setting — and Azure's {@code deploymentName};</li>
+     * <li>the endpoint ({@code baseUrl}, or Vertex's and Azure's {@code endpoint}):
+     * an OpenAI-compatible server decides for itself what a model name means, so
+     * another endpoint is another model as far as the vectors are concerned;</li>
+     * <li>the output size ({@code dimensions}, Gemini's
+     * {@code outputDimensionality}): vectors of two sizes cannot be compared at
+     * all.</li>
+     * </ul>
+     * Credentials, timeouts, retries and task types are left out — rotating a key
+     * does not change a vector.
      * <p>
-     * Compared on the configured text: a {@code model} given as a global-variable
-     * reference is compared as the reference, so a change to the variable's value
-     * is not seen here.
+     * Compared on the configured text: a value given as a global-variable reference
+     * is compared as the reference, so a change to the variable's value is not seen
+     * here.
      */
     public static String embeddingSignature(RagConfiguration config) {
         Map<String, String> params = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
         String provider = config.getEmbeddingProvider() == null ? "" : config.getEmbeddingProvider().trim();
         return String.join("|", String.valueOf(config.getStoreType()), provider,
-                Objects.toString(params.get("model"), ""), Objects.toString(params.get("deploymentName"), ""));
+                EmbeddingParameters.modelName(params, ""),
+                trimmed(params.get("deploymentName")),
+                firstNonBlank(params.get("baseUrl"), params.get("endpoint")),
+                firstNonBlank(params.get("dimensions"), params.get("outputDimensionality")));
+    }
+
+    private static String trimmed(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return first != null && !first.isBlank() ? first.trim() : trimmed(second);
     }
 
     private static boolean isInMemory(RagConfiguration config) {
         return IN_MEMORY.equals(config.getStoreType());
     }
 
-    private InMemoryKnowledgeBase inMemoryStoreForWrite(RagConfiguration config, String kbId) {
+    private static void requireId(String ragConfigId) {
+        if (ragConfigId == null || ragConfigId.isBlank()) {
+            throw new IllegalArgumentException("An embedding store is addressed by its knowledge base's id, and none was given");
+        }
+    }
+
+    private InMemoryKnowledgeBase inMemoryStoreForWrite(String ragConfigId, RagConfiguration config) {
         String signature = embeddingSignature(config);
-        return inMemoryStores.compute(kbId, (id, existing) -> {
+        return inMemoryStores.compute(inMemoryKey(ragConfigId, config), (key, existing) -> {
             if (existing == null) {
-                return newInMemoryStore(config, id);
+                return newInMemoryStore(config, key);
             }
             if (existing.embeddingSignature().equals(signature)) {
                 return existing;
             }
-            LOGGER.warnf("Knowledge base '%s' is being written with a different embedding configuration; its in-memory "
+            LOGGER.warnf("Knowledge base %s is being written with a different embedding configuration; its in-memory "
                     + "vectors (%d segments) were made by another model and are discarded. Every source re-embeds on "
-                    + "its next run.", sanitize(id), existing.store().size());
-            return newInMemoryStore(config, id);
+                    + "its next run.", sanitize(key), existing.store().size());
+            return newInMemoryStore(config, key);
         });
     }
 
-    private InMemoryKnowledgeBase newInMemoryStore(RagConfiguration config, String kbId) {
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", IN_MEMORY, sanitize(kbId));
+    private InMemoryKnowledgeBase newInMemoryStore(RagConfiguration config, String key) {
+        LOGGER.infof("Building embedding store: type=%s, knowledgeBase=%s", IN_MEMORY, sanitize(key));
         CappedInMemoryEmbeddingStore.CapacityGuard guard = new CappedInMemoryEmbeddingStore.CapacityGuard() {
             @Override
             public Object lock() {
@@ -441,7 +508,7 @@ public class EmbeddingStoreFactory {
                 reserveInMemorySegments(knowledgeBaseId, incoming);
             }
         };
-        return new InMemoryKnowledgeBase(new CappedInMemoryEmbeddingStore(kbId, guard), embeddingSignature(config));
+        return new InMemoryKnowledgeBase(new CappedInMemoryEmbeddingStore(key, guard), embeddingSignature(config));
     }
 
     private void reserveInMemorySegments(String knowledgeBaseId, int incoming) {
@@ -451,7 +518,7 @@ public class EmbeddingStoreFactory {
         long held = inMemorySegmentCount();
         if (held + incoming > maxInMemorySegments) {
             throw new InMemoryStoreFullException(String.format(
-                    "Cannot store %d more segments in the in-memory vector store of knowledge base '%s': in-memory "
+                    "Cannot store %d more segments in the in-memory vector store of knowledge base %s: in-memory "
                             + "knowledge bases already hold %d of the %d segments this deployment allows (%s). Nothing "
                             + "was evicted to make room. Move large knowledge bases to a persistent store such as "
                             + "pgvector, delete in-memory knowledge bases that are no longer needed, or raise %s.",
@@ -461,20 +528,33 @@ public class EmbeddingStoreFactory {
     }
 
     /**
+     * The filter retrieval applies so a knowledge base only ever sees its own
+     * chunks, or {@code null} for a knowledge base in the 6.5.0 layout — whose
+     * chunks carry no id tag, see {@link KnowledgeBaseStorage#filtersRetrieval}.
+     */
+    public static Filter retrievalFilter(String ragConfigId, RagConfiguration config) {
+        if (!KnowledgeBaseStorage.filtersRetrieval(config)) {
+            return null;
+        }
+        return metadataKey(KnowledgeBaseStorage.METADATA_KB_ID).isEqualTo(KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+    }
+
+    /**
      * Builds an external store's client. Package-private so a test can stand in for
      * it: an external client may open sockets as it is built, which a unit test of
      * the cache around it does not need.
      */
-    EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
+    EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config) {
         String storeType = config.getStoreType();
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", sanitize(storeType), sanitize(kbId));
+        LOGGER.infof("Building embedding store: type=%s, knowledgeBase=%s, namespace=%s", sanitize(storeType), sanitize(ragConfigId),
+                KnowledgeBaseStorage.usesIdNamespace(config) ? KnowledgeBaseStorage.NAMESPACE_ID : KnowledgeBaseStorage.NAMESPACE_NAME);
 
         return switch (storeType) {
-            case "pgvector" -> buildPgVector(config, kbId);
-            case "mongodb-atlas" -> buildMongoDbAtlas(config, kbId);
-            case "elasticsearch" -> buildElasticsearch(config, kbId);
-            case "qdrant" -> buildQdrant(config, kbId);
-            case "chroma" -> buildChroma(config, kbId);
+            case "pgvector" -> buildPgVector(config, ragConfigId);
+            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId);
+            case "elasticsearch" -> buildElasticsearch(config, ragConfigId);
+            case "qdrant" -> buildQdrant(config, ragConfigId);
+            case "chroma" -> buildChroma(config, ragConfigId);
             default -> throw new IllegalArgumentException(
                     "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
@@ -496,12 +576,13 @@ public class EmbeddingStoreFactory {
      * <li>{@code user} — database user (default: "eddi")</li>
      * <li>{@code password} — database password, supports {@code ${vault:...}}
      * (required)</li>
-     * <li>{@code table} — table name (default: auto-generated from kbId)</li>
+     * <li>{@code table} — table name (default: derived per knowledge base, see
+     * KnowledgeBaseStorage)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
      * text-embedding-3-small)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
@@ -512,8 +593,7 @@ public class EmbeddingStoreFactory {
         String password = requireParam(params, "password", "pgvector");
         int dimension = parseIntParam(params, "dimension", 1536);
 
-        // Table name: use explicit param, or derive a safe name from kbId
-        String table = params.getOrDefault("table", sanitizeTableName(kbId));
+        String table = physicalName(params, "table", ragConfigId, config);
 
         LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
                 sanitize(table), dimension);
@@ -535,17 +615,17 @@ public class EmbeddingStoreFactory {
      * {@code ${vault:...}})</li>
      * <li>{@code databaseName} — database name (default: "eddi")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * <li>{@code indexName} — Atlas Search index name (default:
      * "vector_index")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String connectionString = requireParam(params, "connectionString", "mongodb-atlas");
         String databaseName = params.getOrDefault("databaseName", "eddi");
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId);
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         String indexName = params.getOrDefault("indexName", "vector_index");
 
         LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
@@ -576,17 +656,18 @@ public class EmbeddingStoreFactory {
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
      * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
-     * <li>{@code indexName} — index name (default: auto-generated from kbId)</li>
+     * <li>{@code indexName} — index name (default: derived per knowledge base, see
+     * KnowledgeBaseStorage)</li>
      * </ul>
      */
     @SuppressWarnings("removal") // serverUrl/apiKey/userName/password deprecated in favor of
                                  // restClient(RestClient), but usable without direct ES REST client dependency
-    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
         UrlValidationUtils.rejectCloudMetadataTarget(serverUrl);
-        String indexName = params.getOrDefault("indexName", "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_"));
+        String indexName = physicalName(params, "indexName", ragConfigId, config);
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
 
@@ -615,19 +696,19 @@ public class EmbeddingStoreFactory {
      * <li>{@code host} — Qdrant host (default: "localhost")</li>
      * <li>{@code port} — Qdrant gRPC port (default: 6334)</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * <li>{@code apiKey} — Qdrant API key (optional, supports
      * {@code ${vault:...}})</li>
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
         guardMetadataHost(host);
         int port = parseIntParam(params, "port", 6334);
-        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
         LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
@@ -655,17 +736,17 @@ public class EmbeddingStoreFactory {
      * <li>{@code tenantName} — tenant name (default: "default_tenant")</li>
      * <li>{@code databaseName} — database name (default: "default_database")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
-     * kbId)</li>
+     * the knowledge base, see KnowledgeBaseStorage)</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
         UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
         String tenantName = params.getOrDefault("tenantName", "default_tenant");
         String databaseName = params.getOrDefault("databaseName", "default_database");
-        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+        String collectionName = physicalName(params, "collectionName", ragConfigId, config);
 
         ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
 
@@ -761,16 +842,43 @@ public class EmbeddingStoreFactory {
         }
     }
 
+    /**
+     * The 6.5.0 Qdrant/Chroma collection name — see {@link KnowledgeBaseStorage}.
+     */
     static String sanitizeCollection(String kbId) {
-        String name = "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
-        // A scan from the end, not the "_+$" regex it replaces: an unanchored-start
-        // "_+$" retries at every underscore, quadratic on a name that is a long run of
-        // them (CodeQL java/polynomial-redos), and the name is operator input.
-        int end = name.length();
-        while (end > 0 && name.charAt(end - 1) == '_') {
-            end--;
+        return KnowledgeBaseStorage.legacyCollectionName(kbId);
+    }
+
+    /**
+     * The physical location: the explicit storeParameters value (after variable and
+     * vault resolution) when there is one, otherwise the knowledge base's default
+     * from {@link KnowledgeBaseStorage#defaultPhysicalName}.
+     * <p>
+     * The location must be literal here too, not only when it is saved. A
+     * configuration stored before the save-time rule can still carry a
+     * {@code ${vars:...}} reference, and global variables are editable by any
+     * editor, without EDIT on the knowledge bases that use them: re-pointing one at
+     * another knowledge base's table — reserved name or not — would make this
+     * knowledge base read (and, unfiltered in the 6.5.0 layout, answer from) that
+     * one's chunks. So a reference is refused outright rather than judged by what
+     * it currently resolves to, and the knowledge base has to be saved once with
+     * the name written out. A pgvector table must also be a plain identifier: the
+     * store puts it into SQL unquoted. A literal reserved name stored before the
+     * save-time rule existed is left alone.
+     */
+    static String physicalName(Map<String, String> resolvedParams, String key, String ragConfigId, RagConfiguration config) {
+        String raw = config.getStoreParameters() == null ? null : config.getStoreParameters().get(key);
+        if (raw != null && raw.contains("${")) {
+            throw new IllegalArgumentException("storeParameters." + key + " is a ${...} reference. The location decides whose documents "
+                    + "this knowledge base reads, so it must be written out: save the knowledge base with the literal name");
         }
-        return name.substring(0, end);
+        String explicit = resolvedParams.get(key);
+        String name = explicit != null && !explicit.isBlank() ? explicit : KnowledgeBaseStorage.defaultPhysicalName(ragConfigId, config);
+        if ("pgvector".equals(config.getStoreType()) && !KnowledgeBaseStorage.isPlainPgIdentifier(name)) {
+            throw new IllegalArgumentException("pgvector storeParameters." + key + " must be a plain table name, optionally "
+                    + "qualified with a schema; it is put into SQL as it is");
+        }
+        return name;
     }
 
     /**
@@ -789,19 +897,9 @@ public class EmbeddingStoreFactory {
         UrlValidationUtils.rejectCloudMetadataTarget("http://" + authority);
     }
 
-    /**
-     * Converts a knowledge base ID into a safe PostgreSQL table name. Replaces
-     * non-alphanumeric characters with underscores, lowercases, prefixes with
-     * {@code eddi_kb_}, and truncates to the PostgreSQL identifier limit (63
-     * chars).
-     */
+    /** The 6.5.0 pgvector table name — see {@link KnowledgeBaseStorage}. */
     static String sanitizeTableName(String kbId) {
-        String sanitized = UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
-        String result = "eddi_kb_" + sanitized;
-        if (result.length() > MAX_PG_IDENTIFIER_LENGTH) {
-            result = result.substring(0, MAX_PG_IDENTIFIER_LENGTH);
-        }
-        return result;
+        return KnowledgeBaseStorage.legacyTableName(kbId);
     }
 
     /**
