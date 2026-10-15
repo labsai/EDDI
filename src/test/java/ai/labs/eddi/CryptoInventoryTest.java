@@ -87,7 +87,13 @@ class CryptoInventoryTest {
 
     private static final Pattern STRING_LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
 
-    private static final Pattern IDENTIFIER = Pattern.compile("(?:[A-Za-z_][A-Za-z0-9_]*\\.)*([A-Za-z_][A-Za-z0-9_]*)");
+    /**
+     * A bare identifier only. A qualified reference such as {@code Other.ALGO}
+     * names a constant in another class, which this file's constants cannot
+     * resolve; looking up its last segment here could pick up an unrelated
+     * same-named constant, so it is reported as unresolvable instead.
+     */
+    private static final Pattern IDENTIFIER = Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)");
 
     /** One resolved use: engine class, algorithm, and where it is. */
     record Use(String engine, String algorithm, String location) {
