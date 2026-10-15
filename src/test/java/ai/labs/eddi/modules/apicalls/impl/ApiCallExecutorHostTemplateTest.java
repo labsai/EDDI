@@ -267,7 +267,9 @@ class ApiCallExecutorHostTemplateTest {
 
         executor(true, " 127.0.0.1:7070 ").execute(call("/v1"), memory, data("x", "x"), "http://127.0.0.1:7070");
         executor(true, "LOCALHOST").execute(call("/v1"), memory, data("x", "x"), "http://localhost:8080");
-        verify(httpClient, times(2)).newRequest(any(), any());
+        // No port in the URL: the scheme's default is what an entry is matched against.
+        executor(true, "127.0.0.1:80").execute(call("/v1"), memory, data("x", "x"), "http://127.0.0.1");
+        verify(httpClient, times(3)).newRequest(any(), any());
     }
 
     @Test

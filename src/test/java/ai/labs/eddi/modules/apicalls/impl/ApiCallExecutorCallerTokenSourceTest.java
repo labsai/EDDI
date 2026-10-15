@@ -129,9 +129,12 @@ class ApiCallExecutorCallerTokenSourceTest {
     @Test
     @DisplayName("a ${caller:token} written in the header itself is resolved as before")
     void tokenWrittenInTheHeaderIsResolved() throws Exception {
+        when(callerIdentityResolver.resolveValue(eq("Bearer ${caller:token}"), any())).thenReturn("Bearer caller-token-value");
+
         executor.execute(callWithAuthorization("Bearer ${caller:token}"), memory, new HashMap<>(), "http://127.0.0.1:7070");
 
-        verify(callerIdentityResolver).resolveValue(eq("Bearer ${caller:token}"), any());
+        // The resolved token is what goes on the wire, not the literal reference.
+        verify(request).setHttpHeader("Authorization", "Bearer caller-token-value");
         verify(request).send();
     }
 

@@ -1722,7 +1722,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return false;
         }
         String host = target.getHost().toLowerCase(Locale.ROOT);
-        return ssrfAllowedHosts.contains(host) || (target.getPort() >= 0 && ssrfAllowedHosts.contains(host + ":" + target.getPort()));
+        // A URL without a port uses its scheme's default, so "host:443" matches
+        // https://host as well as https://host:443.
+        int port = target.getPort() >= 0
+                ? target.getPort()
+                : "https".equalsIgnoreCase(target.getScheme()) ? 443 : "http".equalsIgnoreCase(target.getScheme()) ? 80 : -1;
+        return ssrfAllowedHosts.contains(host) || (port >= 0 && ssrfAllowedHosts.contains(host + ":" + port));
     }
 
     /**
