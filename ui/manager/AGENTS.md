@@ -278,6 +278,32 @@ what it finds. Off by default. Worth knowing before touching it:
   its body media type**; the two lists (`SUPPORTED_BODY_MEDIA_TYPES` in
   `operator.ts`, `isSupportedBodyType` in the builder) must stay in step. An
   older backend that does not report the field is covered by the pre-flight.
+- **Multi-step changes cost two approvals, not one per step.** Two levers, both
+  stated to the operator by `buildBatchingSection` in `system-prompt.ts` (a
+  clearly delimited block — keep it that way): (1) it lists the WHOLE plan before
+  the first gated call — after a look/check/verify request the plan is a
+  *proposal* and it waits for agreement (the "check/look/verify is read-only"
+  rule); for a change asked for outright it states the plan and makes the first
+  call in the same turn, because the approval pause is the confirmation — then
+  issues independent writes as **parallel tool calls in one turn** — the backend
+  gate classifies a whole model message as one batch and pauses it once
+  (`docs/hitl.md` → "Batching"), and `approval-banner.tsx` already decides it call
+  by call (`requireExplicitPerCall`); (2) it lands an edit with ONE
+  `POST /agentstore/agents/{id}/cascade` (`cascadeAgentChanges`) instead of
+  separate workflow-repoint, agent-repoint and deploy calls. A call whose
+  arguments need an earlier call's *result* (a version number) cannot be batched
+  with it — approval binds to the exact resolved request ("request pinning"). The
+  cascade is in `WRITE_ENDPOINTS` because its body is URI pairs only, so it cannot
+  carry `hitlConfig`; aimed at the operator's own agent it is the same
+  self-ungating hinge as `updateResourceUri`, and `self-guard.ts` covers it for
+  the same reason (the agent id is a path segment). `cascade-preview.ts` /
+  `cascade-summary.tsx` render a gated cascade as `llm <id> v1 → v2` plus
+  "will redeploy to <env>"; the raw body stays below it. Knowledge-base binding:
+  batch 1 = the LLM config edit as a credential-safe PATCH plus the workflow write that
+  adds the RAG step as `PUT /workflowstore/workflows/{id}` (the workflow store has no
+  PATCH and a workflow holds no credential references), issued in parallel; batch 2 = one
+  cascade carrying both new versions plus the redeploy. The batching block names no write
+  method; it defers to the editing rules, so it stays right whichever method they teach.
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.

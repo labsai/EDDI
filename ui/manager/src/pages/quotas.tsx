@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useId } from "react";
+import { useState, useCallback, useEffect, useId, useRef } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -409,8 +409,16 @@ function QuotaField({
   // The input edits its own text so an empty field stays empty and a lone "-"
   // can be typed on the way to "-1"; the number is derived from it.
   const [text, setText] = useState(() => String(value));
+  // The value the text last agreed with. React runs a passive effect lazily, so
+  // the effect of the FIRST commit can fire after the user has already started
+  // typing; with the mount value still in its closure it overwrote a field the
+  // user had just cleared (so "999" came out as "-1999" under load). Comparing
+  // against what was last synced makes a run that brings nothing new a no-op.
+  const syncedValue = useRef(value);
   // Follow the server value (load, save) unless the text already means it.
   useEffect(() => {
+    if (syncedValue.current === value) return;
+    syncedValue.current = value;
     setText((prev) => (parseQuotaLimit(prev, { integer }) === value ? prev : String(value)));
   }, [value, integer]);
   // A number input reports half-typed text ("-", "1e") as "" with

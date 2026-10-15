@@ -141,13 +141,24 @@ export async function drainToasts() {
       await vi.advanceTimersByTimeAsync(1_000);
     });
   }
+  // Dismiss again on every poll while a toast is still there. One dismissal only
+  // reaches the toasts sonner holds at that moment: a toast an in-flight request
+  // creates a beat later (an error toast from a mutation that settled while the
+  // drain ran) is not covered by it and would sit in the DOM for its whole
+  // duration, which tests may set to ten minutes. The budget is wall-clock time
+  // on a runner that may be running several suites at once, where the 200 ms
+  // removal timer can be starved for seconds; a toast that outlives it is still
+  // reported.
   await waitFor(
     () => {
       if (document.querySelector(TOAST)) {
+        act(() => {
+          toast.dismiss();
+        });
         throw new Error("a sonner toast is still in the DOM after toast.dismiss()");
       }
     },
-    { timeout: 3_000 },
+    { timeout: 8_000 }, // under vitest's 10 s hook timeout
   );
   // The DOM goes before React runs the unmounted toasts' passive-effect
   // cleanups, and one of those clears the auto-dismiss timer that dismissing

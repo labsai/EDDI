@@ -4,56 +4,105 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.output.IRestOutputStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.DisplayName;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Nested;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.Mock;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.ArrayList;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.HashMap;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.LinkedHashMap;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.Map;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.MockitoAnnotations.openMocks;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.io.IOException;
 
 /**
@@ -114,7 +163,7 @@ class McpAdminToolsSwitchCoverageTest {
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
-                identity, false);
+                identity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
 
         // Wire up all store mocks through restInterfaceFactory
         doReturn(ruleSetStore).when(restInterfaceFactory).get(IRestRuleSetStore.class);
@@ -1043,7 +1092,8 @@ class McpAdminToolsSwitchCoverageTest {
         @DisplayName("agent not found → error")
         void agentNotFound() throws Exception {
             when(jsonSerialization.deserialize(anyString(), eq(List.class)))
-                    .thenReturn(List.of(Map.of("oldUri", "old", "newUri", "new")));
+                    .thenReturn(List.of(Map.of("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1", "newUri",
+                            "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2")));
             when(restAgentStore.readAgent("agent1", 1)).thenReturn(null);
             String result = tools.applyAgentChanges("agent1", 1, "[{}]", null, null, null);
             assertTrue(result.contains("error"));
@@ -1103,11 +1153,11 @@ class McpAdminToolsSwitchCoverageTest {
             when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
 
             Response wfResp = mock(Response.class);
-            doReturn((String) null).when(wfResp).getHeaderString("Location");
+            doReturn("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2").when(wfResp).getHeaderString("Location");
             when(workflowStore.updateWorkflow(eq("wf1"), eq(1), any())).thenReturn(wfResp);
 
             Response agentResp = mock(Response.class);
-            doReturn((String) null).when(agentResp).getHeaderString("Location");
+            doReturn("/agentstore/agents/agent1?version=2").when(agentResp).getHeaderString("Location");
             when(restAgentStore.updateAgent(eq("agent1"), eq(1), any(), any())).thenReturn(agentResp);
 
             Response deployResp = mock(Response.class);
@@ -1159,8 +1209,8 @@ class McpAdminToolsSwitchCoverageTest {
         @DisplayName("workflow config null → keep URI as-is")
         void workflowConfigNull() throws Exception {
             var mapping = new HashMap<String, String>();
-            mapping.put("oldUri", "old");
-            mapping.put("newUri", "new");
+            mapping.put("oldUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=1");
+            mapping.put("newUri", "eddi://ai.labs.rules/rulestore/rulesets/rs1?version=2");
             when(jsonSerialization.deserialize(anyString(), eq(List.class))).thenReturn(List.of(mapping));
 
             var agent = new AgentConfiguration();

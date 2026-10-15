@@ -4,35 +4,63 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.DisplayName;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Nested;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.Mock;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.ArrayList;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.BadRequestException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.MockitoAnnotations.openMocks;
 
 /**
@@ -69,7 +97,7 @@ class RestAgentStoreExtendedTest {
         openMocks(this);
         restAgentStore = new RestAgentStore(agentStore, restWorkflowStore,
                 documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService, deploymentStore,
-                permissiveGuard(), mock(AgentSigningService.class), mock(IAgentFactory.class), "default");
+                permissiveGuard(), mock(AgentSigningService.class), mock(IAgentFactory.class), "default", mock(AgentCascadeService.class));
         // The Agent is live at v1. A cascade only runs against the CURRENT version —
         // it tears workflows and schedules down before the delete's own version check.
         when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(createResourceId(AGENT_ID, 1));

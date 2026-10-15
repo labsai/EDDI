@@ -157,8 +157,9 @@ describe("QuotasPage", () => {
     await user.clear(input);
     await user.type(input, "999");
 
-    expect(screen.getByTestId("quotas-dirty-indicator")).toBeInTheDocument();
-    expect(screen.getByTestId("quotas-save")).toBeEnabled();
+    expect(await screen.findByTestId("quotas-dirty-indicator")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeEnabled());
+    expect(input).toHaveValue(999);
   });
 
   it("toggles enforcement off and shows disabled banner", async () => {
@@ -172,9 +173,9 @@ describe("QuotasPage", () => {
     // Mock has enabled: true, toggling should show "Disabled"
     await user.click(screen.getByTestId("quotas-toggle-enabled"));
 
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
     // The disabled banner should now appear
-    expect(screen.getByTestId("quotas-disabled-banner")).toBeInTheDocument();
+    expect(await screen.findByTestId("quotas-disabled-banner")).toBeInTheDocument();
   });
 
   it("saves quota changes via PUT", async () => {
@@ -211,7 +212,7 @@ describe("QuotasPage", () => {
     renderQuotas();
     const input = await screen.findByTestId("quota-max-conversations");
     await user.clear(input);
-    expect(input).toHaveValue(null); // stays empty while editing
+    await waitFor(() => expect(input).toHaveValue(null)); // stays empty while editing
     await user.click(screen.getByTestId("quotas-save"));
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.maxConversationsPerDay).toBe(-1);
@@ -221,20 +222,22 @@ describe("QuotasPage", () => {
     const user = userEvent.setup();
     renderQuotas();
     const input = await screen.findByTestId("quota-max-conversations");
+    // Every assertion follows a state update the page makes after the keystroke,
+    // so each one waits for it instead of reading the DOM on the same tick.
     await user.clear(input);
     await user.type(input, "-5");
-    expect(screen.getByTestId("quota-max-conversations-invalid")).toBeInTheDocument();
-    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByTestId("quota-max-conversations-invalid")).toBeInTheDocument();
+    await waitFor(() => expect(input).toHaveAttribute("aria-invalid", "true"));
     expect(screen.getByTestId("quotas-save")).toBeDisabled();
 
     await user.clear(input);
     await user.type(input, "2.5");
-    expect(screen.getByTestId("quota-max-conversations-invalid")).toBeInTheDocument();
+    expect(await screen.findByTestId("quota-max-conversations-invalid")).toBeInTheDocument();
 
     await user.clear(input);
     await user.type(input, "7");
-    expect(screen.queryByTestId("quota-max-conversations-invalid")).not.toBeInTheDocument();
-    expect(screen.getByTestId("quotas-save")).toBeEnabled();
+    await waitFor(() => expect(screen.queryByTestId("quota-max-conversations-invalid")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeEnabled());
   });
 
   it("ties each limit's label to its input", async () => {
