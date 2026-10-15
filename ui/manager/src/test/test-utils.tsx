@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import type { ReactElement } from "react";
+import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
 
 export function createTestQueryClient() {
   return new QueryClient({
@@ -29,6 +30,9 @@ export function renderWithProviders(
         <QueryClientProvider client={queryClient}>
           <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
             {children}
+            {/* Every deploy flow asks its vault-grant question through this one
+                host, as the app does beside its toaster. */}
+            <GrantRequiredDialogHost />
           </ThemeProvider>
         </QueryClientProvider>
       </MemoryRouter>
@@ -70,6 +74,7 @@ export function renderPage(
             <Routes>
               <Route path={routePattern ?? path} element={element} />
             </Routes>
+            <GrantRequiredDialogHost />
           </ThemeProvider>
         </QueryClientProvider>
       </MemoryRouter>

@@ -1,53 +1,189 @@
 {{- if .Values.nats.enabled }}
+{{- $fullname := include "eddi.fullname" . }}
+{{- $replicas := int .Values.nats.replicas }}
+{{- $clusterOn := and .Values.nats.cluster.enabled (gt $replicas 1) }}
+{{- if and .Values.nats.tls.enabled (not .Values.nats.tls.secretName) }}
+{{- fail "nats.tls.enabled=true needs nats.tls.secretName: a kubernetes.io/tls Secret with tls.crt, tls.key and ca.crt." }}
+{{- end }}
+{{- /*
+  nats.conf, rendered into a Secret because it carries the EDDI user's
+  password. The `eddi` user may only touch EDDI's own subjects: its events, RPC
+  and dead letters (eddi.>), the JetStream API (including acks and the flow
+  control of ordered consumers), KV buckets and reply inboxes.
+*/}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fullname }}-nats-config
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: messaging
+type: Opaque
+stringData:
+  nats.conf: |
+    server_name: $POD_NAME
+    port: 4222
+    http_port: 8222
+    jetstream {
+      store_dir: /data
+      max_file_store: {{ .Values.nats.storage.size | replace "Gi" "G" | replace "Mi" "M" }}
+    }
+    {{- if .Values.nats.auth.enabled }}
+    authorization {
+      users: [
+        {
+          user: {{ .Values.nats.auth.username | quote }}
+          password: {{ required "nats.auth.password is required when nats.enabled=true and nats.auth.enabled=true. Generate one: openssl rand -base64 24" .Values.nats.auth.password | quote }}
+          permissions: {
+            publish: ["eddi.>", "$JS.API.>", "$KV.*.>", "$O.*.>", "$JS.ACK.>", "$JS.FC.>", "_INBOX.>"]
+            subscribe: ["eddi.>", "$JS.API.>", "$KV.*.>", "_INBOX.>"]
+          }
+        }
+      ]
+    }
+    {{- end }}
+    {{- if .Values.nats.tls.enabled }}
+    tls {
+      cert_file: /etc/nats-tls/tls.crt
+      key_file: /etc/nats-tls/tls.key
+      ca_file: /etc/nats-tls/ca.crt
+    }
+    {{- end }}
+    {{- if $clusterOn }}
+    {{- $routeUser := .Values.nats.cluster.routeUsername | default "route" }}
+    {{- $routePassword := required "nats.cluster.routePassword is required when the in-chart NATS runs more than one node: routes authenticate separately from clients. Generate one: openssl rand -hex 24" .Values.nats.cluster.routePassword }}
+    cluster {
+      name: eddi
+      port: 6222
+      # Routes authenticate on their own: client authorization does not cover them.
+      authorization {
+        user: {{ $routeUser | quote }}
+        password: {{ $routePassword | quote }}
+        timeout: 2
+      }
+      {{- if .Values.nats.tls.enabled }}
+      tls {
+        cert_file: /etc/nats-tls/tls.crt
+        key_file: /etc/nats-tls/tls.key
+        ca_file: /etc/nats-tls/ca.crt
+      }
+      {{- end }}
+      routes: [
+        {{- range $i := until $replicas }}
+        nats://{{ $routeUser | urlquery }}:{{ $routePassword | urlquery }}@{{ $fullname }}-nats-{{ $i }}.{{ $fullname }}-nats:6222
+        {{- end }}
+      ]
+    }
+    {{- end }}
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "eddi.fullname" . }}-nats
+  name: {{ $fullname }}-nats
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
     app.kubernetes.io/component: messaging
 spec:
-  serviceName: {{ include "eddi.fullname" . }}-nats
-  replicas: 1
+  serviceName: {{ $fullname }}-nats
+  replicas: {{ $replicas }}
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "eddi.fullname" . }}-nats
+      app.kubernetes.io/name: {{ $fullname }}-nats
       app.kubernetes.io/component: messaging
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "eddi.fullname" . }}-nats
+        app.kubernetes.io/name: {{ $fullname }}-nats
         app.kubernetes.io/component: messaging
         app.kubernetes.io/part-of: eddi
+      annotations:
+        checksum/config: {{ .Values.nats | toJson | sha256sum }}
     spec:
       # NATS never talks to the Kubernetes API.
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ $fullname }}-nats
+                    app.kubernetes.io/component: messaging
       containers:
         - name: nats
           image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}"
-          command: ["nats-server", "--jetstream", "--store_dir=/data", "-m", "8222"]
+          args: ["--config", "/etc/nats/nats.conf"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           ports:
             - containerPort: 4222
               name: client
+            - containerPort: 6222
+              name: cluster
             - containerPort: 8222
               name: monitoring
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: nats-data
               mountPath: /data
+            - name: nats-config
+              mountPath: /etc/nats
+              readOnly: true
+            {{- if .Values.nats.tls.enabled }}
+            - name: nats-tls
+              mountPath: /etc/nats-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.nats.resources | nindent 12 }}
-          livenessProbe:
+          # Strict at start-up only. A rolling update restarts one NATS node at a time
+          # and must not touch the next until the restarted one has caught up its R3
+          # streams: readiness waits for that (js-server-only), and liveness only
+          # checks that JetStream is enabled, so a node that is still catching up is
+          # never killed for it.
+          startupProbe:
             httpGet:
               path: /healthz
               port: monitoring
-            initialDelaySeconds: 5
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /healthz?js-enabled-only=true
+              port: monitoring
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /healthz?js-server-only=true
               port: monitoring
-            initialDelaySeconds: 3
             periodSeconds: 10
+      volumes:
+        - name: nats-config
+          secret:
+            secretName: {{ $fullname }}-nats-config
+            defaultMode: 0440
+        {{- if .Values.nats.tls.enabled }}
+        - name: nats-tls
+          secret:
+            secretName: {{ .Values.nats.tls.secretName }}
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: nats-data
@@ -60,21 +196,43 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "eddi.fullname" . }}-nats
+  name: {{ $fullname }}-nats
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
     app.kubernetes.io/component: messaging
 spec:
   type: ClusterIP
   clusterIP: None
+  # Routes must resolve before a peer is ready, or the cluster never forms.
+  publishNotReadyAddresses: true
   selector:
-    app.kubernetes.io/name: {{ include "eddi.fullname" . }}-nats
+    app.kubernetes.io/name: {{ $fullname }}-nats
     app.kubernetes.io/component: messaging
   ports:
     - name: client
       port: 4222
       targetPort: client
+    - name: cluster
+      port: 6222
+      targetPort: cluster
     - name: monitoring
       port: 8222
       targetPort: monitoring
+{{- if gt $replicas 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: messaging
+spec:
+  # One NATS node at a time: R3 streams keep quorum with two.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $fullname }}-nats
+      app.kubernetes.io/component: messaging
+{{- end }}
 {{- end }}

@@ -10,12 +10,17 @@ import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
@@ -125,4 +130,17 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
             + "Probes an MCP server that requires no authentication. A credential query parameter is rejected.")
     Response discoverToolsUnauthenticated(@QueryParam("url") String url, @QueryParam("transport")
     @DefaultValue("http") String transport, @Context UriInfo uriInfo);
+
+    @PATCH
+    @Path("/{id}")
+    @Consumes(ConfigJsonPatcher.JSON_PATCH_MEDIA_TYPE)
+    @Operation(operationId = "patchMcpCalls",
+               description = "Partially update the config with an RFC 6902 JSON Patch (Content-Type application/json-patch+json): applied to version N, validated exactly as PUT, stored as a new version returned in Location. 409 if N is not the current version, 400 for a failed test operation, a path that does not resolve, or a patched document the model rejects. Send only what changes — a patch never needs to carry a credential reference, so prefer it to PUT for any config that holds one.")
+    @RequestBody(required = true,
+                 content = @Content(mediaType = ConfigJsonPatcher.JSON_PATCH_MEDIA_TYPE,
+                                    schema = @Schema(type = SchemaType.ARRAY,
+                                                     example = "[{\"op\":\"replace\",\"path\":\"/name\",\"value\":\"renamed\"}]")))
+    Response patchMcpCalls(@PathParam("id") String id,
+                           @Parameter(name = "version", required = true, example = "1")
+                           @QueryParam("version") Integer version, String jsonPatch);
 }

@@ -21,6 +21,15 @@ public interface IDeploymentStore {
 
     void setDeploymentInfo(String environment, String agentId, Integer agentVersion, DeploymentStatus deploymentStatus);
 
+    /**
+     * Cluster mode: tells the other nodes that this node deployed an agent with
+     * {@code autoDeploy=false} — a deployment that is deliberately not recorded (it
+     * does not survive a restart), so without this the other nodes never learned of
+     * it and answered 404 for the agent. A no-op on one node.
+     */
+    default void announceTransientDeployment(String environment, String agentId, Integer agentVersion) {
+    }
+
     List<DeploymentInfo> readDeploymentInfos() throws IResourceStore.ResourceStoreException;
 
     List<DeploymentInfo> readDeploymentInfos(DeploymentStatus deploymentStatus) throws IResourceStore.ResourceStoreException;

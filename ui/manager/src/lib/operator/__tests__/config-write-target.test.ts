@@ -14,6 +14,29 @@ function preview(overrides: Partial<ResolvedRequestPreview> = {}): ResolvedReque
   };
 }
 
+describe("resolveConfigWriteTarget — PATCH", () => {
+  const patch = (overrides: Partial<ResolvedRequestPreview> = {}) =>
+    preview({ method: "PATCH", uri: "http://localhost:7070/llmstore/llms/abc123?version=3", body: "[]", ...overrides });
+
+  it("identifies the document and version a patch applies to", () => {
+    const target = resolveConfigWriteTarget(patch(), "PATCH");
+    expect(target?.resourceType.store).toBe("llmstore");
+    expect(target?.id).toBe("abc123");
+    expect(target?.version).toBe(3);
+  });
+
+  it("is asked for by method — a PUT is not a patch and a patch is not a PUT", () => {
+    expect(resolveConfigWriteTarget(patch())).toBeNull();
+    expect(resolveConfigWriteTarget(preview(), "PATCH")).toBeNull();
+  });
+
+  it("keeps the same refusals: sub-resource, unknown store, no usable version", () => {
+    expect(resolveConfigWriteTarget(patch({ uri: "http://x/llmstore/llms/abc123/currentversion?version=3" }), "PATCH")).toBeNull();
+    expect(resolveConfigWriteTarget(patch({ uri: "http://x/nostore/things/abc123?version=3" }), "PATCH")).toBeNull();
+    expect(resolveConfigWriteTarget(patch({ uri: "http://x/llmstore/llms/abc123", queryParams: {} }), "PATCH")).toBeNull();
+  });
+});
+
 describe("resolveConfigWriteTarget", () => {
   it("identifies a whole-document write and the base version to compare against", () => {
     // EDDI writes version+1, so the version in the URI is the version currently

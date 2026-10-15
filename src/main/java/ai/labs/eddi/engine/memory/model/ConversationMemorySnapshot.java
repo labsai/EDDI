@@ -104,6 +104,26 @@ public class ConversationMemorySnapshot {
      * is never trusted by an append (the append does not write this field).
      */
     private long historyRevision = UNVERSIONED_REVISION;
+    /**
+     * The highest cluster fencing token any write of this document carried,
+     * persisted as {@code _fence}. {@code null} — and therefore absent from the
+     * document — for every conversation that was only ever written in single-node
+     * mode, so an in-memory deployment's documents are byte-for-byte what they were
+     * before clustering existed.
+     * <p>
+     * In cluster mode a turn runs under a conversation lease whose revision is a
+     * monotonically growing token. The stores refuse a write whose token is lower
+     * than this value ({@code ConversationFencedException}), so a node that lost
+     * its lease — it hung, was partitioned, or was killed while its lease expired —
+     * cannot overwrite the turn that ran after it.
+     */
+    private Long fence;
+    /**
+     * The fencing token THIS write carries (the lease's), or {@code null} for an
+     * unfenced write. Never persisted: the store turns it into the {@code _fence}
+     * filter and value.
+     */
+    private transient Long fenceToken;
     private String conversationId;
     private String agentId;
     private Integer agentVersion;
@@ -221,6 +241,7 @@ public class ConversationMemorySnapshot {
                 case "conversationId" -> "_id";
                 case "revision" -> "_rev";
                 case "historyRevision" -> "_histRev";
+                case "fence" -> "_fence";
                 default -> field.getName();
             });
         }
@@ -722,6 +743,40 @@ public class ConversationMemorySnapshot {
      * How many steps the document held when this conversation was loaded. See
      * {@link #persistedStepCount}.
      */
+    @JsonProperty("_fence")
+    public Long getFence() {
+        return fence;
+    }
+
+    @JsonProperty("_fence")
+    public void setFence(Long fence) {
+        this.fence = fence;
+    }
+
+    /** The fencing token this write carries; see {@link #fenceToken}. */
+    @JsonIgnore
+    public Long getFenceToken() {
+        return fenceToken;
+    }
+
+    @JsonIgnore
+    public void setFenceToken(Long fenceToken) {
+        this.fenceToken = fenceToken;
+    }
+
+    /**
+     * The {@code _fence} value a write carrying {@link #getFenceToken()} leaves on
+     * the document: the larger of the stored and the carried token, so the stored
+     * fence never moves backwards. Unchanged for an unfenced write.
+     */
+    @JsonIgnore
+    public Long effectiveFence() {
+        if (fenceToken == null) {
+            return fence;
+        }
+        return fence == null ? fenceToken : Math.max(fence, fenceToken);
+    }
+
     @JsonIgnore
     public int getPersistedStepCount() {
         return persistedStepCount;

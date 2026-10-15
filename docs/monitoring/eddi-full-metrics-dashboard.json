@@ -2134,7 +2134,7 @@
               "sort": "desc"
             }
           },
-          "description": "Turns that failed after they had started. The rate is cumulative across purges; 'retained' is what GET /administration/coordinator/dead-letters lists now (capped by eddi.coordinator.max-dead-letters). The NATS coordinator reports eddi_nats_dead_letter_count instead."
+          "description": "Turns that failed after they had started. The rate is cumulative across purges; 'retained' is what GET /administration/coordinator/dead-letters lists now (capped by eddi.coordinator.max-dead-letters). In cluster mode 'retained' is the shared dead-letter stream's count."
         },
         {
           "id": 184,
@@ -12781,7 +12781,7 @@
     {
       "id": 151,
       "type": "row",
-      "title": "NATS JetStream (when the NATS coordinator is enabled)",
+      "title": "Cluster mode (when eddi.messaging.type=nats)",
       "collapsed": true,
       "gridPos": {
         "h": 1,
@@ -12793,7 +12793,7 @@
         {
           "id": 123,
           "type": "timeseries",
-          "title": "Publish vs consume",
+          "title": "Cluster events published vs consumed",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12806,26 +12806,22 @@
           },
           "targets": [
             {
+              "expr": "sum(rate(eddi_cluster_events_published_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "published",
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_publish_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "publish"
+              }
             },
             {
+              "expr": "sum(rate(eddi_cluster_events_consumed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "consumed",
               "refId": "B",
-              "expr": "sum(rate(eddi_nats_consume_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "consume"
+              }
             }
           ],
           "fieldConfig": {
@@ -12874,12 +12870,13 @@
               "mode": "multi",
               "sort": "desc"
             }
-          }
+          },
+          "description": "Cache-coherence events on the EVENTS stream (cluster mode only; 0 on a single node). The full picture is on the EDDI Cluster dashboard."
         },
         {
           "id": 124,
           "type": "timeseries",
-          "title": "Publish latency",
+          "title": "Lease wait",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12892,26 +12889,22 @@
           },
           "targets": [
             {
+              "expr": "sum(rate(eddi_cluster_lease_acquire_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_cluster_lease_acquire_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "legendFormat": "mean",
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_publish_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_nats_publish_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "avg"
+              }
             },
             {
+              "expr": "max(eddi_cluster_lease_acquire_seconds_max{job=~\"$job\"})",
+              "legendFormat": "max",
               "refId": "B",
-              "expr": "max(eddi_nats_publish_duration_seconds_max{job=~\"$job\"})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "peak"
+              }
             }
           ],
           "fieldConfig": {
@@ -12961,12 +12954,13 @@
               "mode": "multi",
               "sort": "desc"
             }
-          }
+          },
+          "description": "How long turns wait for their conversation lease (cluster mode only)."
         },
         {
           "id": 125,
           "type": "timeseries",
-          "title": "Consume latency",
+          "title": "Shared-state (KV) latency",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12979,26 +12973,13 @@
           },
           "targets": [
             {
+              "expr": "sum by (bucket) (rate(eddi_cluster_kv_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum by (bucket) (rate(eddi_cluster_kv_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
+              "legendFormat": "{{bucket}}",
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_consume_duration_seconds_sum{job=~\"$job\"}[$__rate_interval]))\n  / clamp_min(sum(rate(eddi_nats_consume_duration_seconds_count{job=~\"$job\"}[$__rate_interval])), 1e-9)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "avg"
-            },
-            {
-              "refId": "B",
-              "expr": "max(eddi_nats_consume_duration_seconds_max{job=~\"$job\"})",
-              "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true,
-              "legendFormat": "peak"
+              }
             }
           ],
           "fieldConfig": {
@@ -13048,17 +13029,18 @@
               "mode": "multi",
               "sort": "desc"
             }
-          }
+          },
+          "description": "Mean JetStream KV call latency by bucket (cluster mode only)."
         },
         {
           "id": 126,
           "type": "timeseries",
-          "title": "Dead-lettered messages",
+          "title": "Fenced writes and lost leases",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_nats_dead_letter_count_total` — a conversation message exhausted its retries.",
+          "description": "Turns whose write the fence refused, and leases lost while a turn ran (cluster mode only). Both are dead-lettered.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -13067,14 +13049,22 @@
           },
           "targets": [
             {
+              "expr": "sum(rate(eddi_cluster_fence_rejected_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "fenced",
               "refId": "A",
-              "expr": "sum(rate(eddi_nats_dead_letter_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
-              },
-              "editorMode": "code",
-              "range": true
+              }
+            },
+            {
+              "expr": "sum(rate(eddi_cluster_lease_lost_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "lease lost",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              }
             }
           ],
           "fieldConfig": {
