@@ -143,14 +143,13 @@ public class OpenApiSpecFetcher {
         URI uri = UrlValidationUtils.validateUrlSyntax(location.trim());
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             targetPolicy.validateUrl(uri.toString());
+            // codeql[java/ssrf] False Positive: fetching the editor-supplied spec
+            // location is the feature; this hop passed targetPolicy.validateUrl above.
             HttpRequest request = HttpRequest.newBuilder(uri).GET().timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json, application/yaml, application/x-yaml, text/yaml, */*;q=0.5")
                     .header("User-Agent", "EDDI-OpenAPI-Discovery/1.0").build();
             HttpResponse<InputStream> response;
             try {
-                // codeql[java/ssrf] False Positive: fetching the editor-supplied spec location
-                // is
-                // the feature; every hop is checked by targetPolicy.validateUrl just above.
                 response = httpClient.get().sendNoRedirect(request, OpenApiSpecFetcher::bodyOrNothing);
             } catch (IOException e) {
                 throw new IllegalArgumentException("Could not fetch the OpenAPI spec from " + forMessage(uri) + ": " + e.getMessage(), e);
