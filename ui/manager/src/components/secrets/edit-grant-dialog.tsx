@@ -222,7 +222,7 @@ function GrantEditor({
   }, [secret, emptyList, proposed, description, updateMut, onClose, t]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-5">
       {/* The reassurance that makes this dialog safe to use: no value is
             involved, so nothing here can break a working secret. */}
       <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
