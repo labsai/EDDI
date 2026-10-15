@@ -45,6 +45,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -183,6 +184,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     ConversationAccessGuard conversationAccessGuard;
+
+    /**
+     * Lets {@link #isSoftDeleted} reuse the descriptor the ownership check of the
+     * same request read (see {@link ConversationDescriptorMemo}). Field-injected
+     * for the same reason as {@link #attachmentStore}; {@code null} means every
+     * check reads the store.
+     */
+    @Inject
+    Instance<ConversationDescriptorMemo> descriptorMemoInstance;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
@@ -1717,18 +1727,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * No live descriptor, but an archived one: the conversation was soft-deleted.
      */
     private boolean isSoftDeleted(String conversationId) throws ResourceStoreException {
-        try {
-            if (conversationDescriptorStore.readDescriptor(conversationId, 0) != null) {
-                return false;
-            }
-        } catch (ResourceNotFoundException e) {
-            // no live descriptor — check the archive
-        }
-        try {
-            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0) != null;
-        } catch (ResourceNotFoundException e) {
-            return false;
-        }
+        // The ownership check of this request has usually resolved the descriptor
+        // already.
+        return ConversationDescriptorMemo.resolve(conversationDescriptorStore, descriptorMemoInstance, conversationId).archived();
     }
 
     /**

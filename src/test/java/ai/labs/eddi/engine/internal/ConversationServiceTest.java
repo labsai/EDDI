@@ -5,6 +5,12 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import java.security.Principal;
+import jakarta.enterprise.inject.Instance;
+import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -872,6 +878,45 @@ class ConversationServiceTest {
                     () -> conversationService.say(CONVERSATION_ID, false, false, null, inputData, false, (s) -> {
                     }));
             verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationDescriptorStore, never()).readDescriptorWithHistory(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("the REST ownership check, say's own check and the soft-delete check share one descriptor read")
+        @SuppressWarnings("unchecked")
+        void preTurnChecks_readTheDescriptorOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            snapshot.setConversationState(ConversationState.READY);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            var descriptor = new ConversationDescriptor();
+            descriptor.setUserId(USER_ID);
+            doReturn(descriptor).when(conversationDescriptorStore).readDescriptor(CONVERSATION_ID, 0);
+
+            Instance<ConversationDescriptorMemo> memo = mock(Instance.class);
+            var requestMemo = new ConversationDescriptorMemo();
+            when(memo.isResolvable()).thenReturn(true);
+            when(memo.get()).thenReturn(requestMemo);
+            var identity = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(USER_ID);
+            when(identity.getPrincipal()).thenReturn(principal);
+            var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), conversationDescriptorStore);
+            var guardMemo = ConversationAccessGuard.class.getDeclaredField("descriptorMemoInstance");
+            guardMemo.setAccessible(true);
+            guardMemo.set(guard, memo);
+            conversationService.conversationAccessGuard = guard;
+            conversationService.descriptorMemoInstance = memo;
+
+            // RestAgentEngine checks first, then say() checks again and asks whether it was
+            // soft-deleted.
+            guard.requireConversationOwner(CONVERSATION_ID);
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()), false,
+                            (s) -> {
+                            }));
+
+            verify(conversationDescriptorStore, times(1)).readDescriptor(CONVERSATION_ID, 0);
             verify(conversationDescriptorStore, never()).readDescriptorWithHistory(anyString(), anyInt());
         }
     }
