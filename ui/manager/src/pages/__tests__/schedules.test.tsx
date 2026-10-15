@@ -109,14 +109,15 @@ describe("SchedulesPage", () => {
 
   it("shows schedule names from mock data", async () => {
     renderSchedules();
-    // Either name can also render in the Next Fire card, which shows the soonest
-    // enabled schedule: Heartbeat Monitor fires 30 minutes from now, Daily Health
+    // Query inside the table: the Next Fire card also shows the soonest enabled
+    // schedule's name. Heartbeat Monitor fires 30 minutes from now, Daily Health
     // Check at the next weekday 09:00 UTC, so between 08:30 and 09:00 UTC on a
-    // weekday it is Daily Health Check. A single-match query fails in that window.
-    const dailyHealthCheck = await screen.findAllByText("Daily Health Check", {}, { timeout: 3000 });
-    expect(dailyHealthCheck.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Heartbeat Monitor").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Failed Report")).toBeInTheDocument();
+    // weekday the card shows Daily Health Check, and a page-wide single-match
+    // query fails in that window.
+    const table = await screen.findByTestId("schedules-table", {}, { timeout: 3000 });
+    expect(await within(table).findByText("Daily Health Check", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(within(table).getByText("Heartbeat Monitor")).toBeInTheDocument();
+    expect(within(table).getByText("Failed Report")).toBeInTheDocument();
   });
 
   it("shows cron type badge", async () => {
