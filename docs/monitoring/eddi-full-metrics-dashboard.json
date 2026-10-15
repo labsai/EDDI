@@ -8286,6 +8286,104 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 202,
+          "type": "timeseries",
+          "title": "Agent test runs / turns",
+          "description": "Agent regression test runs (golden conversations) by outcome, and the turns they execute. Runs drive real test-environment conversations: a sustained FAILED or ERROR rate is an agent version that no longer does what its suite says. Average run duration is sum/count of the run timer.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 30
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (status) (rate(eddi_agent_tests_runs_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "runs {{status}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_agent_tests_turns_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "turns"
+            },
+            {
+              "refId": "C",
+              "expr": "sum(rate(eddi_agent_tests_run_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum(rate(eddi_agent_tests_run_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "avg run duration (s)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },

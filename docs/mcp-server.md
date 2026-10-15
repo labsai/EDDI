@@ -22,7 +22,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (85)
+## Available Tools (88)
 
 ### Argument contract
 
@@ -156,6 +156,16 @@ Which build of EDDI is running. Read live from the process, so it stays correct 
 | Tool               | Description                                                                                                       |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `get_eddi_version` | Version and git commit of the running EDDI (`version`, `commit`, `commitShort`). `commit` is `unknown` if the build recorded none |
+
+### Agent Test Tools (3)
+
+Run golden-conversation regression suites against an agent version — see [Agent Testing](agent-testing.md). Same tier as `deploy_agent` (`eddi-admin`, `eddi-editor`), because a run deploys the version under test to the `test` environment.
+
+| Tool                   | Description                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `run_agent_tests`      | Start a run (`suiteId`, `agentId`, optional versions, `keepConversations`). Returns the `RUNNING` record at once |
+| `get_agent_test_run`   | Read a run: status, per-case / per-turn failed expectations with actual values, tool calls, cost              |
+| `list_agent_test_runs` | An agent's runs, newest first                                                                                |
 
 ### HITL Tools (10)
 

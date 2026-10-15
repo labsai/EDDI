@@ -76,6 +76,7 @@ public class AgentTestRunner {
     public static final String AUDIT_TASK_ID = "ai.labs.agenttest";
     static final String AUDIT_TASK_TYPE = "agent_test_run";
     static final int MAX_OUTPUT_CHARS = 2_000;
+    static final int STORED_STEP_WAIT_SECONDS = 5;
 
     private final IConversationService conversationService;
     private final IAgentTestRunStore runStore;
@@ -303,21 +304,26 @@ public class AgentTestRunner {
         long startNanos = System.nanoTime();
         int timeoutSeconds = ctx.defaults().turnTimeoutSeconds();
         var inputData = new InputData(turn.input(), toContext(testCase.context(), turn.context()));
-        var outcome = new CompletableFuture<Boolean>();
+        var outcome = new CompletableFuture<SimpleConversationMemorySnapshot>();
+        SimpleConversationMemorySnapshot turnSnapshot;
         try {
-            conversationService.say(Environment.test, ctx.run().agentId(), conversationId, false, true, null, inputData, false,
+            // Detailed and current step only: the record of the turn itself, with the
+            // non-public audit:* keys. Not a re-read of the store, which the completion
+            // can precede.
+            conversationService.say(Environment.test, ctx.run().agentId(), conversationId, true, true, null, inputData, false,
                     new IConversationService.ConversationResponseHandler() {
                         @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                            outcome.complete(Boolean.TRUE);
+                            outcome.complete(snapshot);
                         }
 
                         @Override
                         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                            outcome.complete(Boolean.FALSE);
+                            outcome.complete(null);
                         }
                     });
-            if (!outcome.get(timeoutSeconds, TimeUnit.SECONDS)) {
+            turnSnapshot = outcome.get(timeoutSeconds, TimeUnit.SECONDS);
+            if (turnSnapshot == null) {
                 return failedTurn(turn, index, startNanos, "turn", "executed", "skipped: the conversation was busy or paused");
             }
         } catch (TimeoutException e) {
@@ -329,13 +335,7 @@ public class AgentTestRunner {
             return failedTurn(turn, index, startNanos, "turn", "executed", safeMessage(e));
         }
 
-        TurnObservation observed;
-        try {
-            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
-            observed = TurnObservation.fromSnapshot(snapshot, snapshot.getConversationSteps().size() - 1);
-        } catch (Exception e) {
-            return failedTurn(turn, index, startNanos, "turn", "readable afterwards", safeMessage(e));
-        }
+        TurnObservation observed = withStoredCost(conversationId, index, TurnObservation.fromTurnSnapshot(turnSnapshot));
         // The registry saw every call of the turn on all three paths (LLM tools,
         // rule-triggered httpcalls and MCP calls), mocked or not; the LLM trace in
         // memory only has the first kind.
@@ -351,6 +351,37 @@ public class AgentTestRunner {
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), observed.actions(), truncate(observed.output()),
                 observed.toolCalls().stream().map(TurnObservation.ObservedToolCall::tool).toList(), observed.conversationState(),
                 failures.isEmpty() ? null : failures);
+    }
+
+    /**
+     * The turn's {@code audit:cost} and model names. They are internal keys, which
+     * the turn's response snapshot never carries (they are stripped from every
+     * client projection), so they are read from the stored step — waiting briefly,
+     * because the completion callback can run before the turn is written back.
+     */
+    private TurnObservation withStoredCost(String conversationId, int stepIndex, TurnObservation observed) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(STORED_STEP_WAIT_SECONDS);
+        try {
+            while (true) {
+                ConversationMemorySnapshot stored = conversationService.getConversationMemorySnapshot(conversationId);
+                if (stored.getConversationSteps().size() > stepIndex) {
+                    TurnObservation fromStore = TurnObservation.fromSnapshot(stored, stepIndex);
+                    return observed.withCost(fromStore.costUsd(), fromStore.modelNames());
+                }
+                if (System.nanoTime() > deadline) {
+                    LOGGER.warnf("Turn %d of test conversation %s was not stored within %ds; its cost is not counted", stepIndex,
+                            sanitize(conversationId), STORED_STEP_WAIT_SECONDS);
+                    return observed;
+                }
+                Thread.sleep(50);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return observed;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not read the cost of test conversation %s: %s", sanitize(conversationId), e.getMessage());
+            return observed;
+        }
     }
 
     private static TurnResult failedTurn(Turn turn, int index, long startNanos, String expectation, Object expected, Object actual) {

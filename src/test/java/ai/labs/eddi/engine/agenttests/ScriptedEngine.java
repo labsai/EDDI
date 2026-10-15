@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.agenttests;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -15,7 +16,6 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
-import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 
@@ -131,7 +131,9 @@ final class ScriptedEngine {
                 ToolMockRegistry.interceptToolCall(memory, tool, "{}", "http");
             }
             apply(snapshot, script.apply(input.getInput()));
-            handler.onComplete(new SimpleConversationMemorySnapshot());
+            // What ConversationService hands the handler: the real conversion of the turn.
+            handler.onComplete(ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(snapshot, inv.<Boolean>getArgument(3),
+                    inv.<Boolean>getArgument(4), null));
             return null;
         }).when(service).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), isNull(), any(InputData.class), eq(false),
                 any(ConversationResponseHandler.class));

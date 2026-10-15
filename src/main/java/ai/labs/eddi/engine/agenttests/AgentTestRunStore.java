@@ -54,9 +54,11 @@ public class AgentTestRunStore implements IAgentTestRunStore {
     @Override
     public String create(AgentTestRun run) throws IResourceStore.ResourceStoreException {
         try {
+            // The backend assigns the id on the first write (MongoDB has none before it).
             var resource = storage.newResource(run);
+            storage.store(resource);
             String id = resource.getId();
-            // The id is part of the document so a run read through any path carries it.
+            // Written again with the id inside, so a run read through any path carries it.
             storage.store(storage.newResource(id, SINGLE_VERSION, run.withId(id)));
             return id;
         } catch (IOException e) {

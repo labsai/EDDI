@@ -67,6 +67,9 @@ class AgentTestRunStoreTest {
         assertEquals(RUN_ID, store.create(run(null)));
 
         assertEquals(RUN_ID, captor.getValue().id());
+        var order = inOrder(storage, generated);
+        order.verify(storage).store(generated);
+        order.verify(generated).getId();
         verify(storage).store(stored);
     }
 

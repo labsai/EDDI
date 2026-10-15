@@ -9,7 +9,10 @@ import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -52,52 +55,85 @@ public record TurnObservation(List<String> actions, Map<String, Object> properti
     public record ObservedToolCall(String tool, String arguments) {
     }
 
+    public TurnObservation withCost(double usd, Set<String> models) {
+        return new TurnObservation(actions, properties, output, toolCalls, usd, conversationState, models);
+    }
+
     public TurnObservation withToolCalls(List<ObservedToolCall> calls) {
         return new TurnObservation(actions, properties, output, calls, costUsd, conversationState, modelNames);
     }
 
     /**
-     * Reads the observation of the step at {@code stepIndex} — the latest step for
-     * a turn that just ran, step 0 for the start turn.
+     * Reads the observation of the step at {@code stepIndex} of a stored
+     * conversation; used for the start turn, which is stored before
+     * {@code startConversation} returns.
      */
     public static TurnObservation fromSnapshot(ConversationMemorySnapshot snapshot, int stepIndex) {
+        var data = new ArrayList<Map.Entry<String, Object>>();
+        var steps = snapshot.getConversationSteps();
+        if (steps != null && stepIndex >= 0 && stepIndex < steps.size()) {
+            for (var workflow : steps.get(stepIndex).getWorkflows()) {
+                for (var result : workflow.getLifecycleTasks()) {
+                    data.add(new AbstractMap.SimpleEntry<>(result.getKey(), result.getResult()));
+                }
+            }
+        }
+        List<ConversationOutput> outputs = snapshot.getConversationOutputs();
+        ConversationOutput output = outputs != null && stepIndex >= 0 && stepIndex < outputs.size() ? outputs.get(stepIndex) : null;
+        return of(data, output, snapshot.getConversationProperties(), snapshot.getConversationState());
+    }
+
+    /**
+     * Reads the observation of a turn from the snapshot its {@code say} completed
+     * with ({@code returnDetailed=true}, {@code returnCurrentStepOnly=true}). That
+     * snapshot, not a re-read of the store, is the record of the turn: the
+     * completion callback can run before the turn has been written back.
+     */
+    public static TurnObservation fromTurnSnapshot(SimpleConversationMemorySnapshot snapshot) {
+        var data = new ArrayList<Map.Entry<String, Object>>();
+        var steps = snapshot.getConversationSteps();
+        if (steps != null && !steps.isEmpty()) {
+            for (var entry : steps.getLast().getConversationStep()) {
+                data.add(new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue()));
+            }
+        }
+        var outputs = snapshot.getConversationOutputs();
+        ConversationOutput output = outputs != null && !outputs.isEmpty() ? outputs.getLast() : null;
+        return of(data, output, snapshot.getConversationProperties(), snapshot.getConversationState());
+    }
+
+    private static TurnObservation of(List<Map.Entry<String, Object>> stepData, ConversationOutput lastOutput,
+                                      Map<String, Property> conversationProperties, ConversationState conversationState) {
         List<String> actions = List.of();
         double cost = 0.0;
         Set<String> models = new LinkedHashSet<>();
         List<ObservedToolCall> toolCalls = new ArrayList<>();
-
-        var steps = snapshot.getConversationSteps();
-        if (steps != null && stepIndex >= 0 && stepIndex < steps.size()) {
-            for (var workflow : steps.get(stepIndex).getWorkflows()) {
-                for (var data : workflow.getLifecycleTasks()) {
-                    String key = data.getKey();
-                    Object result = data.getResult();
-                    if (key == null || result == null) {
-                        continue;
-                    }
-                    if (MemoryKeys.ACTIONS.key().equals(key) && result instanceof List<?> list) {
-                        actions = list.stream().map(String::valueOf).toList();
-                    } else if (MemoryKeys.AUDIT_COST.equals(key) && result instanceof Number number) {
-                        cost = number.doubleValue();
-                    } else if (MemoryKeys.AUDIT_MODEL_NAME.equals(key)) {
-                        models.add(String.valueOf(result));
-                    } else if (MemoryKeys.AUDIT_TOOL_CALLS.equals(key)) {
-                        toolCalls = toolCallsOf(result);
-                    }
-                }
+        for (var data : stepData) {
+            String key = data.getKey();
+            Object result = data.getValue();
+            if (key == null || result == null) {
+                continue;
+            }
+            if (MemoryKeys.ACTIONS.key().equals(key) && result instanceof List<?> list) {
+                actions = list.stream().map(String::valueOf).toList();
+            } else if (MemoryKeys.AUDIT_COST.equals(key) && result instanceof Number number) {
+                cost = number.doubleValue();
+            } else if (MemoryKeys.AUDIT_MODEL_NAME.equals(key)) {
+                models.add(String.valueOf(result));
+            } else if (MemoryKeys.AUDIT_TOOL_CALLS.equals(key)) {
+                toolCalls = toolCallsOf(result);
             }
         }
 
         String output = "";
-        List<ConversationOutput> outputs = snapshot.getConversationOutputs();
-        if (outputs != null && stepIndex >= 0 && stepIndex < outputs.size()) {
-            String text = ConversationOutputExtractor.extractText(outputs.get(stepIndex));
+        if (lastOutput != null) {
+            String text = ConversationOutputExtractor.extractText(lastOutput);
             output = text != null ? text : "";
         }
 
         var properties = new LinkedHashMap<String, Object>();
-        if (snapshot.getConversationProperties() != null) {
-            snapshot.getConversationProperties().forEach((name, property) -> {
+        if (conversationProperties != null) {
+            conversationProperties.forEach((name, property) -> {
                 Object value = valueOf(property);
                 if (value != null) {
                     properties.put(name, value);
@@ -105,7 +141,7 @@ public record TurnObservation(List<String> actions, Map<String, Object> properti
             });
         }
 
-        String state = snapshot.getConversationState() != null ? snapshot.getConversationState().name() : null;
+        String state = conversationState != null ? conversationState.name() : null;
         return new TurnObservation(actions, properties, output, toolCalls, cost, state, models);
     }
 
