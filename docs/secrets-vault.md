@@ -148,6 +148,31 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+### Editing a configuration that holds a reference: PATCH, not echo
+
+A stored configuration carries your credential **references**, not secrets — `GET /llmstore/llms/{id}` returns `"apiKey": "${vault:anthropic-api-key}"`. Editing it by reading the document and sending the whole thing back with `PUT` therefore means *sending a reference back*, and that is the one thing a caller that is not a human at the Manager should not do:
+
+- An agent's API call (the Platform Operator's tools are such calls, generated from EDDI's own OpenAPI spec) resolves `${vault:…}` in its rendered request **just before sending**. A document body that echoes a reference it read would reach the store as the **plaintext secret** — written into a new, exportable configuration version.
+- It never gets that far: the reference in the body was not written by the call's own configuration, so the check above refuses the call. That is correct, and it is deliberately **not** relaxed with an "unchanged from the stored document" exemption — the check does not know the target document, and what the model read back is itself conversation data.
+
+The way through is to not send what does not change. `PATCH /{store}/{id}?version=N` with `Content-Type: application/json-patch+json` applies an [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) JSON Patch to version `N` and stores the result as a new version (returned in `Location`, like `PUT`):
+
+```bash
+curl -X PATCH "$EDDI/llmstore/llms/$ID?version=2" \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[{"op":"replace","path":"/tasks/0/parameters/modelName","value":"claude-sonnet-4-5"}]'
+```
+
+The reference already in the document is untouched, and a patch that tried to *introduce* one is refused by the same check as any other call — so a caller restricted this way can edit everything in the document **except** its credentials. `add`, `replace`, `remove` and `test` all work; `test` makes an edit conditional on what it expects to find.
+
+| Outcome | Status |
+| --- | --- |
+| New version stored | `200`, `Location` of the new version |
+| `N` is not the current version | `409`, the current resource URI in the body — nothing is applied |
+| Not a patch, an unknown operation, a `test` that does not hold, a path that does not resolve, or a patched document the model rejects (unknown field, wrong shape) | `400` with the reason |
+
+The patched document goes through the same strict parse and the same pre-write checks as a `PUT` body, so nothing a `PUT` would refuse can be stored this way. Available on `llmstore/llms`, `apicallstore/apicalls` and `mcpcallsstore/mcpcalls` — the stores whose documents carry references. A patch is limited to 256 KiB and 200 operations: it is a diff, not a document.
+
 ## Secrets that belong to a space
 
 With [workspaces](workspaces.md) enforced, writing to the vault stays with

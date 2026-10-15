@@ -63,6 +63,8 @@ public final class SelfUngatingGuard {
 
     public static final String OWN_AGENT_REASON = "an agent may not modify, deploy or start itself";
     public static final String GATE_WRITE_REASON = "an agent may not write a tool-approval gate (toolApprovals) into an LLM configuration";
+    public static final String PATCH_OP_REASON = "an LLM configuration patch may only use add, replace, remove and test operations";
+    private static final Set<String> PATCH_OPS = Set.of("add", "replace", "remove", "test");
     public static final String UNVERIFIABLE_REASON = "the LLM configuration body could not be verified to carry no tool-approval gate";
 
     private SelfUngatingGuard() {
@@ -87,12 +89,48 @@ public final class SelfUngatingGuard {
             }
             try {
                 JsonNode tree = MAPPER.readTree(body);
+                if (tree.isArray() && method != null && "PATCH".equals(method.trim().toUpperCase(Locale.ROOT))) {
+                    return patchRefusal(tree);
+                }
                 return containsKey(tree, TOOL_APPROVALS_KEY) ? GATE_WRITE_REASON : null;
             } catch (JsonProcessingException e) {
                 return UNVERIFIABLE_REASON;
             }
         }
         return null;
+    }
+
+    /**
+     * An RFC 6902 patch of an LLM configuration. The gate is out of reach for a
+     * patch in three ways the whole-document test cannot see: an operation whose
+     * {@code path} or {@code from} NAMES the field (the key is then a string, not a
+     * key), a {@code value} that carries it, and {@code copy}/{@code move}, which
+     * carry part of the stored document — a gate override included — somewhere the
+     * body does not name. Mirrors {@code gate-guard.ts}: the field named anywhere
+     * is refused first, then any operation outside add/replace/remove/test.
+     */
+    private static String patchRefusal(JsonNode operations) {
+        boolean unsupported = false;
+        String needle = TOOL_APPROVALS_KEY.toLowerCase(Locale.ROOT);
+        for (JsonNode operation : operations) {
+            if (!operation.isObject()) {
+                return UNVERIFIABLE_REASON;
+            }
+            for (String pointer : new String[]{"path", "from"}) {
+                JsonNode target = operation.get(pointer);
+                if (target != null && target.asText("").toLowerCase(Locale.ROOT).contains(needle)) {
+                    return GATE_WRITE_REASON;
+                }
+            }
+            if (containsKey(operation.get("value"), TOOL_APPROVALS_KEY)) {
+                return GATE_WRITE_REASON;
+            }
+            JsonNode op = operation.get("op");
+            if (op == null || !op.isTextual() || !PATCH_OPS.contains(op.asText())) {
+                unsupported = true;
+            }
+        }
+        return unsupported ? PATCH_OP_REASON : null;
     }
 
     /**

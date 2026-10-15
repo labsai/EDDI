@@ -207,3 +207,134 @@ describe("findGateCarryingCalls", () => {
     expect(findGateCarryingCalls(undefined)).toEqual([]);
   });
 });
+
+describe("findGateCarryingCalls — PATCH (RFC 6902)", () => {
+  /** A PATCH of an LLM document, body given as a list of operations. */
+  const patchCall = (ops: unknown, overrides: Partial<ResolvedRequestPreview> = {}, pinned = true) =>
+    call(
+      "p1",
+      {
+        method: "PATCH",
+        uri: "https://eddi.example/llmstore/llms/abc123?version=3",
+        body: typeof ops === "string" ? ops : JSON.stringify(ops),
+        ...overrides,
+      },
+      pinned,
+    );
+  const refused = (ops: unknown, reason: string) =>
+    expect(findGateCarryingCalls([patchCall(ops)])).toEqual([{ callId: "p1", reason }]);
+  const allowed = (ops: unknown) => expect(findGateCarryingCalls([patchCall(ops)])).toEqual([]);
+
+  it("allows an ordinary edit — the credential-safe path the operator exists to use", () => {
+    allowed([
+      { op: "add", path: "/tasks/0/knowledgeBases", value: [{ name: "eddi-docs" }] },
+      { op: "replace", path: "/tasks/0/parameters/modelName", value: "claude-sonnet-4-5" },
+      { op: "remove", path: "/tasks/0/parameters/temperature" },
+      { op: "test", path: "/tasks/0/type", value: "anthropic" },
+    ]);
+  });
+
+  it("allows an empty patch", () => {
+    allowed([]);
+  });
+
+  it("refuses an operation whose path is the gate field, or anything beneath it", () => {
+    refused([{ op: "add", path: "/tasks/0/toolApprovals", value: { requireApproval: [] } }], "carries-gate");
+    refused([{ op: "replace", path: "/tasks/0/toolApprovals/requireApproval", value: [] }], "carries-gate");
+    refused([{ op: "add", path: "/tasks/0/toolApprovals/requireApproval/-", value: "x" }], "carries-gate");
+  });
+
+  it("refuses remove and test of the gate field too — the guard is on the field being in play", () => {
+    refused([{ op: "remove", path: "/tasks/0/toolApprovals" }], "carries-gate");
+    refused([{ op: "test", path: "/tasks/0/toolApprovals", value: null }], "carries-gate");
+  });
+
+  it("refuses a path that spells the field differently in case", () => {
+    refused([{ op: "add", path: "/tasks/0/TOOLAPPROVALS", value: {} }], "carries-gate");
+  });
+
+  it("refuses a malformed pointer that merely contains the field name — fail closed", () => {
+    refused([{ op: "add", path: "tasks/0/toolApprovals", value: {} }], "carries-gate");
+  });
+
+  it("refuses a value carrying the gate at any depth, wherever it is put", () => {
+    refused([{ op: "add", path: "/tasks/-", value: { type: "anthropic", toolApprovals: {} } }], "carries-gate");
+    refused([{ op: "replace", path: "/tasks/0", value: { type: "x", nested: [{ toolApprovals: {} }] } }], "carries-gate");
+  });
+
+  it("refuses replacing the whole /tasks array or the root with a value that carries it", () => {
+    refused([{ op: "replace", path: "/tasks", value: [{ toolApprovals: {} }] }], "carries-gate");
+    refused([{ op: "replace", path: "", value: { tasks: [{ toolApprovals: {} }] } }], "carries-gate");
+  });
+
+  it("allows replacing a whole task by one with no override — it falls back to the agent-level gate", () => {
+    // The residual gate-guard.ts states for a PUT, unchanged: narrowing one task's
+    // own protection, never an ungated agent.
+    allowed([{ op: "replace", path: "/tasks/0", value: { type: "anthropic", parameters: { modelName: "m" } } }]);
+  });
+
+  it("refuses move and copy, from anywhere — they can carry a stored override or reference somewhere else", () => {
+    refused([{ op: "copy", from: "/tasks/0", path: "/tasks/1" }], "unsupported-patch-op");
+    refused([{ op: "move", from: "/tasks/0/parameters", path: "/tasks/1/parameters" }], "unsupported-patch-op");
+    refused([{ op: "copy", from: "/tasks/0/parameters/apiKey", path: "/tasks/0/parameters/baseUrl" }], "unsupported-patch-op");
+  });
+
+  it("refuses move and copy that name the gate as the more serious finding", () => {
+    refused([{ op: "copy", from: "/tasks/0/toolApprovals", path: "/tasks/1/toolApprovals" }], "carries-gate");
+    refused([{ op: "move", from: "/tasks/0/toolApprovals", path: "/tasks/1/parameters/x" }], "carries-gate");
+    refused([{ op: "move", from: "/tasks/0/parameters/x", path: "/tasks/1/toolApprovals" }], "carries-gate");
+  });
+
+  it("refuses an operation it does not know", () => {
+    refused([{ op: "frobnicate", path: "/tasks/0" }], "unsupported-patch-op");
+    refused([{ op: "ADD", path: "/tasks/0/x", value: 1 }], "unsupported-patch-op");
+  });
+
+  it("one bad operation refuses the whole patch, however many good ones surround it", () => {
+    refused(
+      [
+        { op: "replace", path: "/tasks/0/parameters/modelName", value: "m" },
+        { op: "add", path: "/tasks/0/toolApprovals", value: {} },
+        { op: "remove", path: "/tasks/0/parameters/temperature" },
+      ],
+      "carries-gate",
+    );
+  });
+
+  it("fails closed on a body that is not a well-formed patch", () => {
+    refused({ op: "add", path: "/x", value: 1 }, "unverifiable-body"); // an object, not a list
+    refused([{ op: "add", value: 1 }], "unverifiable-body"); // no path
+    refused([{ path: "/x" }], "unverifiable-body"); // no op
+    refused([{ op: "add", path: 5 }], "unverifiable-body"); // path not a string
+    refused([{ op: "move", from: 5, path: "/x" }], "unverifiable-body"); // from not a string
+    refused(["add /x"], "unverifiable-body");
+    refused("[{\"op\":\"add\"", "unverifiable-body"); // not JSON
+  });
+
+  it("fails closed on a truncated body, and on an unpinned request", () => {
+    expect(
+      findGateCarryingCalls([patchCall([{ op: "add", path: "/tasks/0/x", value: 1 }], { bodyTruncated: true })]),
+    ).toEqual([{ callId: "p1", reason: "unverifiable-body" }]);
+    expect(findGateCarryingCalls([patchCall([{ op: "add", path: "/tasks/0/x", value: 1 }], {}, false)])).toEqual([
+      { callId: "p1", reason: "unpinned-request" },
+    ]);
+  });
+
+  it("does not look at a PATCH to another store", () => {
+    // Only llmstore documents can carry a gate; an apicall patch with the word in a
+    // value is somebody's header, not an approval gate.
+    expect(
+      findGateCarryingCalls([
+        patchCall([{ op: "add", path: "/httpCalls/0/toolApprovals", value: 1 }], {
+          uri: "https://eddi.example/apicallstore/apicalls/abc123?version=3",
+        }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("a PUT is still judged on its whole body, exactly as before", () => {
+    expect(findGateCarryingCalls([call("c1", { body: llmBody({ toolApprovals: {} }) })])).toEqual([
+      { callId: "c1", reason: "carries-gate" },
+    ]);
+  });
+});
