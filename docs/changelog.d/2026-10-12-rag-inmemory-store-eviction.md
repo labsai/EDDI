@@ -46,6 +46,12 @@ pipeline skips a page whose content hash is unchanged, and the hashes outlived t
   `CappedInMemoryEmbeddingStore` under one lock. A write past it throws
   `InMemoryStoreFullException` with an actionable message; an ingestion run stops and reports
   `FAILED` with that message. Nothing is evicted.
+- **Replaced and dropped stores are retired.** A run takes its store at the start, so a store
+  replaced (embedding signature changed) or dropped (delete, move) mid-run used to keep receiving
+  that run's writes: an orphan nothing reads, outside the cap, which counts only registered stores.
+  The factory now retires such a store; a later write throws `InMemoryStoreRetiredException` under
+  the cap's lock, and the run stops `FAILED` saying the store was replaced or removed. The next run
+  re-embeds into the current store, because its epoch no longer matches. (Raised in review.)
 
 ### Design decisions
 

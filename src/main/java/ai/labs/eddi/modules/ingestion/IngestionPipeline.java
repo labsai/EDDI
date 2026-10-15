@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
+import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -304,9 +305,10 @@ public class IngestionPipeline {
      * operators to ignore the status.
      */
     private static IngestionRun.Status statusFor(Collector collector) {
-        if (collector.storeFull != null) {
-            // Not "some documents failed": the knowledge base cannot take any more,
-            // and every later run will say the same until an operator acts.
+        if (collector.storeRefused != null) {
+            // Not "some documents failed": the in-memory store took nothing more. When
+            // it is full, every later run says the same until an operator acts; when
+            // it was replaced mid-run, the next run re-embeds into the new store.
             return IngestionRun.Status.FAILED;
         }
         boolean nothingUsable = collector.ingested + collector.unchanged == 0;
@@ -975,7 +977,7 @@ public class IngestionPipeline {
          * Why the in-memory store refused this run's writes, once it has; the run stops
          * there rather than failing every remaining document the same way.
          */
-        private String storeFull;
+        private String storeRefused;
         private Instant nextOwnershipCheck = Instant.MIN;
 
         private Collector(RagConfiguration knowledgeBase, String ragConfigId, String knowledgeBaseId,
@@ -1028,7 +1030,7 @@ public class IngestionPipeline {
 
         @Override
         public boolean isCancelled() {
-            return budgetExhausted || storeFull != null || !stillOwnsRun(false);
+            return budgetExhausted || storeRefused != null || !stillOwnsRun(false);
         }
 
         /**
@@ -1186,10 +1188,11 @@ public class IngestionPipeline {
         }
 
         private void recordDocumentFailure(RuntimeException e) {
-            if (e instanceof InMemoryStoreFullException full && storeFull == null) {
-                storeFull = full.getMessage();
+            // Either refusal ends the run: no later document could be stored either.
+            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
+                storeRefused = e.getMessage();
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
-                        LogSanitizer.sanitize(storeFull));
+                        LogSanitizer.sanitize(storeRefused));
             }
             failed++;
             inconclusive++;
@@ -1317,8 +1320,8 @@ public class IngestionPipeline {
             if (error == null && superseded) {
                 error = "The run stopped: its source was purged, removed or reaped while it was running";
             }
-            if (error == null && storeFull != null) {
-                error = storeFull;
+            if (error == null && storeRefused != null) {
+                error = storeRefused;
             }
             return new IngestionReport(
                     runId,

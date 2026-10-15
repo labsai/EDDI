@@ -377,6 +377,9 @@ public class EmbeddingStoreFactory {
         String key = inMemoryKey(ragConfigId, config);
         InMemoryKnowledgeBase dropped = inMemoryStores.remove(key);
         if (dropped != null) {
+            // A run that took this store before the drop must not keep writing into
+            // it: nothing reads it any more, and the cap no longer counts it.
+            dropped.store().retire();
             LOGGER.infof("Dropped the in-memory vector store of knowledge base %s (%d segments)", sanitize(key),
                     dropped.store().size());
         }
@@ -491,6 +494,9 @@ public class EmbeddingStoreFactory {
             LOGGER.warnf("Knowledge base %s is being written with a different embedding configuration; its in-memory "
                     + "vectors (%d segments) were made by another model and are discarded. Every source re-embeds on "
                     + "its next run.", sanitize(key), existing.store().size());
+            // Same reason as a drop: a run still holding the old store would
+            // otherwise fill an orphan the cap does not count.
+            existing.store().retire();
             return newInMemoryStore(config, key);
         });
     }

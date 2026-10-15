@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.FakeSite;
+import ai.labs.eddi.modules.ingestion.crawl.PageFetcher;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
@@ -1792,6 +1793,36 @@ class IngestionPipelineTest {
             assertEquals(1, segmentsIn(storeFactory), "the segment already stored stays; nothing was evicted");
             var runs = stateStore.listRuns(sourceKey(), 10);
             assertEquals(IIngestionStateStore.IngestionRun.Status.FAILED, runs.get(0).status());
+        }
+
+        @Test
+        @DisplayName("a store replaced while the run holds it fails that run; the next run refills the new store")
+        void storeReplacedMidRunFailsTheRunThenRefills() {
+            storeFactory = restartedProcess();
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .page(SITE + "/leaf", pageWith("Content."));
+            // The knowledge base is deleted (or moved, or remodelled) while the run is
+            // crawling: the store the run took at its start is gone from the registry.
+            PageFetcher dropsTheStoreMidRun = command -> {
+                if (command.url().endsWith("/leaf")) {
+                    storeFactory.dropInMemoryStore(KB_RESOURCE_ID, knowledgeBase());
+                }
+                return site.fetch(command);
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(dropsTheStoreMidRun), new HtmlToMarkdownConverter(), stateStore,
+                    fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertNotNull(report.message());
+            assertTrue(report.message().contains("replaced or removed"), report.message());
+            assertEquals(0, segmentsIn(storeFactory), "nothing landed in the orphan, and the current store is new");
+
+            IngestionReport next = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertNotEquals(IngestionReport.Outcome.FAILED, next.outcome());
+            assertTrue(segmentsIn(storeFactory) > 0, "the next run re-embeds into the current store");
         }
     }
 

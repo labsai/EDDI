@@ -989,7 +989,10 @@ parameter rather than ignoring it.
 > segments (default `50000`; `0` disables the cap — see the
 > [configuration reference](configuration-reference.md#knowledge-bases-rag)). A write past the cap
 > fails — the run reports `FAILED` with an error naming the setting — and nothing is evicted to make
-> room. Any agent expected to answer from a knowledge base after a restart needs a persistent store.
+> room. A run that is still writing when its store is replaced or dropped (the knowledge base
+> changed its embedding model, moved, or was deleted) stops the same way, with an error saying the
+> store was replaced or removed. Its remaining writes would otherwise land in a store nothing reads,
+> outside the cap. The next run re-embeds into the current store. Any agent expected to answer from a knowledge base after a restart needs a persistent store.
 > `storeType` still **defaults to** `in-memory`, so persistence is opt-in: `pgvector` is the
 > recommended choice, and — with `in-memory` — one of the two stores whose document-replacement
 > semantics are verified (see [Ingestion Sources](#ingestion-sources)).

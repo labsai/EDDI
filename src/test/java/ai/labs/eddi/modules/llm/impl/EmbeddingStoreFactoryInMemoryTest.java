@@ -519,6 +519,39 @@ class EmbeddingStoreFactoryInMemoryTest {
         }
 
         @Test
+        @DisplayName("a store replaced while a run still holds it refuses that run's writes, so the cap holds")
+        void replacedStoreHeldByARunRefusesWrites() {
+            var capped = offlineFactory(5);
+            // A run takes the store, as the ingestion Collector does at its start.
+            var heldByRun = capped.getOrCreateForIngestion(KB_ID, inMemory());
+            addSegments(heldByRun, 2);
+
+            // The model changes mid-run: the next write replaces the store.
+            var remodelled = inMemory();
+            remodelled.setEmbeddingParameters(Map.of("model", "text-embedding-3-large"));
+            var current = capped.getOrCreateForIngestion(KB_ID, remodelled);
+            addSegments(current, 5);
+            assertEquals(5, capped.inMemorySegmentCount(), "the replacement may use the whole cap");
+
+            var refused = assertThrows(InMemoryStoreRetiredException.class, () -> addSegments(heldByRun, 1));
+            assertTrue(refused.getMessage().contains("replaced or removed"), refused.getMessage());
+            assertEquals(2, countOf(heldByRun), "nothing more lands in the orphan; what it had stays readable");
+            assertEquals(5, capped.inMemorySegmentCount(), "the cap is not exceeded through the orphan");
+        }
+
+        @Test
+        @DisplayName("a dropped store refuses writes from a run that still holds it")
+        void droppedStoreHeldByARunRefusesWrites() {
+            var heldByRun = factory.getOrCreateForIngestion(KB_ID, inMemory());
+            addSegments(heldByRun, 1);
+
+            assertTrue(factory.dropInMemoryStore(KB_ID, inMemory()));
+
+            assertThrows(InMemoryStoreRetiredException.class, () -> addSegments(heldByRun, 1));
+            assertEquals(0, factory.inMemorySegmentCount());
+        }
+
+        @Test
         @DisplayName("zero disables the cap")
         void zeroDisablesTheCap() {
             var uncapped = offlineFactory(0);

@@ -25,6 +25,14 @@ import java.util.UUID;
  * that was recreated — after a restart, or because its embedding configuration
  * changed — is recognised as empty instead of being trusted to hold what the
  * content hashes say.
+ * <p>
+ * A store the factory replaces or drops is {@linkplain #retire() retired}: it
+ * accepts no further writes. An ingestion run that took the store before the
+ * replacement still holds it, and without this its writes would land in a store
+ * nothing reads any more, outside the cap, which counts only the stores still
+ * registered. Refusing them keeps the cap exact and stops the run with a
+ * reason, instead of letting it fill an orphan. The check runs under the same
+ * lock as the cap, so no write slips in between the replacement and the flag.
  */
 final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegment> {
 
@@ -45,9 +53,30 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     private final String epoch = UUID.randomUUID().toString();
     private final CapacityGuard guard;
 
+    /** Guarded by {@code guard.lock()}. */
+    private boolean retired;
+
     CappedInMemoryEmbeddingStore(String knowledgeBaseId, CapacityGuard guard) {
         this.knowledgeBaseId = knowledgeBaseId;
         this.guard = guard;
+    }
+
+    /**
+     * Refuses every later write. Called by the factory when it replaces or drops
+     * this store; what is already stored stays readable to anyone still holding it.
+     */
+    void retire() {
+        synchronized (guard.lock()) {
+            retired = true;
+        }
+    }
+
+    /** Called with {@code guard.lock()} held. */
+    private void admit(int incoming) {
+        if (retired) {
+            throw new InMemoryStoreRetiredException(knowledgeBaseId);
+        }
+        guard.reserve(knowledgeBaseId, incoming);
     }
 
     /** This instance's identity — different for every store ever created. */
@@ -58,7 +87,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public String add(Embedding embedding) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, 1);
+            admit(1);
             return super.add(embedding);
         }
     }
@@ -66,7 +95,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public void add(String id, Embedding embedding) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, 1);
+            admit(1);
             super.add(id, embedding);
         }
     }
@@ -74,7 +103,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public String add(Embedding embedding, TextSegment embedded) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, 1);
+            admit(1);
             return super.add(embedding, embedded);
         }
     }
@@ -82,7 +111,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public void add(String id, Embedding embedding, TextSegment embedded) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, 1);
+            admit(1);
             super.add(id, embedding, embedded);
         }
     }
@@ -90,7 +119,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public List<String> addAll(List<Embedding> embeddings) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, embeddings == null ? 0 : embeddings.size());
+            admit(embeddings == null ? 0 : embeddings.size());
             return super.addAll(embeddings);
         }
     }
@@ -98,7 +127,7 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
     @Override
     public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
         synchronized (guard.lock()) {
-            guard.reserve(knowledgeBaseId, embeddings == null ? 0 : embeddings.size());
+            admit(embeddings == null ? 0 : embeddings.size());
             super.addAll(ids, embeddings, embedded);
         }
     }
