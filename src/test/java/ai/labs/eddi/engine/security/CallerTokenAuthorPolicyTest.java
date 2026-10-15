@@ -111,7 +111,7 @@ class CallerTokenAuthorPolicyTest {
     @DisplayName("inactive with authorization off, and for a null config")
     void inactiveWhenAuthorizationIsOff() {
         assertDoesNotThrow(() -> policy(false, List.of("eddi-admin")).requireMayAuthor(WITH_TOKEN, "x"));
-        assertDoesNotThrow(() -> policy(true, List.of("eddi-admin")).requireMayAuthor(null, "x"));
         verifyNoInteractions(identity);
+        assertDoesNotThrow(() -> policy(true, List.of("eddi-admin")).requireMayAuthor(null, "x"));
     }
 }

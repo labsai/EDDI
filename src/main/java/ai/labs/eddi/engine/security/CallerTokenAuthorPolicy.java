@@ -72,7 +72,12 @@ public class CallerTokenAuthorPolicy {
      *             403 with a JSON {@code error} naming the property that widens it
      */
     public void requireMayAuthor(Object configuration, String kind) {
-        if (!authorizationEnabled || configuration == null || !containsCallerToken(configuration) || callerHoldsAuthorRole()) {
+        if (!authorizationEnabled) {
+            return;
+        }
+        // The role check runs first and unconditionally: whether the caller may author
+        // is decided by who they are, never skipped because of what the document says.
+        if (callerHoldsAuthorRole() || configuration == null || !containsCallerToken(configuration)) {
             return;
         }
         String message = "This " + kind + " configuration contains ${caller:token}, which sends the bearer token of whoever chats "
