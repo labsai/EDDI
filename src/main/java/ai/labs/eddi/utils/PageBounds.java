@@ -5,7 +5,11 @@
 package ai.labs.eddi.utils;
 
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.ConfigProvider;
+
+import java.util.Map;
 
 /**
  * The one bound every paginated listing applies to its {@code index} and
@@ -29,7 +33,12 @@ import org.eclipse.microprofile.config.ConfigProvider;
 public final class PageBounds {
 
     public static final String MAX_LIMIT_PROPERTY = "eddi.rest.listing.max-limit";
-    public static final int DEFAULT_MAX_LIMIT = 200;
+    /**
+     * The Manager resolves agent names and counts dashboard totals from one
+     * descriptor page of 1000 ({@code DASHBOARD_DESCRIPTOR_LIMIT},
+     * {@code AGENT_NAME_LOOKUP_LIMIT}); the ceiling must admit it.
+     */
+    public static final int DEFAULT_MAX_LIMIT = 1000;
 
     private static volatile Integer maxLimit;
 
@@ -71,7 +80,7 @@ public final class PageBounds {
      */
     public static void require(Integer index, Integer limit) {
         if (index != null && index < 0) {
-            throw new BadRequestException("'index' must not be negative");
+            throw badRequest("'index' must not be negative");
         }
         requireLimit(limit);
     }
@@ -80,7 +89,17 @@ public final class PageBounds {
     public static void requireLimit(Integer limit) {
         int max = maxLimit();
         if (limit != null && limit > max) {
-            throw new BadRequestException("'limit' must be at most " + max + "; page through the results with 'index' instead");
+            throw badRequest("'limit' must be at most " + max + "; page through the results with 'index' instead");
         }
+    }
+
+    /**
+     * A JSON {@code {"error": …}} body, which is what the Manager and the other
+     * clients parse; a bare text body is reported as a JSON syntax error instead of
+     * the message.
+     */
+    private static BadRequestException badRequest(String message) {
+        return new BadRequestException(message,
+                Response.status(Response.Status.BAD_REQUEST).type(MediaType.APPLICATION_JSON).entity(Map.of("error", message)).build());
     }
 }

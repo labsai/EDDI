@@ -1201,7 +1201,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly, agent);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -2198,11 +2198,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
                                                      boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
-                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun)
+                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun, IAgent agent)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
                 loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn,
-                describeTurn(environment, conversationMemory, conversationId, inputData, rerun));
+                describeTurn(environment, conversationMemory, conversationId, inputData, rerun, agent));
     }
 
     /**
@@ -2220,12 +2220,16 @@ public class ConversationService implements IConversationService, UserErasurePar
      * expects secrets in its input and the client cannot be relied on to flag each
      * one; and the input that is kept passes through {@link SecretRedactionFilter},
      * so a credential-shaped token in an ordinary turn is masked rather than
-     * retained for the dead letter's lifetime. When the agent cannot be resolved
-     * the turn is treated as secret: a dead letter that cannot be replayed beats
-     * one that holds what it should not.
+     * retained for the dead letter's lifetime.
+     *
+     * @param agent
+     *            the agent the turn runs on, as {@code say} resolved it — no second
+     *            lookup here, this is the hot path. {@code null} is treated as an
+     *            agent that expects secrets: a dead letter that cannot be replayed
+     *            beats one that holds what it should not
      */
     Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
-                                     boolean rerun) {
+                                     boolean rerun, IAgent agent) {
         Map<String, Object> turn = new LinkedHashMap<>();
         turn.put("conversationId", conversationId);
         turn.put("agentId", memory.getAgentId());
@@ -2234,7 +2238,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
         if (captureDeadLetterInput && inputData != null) {
-            if (isSecretInput(inputData) || agentExpectsSecrets(environment, memory)) {
+            if (isSecretInput(inputData) || agent == null || agent.hasSecretPropertyInstructions()) {
                 // A turn the client flagged secretInput, or one addressed to an agent
                 // with a scope: secret instruction: its input must not sit in a dead
                 // letter for days. Recorded as such, without input or context — so it can
@@ -2254,22 +2258,6 @@ public class ConversationService implements IConversationService, UserErasurePar
         var context = inputData.getContext();
         Context flag = context == null ? null : context.get("secretInput");
         return flag != null && "true".equals(String.valueOf(flag.getValue()));
-    }
-
-    /**
-     * Whether the agent this turn runs against sets any {@code scope: secret}
-     * property. Fails closed: an agent that cannot be looked up is treated as one
-     * that expects secrets.
-     */
-    private boolean agentExpectsSecrets(Environment environment, IConversationMemory memory) {
-        try {
-            IAgent agent = agentFactory.getAgent(environment, memory.getAgentId(), memory.getAgentVersion());
-            return agent == null || agent.hasSecretPropertyInstructions();
-        } catch (Exception e) {
-            LOGGER.debugf("Could not resolve agent %s v%s for the dead-letter capture; treating the turn as secret: %s",
-                    sanitize(memory.getAgentId()), memory.getAgentVersion(), e.getMessage());
-            return true;
-        }
     }
 
     /**

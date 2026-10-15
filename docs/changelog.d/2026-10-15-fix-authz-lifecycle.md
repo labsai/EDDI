@@ -33,8 +33,9 @@ name the finding so a later reader can find this entry.
   agent whose workflows carry any `scope: secret` property instruction is recorded as
   `secretInput: true` without input or context, like a client-flagged one. The fact is
   computed once at deployment: `PropertySetterConfiguration.hasSecretInstructions()`,
-  carried by `IExecutableWorkflow` and aggregated on `IAgent`. An agent that cannot be
-  resolved is treated as one that expects secrets.
+  carried by `IExecutableWorkflow` and aggregated on `IAgent`, and read from the agent
+  `say` already resolved for the turn — no second lookup on the hot path. A turn with
+  no resolved agent is treated as one that expects secrets.
 - **L9 — three ownership gaps on the internal REST surface.**
   `RestAgentManagement` never bound the `{userId}` path segment to the caller (its
   only check asked whether the caller was anonymous), and `initUserConversation`
@@ -49,11 +50,11 @@ name the finding so a later reader can find this entry.
 - **L10 — unbounded listings and unbounded per-user attachments.**
   `?limit=2147483647` returned every descriptor in one response (verified live on
   `/agentstore/agents/descriptors`). `PageBounds` applies one ceiling —
-  `eddi.rest.listing.max-limit`, default 200, which the Manager pages with — to every
+  `eddi.rest.listing.max-limit`, default 1000, the Manager's largest descriptor page — to every
   config store's descriptor listing, the cross-resource `/descriptors`, the
   conversation listing (which used to clamp silently at 100), the visible user
   memories and both `/administration/logs` listings; a limit above it, or a negative
-  index, is a 400. `eddi.attachments.max-per-user` and
+  index, is a 400 with a JSON `{"error": …}` body. `eddi.attachments.max-per-user` and
   `eddi.attachments.max-total-bytes-per-user` default to 500 files and 1 GiB instead of
   off ([`attachments-guide.md`](../attachments-guide.md#quotas)).
 - **L12 (remaining) — legacy salt and request logging.** A boot that adopts the
@@ -81,7 +82,7 @@ name the finding so a later reader can find this entry.
 [`hitl.md`](../hitl.md), [`secrets-vault.md`](../secrets-vault.md), [`langchain.md`](../langchain.md).
 
 ```decision-log
-| 2026-10-15 | A listing above the page ceiling is refused with 400, not clamped | A clamp returns a short page a client mistakes for the whole; a refusal tells it to page. The ceiling (200) is what the Manager already pages with | Silent clamping, as the conversation listing did at 100 |
+| 2026-10-15 | A listing above the page ceiling is refused with 400, not clamped | A clamp returns a short page a client mistakes for the whole; a refusal tells it to page. The ceiling (1000) is the Manager's largest page — it resolves agent names and dashboard counts from one page of 1000, and 200 broke both | Silent clamping, as the conversation listing did at 100; a 200 ceiling with the Manager paging |
 | 2026-10-15 | An agent with any `scope: secret` instruction never has its turn input dead-lettered | The capture runs before the pipeline, so the scrub cannot help, and a client cannot be relied on to flag every secret turn; losing replayability for those agents' failed turns is the lesser cost | Per-turn detection of secret-shaped input (the redaction filter still runs on everything captured) |
 | 2026-10-15 | An approver-only caller may cancel only an `AWAITING_HUMAN` conversation | The role exists to decide pauses; a cancel of an executing turn is the owner's or an admin's to make | A separate cancel permission |
 ```

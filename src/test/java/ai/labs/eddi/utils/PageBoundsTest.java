@@ -26,10 +26,10 @@ class PageBoundsTest {
     }
 
     @Test
-    @DisplayName("the default ceiling is 200, which is what the Manager pages with")
+    @DisplayName("the default ceiling is 1000, the Manager's largest descriptor page")
     void defaultCeiling() {
         assertEquals(PageBounds.DEFAULT_MAX_LIMIT, PageBounds.maxLimit());
-        assertEquals(200, PageBounds.DEFAULT_MAX_LIMIT);
+        assertEquals(1000, PageBounds.DEFAULT_MAX_LIMIT);
     }
 
     @Test
@@ -39,6 +39,9 @@ class PageBoundsTest {
 
         var refused = assertThrows(BadRequestException.class, () -> PageBounds.require(0, 51));
         assertTrue(refused.getMessage().contains("50"), refused.getMessage());
+        assertEquals(400, refused.getResponse().getStatus());
+        assertEquals("application/json", refused.getResponse().getMediaType().toString());
+        assertTrue(refused.getResponse().getEntity().toString().contains("50"), "the body carries the message as JSON");
         assertThrows(BadRequestException.class, () -> PageBounds.requireLimit(Integer.MAX_VALUE));
     }
 
