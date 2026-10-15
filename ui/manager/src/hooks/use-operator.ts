@@ -17,6 +17,10 @@ import {
   resolveAgentVersion,
   fetchOpenApiSpec,
   findMissingEndpoints,
+  findUnusableEndpoints,
+  apiAuthForMode,
+  unusableEndpointsFromResult,
+  unusableEndpointsMessage,
   defaultOperatorConfig,
   verifyGateInstalled,
   reportOperatorGateStatus,
@@ -325,6 +329,19 @@ export function useActivateOperator() {
             `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
           );
         }
+        // Present in the spec is not the same as usable: an endpoint whose request
+        // body is of a type the tool generator cannot send (the text/plain
+        // updateResourceUri once was) yields a tool that can only fail after the
+        // admin has approved it. Refused here, by name, like a missing endpoint —
+        // before any agent exists, so a kept one from an earlier attempt survives.
+        const unusable = findUnusableEndpoints(
+          spec,
+          endpointsForScope(config.scope),
+          apiAuthForMode(config.authMode),
+        );
+        if (unusable.length > 0) {
+          throw new Error(unusableEndpointsMessage(unusable));
+        }
 
         // The address the generated tools will target. Resolved HERE, before
         // anything is created, because it is the single field that decides whether
@@ -382,6 +399,26 @@ export function useActivateOperator() {
           await removeAgentQuietly({ ...effectiveConfig, agentId, version: 1 });
           throw versionError;
         }
+
+        // The backend's own report of operations it skipped because their tool
+        // could not send a required input. The spec pre-flight above normally
+        // catches the same set first; this is the authority when the two disagree
+        // (a body type the backend learns to refuse before the Manager does). An
+        // older backend reports nothing, and the pre-flight stands alone. The agent
+        // exists but is not deployed yet, so it is simply removed.
+        const reportedUnusable = unusableEndpointsFromResult(result);
+        if (reportedUnusable.length > 0) {
+          let leftover = "";
+          try {
+            await removeSupersededAgent({ ...effectiveConfig, agentId, version });
+          } catch {
+            // The refusal below is still the headline, but it must say the new
+            // agent is still there: an admin told only "unusable endpoints" has no
+            // reason to look for a second operator.
+            leftover = ` The new agent (${agentId}) could not be removed and still exists — remove it from the Agents screen.`;
+          }
+          throw new Error(unusableEndpointsMessage(reportedUnusable) + leftover);
+        }
       }
       const keptAgent: KeptOperatorAgent = { agentId, version, fingerprint };
 
@@ -419,7 +456,6 @@ export function useActivateOperator() {
             : `The operator agent was created but failed to deploy (status: ${status}). It has been removed.`,
         );
       }
-
       // Everything from here to the config write is rolled back on failure, as
       // is everything above. A throw used to leave a live agent bound to the
       // whole admin-API surface and running as the caller's identity — while

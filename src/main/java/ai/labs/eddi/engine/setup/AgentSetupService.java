@@ -617,6 +617,13 @@ public class AgentSetupService {
             if (!buildResult.unmatchedEndpoints().isEmpty()) {
                 createdResources.put("unmatchedEndpoints", buildResult.unmatchedEndpoints());
             }
+            // Operations the filter selected but that need an input a generated tool
+            // cannot send (e.g. a body type other than JSON or plain text). They were
+            // skipped, not generated half-working — report them so the caller can
+            // refuse to proceed instead of finding out at the first call.
+            if (!buildResult.unusableEndpoints().isEmpty()) {
+                createdResources.put("unusableEndpoints", buildResult.unusableEndpoints());
+            }
 
             // --- Step 3: Create Parser ---
             var parserConfig = createParserConfig();

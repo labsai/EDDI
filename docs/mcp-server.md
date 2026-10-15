@@ -861,6 +861,28 @@ The whole-body form matters most under [HITL approval](hitl.md): the approval ca
 shows tool **arguments**, so "what the approver sees is what gets sent" only holds
 while the body is one of them.
 
+**Which request bodies a tool can send.** The generator maps two media types:
+
+| Operation consumes | Generated tool |
+| --- | --- |
+| `application/json` | `requestBody` carries the JSON document, as a string (above) |
+| `text/plain` | `requestBody` carries the bare text, sent verbatim with `Content-Type: text/plain` — no JSON, quotes or key name. The parameter description is built from the spec's body description and example. EDDI's own `PUT /agentstore/agents/{id}/updateResourceUri` is this shape: its body is one URI |
+
+An operation that offers both is sent the JSON form. The text is substituted as
+*data*, never as a template: `{…}` or `${…}` inside it is sent as written, and a
+credential reference typed into it is refused like one in a JSON body.
+
+**Anything else is reported, not dropped.** An operation that *requires* an input
+the generator cannot send — a request body of another type (`application/zip`,
+`multipart/form-data`, form-urlencoded), or a required header or cookie parameter —
+is skipped rather than generated as a tool that can only fail. The skipped
+operations come back in the response as `resources.unusableEndpoints` (a list of
+`"METHOD /path: reason"`), the operation is logged at `WARN`, and a spec in which
+*nothing* is usable is rejected with those names in the error. An optional body of
+an unsupported type is generated without the body. The Platform Operator's
+activation uses this report to refuse an allow-list containing such an endpoint
+(see [Architecture](architecture.md#case-study-the-platform-operator)).
+
 #### Calling an MCP server as the chatting user
 
 Set `apiKey` to `${caller:token}` and the tool call carries the identity of the
