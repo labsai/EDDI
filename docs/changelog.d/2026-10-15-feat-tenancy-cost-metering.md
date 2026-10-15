@@ -54,7 +54,9 @@ exception swallowed, over-budget marked, in-memory end to end), `ConversationSer
 `LlmTaskSpendGateTest`, `DreamServiceTest` additions, `ConversationServiceResumeTest` (resume
 callback meters), `RestTenantQuotaTest` (no "NOT enforced" warning), `LlmTaskAuditLedgerTest` (cost now bypasses the collector gate),
 `TenantCostMeteringIT` (Mongo + Postgres Testcontainers: two priced turns cross a $0.01 budget and
-the gate then refuses).
+the gate then refuses; and a priced turn that pauses, is persisted to and reloaded from the real
+conversation store, and resumes with further cost is charged exactly the step total, with
+`audit:metered_cost` on the persisted step).
 
 ### Known gap / follow-up
 
