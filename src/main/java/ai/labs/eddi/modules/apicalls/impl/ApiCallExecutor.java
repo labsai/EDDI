@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
@@ -246,6 +247,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getFireAndForget()) {
+                // Agent test harness: a test conversation's fire-and-forget call is never
+                // sent unless its suite runs calls live.
+                if (ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") != null) {
+                    return Collections.emptyMap();
+                }
                 executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
                 return Collections.emptyMap();
             } else {
@@ -296,7 +302,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // executor knows exactly which plaintexts it substituted.
                     RequestRedactor.redactResolvedSecrets(requestMap, built.resolvedSecrets());
                     prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
-                    response = executeAndMeasureRequest(call, request, built.resolvedSecrets(), retryCall, amountOfExecutions);
+                    // Agent test harness: a test conversation gets its suite's mock (or a 501
+                    // NOT_EXECUTED) instead of a request, and everything below — saveResponse,
+                    // postResponse property instructions, retries — runs on it unchanged.
+                    var mocked = ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall");
+                    response = mocked != null
+                            ? new MockedResponse(mocked)
+                            : executeAndMeasureRequest(call, request, built.resolvedSecrets(), retryCall, amountOfExecutions);
 
                     var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
                     if (!isResponseSuccessful) {
@@ -1685,4 +1697,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return out.toString();
     }
 
+    /** An agent-test mock in the shape of an HTTP response. */
+    private record MockedResponse(ToolMockRegistry.MockResult result) implements IResponse {
+        @Override
+        public String getContentAsString() {
+            return result.bodyAsText();
+        }
+
+        @Override
+        public int getHttpCode() {
+            return result.httpCode();
+        }
+
+        @Override
+        public String getHttpCodeMessage() {
+            return "Agent test " + result.outcome().name().toLowerCase(Locale.ROOT);
+        }
+
+        @Override
+        public Map<String, String> getHttpHeader() {
+            boolean json = result.isJsonBody() || result.outcome() != ToolMockRegistry.Outcome.MOCKED;
+            return Map.of(CONTENT_TYPE, json ? CONTENT_TYPE_APPLICATION_JSON : "text/plain");
+        }
+    }
 }

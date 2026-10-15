@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.agenttests;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -85,6 +86,8 @@ final class ScriptedEngine {
     final AtomicInteger active = new AtomicInteger();
     final AtomicInteger maxActive = new AtomicInteger();
     private final AtomicInteger ids = new AtomicInteger();
+    /** Tools the "agent" calls on a given input, through the real mock registry. */
+    final Map<String, List<String>> toolCallsByInput = new ConcurrentHashMap<>();
     volatile boolean neverAnswer;
     volatile long startDelayMs;
 
@@ -122,6 +125,11 @@ final class ScriptedEngine {
                 return null;
             }
             var snapshot = conversations.get(conversationId);
+            var memory = mock(IConversationMemory.class);
+            when(memory.getUserId()).thenReturn(snapshot.getUserId());
+            for (String tool : toolCallsByInput.getOrDefault(input.getInput(), List.of())) {
+                ToolMockRegistry.interceptToolCall(memory, tool, "{}", "http");
+            }
             apply(snapshot, script.apply(input.getInput()));
             handler.onComplete(new SimpleConversationMemorySnapshot());
             return null;

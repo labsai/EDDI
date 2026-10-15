@@ -236,6 +236,9 @@ public class AgentTestRunner {
         String error = null;
         AgentTestRun run = ctx.run();
         String userId = AgentTestConversations.userIdFor(run.id(), caseIndex, repetition);
+        // Armed before the conversation exists: the start turn can already call tools.
+        var mocks = new ToolMockRegistry.Session(ctx.suite());
+        ToolMockRegistry.register(userId, mocks);
 
         try {
             if (ctx.overBudget()) {
@@ -265,7 +268,8 @@ public class AgentTestRunner {
                     error = "Stopped before turn " + (t + 1) + ": the conversation is " + finalState + ".";
                     break;
                 }
-                TurnResult result = runTurn(ctx, conversationId, testCase, turn, t + 1);
+                mocks.startTurn(t + 1);
+                TurnResult result = runTurn(ctx, conversationId, testCase, turn, t + 1, mocks);
                 turnResults.add(result);
                 attemptCost += result.costUsd();
                 finalState = result.conversationState();
@@ -280,14 +284,22 @@ public class AgentTestRunner {
             if (conversationId != null) {
                 cleanUp(conversationId, Boolean.TRUE.equals(run.keepConversations()));
             }
+            // Only after the conversation is ended: from here on any late call of it is
+            // refused (no session, fail closed), never executed.
+            ToolMockRegistry.unregister(userId);
         }
 
-        boolean passed = error == null && turnResults.size() == testCase.turns().size() && turnResults.stream().allMatch(TurnResult::passed);
+        // Every call that had no mock while unmocked calls fail is a failure of its
+        // own, wherever it happened — the start turn included.
+        List<String> unmocked = mocks.calls().stream().filter(c -> c.outcome() == ToolMockRegistry.Outcome.NOT_EXECUTED)
+                .map(ToolMockRegistry.RecordedCall::tool).toList();
+        boolean passed = error == null && unmocked.isEmpty() && turnResults.size() == testCase.turns().size()
+                && turnResults.stream().allMatch(TurnResult::passed);
         return new AttemptResult(repetition, Boolean.TRUE.equals(run.keepConversations()) ? conversationId : null, passed, round(attemptCost),
-                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), finalState, List.of(), turnResults, error);
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), finalState, unmocked, turnResults, error);
     }
 
-    private TurnResult runTurn(RunContext ctx, String conversationId, TestCase testCase, Turn turn, int index) {
+    private TurnResult runTurn(RunContext ctx, String conversationId, TestCase testCase, Turn turn, int index, ToolMockRegistry.Session mocks) {
         long startNanos = System.nanoTime();
         int timeoutSeconds = ctx.defaults().turnTimeoutSeconds();
         var inputData = new InputData(turn.input(), toContext(testCase.context(), turn.context()));
@@ -324,20 +336,21 @@ public class AgentTestRunner {
         } catch (Exception e) {
             return failedTurn(turn, index, startNanos, "turn", "readable afterwards", safeMessage(e));
         }
-        observed = withToolCalls(observed);
+        // The registry saw every call of the turn on all three paths (LLM tools,
+        // rule-triggered httpcalls and MCP calls), mocked or not; the LLM trace in
+        // memory only has the first kind.
+        var calls = mocks.callsOfTurn(index);
+        observed = observed.withToolCalls(calls.stream().map(c -> new TurnObservation.ObservedToolCall(c.tool(), c.arguments())).toList());
         charge(ctx, observed);
         meterRegistry.counter("eddi.agent_tests.turns").increment();
 
-        List<ExpectationFailure> failures = ExpectationEvaluator.evaluate(turn.expect(), observed);
+        List<ExpectationFailure> failures = new ArrayList<>(ExpectationEvaluator.evaluate(turn.expect(), observed));
+        calls.stream().filter(c -> c.outcome() == ToolMockRegistry.Outcome.NOT_EXECUTED)
+                .forEach(c -> failures.add(new ExpectationFailure("unmockedTool", "a mock for '" + c.tool() + "'", "NOT_EXECUTED")));
         return new TurnResult(index, turn.input(), failures.isEmpty(), round(observed.costUsd()),
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), observed.actions(), truncate(observed.output()),
                 observed.toolCalls().stream().map(TurnObservation.ObservedToolCall::tool).toList(), observed.conversationState(),
                 failures.isEmpty() ? null : failures);
-    }
-
-    /** Hook for the tool calls a turn made beyond the LLM trace in memory. */
-    TurnObservation withToolCalls(TurnObservation observed) {
-        return observed;
     }
 
     private static TurnResult failedTurn(Turn turn, int index, long startNanos, String expectation, Object expected, Object actual) {

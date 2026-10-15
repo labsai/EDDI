@@ -266,4 +266,36 @@ class AgentTestRunnerTest {
         assertEquals("de", context.get("language").getValue(), "the turn's value wins");
         assertEquals(Context.ContextType.object, context.get("user").getType());
     }
+
+    @Test
+    @DisplayName("a call without a mock fails the case and is reported — and was never executed")
+    void unmockedToolCallFailsTheCase() throws Exception {
+        var engine = engine();
+        engine.toolCallsByInput.put("hello", List.of("createBooking"));
+
+        AgentTestRun run = runner(engine, 4).run(started(false), suite(null, null, happyPath()));
+
+        assertEquals(AgentTestRun.Status.FAILED, run.status());
+        var attempt = run.cases().getFirst().attempts().getFirst();
+        assertEquals(List.of("createBooking"), attempt.unmockedToolCalls());
+        var turn = attempt.turns().getFirst();
+        assertEquals("unmockedTool", turn.failures().getFirst().expectation());
+        assertEquals(List.of("createBooking"), turn.toolCalls());
+    }
+
+    @Test
+    @DisplayName("a mocked call satisfies toolCalled and the case passes")
+    void mockedToolCallPasses() throws Exception {
+        var engine = engine();
+        engine.toolCallsByInput.put("hello", List.of("getAvailability"));
+        var expect = new Expectation(null, null, null, null, null, List.of(new AgentTestSuite.ToolCallExpectation("getAvailability", null)),
+                List.of("createBooking"), 1, null, null);
+        var suite = new AgentTestSuite("wizard", null, null, null,
+                List.of(new AgentTestSuite.ToolMock("getAvailability", null, new AgentTestSuite.MockResponse(200, "3"))),
+                List.of(new TestCase("tools", null, null, null, List.of(new Turn("hello", null, expect)))));
+
+        AgentTestRun run = runner(engine, 4).run(started(false), suite);
+
+        assertEquals(AgentTestRun.Status.PASSED, run.status(), () -> String.valueOf(run.cases()));
+    }
 }
