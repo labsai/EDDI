@@ -258,6 +258,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // what survives a cap. See the ordered "headers" insert below.
                 Map<String, Object> result = new LinkedHashMap<>();
 
+                // saveResponse without a responseObjectName stored the body under a null
+                // key, which the memory serializer refuses — so EVERY turn running the
+                // call failed. The store refuses that config at save time now; one stored
+                // before the check skips the save and says so, instead of failing the turn.
+                boolean saveResponse = Boolean.TRUE.equals(call.getSaveResponse());
+                if (saveResponse && (call.getResponseObjectName() == null || call.getResponseObjectName().isBlank())) {
+                    LOGGER.warnf("ApiCall (%s) has saveResponse=true but no responseObjectName; its response is not stored", call.getName());
+                    saveResponse = false;
+                }
+
                 do {
                     // Final attempt wins, entirely: a retried failure populated
                     // "body"/"httpCode" on its pass through the loop, and a
@@ -341,7 +351,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
-                        if (call.getSaveResponse()) {
+                        if (saveResponse) {
                             String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
                                 prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
@@ -362,7 +372,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // NOT put into `result` here — see the ordered insert below.
                     }
 
-                    if (isResponseSuccessful && call.getSaveResponse()) {
+                    if (isResponseSuccessful && saveResponse) {
                         // Success bodies land in conversation memory, which is persisted as a
                         // single document — cap them just like the error bodies above.
                         // A response echoing a credential this request sent must not carry it
