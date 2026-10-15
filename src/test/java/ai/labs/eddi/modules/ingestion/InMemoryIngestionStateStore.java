@@ -261,7 +261,23 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         runs.put(run.runId(), new IngestionRun(run.runId(), existing.sourceId(), run.status(),
                 existing.startedAt(), run.finishedAt() == null ? Instant.now() : run.finishedAt(),
                 run.documentsSeen(), run.documentsIngested(), run.documentsUnchanged(), run.documentsFailed(),
-                run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error()));
+                run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error(),
+                run.documentsSkipped(),
+                run.stopReason() != null ? run.stopReason() : existing.stopReason(),
+                run.trigger() != null ? run.trigger() : existing.trigger()));
+    }
+
+    @Override
+    public synchronized void reportProgress(IngestionRun progress) {
+        IngestionRun existing = runs.get(progress.runId());
+        if (existing == null || existing.status() != IngestionRun.Status.RUNNING) {
+            return;
+        }
+        runs.put(progress.runId(), new IngestionRun(existing.runId(), existing.sourceId(), existing.status(),
+                existing.startedAt(), null, progress.documentsSeen(), progress.documentsIngested(),
+                progress.documentsUnchanged(), progress.documentsFailed(), progress.documentsTombstoned(),
+                progress.segmentsStored(), progress.costUsd(), existing.error(), progress.documentsSkipped(),
+                existing.stopReason(), progress.trigger() != null ? progress.trigger() : existing.trigger()));
     }
 
     @Override

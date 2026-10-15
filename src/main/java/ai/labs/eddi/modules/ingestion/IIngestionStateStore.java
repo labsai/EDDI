@@ -272,6 +272,20 @@ public interface IIngestionStateStore {
     /** Closes a run with its outcome and counters. */
     void finishRun(IngestionRun run);
 
+    /**
+     * Writes a run's counters so far onto its row while it is still
+     * {@code RUNNING}, so the run history shows progress instead of a row of zeroes
+     * until the run ends.
+     *
+     * <p>
+     * Only the counters and the trigger are written, and only while the row is
+     * still {@code RUNNING}: a progress write that loses the race with
+     * {@link #finishRun} or with the reaper matches nothing, and never reopens or
+     * overwrites a closed run. Best effort — a caller treats a failure here as a
+     * missed update, never as a reason to stop the run.
+     */
+    void reportProgress(IngestionRun progress);
+
     /** The run currently in flight for a source, if any. */
     Optional<IngestionRun> activeRun(String sourceId);
 
@@ -378,7 +392,45 @@ public interface IIngestionStateStore {
             int documentsTombstoned,
             int segmentsStored,
             double costUsd,
-            String error) {
+            String error,
+            int documentsSkipped,
+            String stopReason,
+            Trigger trigger) {
+
+        /**
+         * A run as recorded before skipped documents, stop reasons and triggers were —
+         * and as most callers still build it.
+         */
+        public IngestionRun(String runId, String sourceId, Status status, Instant startedAt, Instant finishedAt,
+                int documentsSeen, int documentsIngested, int documentsUnchanged, int documentsFailed,
+                int documentsTombstoned, int segmentsStored, double costUsd, String error) {
+            this(runId, sourceId, status, startedAt, finishedAt, documentsSeen, documentsIngested,
+                    documentsUnchanged, documentsFailed, documentsTombstoned, segmentsStored, costUsd, error, 0,
+                    null, null);
+        }
+
+        /**
+         * What started a run. Null on a row written before it was recorded, which the
+         * Manager shows as unknown rather than guessing.
+         */
+        public enum Trigger {
+            /** "Run now", from the Manager or the REST API. */
+            MANUAL,
+            /** The source's cron. */
+            SCHEDULED;
+
+            /** Reads a stored trigger, tolerating one this build does not know. */
+            public static Trigger parse(String stored) {
+                if (stored == null) {
+                    return null;
+                }
+                try {
+                    return valueOf(stored);
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            }
+        }
 
         public enum Status {
             RUNNING, COMPLETED, FAILED, CANCELLED,

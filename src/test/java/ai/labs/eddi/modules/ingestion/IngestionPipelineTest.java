@@ -822,6 +822,44 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a run records what started it and why it stopped")
+        void recordsTriggerAndStopReason() {
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST, null,
+                    IIngestionStateStore.IngestionRun.Trigger.SCHEDULED);
+
+            var run = stateStore.listRuns(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), 10).get(0);
+            assertEquals(IIngestionStateStore.IngestionRun.Trigger.SCHEDULED, run.trigger());
+            assertEquals("COMPLETED", run.stopReason());
+        }
+
+        @Test
+        @DisplayName("a running run shows its counters before it finishes")
+        void progressIsVisibleMidRun() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><head><title>Index</title></head><body><main><p>Index.</p>"
+                            + "<a href=\"" + SITE + "/a\">a</a><a href=\"" + SITE + "/b\">b</a></main></body></html>")
+                    .page(SITE + "/a", pageWith("Page A."))
+                    .page(SITE + "/b", pageWith("Page B."));
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+            List<Integer> ingestedWhileRunning = new ArrayList<>();
+            doAnswer(invocation -> {
+                // Read from the store itself, mid-run: what the Manager would see.
+                stateStore.activeRun(sourceKey).ifPresent(run -> ingestedWhileRunning.add(run.documentsIngested()));
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            IngestionPipeline pipeline = pipelineFor(site);
+            pipeline.progressReportInterval = Duration.ZERO;
+
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(List.of(0, 1, 2), ingestedWhileRunning,
+                    "each embedding saw the documents ingested before it already on the running row");
+        }
+
+        @Test
         @DisplayName("the segment budget stops a run that would cost too much")
         void segmentBudgetStopsTheRun() {
             IngestionSource capped = source();

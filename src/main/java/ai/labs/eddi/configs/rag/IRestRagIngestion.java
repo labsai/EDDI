@@ -141,6 +141,99 @@ public interface IRestRagIngestion {
                               @Parameter(name = "version", required = true, example = "1")
                               @QueryParam("version") Integer version);
 
+    // --- Schedules ---
+
+    @GET
+    @Path("/{id}/sources/{sourceId}/schedule")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The source's schedule and its recent fires.")
+    @Operation(summary = "Read an ingestion source's schedule",
+               description = "Whether the source's cron is armed, when it fires next, when it last fired, and the "
+                       + "outcome of its recent fires. 'scheduled' is false when the source has no cron, is "
+                       + "disabled, or its cron was refused.")
+    Response readSourceSchedule(@PathParam("id") String ragConfigId,
+                                @PathParam("sourceId") String sourceId,
+                                @Parameter(name = "version", required = true, example = "1")
+                                @QueryParam("version") Integer version);
+
+    @GET
+    @Path("/cron/preview")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "Whether the cron would be accepted, and its next fire times.")
+    @Operation(summary = "Preview an ingestion cron",
+               description = "Applies the checks saving a knowledge base applies to a source's cron — parseable, "
+                       + "able to match a date, and no more frequent than this deployment allows — and returns "
+                       + "its next fire times in UTC, the zone ingestion schedules run in.")
+    Response previewCron(@QueryParam("cron") String cron,
+                         @QueryParam("count")
+                         @DefaultValue("3") Integer count);
+
+    // --- Inspecting what a knowledge base holds ---
+
+    @GET
+    @Path("/{id}/sources/{sourceId}/documents")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "A page of the source's documents, most recently ingested first.")
+    @Operation(summary = "List a source's ingested documents",
+               description = "Every document this source has ingested, as its ingestion state records it: when it "
+                       + "was first and last embedded, and whether it has since been removed from the source. "
+                       + "'q' narrows to documents whose URL, file name or id contains it.")
+    Response readSourceDocuments(@PathParam("id") String ragConfigId,
+                                 @PathParam("sourceId") String sourceId,
+                                 @Parameter(name = "version", required = true, example = "1")
+                                 @QueryParam("version") Integer version,
+                                 @QueryParam("q") String query,
+                                 @QueryParam("offset")
+                                 @DefaultValue("0") Integer offset,
+                                 @QueryParam("limit")
+                                 @DefaultValue("50") Integer limit);
+
+    @GET
+    @Path("/{id}/sources/{sourceId}/chunks")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The document's chunks, in document order.")
+    @APIResponse(responseCode = "501", description = "The vector store cannot filter by metadata.")
+    @Operation(summary = "Read the chunks of one ingested document",
+               description = "The text chunks one document was split into and stored as, with their metadata. "
+                       + "Costs one embedding call: the vector stores offer no listing, so the chunks are found "
+                       + "by a search filtered to the document.")
+    Response readDocumentChunks(@PathParam("id") String ragConfigId,
+                                @PathParam("sourceId") String sourceId,
+                                @Parameter(name = "version", required = true, example = "1")
+                                @QueryParam("version") Integer version,
+                                @Parameter(name = "documentId", required = true,
+                                           description = "The document's id, as the documents listing returns it")
+                                @QueryParam("documentId") String documentId,
+                                @QueryParam("limit")
+                                @DefaultValue("100") Integer limit);
+
+    @POST
+    @Path("/{id}/search")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The chunks the query retrieves, best match first.")
+    @Operation(summary = "Test retrieval against a knowledge base",
+               description = "Embeds the query and searches the knowledge base exactly as an agent's retrieval "
+                       + "does, returning each chunk with its score and metadata. Costs one embedding call.")
+    Response searchKnowledgeBase(@PathParam("id") String ragConfigId,
+                                 @Parameter(name = "version", required = true, example = "1")
+                                 @QueryParam("version") Integer version,
+                                 KnowledgeBaseSearch search);
+
+    /**
+     * A test retrieval.
+     *
+     * @param maxResults
+     *            defaults to the knowledge base's own {@code maxResults}
+     * @param minScore
+     *            defaults to the knowledge base's own {@code minScore}
+     * @param sourceId
+     *            narrows the search to one source's chunks; absent searches all of
+     *            them
+     */
+    record KnowledgeBaseSearch(String query, Integer maxResults, Double minScore, String sourceId) {
+    }
+
     @DELETE
     @Path("/{id}/sources/{sourceId}/documents")
     @Produces(MediaType.APPLICATION_JSON)
