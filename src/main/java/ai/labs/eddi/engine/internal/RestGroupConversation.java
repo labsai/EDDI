@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -46,6 +47,16 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
 /**
  * REST implementation for group conversation operations.
+ * <p>
+ * The endpoints that run discussion work inline &mdash; {@code discuss},
+ * {@code followUpWithMember}, {@code continueDiscussion},
+ * {@code approveGroupPhase}, {@code submitHumanInput} and
+ * {@code approveGroupPhaseStreaming} &mdash; are {@link RunOnVirtualThread}: on
+ * a worker thread each held one of the pool's ~200 platform threads for an
+ * entire multi-agent discussion, every member turn and LLM call included, which
+ * is the ceiling conversation turns no longer have. The member turns themselves
+ * already run on virtual threads. {@link #identity} is the request-scoped
+ * proxy, which Quarkus keeps resolvable on the request's virtual thread.
  *
  * @author ginccc
  */
@@ -183,6 +194,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response discuss(String groupId, DiscussRequest request) {
         if (request == null) {
             return badRequest("A request body is required.");
@@ -372,6 +384,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
         // Reject an incomplete body up front: without this a missing targetAgentId NPEs
         // during member resolution and surfaces as a 500 rather than a 400.
@@ -463,6 +476,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             + "(pauseId no longer current) — re-read approval-status and decide again.";
 
     @Override
+    @RunOnVirtualThread
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -524,6 +538,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response submitHumanInput(String groupId, String gcId, HumanInputRequest request) {
         if (request == null || request.memberId() == null || request.memberId().isBlank()
                 || request.content() == null || request.content().isBlank()) {
@@ -595,6 +610,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
         String rejection = request == null ? "'question' is required." : rejectionReason(request.question(), request.userId());
         if (rejection != null) {
@@ -696,6 +712,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
