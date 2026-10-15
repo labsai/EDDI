@@ -39,12 +39,16 @@ export function SourceContents({
   const [openDocument, setOpenDocument] = useState<string | null>(null);
 
   useEffect(() => {
+    const next = filter.trim();
+    // Nothing to apply — on mount, or an edit that only added spaces. Resetting the
+    // page here anyway undid a "Next" clicked within the debounce window.
+    if (next === query) return;
     const id = window.setTimeout(() => {
-      setQuery(filter.trim());
+      setQuery(next);
       setPage(0);
     }, FILTER_DEBOUNCE_MS);
     return () => window.clearTimeout(id);
-  }, [filter]);
+  }, [filter, query]);
 
   const documents = useSourceDocuments(
     kbId,

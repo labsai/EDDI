@@ -238,14 +238,21 @@ describe("RAG ingestion — what the knowledge base holds", () => {
     await openFirstSource(user);
     await user.click(await screen.findByTestId("ingestion-source-0-contents-toggle"));
     await user.click(await screen.findByTestId("ingestion-source-0-contents-next"));
+    // Past the filter's debounce window: opening the list must not later snap the
+    // page back to the first one.
+    await new Promise((resolve) => setTimeout(resolve, 500));
     await screen.findByTestId("ingestion-source-0-doc-https://example.com/p29");
 
     // A run removed documents: only one page is left.
     total = 3;
     await client.invalidateQueries({ queryKey: ["ingestion", "documents"] });
 
-    await screen.findByTestId("ingestion-source-0-doc-https://example.com/p0");
-    expect(screen.queryByTestId("ingestion-source-0-contents-next")).not.toBeInTheDocument();
+    // The first page's cached copy (still 30 documents) shows until its refetch lands.
+    await waitFor(() => {
+      expect(screen.getByTestId("ingestion-source-0-contents-total")).toHaveTextContent(/^3$/);
+      expect(screen.queryByTestId("ingestion-source-0-contents-next")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("ingestion-source-0-doc-https://example.com/p0")).toBeInTheDocument();
   });
 
   it("runs a test retrieval and shows each chunk with its score and origin", async () => {
