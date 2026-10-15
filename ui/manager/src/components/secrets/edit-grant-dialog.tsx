@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { AlertTriangle, Bot, Globe, Info, Loader2, X } from "lucide-react";
+import { AlertTriangle, Bot, Globe, Info, Loader2, Server, X } from "lucide-react";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AgentPicker } from "@/components/shared/agent-picker";
+import { ChipInput } from "@/components/shared/chip-input";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
   useSecretGrantImpact,
@@ -15,8 +16,11 @@ import {
 import {
   ALL_AGENTS,
   grantsAllAgents,
+  validateAllowedHost,
+  type AllowedHostProblem,
   type SecretMetadata,
 } from "@/lib/api/secrets";
+import { commitPending } from "@/lib/chip-values";
 import { getErrorMessage } from "@/lib/api-client";
 
 interface EditGrantDialogProps {
@@ -102,6 +106,14 @@ function GrantEditor({
       : secret.allowedAgents.filter((agent) => agent !== ALL_AGENTS),
   );
   const [description, setDescription] = useState(secret.description ?? "");
+  /* Where the secret may be sent. Independent of the agent grant: an agent that
+   * may use the key can still be configured to send it anywhere, which is what
+   * this list stops. Empty means unrestricted, exactly as on the backend. */
+  const storedHosts = useMemo(() => secret.allowedHosts ?? [], [secret.allowedHosts]);
+  const [hosts, setHosts] = useState<string[]>(storedHosts);
+  const [pendingHost, setPendingHost] = useState("");
+  const [hostProblem, setHostProblem] = useState<AllowedHostProblem | null>(null);
+  const hostErrorId = useId();
   /* What the operator acknowledged, not merely that they did: the impact it was
    * given for. A different answer — another agent turns up, or the check fails —
    * is a different decision and needs its own tick. */
@@ -195,6 +207,17 @@ function GrantEditor({
 
   const handleSave = useCallback(() => {
     if (emptyList) return;
+    // Text still in the box counts — a host typed and not yet committed must not
+    // be dropped by a click on Save. Refused if it would not pass the backend.
+    const pendingProblem = pendingHost.trim() ? validateAllowedHost(pendingHost) : null;
+    if (pendingProblem) {
+      setHostProblem(pendingProblem);
+      return;
+    }
+    const finalHosts = commitPending(hosts, pendingHost.toLowerCase());
+    const hostsChanged =
+      finalHosts.length !== storedHosts.length ||
+      finalHosts.some((host, i) => host !== storedHosts[i]);
     updateMut.mutate(
       {
         tenantId: secret.tenantId,
@@ -205,6 +228,9 @@ function GrantEditor({
         // clears it, which is why this compares rather than tests truthiness.
         description:
           description !== (secret.description ?? "") ? description : undefined,
+        // Only when changed, like the description: the backend writes the list
+        // whenever the field is present, and `[]` lifts the restriction.
+        allowedHosts: hostsChanged ? finalHosts : undefined,
       },
       {
         onSuccess: () => {
@@ -219,7 +245,7 @@ function GrantEditor({
         onError: (err) => toast.error(getErrorMessage(err)),
       },
     );
-  }, [secret, emptyList, proposed, description, updateMut, onClose, t]);
+  }, [secret, emptyList, proposed, description, hosts, pendingHost, storedHosts, updateMut, onClose, t]);
 
   return (
     <div className="space-y-4 p-5">
@@ -400,6 +426,46 @@ function GrantEditor({
           )}
           data-testid="grant-description-input"
         />
+      </div>
+
+      {/* The destination allow-list. Edited here because, like the grant, it
+            changes without the value. */}
+      <div className="space-y-1.5" data-testid="grant-hosts">
+        <span className="text-xs font-medium text-foreground">
+          {t("secrets.allowedHosts", "Allowed destinations")}
+        </span>
+        <ChipInput
+          values={hosts}
+          onChange={(next) => setHosts(next.map((host) => host.toLowerCase()))}
+          pending={pendingHost}
+          onPendingChange={setPendingHost}
+          validate={validateAllowedHost}
+          onInvalid={(code) => setHostProblem(code as AllowedHostProblem | null)}
+          placeholder="api.openai.com"
+          inputLabel={t("secrets.allowedHostsAdd", "Add an allowed host")}
+          itemIcon={Server}
+          invalid={hostProblem !== null}
+          errorId={hostErrorId}
+          testId="grant-hosts-input"
+          ltr
+        />
+        {hostProblem && (
+          <p
+            id={hostErrorId}
+            role="alert"
+            data-testid="grant-hosts-error"
+            className="text-[11px] text-destructive"
+          >
+            {hostProblem === "scheme"
+              ? t("secrets.allowedHostsScheme", "Enter the host only, without https:// or a path — e.g. api.openai.com or api.openai.com:443.")
+              : t("secrets.allowedHostsShape", "Not a host or host:port. Wildcards are not supported.")}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground" data-testid="grant-hosts-hint">
+          {hosts.length === 0
+            ? t("secrets.allowedHostsAny", "No restriction: an agent allowed to use this secret may send it to any host. Add hosts to refuse every other destination.")
+            : t("secrets.allowedHostsHint", "A request, model, knowledge base or MCP/A2A server that would send this secret to any other host is refused. A host without a port matches every port.")}
+        </p>
       </div>
 
       {/* Always mounted: a live region that appears together with its text is

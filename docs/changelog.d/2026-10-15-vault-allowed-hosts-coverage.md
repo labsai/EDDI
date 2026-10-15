@@ -1,0 +1,26 @@
+## 🔒 fix(vault): enforce `allowedHosts` for embedding, vector-store, MCP and A2A references; edit it in the Manager (2026-10-15)
+
+**Repo:** EDDI (`fix/vault-allowed-hosts-coverage`, branched from `fix/vault-grants`)
+
+Follow-up to M1 of the 2026-10-15 security review. `fix/vault-grants` added a per-secret `allowedHosts` list but enforced it only where `ApiCallExecutor` and `ChatModelRegistry` resolve `${vault:…}`; [`secrets-vault.md`](../secrets-vault.md#destination-allow-list-allowedhosts) listed the other resolution paths, and the Manager, as gaps. This closes them.
+
+### Backend
+
+- **`EmbeddingModelFactory`** checks the embedding parameters against `baseUrl` or `endpoint` (the editor-chosen endpoint keys the providers read) before the references are resolved, as `ChatModelRegistry` does. No endpoint parameter means the vendor's own endpoint and is not checked.
+- **`EmbeddingStoreFactory.resolveParams`** collects the references, resolves them, and checks every destination the store builder will connect to — `destinationsOf(storeType, params)`: pgvector and Qdrant `host:port` with the builders' defaults, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, and each host of a MongoDB Atlas connection string. *After* resolution on purpose: the connection string is commonly the secret itself, so its hosts are unknown until it is decrypted, and resolving is local — the check still runs before anything connects. An unparseable connection string yields a destination no list matches.
+- **`McpToolProviderManager`**: new `validateSecretDestination`, run with the other pre-contact checks in `discoverTools` and `resourceBridgeTools`, so a refusal is reported as `INVALID_CONFIGURATION` and kept away from the circuit breaker (it rethrows `HostNotAllowedException` as `IllegalArgumentException`); `createTransport` checks again immediately before resolving, since a transport is also built for a tool call. Caller- and connection-bound keys are not vault references and are skipped.
+- **`A2AToolProviderManager.applyCredential`** checks against the request's own `agentUrl` — for a task call that is the endpoint the peer's agent card announced, which need not be the configured host. Discovery already treats an `IllegalStateException` as a credential problem, not a breaker failure.
+- All four field-inject `VaultHostAllowlist` (null only in tests that construct them directly) rather than adding a constructor parameter: `fix/ssrf-coverage` changes the embedding factories' constructors, and the MCP/A2A ones have several back-compat overloads.
+- **`RestSecretStore.updateGrant`** now calls `secretResolver.invalidateCache(ref)` when `allowedHosts` is written. Models, embedding models/stores and MCP clients check the list when they are built and are then cached; without the eviction their invalidation listeners perform, a narrowed list would not reach a client already built. The agent-grant-only edit still does not invalidate (unchanged reasoning).
+
+### Manager
+
+- `SecretMetadata`, `SecretGrantRequest` and `SecretGrantResponse` carry an optional `allowedHosts`; `updateSecretGrant` and `useUpdateSecretGrant` pass it through only when given. `validateAllowedHost` mirrors the backend's shape check (no scheme, path or wildcard; `host` or `host:port`).
+- The Secrets page shows a restricted secret's hosts under its agent chips (`allowed-hosts-<key>`); an unrestricted one shows nothing.
+- The Access dialog (`EditGrantDialog`) edits the list with the shared `ChipInput`: entries are lower-cased, a URL is refused as it is typed, text still in the box is folded in on Save, and the field is sent only when it changed — removing every host sends `[]`, which lifts the restriction.
+- MSW: `google-gemini-key` is seeded with `allowedHosts`, and the grant handler stores and echoes it like the backend. Six new keys under `secrets.*` in all 11 locales.
+- No operator change: the operator cannot create or edit secrets, and a refusal message names the grant call that fixes it.
+
+### Tests
+
+`VaultAllowedHostsCoverageTest` (13, one `@Nested` class per path, real `VaultHostAllowlist` over a mocked provider) and two assertions in `RestSecretStoreGrantOnCreateTest` (invalidation on a hosts write, none on a grant-only edit). Mutation check: with the five new calls disabled, 7 tests fail — every path's refusal test and the invalidation assertion. `secrets-grants.test.tsx` gains seven Manager tests.

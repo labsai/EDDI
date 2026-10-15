@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
@@ -30,6 +31,7 @@ import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -67,6 +69,22 @@ public class EmbeddingModelFactory {
     private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+
+    /**
+     * Enforces a referenced secret's {@code allowedHosts} against the configured
+     * endpoint before the reference is resolved. Field-injected so the constructor
+     * keeps its shape; null only in tests that construct the factory directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * The parameter keys the providers below read an editor-chosen endpoint from. A
+     * configuration with neither uses the provider's own endpoint, which an editor
+     * cannot choose, so there is nothing to check — as in
+     * {@link ChatModelRegistry}.
+     */
+    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint");
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
@@ -149,6 +167,7 @@ public class EmbeddingModelFactory {
         if (provider == null || provider.isEmpty()) {
             throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
         }
+        requireSecretsAllowedAt(provider, params);
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         // Checked again here, not only at save time: a knowledge base stored before
         // the save-time check existed must not keep sending its documents to the
@@ -182,6 +201,27 @@ public class EmbeddingModelFactory {
             return model;
         }
         return InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
+    }
+
+    /**
+     * Refuses the build when a referenced secret's {@code allowedHosts} does not
+     * name the configured endpoint, before any reference is resolved.
+     *
+     * @param params
+     *            the embedding parameters with global variables resolved and vault
+     *            references still in place
+     */
+    private void requireSecretsAllowedAt(String provider, Map<String, String> params) {
+        if (vaultHostAllowlist == null) {
+            return;
+        }
+        for (String key : ENDPOINT_KEYS) {
+            String endpoint = params.get(key);
+            if (!isBlank(endpoint)) {
+                vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
+                return;
+            }
+        }
     }
 
     /**

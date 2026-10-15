@@ -260,8 +260,14 @@ public class RestSecretStore implements IRestSecretStore {
                     // A second, unconditional write: the host list is independent of the
                     // agent grant, so the precondition above does not cover it.
                     after = secretProvider.updateAllowedHosts(ref, allowedHosts);
+                    // Invalidated for the host list, unlike the grant below: the list is
+                    // checked when a model, embedding store or MCP client is BUILT, and
+                    // those are cached. Without the eviction their invalidation listeners
+                    // perform, a narrowed list would not reach a client already built.
+                    secretResolver.invalidateCache(ref);
                 }
-                // Deliberately NOT invalidating the SecretResolver cache.
+                // For the agent grant alone, deliberately NOT invalidating the
+                // SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may
                 // have changed. Here it cannot have: the value is untouched, so every
