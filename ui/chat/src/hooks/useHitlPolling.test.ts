@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useHitlPolling } from "./useHitlPolling";
 import { setBaseUrl } from "@/api/http";
 
@@ -61,29 +61,77 @@ describe("useHitlPolling", () => {
     expect(onResolved).not.toHaveBeenCalled();
   });
 
-  it("resolves once a settled state is observed", async () => {
-    const onResolved = vi.fn(async (_isStale: () => boolean) => true);
-    mockStatuses(["READY"]);
+  describe("with the pause not stored yet (stream announces it before persisting)", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
 
-    mount(onResolved);
+    it("does NOT treat a first READY read as resolution: keeps the card and re-polls fast", async () => {
+      const onResolved = vi.fn(async (_isStale: () => boolean) => true);
+      const onStatus = vi.fn();
+      const calls = mockStatuses(["READY", "READY", "AWAITING_HUMAN"]);
+      mount(onResolved, onStatus);
 
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-  });
-
-  it("keeps watching when the post-resolution refresh fails", async () => {
-    // A dropped refresh used to stop the loop forever, wedging the widget in a
-    // paused state with a locked composer.
-    const onResolved = vi.fn(async (_isStale: () => boolean) => false);
-    mockStatuses(["READY"]);
-
-    mount(onResolved);
-
-    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
-    // The loop must have rescheduled rather than returned.
-    await waitFor(() => expect(onResolved.mock.calls.length).toBeGreaterThan(1), {
-      timeout: 8000,
+      await advance(0);
+      expect(calls.count).toBe(1);
+      expect(onResolved).not.toHaveBeenCalled();
+      await advance(600);
+      expect(calls.count).toBe(2);
+      expect(onResolved).not.toHaveBeenCalled();
+      await advance(1100);
+      expect(calls.count).toBe(3);
+      expect(onStatus).toHaveBeenCalledWith(expect.objectContaining({ state: "AWAITING_HUMAN" }));
+      expect(onResolved).not.toHaveBeenCalled();
     });
-  }, 15000);
+
+    it("resolves on a settled state once the pause has been seen", async () => {
+      const onResolved = vi.fn(async (_isStale: () => boolean) => true);
+      mockStatuses(["READY", "AWAITING_HUMAN", "READY"]);
+      mount(onResolved);
+
+      await advance(0);
+      await advance(600); // AWAITING_HUMAN observed
+      expect(onResolved).not.toHaveBeenCalled();
+      await advance(6100); // normal (backed-off) cadence from here
+      expect(onResolved).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves on READY after the 10 s window when the pause was never seen (decided before the first poll)", async () => {
+      const onResolved = vi.fn(async (_isStale: () => boolean) => true);
+      mockStatuses(["READY"]);
+      mount(onResolved);
+
+      await advance(9_000);
+      expect(onResolved).not.toHaveBeenCalled();
+      await advance(3_000);
+      expect(onResolved).toHaveBeenCalledTimes(1);
+    });
+
+    it("treats ENDED / ERROR / EXECUTION_INTERRUPTED as resolution at once", async () => {
+      for (const state of ["ENDED", "ERROR", "EXECUTION_INTERRUPTED"]) {
+        const onResolved = vi.fn(async (_isStale: () => boolean) => true);
+        mockStatuses([state]);
+        const { unmount } = mount(onResolved);
+        await advance(0);
+        expect(onResolved).toHaveBeenCalledTimes(1);
+        unmount();
+      }
+    });
+
+    it("keeps watching when the post-resolution refresh fails", async () => {
+      // A dropped refresh used to stop the loop forever, wedging the widget in a
+      // paused state with a locked composer.
+      const onResolved = vi.fn(async (_isStale: () => boolean) => false);
+      mockStatuses(["AWAITING_HUMAN", "READY"]);
+      mount(onResolved);
+
+      await advance(0);
+      await advance(3_100);
+      expect(onResolved).toHaveBeenCalledTimes(1);
+      await advance(10_000);
+      expect(onResolved.mock.calls.length).toBeGreaterThan(1);
+    });
+  });
 
   it("reports a still-paused status to the caller", async () => {
     const onStatus = vi.fn();

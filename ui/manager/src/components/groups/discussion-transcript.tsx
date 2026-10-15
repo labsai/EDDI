@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { PhaseHeader } from "./phase-header";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { HumanTurnBanner } from "./human-turn-banner";
 import { DiscussionInsights } from "./discussion-insights";
 import { AgentResponseCard } from "./agent-response-card";
@@ -240,6 +240,34 @@ export function DiscussionTranscript({
     () => (effectiveState === "AWAITING_APPROVAL" ? new Set(pendingTaskIds) : undefined),
     [effectiveState, pendingTaskIds],
   );
+
+  // The approval card's props, held while a decision is carried out. Approving
+  // switches the transcript from the stored conversation to the live resumed
+  // stream, which would unmount the card and lose the reviewer's per-task
+  // choices if the resume then fails. The card stays mounted (hidden behind its
+  // receipt) from the last props it had, and comes back when the stream fails.
+  const awaitingNow = effectiveState === "AWAITING_APPROVAL";
+  const liveCardProps = awaitingNow
+    ? {
+        cardKey: `${gcId ?? ""}:${conversation?.pausedAt ?? ""}`,
+        pending: conversation?.state !== "AWAITING_APPROVAL",
+        pauseReason: streamState?.hitlPause?.reason || conversation?.hitlPauseReason,
+        pausedAt: conversation?.pausedAt,
+        timeoutPolicy: conversation?.hitlTimeoutPolicy,
+        approvalTimeout: conversation?.hitlApprovalTimeout,
+        pausedPhaseName: streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName,
+        granularity: streamState?.hitlPause?.granularity || conversation?.hitlPauseType,
+        pendingTaskIds,
+      }
+    : null;
+  const [frozenCard, setFrozenCard] = useState<typeof liveCardProps>(null);
+  if (liveCardProps && !liveCardProps.pending && frozenCard?.cardKey !== liveCardProps.cardKey) {
+    setFrozenCard(liveCardProps);
+  }
+  const streamFailed = streamState?.state === "FAILED";
+  const cardProps =
+    liveCardProps ?? (frozenCard && (isDeciding || streamFailed) ? { ...frozenCard, pending: false } : null);
+  const cardHidden = !liveCardProps && !!cardProps && !!isDeciding;
 
   // Memoize phases to avoid re-grouping on every render
   const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
@@ -709,7 +737,10 @@ export function DiscussionTranscript({
         )}
 
         {/* HITL Approval Banner */}
-        {effectiveState === "AWAITING_APPROVAL" && (
+        {cardProps && (
+          // Focus target for a discussion that stopped on a human (see the
+          // awaitingHuman effect); the card slot inside it hides behind the
+          // decision receipt while the resumed discussion runs.
           <div
             ref={pauseBannerRef}
             tabIndex={-1}
@@ -717,15 +748,25 @@ export function DiscussionTranscript({
             className="px-6 py-4 focus:outline-none"
             data-testid="approval-banner-anchor"
           >
-            <ApprovalBanner
+          <div className={cn(cardHidden && "hidden")} data-testid="group-approval-slot">
+            <ApprovalCard
               surface="group"
-              pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
-              pausedAt={conversation?.pausedAt}
-              timeoutPolicy={conversation?.hitlTimeoutPolicy}
-              approvalTimeout={conversation?.hitlApprovalTimeout}
-              pausedPhaseName={streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName}
-              granularity={streamState?.hitlPause?.granularity || conversation?.hitlPauseType}
-              pendingTaskIds={pendingTaskIds}
+              // The same card, receipt and verify-the-pause rule as every other
+              // deciding surface. Identity is the persisted pause start.
+              cardKey={cardProps.cardKey}
+              isResolving={!!isDeciding}
+              // The stream announces AWAITING_APPROVAL BEFORE the paused
+              // conversation is stored. Until the persisted conversation says so
+              // too, there is no phase/task data to decide from: Approve would
+              // resume a pause nobody can see the particulars of.
+              pauseDetailsPending={cardProps.pending}
+              pauseReason={cardProps.pauseReason}
+              pausedAt={cardProps.pausedAt}
+              timeoutPolicy={cardProps.timeoutPolicy}
+              approvalTimeout={cardProps.approvalTimeout}
+              pausedPhaseName={cardProps.pausedPhaseName}
+              granularity={cardProps.granularity}
+              pendingTaskIds={cardProps.pendingTaskIds}
               isSubmitting={isDeciding}
               onDecide={(verdict, note, taskApprovals) => {
                 if (gcId) onApprove?.(gcId, verdict, note, taskApprovals);
@@ -734,6 +775,7 @@ export function DiscussionTranscript({
                 onCancelDiscussion && gcId ? () => onCancelDiscussion(gcId) : undefined
               }
             />
+          </div>
           </div>
         )}
 

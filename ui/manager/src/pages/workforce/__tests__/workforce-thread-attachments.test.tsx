@@ -843,9 +843,9 @@ describe("WorkforceThread – Attachment Features", () => {
       // Retrying cannot help until the pause is decided; the queue that decides
       // it is one link away.
       expect(screen.queryByTestId("thread-retry")).not.toBeInTheDocument();
-      expect(screen.getByTestId("thread-review-approvals")).toHaveAttribute(
-        "href",
-        "/manage/approvals",
+      // Deep link to THIS conversation's review page, not the generic inbox.
+      expect(screen.getByTestId("thread-review-approvals").getAttribute("href")).toMatch(
+        /^\/manage\/conversationview\/.+\?awaiting=1$/,
       );
       // The message was never received, so it must not sit in the transcript
       // looking sent.
