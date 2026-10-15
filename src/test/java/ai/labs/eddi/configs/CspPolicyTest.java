@@ -7,6 +7,8 @@ package ai.labs.eddi.configs;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import io.vertx.core.http.impl.HttpUtils;
+
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -241,10 +243,88 @@ class CspPolicyTest {
             assertTrue(defaultFilter.matcher(path).matches(), path + " must get the default policy");
             assertFalse(chatFilter.matcher(path).matches(), path + " must not get the chat policy");
         }
-        for (var path : new String[]{"/q/swagger-ui", "/q/swagger-ui/index.html"}) {
-            assertTrue(swaggerFilter.matcher(path).matches(), path);
-            assertFalse(defaultFilter.matcher(path).matches(), path);
+        for (var path : new String[]{"/q/swagger-ui", "/q/swagger-ui/", "/q/swagger-ui/index.html",
+                "/q/swagger-ui/swagger-ui.css"}) {
+            assertTrue(swaggerFilter.matcher(path).matches(), path + " must get the Swagger policy");
+            assertFalse(defaultFilter.matcher(path).matches(), path + " must not ALSO get the default policy");
             assertFalse(chatFilter.matcher(path).matches(), path);
+        }
+        // The other /q routes are not Swagger UI and keep the strict policy.
+        for (var path : new String[]{"/q/openapi", "/q/metrics", "/q/swagger-ui-x", "/q/dev-ui"}) {
+            assertTrue(defaultFilter.matcher(path).matches(), path + " must get the default policy");
+            assertFalse(swaggerFilter.matcher(path).matches(), path + " must not get the Swagger policy");
+        }
+    }
+
+    /**
+     * The regexes above are matched against the path as Vert.x normalises it
+     * ({@code RoutingContext.normalizedPath()}, which is {@code
+     * HttpUtils.normalizePath}: dot segments resolved, unreserved characters
+     * decoded, {@code %2F} and {@code //} left alone), so the spellings an attacker
+     * would try are fed through the same function here. What has to hold: the chat
+     * policy — the one whose frame-ancestors is an operator allow-list — is applied
+     * only to a path that is unambiguously under {@code /chat}, and everything else
+     * keeps the blanket deny.
+     */
+    @Test
+    @DisplayName("path tricks cannot borrow the chat policy's framing allow-list")
+    void pathTricksKeepTheStrictPolicy() throws Exception {
+        var properties = applicationProperties();
+        var defaultFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-default.matches"));
+        var chatFilter = Pattern.compile(properties.getProperty("quarkus.http.filter.csp-chat.matches"));
+
+        // A dot segment is resolved before any route or filter sees the path, so
+        // this is /manage and gets the default policy. A percent-encoded slash is
+        // not decoded, and a different case is a different path: both 404 with the
+        // default policy. A matrix parameter on the first segment ("/chat;x=1")
+        // is stripped by JAX-RS when it picks the chat shell, but the filter saw
+        // "chat;" and gave it the default policy — strict, so safe.
+        assertEquals("/manage", HttpUtils.normalizePath("/chat/../manage"));
+        for (var raw : new String[]{"/chat/../manage", "/%2Fchat", "/%2fchat", "/CHAT", "/Chat/production/x",
+                "/chat%2F../manage", "/chat;x=1/production/x", "/chatter"}) {
+            var path = HttpUtils.normalizePath(raw);
+            assertTrue(defaultFilter.matcher(path).matches(), raw + " (normalised: " + path + ") must get the default policy");
+            assertFalse(chatFilter.matcher(path).matches(), raw + " (normalised: " + path + ") must not get the chat policy");
+        }
+        // Collapsed and matrix-parameter spellings that remain the chat shell —
+        // Vert.x folds "//chat" to "/chat", and "..;" is not a dot segment, so
+        // "/chat/..;/manage" stays under /chat and the chat catch-all serves
+        // chat.html (verified live). The chat policy is the right one for the chat
+        // shell, and the default filter must not match too, or the browser
+        // enforces the intersection and frames nothing.
+        assertEquals("/chat", HttpUtils.normalizePath("//chat"));
+        for (var raw : new String[]{"//chat", "//chat/production/x", "/chat/..;/manage"}) {
+            var path = HttpUtils.normalizePath(raw);
+            assertTrue(path.startsWith("/chat"), raw + " normalised to " + path);
+            assertTrue(chatFilter.matcher(path).matches(), raw + " (normalised: " + path + ") stays a chat path");
+            assertFalse(defaultFilter.matcher(path).matches(), raw + " must not ALSO get the default policy");
+        }
+    }
+
+    /**
+     * Quarkus hands a filter's {@code order} to Vert.x {@code Route.order()} as is,
+     * and Vert.x runs routes in ascending order. The {@code /q} sub-router (health,
+     * metrics, Swagger UI) is mounted on the same router as a route whose order is
+     * its creation sequence number — zero or above — so a filter with a positive
+     * order can run after that mount has already answered the request. At
+     * {@code order=20} the Swagger filter never ran: {@code
+     * /q/swagger-ui/} was served with no Content-Security-Policy and no
+     * X-Frame-Options at all (2026-10-15 security review, L11). A negative order
+     * runs before every sequence-ordered route.
+     */
+    @Test
+    @DisplayName("every CSP filter runs before the /q sub-router mount (negative order)")
+    void everyCspFilterRunsBeforeTheFrameworkRouter() throws Exception {
+        var properties = applicationProperties();
+        for (var filter : new String[]{"csp-default", "csp-chat", "csp-swagger"}) {
+            var key = "quarkus.http.filter." + filter + ".order";
+            var order = properties.getProperty(key);
+            assertNotNull(order, key + " must be set: unset, Quarkus uses Integer.MIN_VALUE, which is fine, "
+                    + "but the three filters are ordered relative to each other on purpose");
+            assertTrue(Integer.parseInt(order.trim()) < 0,
+                    key + "=" + order + " is not negative: Vert.x runs routes in ascending order and the /q "
+                            + "sub-router mount has a non-negative sequence order, so a positive filter order can "
+                            + "sit behind it and never run — which is how Swagger UI lost its CSP");
         }
     }
 
