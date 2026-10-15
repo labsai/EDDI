@@ -283,7 +283,8 @@ public final class McpApiToolBuilder {
      * With protection off, private/internal hosts stay permitted so internal
      * OpenAPI specs remain discoverable (the calling REST/MCP surface is
      * {@code eddi-admin}/{@code eddi-editor} gated). The fetched text is parsed
-     * with the location as its base, so relative {@code $ref}s resolve as they did.
+     * with the URL it was finally read from as its base, so relative {@code $ref}s
+     * resolve beside the fetched document.
      * <p>
      * For inline JSON/YAML content, {@code setSafelyResolveURL(true)} alone is not
      * enough: it guards only URL-format {@code $ref}s, while swagger-parser
@@ -328,8 +329,10 @@ public final class McpApiToolBuilder {
             if (!UrlValidationUtils.isValidHttpUrl(location)) {
                 throw new IllegalArgumentException("OpenAPI spec location must be an http or https URL");
             }
-            String content = specFetcher.fetch(location);
-            result = new OpenAPIV3Parser().readContents(content, null, parseOptions, location);
+            // The base for relative $refs is the URL the document was finally read
+            // from: after a redirect that differs from the location the editor gave.
+            OpenApiSpecFetcher.FetchedSpec fetched = specFetcher.fetchSpec(location);
+            result = new OpenAPIV3Parser().readContents(fetched.content(), null, parseOptions, fetched.location());
         }
 
         if (result == null || result.getOpenAPI() == null) {

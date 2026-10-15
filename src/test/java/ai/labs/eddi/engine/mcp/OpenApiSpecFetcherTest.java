@@ -112,6 +112,15 @@ class OpenApiSpecFetcherTest {
     }
 
     @Test
+    @DisplayName("the location handed back is the final one after redirects — the base for relative $refs")
+    void finalLocationIsReported() {
+        var fetched = fetcher(OutboundTargetPolicy.permissive()).fetchSpec(origin + "/moved");
+        assertEquals(origin + "/openapi.json", fetched.location());
+        assertTrue(fetched.content().contains("\"Fetched\""), fetched.content());
+        assertEquals(origin + "/openapi.json", fetcher(OutboundTargetPolicy.permissive()).fetchSpec(origin + "/openapi.json").location());
+    }
+
+    @Test
     @DisplayName("protection off: a redirect onto the metadata service is refused, and the metadata host is never contacted")
     void redirectToMetadataRefused() {
         var e = assertThrows(IllegalArgumentException.class,

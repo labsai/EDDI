@@ -132,14 +132,29 @@ public class OpenApiSpecFetcher {
     }
 
     /**
-     * The document at {@code location}, as text.
+     * A fetched document and the URL it was finally read from — after any redirects
+     * — which is the base a relative {@code $ref} resolves against. A spec at
+     * {@code /openapi.yaml} redirected to {@code /v2/openapi.yaml} references
+     * {@code ./schemas.yaml} beside the <em>fetched</em> document, not the
+     * original.
+     */
+    public record FetchedSpec(String content, String location) {
+    }
+
+    /** {@link #fetchSpec(String)}, content only. */
+    public String fetch(String location) {
+        return fetchSpec(location).content();
+    }
+
+    /**
+     * The document at {@code location}, as text, with the URL it was read from.
      *
      * @throws IllegalArgumentException
      *             when the location or a redirect target is refused by the policy,
      *             the server does not answer 200, the body exceeds the cap, there
      *             are too many redirects, or the fetch fails
      */
-    public String fetch(String location) {
+    public FetchedSpec fetchSpec(String location) {
         URI uri = UrlValidationUtils.validateUrlSyntax(location.trim());
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             targetPolicy.validateUrl(uri.toString());
@@ -187,7 +202,7 @@ public class OpenApiSpecFetcher {
                 throw new IllegalArgumentException("OpenAPI spec at " + forMessage(uri) + " is larger than the " + maxSpecBytes
                         + " byte limit, or did not arrive within " + REQUEST_TIMEOUT.toSeconds() + " seconds");
             }
-            return new String(body.bytes(), StandardCharsets.UTF_8);
+            return new FetchedSpec(new String(body.bytes(), StandardCharsets.UTF_8), uri.toString());
         }
         throw new IllegalArgumentException("OpenAPI spec location redirected more than " + MAX_REDIRECTS + " times: " + forMessage(uri));
     }
