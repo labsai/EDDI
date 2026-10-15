@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
@@ -43,12 +44,31 @@ class AgentExecutionHelper {
     }
 
     /**
+     * As above, spending from the turn's deadline ({@code null} = none). The
+     * deadline-bounded loop is {@link RetryConfiguration#executeWithRetry}.
+     */
+    static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs,
+                                  TurnDeadline deadline)
+            throws LifecycleException {
+        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline);
+    }
+
+    /**
      * Executes chat model with retry logic based on task configuration.
      */
     static ChatResponse executeChatWithRetry(ChatModel chatModel, List<ChatMessage> messages,
                                              LlmConfiguration.Task task)
             throws LifecycleException {
+        return executeChatWithRetry(chatModel, messages, task, null);
+    }
 
-        return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution");
+    /**
+     * As above, inside the turn's deadline ({@code null} = none).
+     */
+    static ChatResponse executeChatWithRetry(ChatModel chatModel, List<ChatMessage> messages,
+                                             LlmConfiguration.Task task, TurnDeadline deadline)
+            throws LifecycleException {
+
+        return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution", new long[1], deadline);
     }
 }

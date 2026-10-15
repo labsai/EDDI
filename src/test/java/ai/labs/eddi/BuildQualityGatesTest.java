@@ -206,12 +206,11 @@ class BuildQualityGatesTest {
      * line, so it cannot outlive its reason. Dependabot's langchain4j group bumps
      * the property when a newer release appears.
      * <p>
-     * {@code langchain4j-community-oci-genai}: newest release 1.20.0-beta30 when
-     * the rest of the beta line moved to 1.20.2-beta30. Its builder tests pass
-     * against the 1.20.2 core.
+     * Currently empty: {@code langchain4j-community-oci-genai} caught up with the
+     * beta line at 1.22.0-beta32. Add an entry (artifactId to its own property)
+     * when an artifact trails again.
      */
-    private static final Map<String, String> LANGCHAIN4J_LAGGING_ARTIFACTS = Map.of(
-            "langchain4j-community-oci-genai", "${langchain4j-community-oci.version}");
+    private static final Map<String, String> LANGCHAIN4J_LAGGING_ARTIFACTS = Map.of();
 
     /**
      * checkstyle.xml carries a DOCTYPE pointing at puppycrawl.com, so the doctype

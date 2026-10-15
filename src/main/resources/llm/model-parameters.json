@@ -1,0 +1,3549 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "openai": {
+      "displayName": "OpenAI",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "effect": "rejected",
+              "note": "This reasoning model rejects sampling settings such as temperature and topP."
+            },
+            {
+              "models": "^gpt-5\\.[1-4](?!\\d)",
+              "effect": "rejected",
+              "note": "This model accepts sampling settings only while reasoningEffort is none (its default).",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": true
+              }
+            },
+            {
+              "models": "^(gpt-5\\.[5-9](?!\\d)|gpt-6)",
+              "effect": "rejected",
+              "note": "This model accepts sampling settings only when reasoningEffort is set to none.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share; change this or temperature, not both.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "effect": "rejected",
+              "note": "This reasoning model rejects sampling settings such as temperature and topP."
+            },
+            {
+              "models": "^gpt-5\\.[1-4](?!\\d)",
+              "effect": "rejected",
+              "note": "This model accepts sampling settings only while reasoningEffort is none (its default).",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": true
+              }
+            },
+            {
+              "models": "^(gpt-5\\.[5-9](?!\\d)|gpt-6)",
+              "effect": "rejected",
+              "note": "This model accepts sampling settings only when reasoningEffort is set to none.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage the model from repeating the same words.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Reasoning models reject frequencyPenalty."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to move on to new topics.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Reasoning models reject presencePenalty."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests; best effort only.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "logitBias",
+          "type": "json",
+          "group": "sampling",
+          "label": "Logit bias",
+          "description": "Make specific tokens more or less likely, as a JSON object of token id to a bias between -100 and 100.",
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Reasoning models reject logitBias."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens (legacy)",
+          "description": "Legacy cap on the answer length; reasoning models need maxCompletionTokens instead.",
+          "min": 1,
+          "rules": [
+            {
+              "models": "^(o\\d|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set).",
+              "migrateTo": "maxCompletionTokens"
+            }
+          ],
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "maxCompletionTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max completion tokens",
+          "description": "Upper limit on the tokens the model may produce, including its hidden reasoning.",
+          "min": 1,
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Up to four pieces of text that make the model stop writing when it produces them.",
+          "rules": [
+            {
+              "models": "^(o3(-pro)?|o4-mini)(-\\d{4}-\\d{2}-\\d{2})?$",
+              "effect": "rejected",
+              "note": "o3 and o4-mini do not support stop sequences."
+            }
+          ],
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "responseFormat",
+          "type": "enum",
+          "group": "output",
+          "label": "Response format",
+          "description": "Set to json to make the model answer with a JSON object.",
+          "enum": [
+            "text",
+            "json"
+          ],
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "verbosity",
+          "type": "enum",
+          "group": "output",
+          "label": "Verbosity",
+          "description": "How long and detailed the answer should be (GPT-5 and later).",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "source": "https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.2"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the model thinks before answering; more effort is slower and costs more.",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "rules": [
+            {
+              "models": "^(gpt-4o|gpt-4\\.1|o1-mini)",
+              "effect": "rejected",
+              "note": "This model has no reasoning effort setting."
+            },
+            {
+              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "effect": "rejected",
+              "note": "This model does not support reasoningEffort none.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ]
+              }
+            },
+            {
+              "models": "^(gpt-5\\.\\d|gpt-6)",
+              "effect": "rejected",
+              "note": "reasoningEffort minimal exists only on the original gpt-5 models.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "minimal"
+                ]
+              }
+            },
+            {
+              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.1(?!\\d)(?!-codex-max))",
+              "effect": "rejected",
+              "note": "This model does not support reasoningEffort xhigh.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "xhigh"
+                ]
+              }
+            },
+            {
+              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.[1-5](?!\\d))",
+              "effect": "rejected",
+              "note": "reasoningEffort max needs gpt-5.6 or gpt-6.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "max"
+                ]
+              }
+            }
+          ],
+          "source": "https://developers.openai.com/api/docs/guides/reasoning"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        },
+        {
+          "key": "parallelToolCalls",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Parallel tool calls",
+          "description": "Allow the model to call several tools in one step.",
+          "default": true,
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "strictTools",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Strict tool schemas",
+          "description": "Make tool call arguments follow the tool's schema exactly.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "strictJsonSchema",
+          "type": "boolean",
+          "group": "output",
+          "label": "Strict JSON schema",
+          "description": "Make structured JSON answers follow the requested schema exactly.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "serviceTier",
+          "type": "enum",
+          "group": "connection",
+          "label": "Service tier",
+          "description": "Processing tier: flex is cheaper but slower, priority is faster but costs more.",
+          "enum": [
+            "auto",
+            "default",
+            "flex",
+            "priority"
+          ],
+          "default": "auto",
+          "source": "https://developers.openai.com/api/docs/guides/flex-processing"
+        },
+        {
+          "key": "store",
+          "type": "boolean",
+          "group": "advanced",
+          "label": "Store completions",
+          "description": "Keep the request and answer in your OpenAI account for evaluations and distillation.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "metadata",
+          "type": "json",
+          "group": "advanced",
+          "label": "Metadata",
+          "description": "Up to 16 tags stored with the completion, as a JSON object of string keys and values.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "user",
+          "type": "string",
+          "group": "safety",
+          "label": "End-user id (legacy)",
+          "description": "Legacy identifier of the end user; prefer safetyIdentifier and promptCacheKey.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "safetyIdentifier",
+          "type": "string",
+          "group": "safety",
+          "label": "Safety identifier",
+          "description": "A stable, hashed id of the end user that helps OpenAI detect abuse; never send personal data.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "organizationId",
+          "type": "string",
+          "group": "connection",
+          "label": "Organization",
+          "description": "The OpenAI organization to bill when the key belongs to several.",
+          "source": "https://developers.openai.com/api/reference/overview"
+        },
+        {
+          "key": "projectId",
+          "type": "string",
+          "group": "connection",
+          "label": "Project",
+          "description": "The OpenAI project to use when the key belongs to several.",
+          "source": "https://developers.openai.com/api/reference/overview"
+        },
+        {
+          "key": "promptCacheKey",
+          "type": "string",
+          "group": "caching",
+          "label": "Prompt cache key",
+          "description": "Requests that share this key are more likely to reuse cached prompt prefixes.",
+          "source": "https://developers.openai.com/api/docs/guides/prompt-caching"
+        },
+        {
+          "key": "promptCacheRetention",
+          "type": "enum",
+          "group": "caching",
+          "label": "Prompt cache retention",
+          "description": "How long a cached prompt prefix is kept.",
+          "enum": [
+            "in_memory",
+            "24h"
+          ],
+          "source": "https://developers.openai.com/api/docs/guides/prompt-caching"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        },
+        {
+          "key": "customQueryParams",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom query parameters",
+          "description": "Extra URL query parameters, as a JSON object of name to value.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        },
+        {
+          "key": "customParameters",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom body fields",
+          "description": "Extra top-level request body fields, as a JSON object; these win over every other setting.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        }
+      ]
+    },
+    "anthropic": {
+      "displayName": "Anthropic",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "rules": [
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This Claude model accepts only the default temperature of 1.",
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "1"
+                ]
+              }
+            },
+            {
+              "models": "^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Temperature cannot be changed while thinking is on.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "enabled",
+                  "adaptive"
+                ]
+              },
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "1"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This Claude model rejects temperature and topP sent together.",
+              "when": {
+                "key": "temperature"
+              }
+            },
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This Claude model accepts only the default topP of 0.99.",
+              "unless": {
+                "key": "topP",
+                "values": [
+                  "0.99"
+                ]
+              }
+            },
+            {
+              "models": "^claude-(sonnet-4-5|haiku-4-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.",
+              "when": {
+                "key": "temperature"
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/build-with-claude/thinking#sampling-parameters"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "min": 0,
+          "rules": [
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This Claude model rejects topK."
+            },
+            {
+              "models": "^claude-(opus-4-6|sonnet-4-6|opus-4-5|sonnet-4-5|haiku-4-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "topK cannot be used while thinking is on.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "enabled",
+                  "adaptive"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce, including its thinking.",
+          "min": 1,
+          "max": 128000,
+          "default": 16384,
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Pieces of text that make the model stop writing when it produces them.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "thinkingType",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking mode",
+          "description": "Whether and how the model thinks before answering; the default depends on the model.",
+          "enum": [
+            "adaptive",
+            "enabled",
+            "disabled",
+            "between_tools"
+          ],
+          "rules": [
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Thinking mode enabled (with a fixed budget) is not supported on this model; use adaptive.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "enabled"
+                ]
+              }
+            },
+            {
+              "models": "^claude-(opus-4-5|haiku-4-5|sonnet-4-5|opus-4-1|opus-4|sonnet-4)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Adaptive thinking is not supported on this model; use enabled with a budget.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "adaptive"
+                ]
+              }
+            },
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-5-5|sonnet-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This model always thinks; disabled is not accepted.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            },
+            {
+              "models": "^claude-(opus-5|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Thinking can be disabled on this model only at effort high or lower.",
+              "when": {
+                "key": "effort",
+                "values": [
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "unless": {
+                "key": "thinkingType",
+                "values": [
+                  "adaptive",
+                  "enabled",
+                  "between_tools"
+                ],
+                "whenUnset": true
+              }
+            },
+            {
+              "models": "^claude-(?!sonnet-5-5(-\\d{8})?$)",
+              "effect": "rejected",
+              "note": "between_tools exists only on Claude Sonnet 5.5.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "between_tools"
+                ]
+              }
+            },
+            {
+              "models": "^claude-sonnet-5-5(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "between_tools cannot be combined with effort xhigh or max.",
+              "when": {
+                "key": "effort",
+                "values": [
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "unless": {
+                "key": "thinkingType",
+                "values": [
+                  "adaptive",
+                  "enabled",
+                  "disabled"
+                ],
+                "whenUnset": true
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting"
+        },
+        {
+          "key": "thinkingBudgetTokens",
+          "type": "int",
+          "group": "reasoning",
+          "label": "Thinking budget",
+          "description": "How many tokens the model may spend thinking when thinking mode is enabled; at least 1024 and below maxTokens.",
+          "min": 1024,
+          "rules": [
+            {
+              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "A fixed thinking budget is not supported on this model; use effort."
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+        },
+        {
+          "key": "thinkingDisplay",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking display",
+          "description": "Whether the thinking text is summarized or left out of the response; billing is the same.",
+          "enum": [
+            "summarized",
+            "omitted"
+          ],
+          "rules": [
+            {
+              "models": "^claude-",
+              "effect": "rejected",
+              "note": "thinkingDisplay cannot be combined with thinking disabled or between_tools.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled",
+                  "between_tools"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/build-with-claude/thinking"
+        },
+        {
+          "key": "effort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Effort",
+          "description": "How much work the model puts into an answer; higher is slower and costs more.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "rules": [
+            {
+              "models": "^claude-(sonnet-4-5|haiku-4-5)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "This model has no effort setting."
+            },
+            {
+              "models": "^claude-(opus-4-6|sonnet-4-6|opus-4-5|mythos-preview)(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Effort xhigh is not supported on this model.",
+              "when": {
+                "key": "effort",
+                "values": [
+                  "xhigh"
+                ]
+              }
+            },
+            {
+              "models": "^claude-opus-4-5(-\\d{8})?$",
+              "effect": "rejected",
+              "note": "Effort max is not supported on Claude Opus 4.5.",
+              "when": {
+                "key": "effort",
+                "values": [
+                  "max"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.claude.com/docs/en/build-with-claude/effort"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/thinking"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/thinking"
+        },
+        {
+          "key": "cacheSystemMessages",
+          "type": "boolean",
+          "group": "caching",
+          "label": "Cache system prompt",
+          "description": "Mark the system prompt for prompt caching so repeated requests are cheaper.",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "key": "cacheTools",
+          "type": "boolean",
+          "group": "caching",
+          "label": "Cache tools",
+          "description": "Mark the tool definitions for prompt caching.",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "key": "cacheAutomatically",
+          "type": "boolean",
+          "group": "caching",
+          "label": "Automatic caching",
+          "description": "Let Anthropic place the cache breakpoint automatically.",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "key": "cacheTtl",
+          "type": "enum",
+          "group": "caching",
+          "label": "Cache lifetime",
+          "description": "How long cached content is kept; 1h costs more to write than 5m.",
+          "enum": [
+            "5m",
+            "1h"
+          ],
+          "default": "5m",
+          "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+        },
+        {
+          "key": "disableParallelToolUse",
+          "type": "boolean",
+          "group": "tools",
+          "label": "One tool call at a time",
+          "description": "Allow at most one tool call per step.",
+          "default": false,
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "strictTools",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Strict tool schemas",
+          "description": "Make tool call arguments follow the tool's schema exactly.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "userId",
+          "type": "string",
+          "group": "safety",
+          "label": "End-user id",
+          "description": "An opaque id of the end user (a hash, never personal data) that helps Anthropic detect abuse.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "version",
+          "type": "string",
+          "group": "connection",
+          "label": "API version",
+          "description": "The anthropic-version header to send.",
+          "default": "2023-06-01",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "beta",
+          "type": "string",
+          "group": "advanced",
+          "label": "Beta features",
+          "description": "Comma-separated beta feature names sent in the anthropic-beta header.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        },
+        {
+          "key": "customParameters",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom body fields",
+          "description": "Extra top-level request body fields, as a JSON object; these win over every other setting.",
+          "source": "https://platform.claude.com/docs/en/api/messages/create"
+        }
+      ]
+    },
+    "gemini": {
+      "displayName": "Google Gemini",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable; Gemini 3 works best at 1.",
+          "min": 0,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(models/)?gemini-(3\\.([6-9]|[1-9]\\d)|[4-9])[-.]",
+              "effect": "ignored",
+              "note": "Gemini 3.6 Flash and newer ignore temperature."
+            }
+          ],
+          "source": "https://ai.google.dev/gemini-api/docs/gemini-3"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^(models/)?gemini-(3\\.([6-9]|[1-9]\\d)|[4-9])[-.]",
+              "effect": "ignored",
+              "note": "Gemini 3.6 Flash and newer ignore topP."
+            }
+          ],
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "min": 1,
+          "rules": [
+            {
+              "models": "^(models/)?gemini-(3\\.([6-9]|[1-9]\\d)|[4-9])[-.]",
+              "effect": "ignored",
+              "note": "Gemini 3.6 Flash and newer ignore topK."
+            }
+          ],
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests; best effort only.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage the model from repeating the same words. Not every Gemini model accepts it; if the API answers with an error, remove it.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to move on to new topics. Not every Gemini model accepts it; if the API answers with an error, remove it.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "maxOutputTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max output tokens",
+          "description": "Upper limit on the tokens the model may produce, including its thinking.",
+          "min": 1,
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Up to five pieces of text that make the model stop writing when it produces them.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "thinkingLevel",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking level",
+          "description": "How hard Gemini 3 and later models think before answering.",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "rules": [
+            {
+              "models": "^(models/)?gemini-2\\.5-",
+              "effect": "rejected",
+              "note": "Gemini 2.5 models take thinkingBudget, not thinkingLevel."
+            },
+            {
+              "models": "^(models/)?gemini-([4-9][-.]|3\\.8-flash)",
+              "effect": "rejected",
+              "note": "This model does not support thinking level minimal.",
+              "when": {
+                "key": "thinkingLevel",
+                "values": [
+                  "minimal"
+                ]
+              }
+            }
+          ],
+          "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking"
+        },
+        {
+          "key": "thinkingBudget",
+          "type": "int",
+          "group": "reasoning",
+          "label": "Thinking budget",
+          "description": "Token budget for thinking on Gemini 2.5 models; -1 lets the model decide and 0 turns thinking off where allowed.",
+          "min": -1,
+          "max": 32768,
+          "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": true,
+          "source": "https://ai.google.dev/gemini-api/docs/thought-signatures"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "default": true,
+          "source": "https://ai.google.dev/gemini-api/docs/thought-signatures"
+        },
+        {
+          "key": "allowCodeExecution",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Code execution",
+          "description": "Let the model write and run Python code to work out answers.",
+          "source": "https://ai.google.dev/gemini-api/docs/code-execution"
+        },
+        {
+          "key": "allowGoogleSearch",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Google Search",
+          "description": "Let the model ground its answers in Google Search results.",
+          "source": "https://ai.google.dev/gemini-api/docs/google-search"
+        },
+        {
+          "key": "allowGoogleMaps",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Google Maps",
+          "description": "Let the model ground its answers in Google Maps data.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "allowUrlContext",
+          "type": "boolean",
+          "group": "tools",
+          "label": "URL context",
+          "description": "Let the model read web pages whose links appear in the conversation.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "safetySettings",
+          "type": "json",
+          "group": "safety",
+          "label": "Safety settings",
+          "description": "Blocking thresholds per harm category, as JSON such as {\"HARASSMENT\":\"BLOCK_ONLY_HIGH\"}.",
+          "source": "https://ai.google.dev/api/generate-content"
+        },
+        {
+          "key": "mediaResolution",
+          "type": "enum",
+          "group": "advanced",
+          "label": "Media resolution",
+          "description": "How much detail images and video are read with; higher uses more tokens.",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "source": "https://ai.google.dev/gemini-api/docs/media-resolution"
+        },
+        {
+          "key": "cachedContentName",
+          "type": "string",
+          "group": "caching",
+          "label": "Cached content",
+          "description": "Name of an explicit context cache to reuse, such as cachedContents/abc123.",
+          "rules": [
+            {
+              "models": "^(models/)?gemini-[4-9][-.]",
+              "effect": "rejected",
+              "note": "Gemini 4 and later support only implicit caching."
+            }
+          ],
+          "source": "https://ai.google.dev/gemini-api/docs/caching"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://ai.google.dev/api/generate-content"
+        }
+      ]
+    },
+    "gemini-vertex": {
+      "displayName": "Google Vertex AI Gemini",
+      "params": [
+        {
+          "key": "projectId",
+          "type": "string",
+          "group": "connection",
+          "label": "Google Cloud project",
+          "description": "The Google Cloud project that runs the requests.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations"
+        },
+        {
+          "key": "location",
+          "type": "string",
+          "group": "connection",
+          "label": "Location",
+          "description": "The Google Cloud region, such as us-central1 or global.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations"
+        },
+        {
+          "key": "publisher",
+          "type": "string",
+          "group": "connection",
+          "label": "Location (legacy)",
+          "description": "Legacy name for location; used only when location is not set.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations"
+        },
+        {
+          "key": "apiEndpoint",
+          "type": "string",
+          "group": "connection",
+          "label": "API endpoint",
+          "description": "Override the Vertex AI host, for example for a private endpoint.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations"
+        },
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "max": 2,
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "min": 1,
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests; best effort only.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        },
+        {
+          "key": "maxOutputTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max output tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 1,
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        },
+        {
+          "key": "safetySettings",
+          "type": "json",
+          "group": "safety",
+          "label": "Safety settings",
+          "description": "Blocking thresholds per harm category, as JSON such as {\"HARASSMENT\":\"BLOCK_ONLY_HIGH\"}.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/configure-safety-filters"
+        },
+        {
+          "key": "useGoogleSearch",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Google Search",
+          "description": "Let the model ground its answers in Google Search results.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/grounding/grounding-with-google-search"
+        },
+        {
+          "key": "labels",
+          "type": "json",
+          "group": "advanced",
+          "label": "Labels",
+          "description": "Billing and reporting labels, as a JSON object of lower-case keys and values.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/projects.locations.endpoints/generateContent"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/GenerationConfig"
+        }
+      ]
+    },
+    "azure-openai": {
+      "displayName": "Azure OpenAI",
+      "params": [
+        {
+          "key": "endpoint",
+          "type": "string",
+          "group": "connection",
+          "label": "Endpoint",
+          "description": "Your Azure OpenAI resource URL, such as https://my-resource.openai.azure.com/.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"
+        },
+        {
+          "key": "baseModel",
+          "type": "string",
+          "group": "model",
+          "label": "Underlying model",
+          "description": "The model your deployment runs, such as gpt-4.1; EDDI uses it only to know which settings that model accepts.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "serviceVersion",
+          "type": "string",
+          "group": "connection",
+          "label": "API version",
+          "description": "The Azure OpenAI api-version to call.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"
+        },
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|codex-mini|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro)",
+              "effect": "rejected",
+              "note": "This Azure reasoning model rejects sampling settings such as temperature and topP."
+            },
+            {
+              "models": "^gpt-5\\.[1-4](?!\\d)",
+              "effect": "rejected",
+              "note": "This Azure model accepts sampling settings only while reasoningEffort is none (its default).",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": true
+              }
+            },
+            {
+              "models": "^(gpt-5\\.[5-9](?!\\d))",
+              "effect": "rejected",
+              "note": "This Azure model accepts sampling settings only when reasoningEffort is set to none.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^(o\\d|codex-mini|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro)",
+              "effect": "rejected",
+              "note": "This Azure reasoning model rejects sampling settings such as temperature and topP."
+            },
+            {
+              "models": "^gpt-5\\.[1-4](?!\\d)",
+              "effect": "rejected",
+              "note": "This Azure model accepts sampling settings only while reasoningEffort is none (its default).",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": true
+              }
+            },
+            {
+              "models": "^(gpt-5\\.[5-9](?!\\d))",
+              "effect": "rejected",
+              "note": "This Azure model accepts sampling settings only when reasoningEffort is set to none.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage the model from repeating the same words.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
+              "effect": "rejected",
+              "note": "Azure reasoning models reject frequencyPenalty."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to move on to new topics.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
+              "effect": "rejected",
+              "note": "Azure reasoning models reject presencePenalty."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests; best effort only.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        },
+        {
+          "key": "logitBias",
+          "type": "json",
+          "group": "sampling",
+          "label": "Logit bias",
+          "description": "Make specific tokens more or less likely, as a JSON object of token id to a bias between -100 and 100.",
+          "rules": [
+            {
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Azure reasoning models reject logitBias."
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens (legacy)",
+          "description": "Legacy cap on the answer length; reasoning models need maxCompletionTokens instead.",
+          "min": 1,
+          "rules": [
+            {
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6)",
+              "effect": "rejected",
+              "note": "Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set).",
+              "migrateTo": "maxCompletionTokens"
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        },
+        {
+          "key": "maxCompletionTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max completion tokens",
+          "description": "Upper limit on the tokens the model may produce, including its hidden reasoning.",
+          "min": 1,
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Up to four pieces of text that make the model stop writing when it produces them.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the model thinks before answering; more effort is slower and costs more.",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "rules": [
+            {
+              "models": "^(gpt-4|o1-mini)",
+              "effect": "rejected",
+              "note": "This model has no reasoning effort setting."
+            },
+            {
+              "models": "^gpt-5(-mini|-nano|-pro|-codex)?$",
+              "effect": "rejected",
+              "note": "reasoningEffort none needs gpt-5.1 or later.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ]
+              }
+            },
+            {
+              "models": "^(gpt-5\\.\\d|gpt-6|gpt-5-codex|gpt-5-pro)",
+              "effect": "rejected",
+              "note": "reasoningEffort minimal exists only on gpt-5, gpt-5-mini and gpt-5-nano.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "minimal"
+                ]
+              }
+            }
+          ],
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
+        },
+        {
+          "key": "strictJsonSchema",
+          "type": "boolean",
+          "group": "output",
+          "label": "Strict JSON schema",
+          "description": "Make structured JSON answers follow the requested schema exactly.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        },
+        {
+          "key": "user",
+          "type": "string",
+          "group": "safety",
+          "label": "End-user id",
+          "description": "An identifier of the end user for abuse monitoring.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/latest"
+        }
+      ]
+    },
+    "mistral": {
+      "displayName": "Mistral AI",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied; Mistral recommends 0 to 0.7.",
+          "min": 0,
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share; change this or temperature, not both.",
+          "min": 0,
+          "max": 1,
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests.",
+          "min": 0,
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage the model from repeating the same words.",
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to use a wider vocabulary.",
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 0,
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Pieces of text that make the model stop writing when it produces them.",
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "strictJsonSchema",
+          "type": "boolean",
+          "group": "output",
+          "label": "Strict JSON schema",
+          "description": "Make structured JSON answers follow the requested schema exactly.",
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "safePrompt",
+          "type": "boolean",
+          "group": "safety",
+          "label": "Safe prompt",
+          "description": "Add Mistral's safety instructions in front of the conversation.",
+          "default": false,
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "source": "https://docs.mistral.ai/capabilities/reasoning"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "source": "https://docs.mistral.ai/capabilities/reasoning"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://docs.mistral.ai/api/endpoint/chat"
+        }
+      ]
+    },
+    "ollama": {
+      "displayName": "Ollama",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "default": 0.8,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "default": 0.9,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "min": 0,
+          "default": 40,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "minP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Min P",
+          "description": "Drop words whose probability is below this share of the most likely word's.",
+          "min": 0,
+          "max": 1,
+          "default": 0,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "repeatPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Repeat penalty",
+          "description": "Values above 1 discourage repetition; 1 turns it off.",
+          "min": 0,
+          "default": 1,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "repeatLastN",
+          "type": "int",
+          "group": "sampling",
+          "label": "Repeat window",
+          "description": "How many recent tokens the repeat penalty looks at; 0 turns it off and -1 uses the whole context.",
+          "min": -1,
+          "default": 64,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Fixed random seed for repeatable answers.",
+          "source": "https://github.com/ollama/ollama/blob/main/api/types.go"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce; -1 means no limit.",
+          "min": -1,
+          "default": -1,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Pieces of text that make the model stop writing when it produces them.",
+          "source": "https://github.com/ollama/ollama/blob/main/docs/modelfile.mdx"
+        },
+        {
+          "key": "numCtx",
+          "type": "int",
+          "group": "model",
+          "label": "Context window",
+          "description": "How many tokens of conversation the model can see; longer prompts are cut silently and larger values use more memory.",
+          "min": 1,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/faq.mdx"
+        },
+        {
+          "key": "truncate",
+          "type": "boolean",
+          "group": "advanced",
+          "label": "Truncate history",
+          "description": "Cut the oldest history when the prompt does not fit the context window instead of failing.",
+          "source": "https://github.com/ollama/ollama/blob/main/api/types.go"
+        },
+        {
+          "key": "think",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Think",
+          "description": "Turn reasoning on or off for thinking models; leave empty to let the model decide.",
+          "source": "https://github.com/ollama/ollama/blob/main/docs/capabilities/thinking.mdx"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": false,
+          "source": "https://github.com/ollama/ollama/blob/main/docs/capabilities/thinking.mdx"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://github.com/ollama/ollama/blob/main/docs/api.md"
+        }
+      ]
+    },
+    "bedrock": {
+      "displayName": "Amazon Bedrock",
+      "params": [
+        {
+          "key": "region",
+          "type": "string",
+          "group": "connection",
+          "label": "AWS region",
+          "description": "The AWS region to call, such as us-east-1.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html"
+        },
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)",
+              "effect": "rejected",
+              "note": "This Claude model accepts only the default temperature of 1.",
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "1"
+                ]
+              }
+            }
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "rules": [
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)",
+              "effect": "rejected",
+              "note": "This Claude model rejects temperature and topP sent together.",
+              "when": {
+                "key": "temperature"
+              }
+            },
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(fable-5|mythos|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)",
+              "effect": "rejected",
+              "note": "This Claude model accepts only the default topP of 0.99.",
+              "unless": {
+                "key": "topP",
+                "values": [
+                  "0.99"
+                ]
+              }
+            },
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(sonnet-4-5|haiku-4-5)",
+              "effect": "rejected",
+              "note": "Sonnet 4.5 and Haiku 4.5 accept temperature or topP, not both.",
+              "when": {
+                "key": "temperature"
+              }
+            }
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 1,
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Pieces of text that make the model stop writing when it produces them.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InferenceConfiguration.html"
+        },
+        {
+          "key": "reasoningBudgetTokens",
+          "type": "int",
+          "group": "reasoning",
+          "label": "Thinking budget",
+          "description": "Turn on Claude's extended thinking with this many thinking tokens (at least 1024).",
+          "min": 1024,
+          "rules": [
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(fable-5|mythos-5|opus-(5|4-8|4-7)|sonnet-5|haiku-5-5)",
+              "effect": "rejected",
+              "note": "A fixed thinking budget is not supported on this Claude model; use reasoningEffort."
+            }
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "Turn on Claude's adaptive thinking at this effort level.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "rules": [
+            {
+              "models": "^((global|us|eu|jp|au|apac)\\.)?anthropic\\.claude-(opus-4-5|haiku-4-5|sonnet-4-5|opus-4-1|opus-4|sonnet-4)(-\\d{8})?(-v\\d+(:\\d+)?)?$",
+              "effect": "rejected",
+              "note": "Adaptive thinking is not supported on this Claude model; use reasoningBudgetTokens."
+            }
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/amazon-bedrock"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/amazon-bedrock"
+        },
+        {
+          "key": "promptCachePlacement",
+          "type": "enum",
+          "group": "caching",
+          "label": "Prompt cache point",
+          "description": "Where to place a prompt cache checkpoint so repeated requests are cheaper.",
+          "enum": [
+            "AFTER_SYSTEM",
+            "AFTER_USER_MESSAGE",
+            "AFTER_LAST_USER_MESSAGE",
+            "AFTER_TOOLS"
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html"
+        },
+        {
+          "key": "promptCacheTtl",
+          "type": "enum",
+          "group": "caching",
+          "label": "Prompt cache lifetime",
+          "description": "How long the cache checkpoint is kept; 1h works only on models that support it.",
+          "enum": [
+            "5m",
+            "1h"
+          ],
+          "default": "5m",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html"
+        },
+        {
+          "key": "guardrailId",
+          "type": "string",
+          "group": "safety",
+          "label": "Guardrail id",
+          "description": "The Bedrock guardrail to apply to every request.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_GuardrailConfiguration.html"
+        },
+        {
+          "key": "guardrailVersion",
+          "type": "string",
+          "group": "safety",
+          "label": "Guardrail version",
+          "description": "The guardrail version to apply, a number or DRAFT.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_GuardrailConfiguration.html"
+        },
+        {
+          "key": "guardrailStreamMode",
+          "type": "enum",
+          "group": "safety",
+          "label": "Guardrail stream mode",
+          "description": "Whether streamed answers wait for the guardrail (sync) or are checked in the background (async).",
+          "enum": [
+            "SYNC",
+            "ASYNC"
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_GuardrailConfiguration.html"
+        },
+        {
+          "key": "serviceTier",
+          "type": "enum",
+          "group": "connection",
+          "label": "Service tier",
+          "description": "Processing tier: flex is cheaper but slower, priority is faster but costs more.",
+          "enum": [
+            "PRIORITY",
+            "DEFAULT",
+            "FLEX",
+            "RESERVED"
+          ],
+          "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html"
+        },
+        {
+          "key": "additionalModelRequestFields",
+          "type": "json",
+          "group": "advanced",
+          "label": "Model-specific fields",
+          "description": "Extra model-specific request fields passed through unchanged, as a JSON object.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"
+        },
+        {
+          "key": "requestMetadata",
+          "type": "json",
+          "group": "advanced",
+          "label": "Request metadata",
+          "description": "Up to 16 string tags for filtering invocation logs, as a JSON object.",
+          "source": "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"
+        },
+        {
+          "key": "customHeaders",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom HTTP headers",
+          "description": "Extra HTTP headers sent with every request, as a JSON object of header name to value.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/amazon-bedrock"
+        }
+      ]
+    },
+    "huggingface": {
+      "displayName": "Hugging Face",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "source": "https://huggingface.co/docs/huggingface_hub/package_reference/inference_client"
+        },
+        {
+          "key": "maxNewTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max new tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 1,
+          "source": "https://huggingface.co/docs/huggingface_hub/package_reference/inference_client"
+        },
+        {
+          "key": "returnFullText",
+          "type": "boolean",
+          "group": "output",
+          "label": "Return full text",
+          "description": "Include the prompt in front of the generated answer.",
+          "source": "https://huggingface.co/docs/huggingface_hub/package_reference/inference_client"
+        },
+        {
+          "key": "waitForModel",
+          "type": "boolean",
+          "group": "connection",
+          "label": "Wait for model",
+          "description": "Wait for a cold model to load instead of failing right away.",
+          "source": "https://huggingface.co/docs/huggingface_hub/package_reference/inference_client"
+        }
+      ]
+    },
+    "jlama": {
+      "displayName": "Jlama",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 1,
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        },
+        {
+          "key": "modelCachePath",
+          "type": "string",
+          "group": "advanced",
+          "label": "Model cache folder",
+          "description": "Folder where downloaded models are stored.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        },
+        {
+          "key": "workingDirectory",
+          "type": "string",
+          "group": "advanced",
+          "label": "Working folder",
+          "description": "Folder for the model's working files.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        },
+        {
+          "key": "quantizeModelAtRuntime",
+          "type": "boolean",
+          "group": "advanced",
+          "label": "Quantize at load",
+          "description": "Shrink the model in memory when it loads, trading some quality for speed.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        },
+        {
+          "key": "workingQuantizedType",
+          "type": "string",
+          "group": "advanced",
+          "label": "Working number format",
+          "description": "Number format used while running, such as I8 or F32.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/jlama"
+        }
+      ]
+    },
+    "oracle-genai": {
+      "displayName": "Oracle Cloud Generative AI",
+      "params": [
+        {
+          "key": "compartmentId",
+          "type": "string",
+          "group": "connection",
+          "label": "Compartment",
+          "description": "The OCI compartment that runs the requests.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "configProfile",
+          "type": "string",
+          "group": "connection",
+          "label": "Config profile",
+          "description": "The profile in the OCI config file whose credentials are used.",
+          "source": "https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm"
+        },
+        {
+          "key": "region",
+          "type": "string",
+          "group": "connection",
+          "label": "Region",
+          "description": "The OCI region to call, such as us-chicago-1.",
+          "source": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/overview.htm"
+        },
+        {
+          "key": "servingType",
+          "type": "enum",
+          "group": "connection",
+          "label": "Serving mode",
+          "description": "Use the shared on-demand model or a dedicated AI cluster.",
+          "enum": [
+            "ON_DEMAND",
+            "DEDICATED"
+          ],
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/ServingMode"
+        },
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied, lower values more predictable.",
+          "min": 0,
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share.",
+          "min": 0,
+          "max": 1,
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "seed",
+          "type": "int",
+          "group": "sampling",
+          "label": "Seed",
+          "description": "Ask for repeatable answers to identical requests; best effort only.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage the model from repeating the same words.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to move on to new topics.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens",
+          "description": "Upper limit on the tokens the model may produce.",
+          "min": 1,
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Pieces of text that make the model stop writing when it produces them.",
+          "source": "https://docs.oracle.com/en-us/iaas/api/#/en/generative-ai-inference/20231130/datatypes/GenericChatRequest"
+        }
+      ]
+    },
+    "xai": {
+      "displayName": "xAI Grok",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Up to four pieces of text that make the model stop writing; reasoning models reject them.",
+          "rules": [
+            {
+              "models": "^(grok-4\\.(7|6|5)($|-)|grok-4\\.20-0309-reasoning$)",
+              "effect": "rejected",
+              "note": "xAI reasoning models reject stop sequences."
+            },
+            {
+              "models": "^grok-4\\.3($|-)",
+              "effect": "rejected",
+              "note": "xAI grok-4.3 while it reasons (reasoningEffort other than none) reject stop sequences.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://docs.x.ai/docs/guides/reasoning"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage new topics; reasoning models reject it.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(grok-4\\.(7|6|5)($|-)|grok-4\\.20-0309-reasoning$)",
+              "effect": "rejected",
+              "note": "xAI reasoning models reject presencePenalty."
+            },
+            {
+              "models": "^grok-4\\.3($|-)",
+              "effect": "rejected",
+              "note": "xAI grok-4.3 while it reasons (reasoningEffort other than none) reject presencePenalty.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://docs.x.ai/docs/guides/reasoning"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Positive values discourage repetition; reasoning models reject it.",
+          "min": -2,
+          "max": 2,
+          "rules": [
+            {
+              "models": "^(grok-4\\.(7|6|5)($|-)|grok-4\\.20-0309-reasoning$)",
+              "effect": "rejected",
+              "note": "xAI reasoning models reject frequencyPenalty."
+            },
+            {
+              "models": "^grok-4\\.3($|-)",
+              "effect": "rejected",
+              "note": "xAI grok-4.3 while it reasons (reasoningEffort other than none) reject frequencyPenalty.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ],
+                "whenUnset": false
+              }
+            }
+          ],
+          "source": "https://docs.x.ai/docs/guides/reasoning"
+        },
+        {
+          "key": "logitBias",
+          "type": "json",
+          "group": "sampling",
+          "label": "Logit bias",
+          "description": "Not supported by the xAI API.",
+          "rules": [
+            {
+              "models": "^grok-",
+              "effect": "ignored",
+              "note": "The xAI API does not support logitBias."
+            }
+          ],
+          "source": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the model thinks before answering; grok-4.3 also accepts none.",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "source": "https://docs.x.ai/docs/guides/reasoning"
+        },
+        {
+          "key": "serviceTier",
+          "type": "enum",
+          "group": "connection",
+          "label": "Service tier",
+          "description": "Processing tier; fast and priority are the same.",
+          "enum": [
+            "default",
+            "priority",
+            "fast"
+          ],
+          "source": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions"
+        }
+      ]
+    },
+    "deepseek": {
+      "displayName": "DeepSeek",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied; has no effect while thinking is on.",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "rules": [
+            {
+              "models": "^deepseek-",
+              "effect": "ignored",
+              "note": "DeepSeek ignores temperature in thinking mode (the default).",
+              "unless": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://api-docs.deepseek.com/guides/thinking_mode"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Takes effect only in thinking mode, between 0.95 and 1.",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "rules": [
+            {
+              "models": "^deepseek-",
+              "effect": "ignored",
+              "note": "DeepSeek ignores topP when thinking is disabled.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://api-docs.deepseek.com/guides/thinking_mode"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "No longer supported by DeepSeek.",
+          "rules": [
+            {
+              "models": "^deepseek-",
+              "effect": "ignored",
+              "note": "DeepSeek no longer supports presencePenalty."
+            }
+          ],
+          "source": "https://api-docs.deepseek.com/api/create-chat-completion"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "No longer supported by DeepSeek.",
+          "rules": [
+            {
+              "models": "^deepseek-",
+              "effect": "ignored",
+              "note": "DeepSeek no longer supports frequencyPenalty."
+            }
+          ],
+          "source": "https://api-docs.deepseek.com/api/create-chat-completion"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the model thinks; none turns thinking off.",
+          "enum": [
+            "none",
+            "low",
+            "high",
+            "max"
+          ],
+          "default": "high",
+          "source": "https://api-docs.deepseek.com/api/create-chat-completion"
+        },
+        {
+          "key": "thinkingType",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking",
+          "description": "Turn thinking mode on or off; it is on by default.",
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
+          "default": "enabled",
+          "wire": "thinking.type",
+          "body": true,
+          "source": "https://api-docs.deepseek.com/api/create-chat-completion"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": true,
+          "source": "https://api-docs.deepseek.com/guides/thinking_mode"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "default": true,
+          "source": "https://api-docs.deepseek.com/guides/thinking_mode"
+        }
+      ]
+    },
+    "moonshot": {
+      "displayName": "Moonshot Kimi",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Fixed by Kimi: 1 for kimi-k3 and kimi-k2.7-code; on kimi-k2.6, 1 while thinking and 0.6 without.",
+          "default": 1,
+          "rules": [
+            {
+              "models": "^kimi-(k3|k2\\.7-code)",
+              "effect": "rejected",
+              "note": "This Kimi model accepts only temperature 1.",
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "1"
+                ]
+              }
+            },
+            {
+              "models": "^kimi-k2\\.6$",
+              "effect": "rejected",
+              "note": "kimi-k2.6 accepts only temperature 0.6 when thinking is disabled.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              },
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "0.6"
+                ]
+              }
+            },
+            {
+              "models": "^kimi-k2\\.6$",
+              "effect": "rejected",
+              "note": "kimi-k2.6 accepts only temperature 1 while thinking.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "enabled"
+                ],
+                "whenUnset": true
+              },
+              "unless": {
+                "key": "temperature",
+                "values": [
+                  "1"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.kimi.ai/docs/api/models-overview"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Fixed at 0.95 by Kimi.",
+          "default": 0.95,
+          "rules": [
+            {
+              "models": "^kimi-(k3|k2\\.6|k2\\.7-code)",
+              "effect": "rejected",
+              "note": "Kimi accepts only topP 0.95.",
+              "unless": {
+                "key": "topP",
+                "values": [
+                  "0.95"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.kimi.ai/docs/api/models-overview"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Fixed at 0 by Kimi.",
+          "default": 0,
+          "rules": [
+            {
+              "models": "^kimi-(k3|k2\\.6|k2\\.7-code)",
+              "effect": "rejected",
+              "note": "Kimi accepts only presencePenalty 0.",
+              "unless": {
+                "key": "presencePenalty",
+                "values": [
+                  "0"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.kimi.ai/docs/api/models-overview"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Fixed at 0 by Kimi.",
+          "default": 0,
+          "rules": [
+            {
+              "models": "^kimi-(k3|k2\\.6|k2\\.7-code)",
+              "effect": "rejected",
+              "note": "Kimi accepts only frequencyPenalty 0.",
+              "unless": {
+                "key": "frequencyPenalty",
+                "values": [
+                  "0"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.kimi.ai/docs/api/models-overview"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Up to five short pieces of text that make the model stop writing.",
+          "source": "https://platform.kimi.ai/docs/api/chat"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much kimi-k3 thinks; the kimi-k2 models use thinking instead.",
+          "enum": [
+            "low",
+            "high",
+            "max"
+          ],
+          "source": "https://platform.kimi.ai/docs/api/chat"
+        },
+        {
+          "key": "thinkingType",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking",
+          "description": "Turn thinking on or off on kimi-k2.6; kimi-k3 and kimi-k2.7-code always think.",
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
+          "wire": "thinking.type",
+          "body": true,
+          "rules": [
+            {
+              "models": "^kimi-k3",
+              "effect": "rejected",
+              "note": "kimi-k3 does not take a thinking setting."
+            },
+            {
+              "models": "^kimi-k2\\.7-code",
+              "effect": "rejected",
+              "note": "kimi-k2.7-code always thinks; disabled is not accepted.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.kimi.ai/docs/api/chat"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": true,
+          "source": "https://platform.kimi.ai/docs/api/chat"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "default": true,
+          "source": "https://platform.kimi.ai/docs/api/chat"
+        }
+      ]
+    },
+    "qwen": {
+      "displayName": "Alibaba Qwen",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied; change this or topP, not both.",
+          "min": 0,
+          "max": 2,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Positive values encourage the model to move on to new topics.",
+          "min": -2,
+          "max": 2,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much qwen3.8 models think; none turns thinking off.",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "enableThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Thinking",
+          "description": "Turn the model's thinking on or off; it is on by default.",
+          "default": true,
+          "wire": "enable_thinking",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/deep-thinking"
+        },
+        {
+          "key": "thinkingBudget",
+          "type": "int",
+          "group": "reasoning",
+          "label": "Thinking budget",
+          "description": "Most tokens the model may spend thinking; do not combine with reasoningEffort.",
+          "min": 1,
+          "wire": "thinking_budget",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "preserveThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Keep earlier thinking",
+          "description": "Let the model read its reasoning from earlier turns; that reasoning is billed as input.",
+          "wire": "preserve_thinking",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words; above 100 turns it off.",
+          "min": 0,
+          "max": 100,
+          "default": 20,
+          "wire": "top_k",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "repetitionPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Repetition penalty",
+          "description": "Values above 1 discourage repetition; 1 means no penalty.",
+          "min": 0,
+          "wire": "repetition_penalty",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        },
+        {
+          "key": "enableSearch",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Web search",
+          "description": "Let the model search the web; this can use more tokens.",
+          "default": false,
+          "wire": "enable_search",
+          "body": true,
+          "source": "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"
+        }
+      ]
+    },
+    "zhipu": {
+      "displayName": "Z.ai GLM (Zhipu)",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied; the range is 0 to 1 and it has no effect when sampling is off.",
+          "min": 0,
+          "max": 1,
+          "default": 1,
+          "rules": [
+            {
+              "models": "^glm-",
+              "effect": "ignored",
+              "note": "Temperature has no effect while doSample is false.",
+              "when": {
+                "key": "doSample",
+                "values": [
+                  "false"
+                ]
+              }
+            }
+          ],
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "topP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Top P",
+          "description": "Only consider the most likely words whose probabilities add up to this share; no effect when sampling is off.",
+          "min": 0.01,
+          "max": 1,
+          "default": 0.95,
+          "rules": [
+            {
+              "models": "^glm-",
+              "effect": "ignored",
+              "note": "topP has no effect while doSample is false.",
+              "when": {
+                "key": "doSample",
+                "values": [
+                  "false"
+                ]
+              }
+            }
+          ],
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "stopSequences",
+          "type": "stringList",
+          "group": "output",
+          "label": "Stop sequences",
+          "description": "Text that makes the model stop writing; Z.ai currently honours only one.",
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "responseFormat",
+          "type": "enum",
+          "group": "output",
+          "label": "Response format",
+          "description": "Set to json to make the model answer with JSON.",
+          "enum": [
+            "text",
+            "json"
+          ],
+          "rules": [
+            {
+              "models": "^glm-5\\.3-flashx?$",
+              "effect": "ignored",
+              "note": "glm-5.3-flash and glm-5.3-flashx do not take a response format."
+            }
+          ],
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much GLM-5.2 and GLM-5.3 think while thinking is on.",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "rules": [
+            {
+              "models": "^glm-(4\\.\\d+|5|5\\.1)$",
+              "effect": "ignored",
+              "note": "This GLM model has no reasoning effort setting."
+            },
+            {
+              "models": "^glm-",
+              "effect": "ignored",
+              "note": "reasoningEffort has no effect while thinking is disabled.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "doSample",
+          "type": "boolean",
+          "group": "sampling",
+          "label": "Sampling",
+          "description": "Turn random sampling off to always pick the most likely word; temperature and topP then have no effect.",
+          "default": true,
+          "wire": "do_sample",
+          "body": true,
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "thinkingType",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking",
+          "description": "Turn thinking on or off (GLM-4.6 and later); it is on by default.",
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
+          "default": "enabled",
+          "wire": "thinking.type",
+          "body": true,
+          "rules": [
+            {
+              "models": "^glm-5\\.3(-flash)?$",
+              "effect": "ignored",
+              "note": "glm-5.3 and glm-5.3-flash always think; disabled is ignored.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://docs.z.ai/guides/capabilities/thinking-mode"
+        },
+        {
+          "key": "clearThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Clear earlier thinking",
+          "description": "Set to false to keep earlier reasoning in context; it must then be sent back unchanged.",
+          "default": true,
+          "wire": "thinking.clear_thinking",
+          "body": true,
+          "source": "https://docs.z.ai/api-reference/llm/chat-completion"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": true,
+          "source": "https://docs.z.ai/guides/capabilities/thinking-mode"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "default": true,
+          "source": "https://docs.z.ai/guides/capabilities/thinking-mode"
+        }
+      ]
+    },
+    "minimax": {
+      "displayName": "MiniMax",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "temperature",
+          "type": "double",
+          "group": "sampling",
+          "label": "Temperature",
+          "description": "Higher values make answers more varied; values outside 0 to 2 are an error.",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Ignored by MiniMax.",
+          "rules": [
+            {
+              "models": "^MiniMax-",
+              "effect": "ignored",
+              "note": "MiniMax ignores presencePenalty."
+            }
+          ],
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Ignored by MiniMax.",
+          "rules": [
+            {
+              "models": "^MiniMax-",
+              "effect": "ignored",
+              "note": "MiniMax ignores frequencyPenalty."
+            }
+          ],
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "logitBias",
+          "type": "json",
+          "group": "sampling",
+          "label": "Logit bias",
+          "description": "Ignored by MiniMax.",
+          "rules": [
+            {
+              "models": "^MiniMax-",
+              "effect": "ignored",
+              "note": "MiniMax ignores logitBias."
+            }
+          ],
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much MiniMax-M3.1-Flash-Preview thinks.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "rules": [
+            {
+              "models": "^MiniMax-M3\\.1-Flash-Preview$",
+              "effect": "rejected",
+              "note": "MiniMax-M3.1-Flash-Preview rejects reasoningEffort none.",
+              "when": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "serviceTier",
+          "type": "enum",
+          "group": "connection",
+          "label": "Service tier",
+          "description": "priority gets faster admission at a higher price.",
+          "enum": [
+            "standard",
+            "priority"
+          ],
+          "default": "standard",
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "reasoningSplit",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Separate reasoning",
+          "description": "Return the model's reasoning in its own field instead of inside the answer text.",
+          "default": true,
+          "wire": "reasoning_split",
+          "body": true,
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "thinkingType",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Thinking",
+          "description": "Leave empty to let the model think; disabled skips thinking on MiniMax-M3.",
+          "enum": [
+            "adaptive",
+            "disabled"
+          ],
+          "wire": "thinking.type",
+          "body": true,
+          "rules": [
+            {
+              "models": "^MiniMax-M3\\.1-Flash-Preview$",
+              "effect": "rejected",
+              "note": "MiniMax-M3.1-Flash-Preview always thinks.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            },
+            {
+              "models": "^MiniMax-M2",
+              "effect": "ignored",
+              "note": "MiniMax M2 models ignore a disabled thinking setting.",
+              "when": {
+                "key": "thinkingType",
+                "values": [
+                  "disabled"
+                ]
+              }
+            }
+          ],
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "returnThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Return thinking",
+          "description": "Keep the model's reasoning text from the response instead of discarding it.",
+          "default": true,
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some providers require during tool use.",
+          "default": true,
+          "source": "https://platform.minimax.io/docs/api-reference/text-openai-api"
+        }
+      ]
+    },
+    "openrouter": {
+      "displayName": "OpenRouter",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "verbosity",
+          "type": "enum",
+          "group": "output",
+          "label": "Verbosity",
+          "description": "How long and detailed the answer should be.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "source": "https://openrouter.ai/docs/api/reference/parameters"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the routed model thinks; none turns reasoning off.",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "wire": "reasoning.effort",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+        },
+        {
+          "key": "reasoningMaxTokens",
+          "type": "int",
+          "group": "reasoning",
+          "label": "Reasoning budget",
+          "description": "Token budget for reasoning on models that take one; use this or reasoningEffort, not both.",
+          "min": 1024,
+          "wire": "reasoning.max_tokens",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+        },
+        {
+          "key": "reasoningEnabled",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Reasoning",
+          "description": "Turn reasoning on or off; true means medium effort.",
+          "wire": "reasoning.enabled",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+        },
+        {
+          "key": "reasoningExclude",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Hide reasoning",
+          "description": "The model still reasons (and is billed for it) but the reasoning is left out of the response.",
+          "default": false,
+          "wire": "reasoning.exclude",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/best-practices/reasoning-tokens"
+        },
+        {
+          "key": "topK",
+          "type": "int",
+          "group": "sampling",
+          "label": "Top K",
+          "description": "Only consider this many of the most likely next words.",
+          "min": 0,
+          "wire": "top_k",
+          "body": true,
+          "rules": [
+            {
+              "models": "^openai/",
+              "effect": "ignored",
+              "note": "OpenAI models do not support topK."
+            }
+          ],
+          "source": "https://openrouter.ai/docs/api/reference/parameters"
+        },
+        {
+          "key": "minP",
+          "type": "double",
+          "group": "sampling",
+          "label": "Min P",
+          "description": "Drop words whose probability is below this share of the most likely word's.",
+          "min": 0,
+          "max": 1,
+          "wire": "min_p",
+          "body": true,
+          "source": "https://openrouter.ai/docs/api/reference/parameters"
+        },
+        {
+          "key": "repetitionPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Repetition penalty",
+          "description": "Values above 1 discourage repetition.",
+          "min": 0,
+          "max": 2,
+          "default": 1,
+          "wire": "repetition_penalty",
+          "body": true,
+          "source": "https://openrouter.ai/docs/api/reference/parameters"
+        },
+        {
+          "key": "models",
+          "type": "stringList",
+          "group": "model",
+          "label": "Fallback models",
+          "description": "Models to try in order when the main one fails or is unavailable.",
+          "wire": "models",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/model-fallbacks"
+        },
+        {
+          "key": "route",
+          "type": "enum",
+          "group": "model",
+          "label": "Route",
+          "description": "Routing strategy for the fallback models.",
+          "enum": [
+            "fallback"
+          ],
+          "wire": "route",
+          "body": true,
+          "source": "https://openrouter.ai/docs/api/reference/overview"
+        },
+        {
+          "key": "providerOrder",
+          "type": "stringList",
+          "group": "connection",
+          "label": "Provider order",
+          "description": "Provider names to try in this order.",
+          "wire": "provider.order",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerOnly",
+          "type": "stringList",
+          "group": "connection",
+          "label": "Only these providers",
+          "description": "Route only to these providers.",
+          "wire": "provider.only",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerIgnore",
+          "type": "stringList",
+          "group": "connection",
+          "label": "Skip these providers",
+          "description": "Never route to these providers.",
+          "wire": "provider.ignore",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerAllowFallbacks",
+          "type": "boolean",
+          "group": "connection",
+          "label": "Allow backup providers",
+          "description": "Let OpenRouter use other providers when the preferred ones fail.",
+          "default": true,
+          "wire": "provider.allow_fallbacks",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerRequireParameters",
+          "type": "boolean",
+          "group": "connection",
+          "label": "Require parameter support",
+          "description": "Use only providers that support every setting in the request, instead of silently ignoring unsupported ones.",
+          "default": false,
+          "wire": "provider.require_parameters",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerSort",
+          "type": "enum",
+          "group": "connection",
+          "label": "Sort providers by",
+          "description": "Prefer the cheapest, fastest or lowest-latency provider.",
+          "enum": [
+            "price",
+            "throughput",
+            "latency"
+          ],
+          "wire": "provider.sort",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "providerDataCollection",
+          "type": "enum",
+          "group": "safety",
+          "label": "Data collection",
+          "description": "Set to deny to skip providers that may store your data.",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "default": "allow",
+          "wire": "provider.data_collection",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "key": "plugins",
+          "type": "json",
+          "group": "tools",
+          "label": "Plugins",
+          "description": "OpenRouter plugins such as web search, as a JSON array like [{\"id\":\"web\"}].",
+          "wire": "plugins",
+          "body": true,
+          "source": "https://openrouter.ai/docs/guides/features/plugins/web-search",
+          "jsonShape": "array"
+        },
+        {
+          "key": "appReferer",
+          "type": "string",
+          "group": "advanced",
+          "label": "App URL",
+          "description": "Your app's URL, sent as the HTTP-Referer header so OpenRouter can attribute usage to your app.",
+          "header": "HTTP-Referer",
+          "source": "https://openrouter.ai/docs/app-attribution"
+        },
+        {
+          "key": "appTitle",
+          "type": "string",
+          "group": "advanced",
+          "label": "App name",
+          "description": "Your app's display name on OpenRouter; needs the app URL too.",
+          "header": "X-Title",
+          "source": "https://openrouter.ai/docs/app-attribution"
+        }
+      ]
+    },
+    "groq": {
+      "displayName": "Groq",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "presencePenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Presence penalty",
+          "description": "Not supported by any Groq model yet.",
+          "rules": [
+            {
+              "models": "^.*",
+              "effect": "ignored",
+              "note": "No Groq model supports presencePenalty yet."
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "frequencyPenalty",
+          "type": "double",
+          "group": "sampling",
+          "label": "Frequency penalty",
+          "description": "Not supported by any Groq model yet.",
+          "rules": [
+            {
+              "models": "^.*",
+              "effect": "ignored",
+              "note": "No Groq model supports frequencyPenalty yet."
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "logitBias",
+          "type": "json",
+          "group": "sampling",
+          "label": "Logit bias",
+          "description": "Not supported by any Groq model yet.",
+          "rules": [
+            {
+              "models": "^.*",
+              "effect": "ignored",
+              "note": "No Groq model supports logitBias yet."
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "metadata",
+          "type": "json",
+          "group": "advanced",
+          "label": "Metadata",
+          "description": "Not supported by Groq.",
+          "rules": [
+            {
+              "models": "^.*",
+              "effect": "ignored",
+              "note": "Groq does not support metadata."
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "store",
+          "type": "boolean",
+          "group": "advanced",
+          "label": "Store completions",
+          "description": "Not supported by Groq.",
+          "rules": [
+            {
+              "models": "^.*",
+              "effect": "ignored",
+              "note": "Groq does not support store."
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "parallelToolCalls",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Parallel tool calls",
+          "description": "Allow several tool calls in one step; gpt-oss models do not support it.",
+          "default": true,
+          "rules": [
+            {
+              "models": "^openai/gpt-oss",
+              "effect": "ignored",
+              "note": "gpt-oss models on Groq do not make parallel tool calls."
+            }
+          ],
+          "source": "https://console.groq.com/docs/tool-use"
+        },
+        {
+          "key": "reasoningEffort",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning effort",
+          "description": "How much the model thinks; gpt-oss takes low, medium or high.",
+          "enum": [
+            "none",
+            "default",
+            "low",
+            "medium",
+            "high"
+          ],
+          "rules": [
+            {
+              "models": "^openai/gpt-oss-(20b|120b)$",
+              "effect": "rejected",
+              "note": "gpt-oss accepts only low, medium or high.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            },
+            {
+              "models": "^qwen/qwen3\\.8-27b$",
+              "effect": "rejected",
+              "note": "qwen3.8-27b accepts only none, default, low, medium or high.",
+              "unless": {
+                "key": "reasoningEffort",
+                "values": [
+                  "none",
+                  "default",
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          ],
+          "source": "https://console.groq.com/docs/api-reference"
+        },
+        {
+          "key": "serviceTier",
+          "type": "enum",
+          "group": "connection",
+          "label": "Service tier",
+          "description": "flex has higher limits but fails fast when busy; performance is for enterprise accounts.",
+          "enum": [
+            "auto",
+            "on_demand",
+            "flex",
+            "performance"
+          ],
+          "default": "on_demand",
+          "source": "https://console.groq.com/docs/service-tiers"
+        },
+        {
+          "key": "reasoningFormat",
+          "type": "enum",
+          "group": "reasoning",
+          "label": "Reasoning format",
+          "description": "Return reasoning in its own field (parsed), inside the text (raw) or not at all (hidden).",
+          "enum": [
+            "parsed",
+            "raw",
+            "hidden"
+          ],
+          "wire": "reasoning_format",
+          "body": true,
+          "rules": [
+            {
+              "models": "^openai/gpt-oss",
+              "effect": "rejected",
+              "note": "gpt-oss models take includeReasoning instead of reasoningFormat."
+            }
+          ],
+          "source": "https://console.groq.com/docs/reasoning"
+        },
+        {
+          "key": "includeReasoning",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Include reasoning",
+          "description": "Return the gpt-oss model's reasoning with the answer.",
+          "default": true,
+          "wire": "include_reasoning",
+          "body": true,
+          "rules": [
+            {
+              "models": "^(?!openai/gpt-oss)",
+              "effect": "rejected",
+              "note": "includeReasoning cannot be combined with reasoningFormat (gpt-oss models take includeReasoning only, so reasoningFormat is the one dropped there).",
+              "when": {
+                "key": "reasoningFormat"
+              }
+            },
+            {
+              "models": "^(?!openai/gpt-oss)",
+              "effect": "rejected",
+              "note": "includeReasoning works only with gpt-oss models; use reasoningFormat."
+            }
+          ],
+          "source": "https://console.groq.com/docs/reasoning"
+        }
+      ]
+    }
+  }
+}

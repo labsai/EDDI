@@ -16,14 +16,13 @@ vi.mock("sonner", async () => {
 import { toast } from "sonner";
 
 /**
- * Page-level recovery from a conflicting section save.
+ * Page-level recovery from a conflicting save.
  *
- * A section save addressed to a version another client has already superseded
- * answers 409. The page follows the latest version only by re-reading its
- * version list (`useAgentVersions()[0]`), and a failed save refetches nothing
- * by itself — so without the conflict path in `useAgentSectionSave` (drop the
- * chain, invalidate the agent queries) the page stayed on the superseded
- * version and every later save repeated the 409.
+ * Edits collect in a draft and Save writes it as one new version. A save
+ * addressed to a version another client has already superseded answers 409:
+ * the page must move onto the newer version and carry the user's edits over —
+ * only the blocks they changed — so the next Save lands without undoing the
+ * other client's work.
  */
 
 let seq = 0;
@@ -34,7 +33,7 @@ let puts: number[];
 
 beforeEach(() => {
   vi.mocked(toast.error).mockReset();
-  // Section save state lives at module scope per agent id, so each test uses its own agent.
+  // A fresh agent per test, so cached queries from one cannot leak into the next.
   agentId = `conflict-agent-${++seq}`;
   current = 1;
   docs = { 1: { workflows: [], description: "original" } };
@@ -102,37 +101,73 @@ function snapshotToggle() {
   return screen.getByTestId("auto-snapshot-enabled") as HTMLInputElement;
 }
 
-describe("Agent detail — a section save that conflicts", () => {
-  it("moves onto the newer version after a 409, and the next section save goes there", async () => {
+describe("Agent detail — a save that conflicts", () => {
+  it("edits stay local until Save, which writes exactly one version", async () => {
     const user = userEvent.setup();
     renderPage();
 
     await waitFor(() => expect(screen.getByTestId("version-badge")).toHaveTextContent("v1"));
     await user.click(screen.getByText(/Session Management/i));
-    await waitFor(() => expect(snapshotToggle()).not.toBeDisabled());
+    await user.click(snapshotToggle());
+
+    expect(snapshotToggle().checked).toBe(true);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    expect(screen.getAllByTestId("section-modified").length).toBeGreaterThan(0);
+    expect(puts).toEqual([]);
+
+    await user.click(screen.getByTestId("save-btn"));
+    await waitFor(() => expect(current).toBe(2));
+    expect(puts).toEqual([1]);
+    await waitFor(() => expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument());
+    expect(docs[2]).toMatchObject({ sessionManagement: { autoSnapshot: { enabled: true } } });
+  });
+
+  it("Discard puts every field back to the saved version", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("version-badge")).toHaveTextContent("v1"));
+    await user.click(screen.getByText(/Session Management/i));
+    await user.click(snapshotToggle());
+    expect(snapshotToggle().checked).toBe(true);
+
+    await user.click(screen.getByTestId("discard-btn"));
+    await user.click(screen.getByTestId("unsaved-confirm"));
+
+    expect(snapshotToggle().checked).toBe(false);
+    expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
+    expect(puts).toEqual([]);
+  });
+
+  it("after a 409 the page moves onto the newer version and keeps the edit", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("version-badge")).toHaveTextContent("v1"));
+    await user.click(screen.getByText(/Session Management/i));
 
     // 1. A save that succeeds: v1 -> v2, and the page follows it.
     await user.click(snapshotToggle());
+    await user.click(screen.getByTestId("save-btn"));
     await waitFor(() => expect(screen.getByTestId("version-picker")).toHaveValue("2"));
-    await waitFor(() => expect(snapshotToggle().checked).toBe(true));
-    await waitFor(() => expect(snapshotToggle()).not.toBeDisabled());
+    await waitFor(() => expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument());
 
     // 2. Another client writes v3. The page has no way to know yet.
     current = 3;
     docs[3] = { ...docs[2]!, description: "edited elsewhere" };
 
-    // 3. The next section save is addressed to v2 (the chain the first save
-    //    left) and conflicts. The page must refetch and select v3, the first
-    //    entry of the refetched version list.
+    // 3. The next save is addressed to v2 and conflicts. The page must move
+    //    onto v3 with the edit still pending.
     await user.click(snapshotToggle());
+    await user.click(screen.getByTestId("save-btn"));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByTestId("version-picker")).toHaveValue("3"));
     expect(puts).toEqual([1, 2]);
+    expect(snapshotToggle().checked).toBe(false);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
 
-    // 4. The next section save goes to v3 and lands, keeping the other client's edit.
-    await waitFor(() => expect(snapshotToggle()).not.toBeDisabled());
-    await waitFor(() => expect(snapshotToggle().checked).toBe(true));
-    await user.click(snapshotToggle());
+    // 4. Saving again lands on v3 and keeps the other client's edit.
+    await user.click(screen.getByTestId("save-btn"));
     await waitFor(() => expect(current).toBe(4));
     expect(puts).toEqual([1, 2, 3]);
     expect(docs[4]).toMatchObject({

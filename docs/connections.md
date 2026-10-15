@@ -222,7 +222,7 @@ better than pretending otherwise at runtime.
 
 `clientSecret`, `passwordRef` and every interpolated segment of a `valueTemplate`
 **must** be `${vault:…}` or `${vars:…}`. A literal is refused with a 400 that
-names `POST /secretstore/secrets`.
+names `PUT /secretstore/secrets/{tenantId}/{keyName}`, the call that stores it in the vault.
 
 This is not stylistic. A plaintext key in a connection document would sit outside
 the vault, outside export scrubbing, and outside `VaultGrantChecker`'s

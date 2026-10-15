@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -350,6 +351,21 @@ class CascadingModelExecutor {
         Long maxTotalDurationMs = cascade.getMaxTotalDurationMs();
         Double maxCostPerRun = cascade.getMaxCostPerRun();
         long cascadeStart = System.currentTimeMillis();
+        // The turn's deadline caps the cascade's own duration ceiling: time spent by
+        // earlier tasks (a slow HTTP call, a previous LLM task) is already gone from
+        // what remains, so the cascade is shrunk by it without being told.
+        final TurnDeadline turnDeadline = memory.getTurnDeadline();
+        if (turnDeadline != null) {
+            long left = Math.max(0L, turnDeadline.remainingAfterReserveMs());
+            if (left < 500L) {
+                // Same rule as the other deadline consumers: the first step gets what is
+                // left of the turn instead of a 1 ms sliver that fails it at once.
+                left = Math.max(0L, turnDeadline.remainingMs());
+            }
+            if (maxTotalDurationMs == null || left < maxTotalDurationMs) {
+                maxTotalDurationMs = left;
+            }
+        }
         // Run totals, accumulated across every attempted step: a 3-model escalation
         // spends three models' tokens (and three steps' tool budgets), and reporting
         // only the accepted step's usage made the ledger's tokens contradict its own
@@ -369,6 +385,12 @@ class CascadingModelExecutor {
                     increment("eddi.llm.cascade.ceiling.exceeded", "kind", "duration");
                     return finalizeBest(bestSoFar, totals, trace, errors);
                 }
+                if (turnDeadline != null && !turnDeadline.canFit(TurnDeadline.MIN_ATTEMPT_MS)) {
+                    LOGGER.warnf("Turn deadline leaves %dms (after the reserve) before cascade step %d, below the %dms minimum attempt; "
+                            + "returning best so far", turnDeadline.remainingAfterReserveMs(), i, TurnDeadline.MIN_ATTEMPT_MS);
+                    increment("eddi.llm.turn.deadline.exceeded", "stage", "cascade");
+                    return finalizeBest(bestSoFar, totals, trace, errors);
+                }
                 if (maxCostPerRun != null && totals.runCostUsd() >= maxCostPerRun) {
                     LOGGER.warnf("Cascade cost ceiling reached ($%.4f >= $%.4f) before step %d; returning best so far", totals.runCostUsd(),
                             maxCostPerRun, i);
@@ -380,7 +402,7 @@ class CascadingModelExecutor {
             StepModel stepModel = resolveStepModel(step, task, baseParams, templateDataObjects, memory, "Cascade step " + i);
             String modelType = stepModel.modelType();
             Map<String, String> mergedParams = stepModel.params();
-            String modelName = resolveModelName(mergedParams, modelType);
+            String modelName = resolveVariables(resolveModelName(mergedParams, modelType));
 
             // R8: a model whose circuit is open is not called; the cascade goes straight
             // to its next step, which is what makes a systemically failing cheap model
@@ -402,7 +424,7 @@ class CascadingModelExecutor {
                         modelName));
                 errors.add(String.format("Step %d (%s): %s", i, modelName, denialMessage));
                 increment("eddi.llm.cascade.escalations", "reason", "circuit_open");
-                LOGGER.warnf("Cascade step %d (%s/%s) skipped: circuit open (%s)", i, modelType, modelName, denial.failure().label());
+                recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", denial.failure().label(), i + 1, 0L);
                 if (!isLastStep) {
                     if (eventSink != null) {
                         eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
@@ -445,8 +467,6 @@ class CascadingModelExecutor {
             var stepExchange = new ToolExchangeRecorder();
 
             try {
-                ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
-
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
                 // the confidence value — otherwise tokens could be sent for a step that then
                 // escalates. That is: the last step (always accepted), a null-threshold step
@@ -498,6 +518,14 @@ class CascadingModelExecutor {
                     }
                 }
 
+                // R10: the provider call itself is bounded by the step's budget, not just
+                // the future waiting on it — cancelling that future does not reliably stop
+                // an HTTP request already in flight. A streamed step keeps its own bound.
+                // Built after the timeout is known because the model's cache key includes
+                // the (clamped) timeout.
+                ChatModel chatModel = registry.getOrCreate(modelType,
+                        streamingModel != null ? mergedParams : clampModelTimeout(mergedParams, stepTimeout, stepTrace));
+
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
@@ -511,11 +539,11 @@ class CascadingModelExecutor {
                         : new StepRecovery(retryPolicy,
                                 FormatRetryRunner.RemainingBudget.until(System.currentTimeMillis() + stepTimeout).min(turnBudget),
                                 contextShrinker,
-                                (trigger, attempt) -> {
+                                LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(), (trigger, attempt) -> {
                                     if (eventSink != null) {
                                         eventSink.onLlmRetry(trigger.label(), attempt);
                                     }
-                                }, trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
+                                }), trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
 
                 StepResult stepResult;
                 try {
@@ -613,7 +641,7 @@ class CascadingModelExecutor {
                         stepTrace.put("reason", "invalid_output");
                         trace.add(stepTrace);
                         increment("eddi.llm.cascade.escalations", "reason", "invalid_output");
-                        formatRetryRunner.count("escalate", "invalid_output", unusable);
+                        recordRecovery(memory, LlmRecoveryLog.ESCALATE, "invalid_output", unusable.label(), i + 1, durationMs);
                         LOGGER.warnf("Cascade step %d (%s) produced an unusable reply (%s) after %d re-ask(s), escalating", i, modelName,
                                 unusable.label(), stepResult.reasks);
                         if (eventSink != null) {
@@ -642,6 +670,9 @@ class CascadingModelExecutor {
                     trace.add(stepTrace);
                     increment("eddi.llm.cascade.escalations", "reason", "timeout");
                     increment("eddi.llm.cascade.step.errors", "provider", modelType, "type", "timeout");
+                    if (!isLastStep) {
+                        recordRecovery(memory, LlmRecoveryLog.ESCALATE, "timeout", FailureClass.TIMEOUT.name(), i + 1, durationMs);
+                    }
 
                     if (isLastStep) {
                         LOGGER.warnf("Cascade step %d timed out mid-stream (last step), returning best response", i);
@@ -694,12 +725,13 @@ class CascadingModelExecutor {
                 stepTrace.put("status", "escalated");
                 trace.add(stepTrace);
                 increment("eddi.llm.cascade.escalations", "reason", "low_confidence");
+                recordRecovery(memory, LlmRecoveryLog.ESCALATE, "low_confidence", "low_confidence", i + 1, durationMs);
 
                 if (eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, stepResult.confidence, step.getConfidenceThreshold(), "low_confidence", durationMs);
                 }
 
-                LOGGER.infof("Cascade step %d escalating: confidence=%.2f < threshold=%.2f, model=%s", i, stepResult.confidence,
+                LOGGER.debugf("Cascade step %d escalating: confidence=%.2f < threshold=%.2f, model=%s", i, stepResult.confidence,
                         step.getConfidenceThreshold(), modelName);
 
             } catch (TimeoutException e) {
@@ -718,6 +750,9 @@ class CascadingModelExecutor {
 
                 LOGGER.warnf("Cascade step %d timed out after %dms, escalating", i, durationMs);
 
+                if (!isLastStep) {
+                    recordRecovery(memory, LlmRecoveryLog.ESCALATE, "timeout", FailureClass.TIMEOUT.name(), i + 1, durationMs);
+                }
                 if (!isLastStep && eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
                             "timeout", durationMs);
@@ -781,6 +816,9 @@ class CascadingModelExecutor {
 
                 LOGGER.warnf("Cascade step %d failed (%s): %s, escalating", i, errorType, e.getMessage());
 
+                if (!isLastStep) {
+                    recordRecovery(memory, LlmRecoveryLog.ESCALATE, errorType, failure.cls().name(), i + 1, durationMs);
+                }
                 if (!isLastStep && eventSink != null) {
                     eventSink.onCascadeEscalation(i, i + 1, 0.0, step.getConfidenceThreshold() != null ? step.getConfidenceThreshold() : 0.0,
                             errorType, durationMs);
@@ -1070,6 +1108,50 @@ class CascadingModelExecutor {
     }
 
     /**
+     * The step's model with its request {@code timeout} no longer than the step
+     * itself.
+     * <p>
+     * A model configured with {@code timeout: 120000} inside a step with
+     * {@code timeoutMs: 25000} used to keep its HTTP request open for up to two
+     * minutes after the cascade had given up on it and escalated — the wasted call
+     * was billed and held a thread. The clamped value is part of the model cache
+     * key, so it is rounded <em>up</em> into coarse buckets (whole seconds up to 10
+     * s, 5 s steps above) to keep a deadline that shrinks every turn from minting a
+     * model per millisecond; the future's own timeout still fires on time. A
+     * timeout already at or below the bucket is left untouched.
+     *
+     * @return {@code params} itself when no clamp is needed, else a copy
+     */
+    static Map<String, String> clampModelTimeout(Map<String, String> params, long stepTimeoutMs, Map<String, Object> stepTrace) {
+        long clampMs = timeoutBucketMs(stepTimeoutMs);
+        String raw = params.get("timeout");
+        Long configured = null;
+        if (raw != null) {
+            try {
+                configured = Long.parseLong(raw.trim());
+            } catch (NumberFormatException e) {
+                // not a plain millisecond count: the registry would drop it; replace it
+            }
+        }
+        if (configured != null && configured > 0 && configured <= clampMs) {
+            return params;
+        }
+        Map<String, String> clamped = new HashMap<>(params);
+        clamped.put("timeout", String.valueOf(clampMs));
+        if (stepTrace != null) {
+            stepTrace.put("modelTimeoutClampedMs", clampMs);
+        }
+        return clamped;
+    }
+
+    /** Rounds a timeout up: whole seconds to 10 s, multiples of 5 s beyond. */
+    static long timeoutBucketMs(long ms) {
+        long positive = Math.max(1L, ms);
+        long unit = positive <= 10_000L ? 1_000L : 5_000L;
+        return ((positive + unit - 1) / unit) * unit;
+    }
+
+    /**
      * Execute a single cascade step with timeout.
      */
     private StepResult executeStepWithTimeout(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
@@ -1096,7 +1178,7 @@ class CascadingModelExecutor {
                         recovery);
             } else {
                 return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                        heuristicConfig, jsonPolicy, recovery);
+                        heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
             }
         })));
 
@@ -1104,6 +1186,7 @@ class CascadingModelExecutor {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
+            increment("eddi.llm.cancelled", "scope", "cascade_step");
             throw e;
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
@@ -1123,7 +1206,7 @@ class CascadingModelExecutor {
     private StepResult executeLegacyModeStep(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                              List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                              LlmConfiguration.Task task, ChatModel judgeModel, HeuristicConfig heuristicConfig,
-                                             JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery)
+                                             JsonResponseFormatPolicy jsonPolicy, StepRecovery recovery, TurnDeadline turnDeadline)
             throws LifecycleException {
 
         // The structured_output wrapper only applies in legacy mode; it never co-occurs
@@ -1150,7 +1233,7 @@ class CascadingModelExecutor {
                         : smaller;
             };
             var outcome = formatRetryRunner.run(recovery.policy(), messages, (msgs, maxTokens) -> {
-                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens);
+                var r = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, turnDeadline);
                 return new FormatRetryRunner.Attempt(r.response() != null ? r.response() : "", r.responseMetadata());
             }, shrinker, recovery.budget(), recovery.gate(), recovery.listener());
             responseText = outcome.attempt().text();
@@ -1166,7 +1249,7 @@ class CascadingModelExecutor {
             tokenUsage = extractTokenUsage(responseMetadata);
             streamedLive = true;
         } else {
-            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy);
+            var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonPolicy, turnDeadline);
             responseText = chatResult.response() != null ? chatResult.response() : "";
             responseMetadata = chatResult.responseMetadata();
             tokenUsage = extractTokenUsage(responseMetadata);
@@ -1239,7 +1322,7 @@ class CascadingModelExecutor {
         // Agent mode returned null (no tools enabled) — fall back to legacy (no live
         // stream).
         return executeLegacyModeStep(chatModel, null, null, originalMessages, systemMessage, evaluationStrategy, task, judgeModel, heuristicConfig,
-                jsonPolicy, recovery);
+                jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
     }
 
     /**
@@ -1410,6 +1493,24 @@ class CascadingModelExecutor {
     }
 
     /**
+     * The model name with its ${vars:...} references resolved — what the registry
+     * builds the model with — so the trace, the audit and the circuit key carry the
+     * real model instead of the template. An unresolvable reference leaves the raw
+     * text.
+     */
+    private String resolveVariables(String name) {
+        if (globalVariableResolver == null || !GlobalVariableResolver.containsReference(name)) {
+            return name;
+        }
+        try {
+            String resolved = globalVariableResolver.resolveValue(name);
+            return resolved != null ? resolved : name;
+        } catch (RuntimeException e) {
+            return name;
+        }
+    }
+
+    /**
      * Describe a step failure so it can actually be diagnosed.
      * <p>
      * The retry wrapper reports a generic "… failed after N attempts", which reads
@@ -1515,6 +1616,16 @@ class CascadingModelExecutor {
             stepTrace.put("retryAfterMs", failure.retryAfterMs());
         }
         increment("eddi.llm.failure", "class", failure.cls().name(), "model", isBlank(modelName) ? "unknown" : modelName);
+    }
+
+    /**
+     * One recovery action of the cascade:
+     * {@code eddi.llm.recovery{action,outcome,trigger}} and the single structured
+     * INFO line (R11).
+     */
+    private void recordRecovery(IConversationMemory memory, String action, String outcome, String failureClass, int attempt, long durationMs) {
+        increment("eddi.llm.recovery", "action", action, "outcome", outcome, "trigger", failureClass);
+        LlmRecoveryLog.log(memory.getConversationId(), memory.getAgentId(), failureClass, action, outcome, attempt, durationMs);
     }
 
     private void increment(String metric, String... tags) {

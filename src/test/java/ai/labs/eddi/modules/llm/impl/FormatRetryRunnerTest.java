@@ -533,6 +533,23 @@ class FormatRetryRunnerTest {
             assertNull(FormatRetryRunner.resolveBaseMaxOutputTokens(Map.of(), "openai"));
             assertNull(FormatRetryRunner.resolveBaseMaxOutputTokens(Map.of("maxTokens", "lots"), "openai"));
         }
+
+        @Test
+        @DisplayName("base output cap: a cap the model rejects is not counted, because the re-ask would send it as max_tokens")
+        void baseCapIgnoresACapTheModelRejects() {
+            // a reasoning model is capped through maxCompletionTokens; the re-ask would
+            // carry its raised cap as max_tokens, which the model answers with a 400,
+            // so there is nothing to raise and the re-ask is skipped
+            assertNull(FormatRetryRunner.resolveBaseMaxOutputTokens(
+                    Map.of("modelName", "gpt-5", "maxCompletionTokens", "8000"), "openai"));
+            assertNull(FormatRetryRunner.resolveBaseMaxOutputTokens(
+                    Map.of("modelName", "o3", "maxTokens", "4096"), "openai"));
+            // a model that takes maxTokens keeps it
+            assertEquals(4096, FormatRetryRunner.resolveBaseMaxOutputTokens(
+                    Map.of("modelName", "gpt-4o", "maxTokens", "4096"), "openai"));
+            assertEquals(2048, FormatRetryRunner.resolveBaseMaxOutputTokens(
+                    Map.of("modelName", "gemini-2.5-flash", "maxOutputTokens", "2048"), "gemini-vertex"));
+        }
     }
 
     @Nested
