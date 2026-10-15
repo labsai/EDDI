@@ -46,6 +46,11 @@ public final class RegexDeadline {
      * instant — so several matches can share one deadline.
      */
     public static CharSequence guardUntil(String content, long deadline) {
+        if (System.nanoTime() > deadline) {
+            // The sampled check inside charAt would let a short match through after
+            // the deadline; a match that starts after it is refused outright.
+            throw new MatchDeadlineExceededException();
+        }
         return new CharSequence() {
             private int accesses;
 

@@ -5,13 +5,17 @@
 package ai.labs.eddi.modules.nlp.model;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.RegularDictionary;
 import ai.labs.eddi.utils.RegexDeadline;
 import ai.labs.eddi.utils.RegexDeadline.MatchDeadlineExceededException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -78,6 +82,32 @@ class RegExTest {
         assertTrue(found.isEmpty());
         // One shared 200 ms deadline; five separate budgets would be a second or more.
         assertTrue(elapsedMillis < 700, "lookup took " + elapsedMillis + " ms — the patterns are not sharing a deadline");
+    }
+
+    @Test
+    @DisplayName("once the shared budget is spent, the remaining patterns of the lookup are not evaluated at all")
+    void remainingPatternsAreSkippedAfterTheDeadline() {
+        var dictionary = new RegularDictionary();
+        var evaluated = new AtomicInteger();
+        IDictionary.IRegEx counting = new RegEx("a+!", new Expressions()) {
+            @Override
+            public boolean match(String lookup, long deadlineNanos) {
+                evaluated.incrementAndGet();
+                return super.match(lookup, deadlineNanos);
+            }
+        };
+        dictionary.setRegExs(new ArrayList<>(List.of(new RegEx(EVIL_PATTERN, new Expressions()), counting)));
+
+        var found = dictionary.lookupTerm(ALMOST_MATCHING);
+
+        assertTrue(found.isEmpty());
+        assertEquals(0, evaluated.get(), "the pattern after the one that spent the budget was still evaluated");
+    }
+
+    @Test
+    @DisplayName("a guard created after its deadline refuses the match outright")
+    void expiredDeadlineRefusesAtOnce() {
+        assertThrows(MatchDeadlineExceededException.class, () -> RegexDeadline.guardUntil("x", System.nanoTime() - 1));
     }
 
     @Test
