@@ -76,6 +76,7 @@
     "GET /administration/quotas",
     "GET /administration/quotas/{tenantId}",
     "GET /administration/quotas/{tenantId}/usage",
+    "GET /administration/version",
     "GET /administration/{environment}/deploy/{agentId}/preflight",
     "GET /administration/{environment}/deploymentimpact/{agentId}",
     "GET /administration/{environment}/deploymentstatus",

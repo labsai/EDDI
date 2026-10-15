@@ -46,6 +46,8 @@ public class McpToolFilter implements ToolFilter {
             // Conversation tools
             "list_agents", "list_agent_configs", "create_conversation", "talk_to_agent", "chat_with_agent", "read_conversation",
             "read_conversation_log", "list_conversations", "get_agent",
+            // Build identity (McpVersionTools) — which EDDI is running
+            "get_eddi_version",
             // Admin tools
             "deploy_agent", "undeploy_agent", "get_deployment_status", "list_workflows", "create_agent", "delete_agent", "update_agent",
             "read_workflow", "read_resource",
