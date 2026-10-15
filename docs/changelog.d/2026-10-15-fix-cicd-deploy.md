@@ -94,8 +94,8 @@ strict tag pattern CI and `release-signing.md` use.
 ### Verification
 
 `helm lint` and `helm template` (dockerised `alpine/helm:3.17.3`, helm is not on
-PATH here) for the default, the CI PostgreSQL+Keycloak shape, Keycloak+Ingress
-with and without the acknowledgement, every `existingSecret` combination and the
+PATH here) for the default, the CI shape with PostgreSQL and Keycloak, Keycloak
+behind an Ingress with and without the acknowledgement, every `existingSecret` combination and the
 `mongodb.existingSecret`-alone refusal; `docker compose config` for every edited
 compose file plus the auth and local overlays, and the bind guard run under each
 environment combination; `python -c "import yaml"` over every edited workflow
