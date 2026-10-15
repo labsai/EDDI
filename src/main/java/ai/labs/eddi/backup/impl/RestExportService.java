@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.cluster.ClusterArchiveStore;
 import ai.labs.eddi.backup.IRestExportService;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ExportPreview;
@@ -160,6 +161,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final BackupMetrics metrics;
     private final IConnectionStore connectionStore;
 
+    /**
+     * Cluster mode: shares finished archives between nodes. Field-injected so the
+     * tests that build this service with {@code new} keep the single-node
+     * behaviour.
+     */
+    @Inject
+    ClusterArchiveStore clusterArchives;
+
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
             IParserStore parserStore, IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore,
@@ -219,6 +228,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             if (!zipFilePath.startsWith(archiveDir)) {
                 throw new SecurityException("Invalid file path detected.");
+            }
+            if (!Files.exists(zipFilePath) && clusterArchives != null) {
+                // Cluster mode: exported on another node — fetch it from the shared store.
+                clusterArchives.fetch(agentFilename, zipFilePath, Duration.ofMinutes(retentionMinutes()));
             }
 
             return Response.ok(new BufferedInputStream(new FileInputStream(zipFilePath.toFile())))
@@ -441,6 +454,10 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             String zipFilename = prepareZipFilename(agentDocumentDescriptor, agentId, agentVersion);
             String targetZipPath = FileUtilities.buildPath(archiveDir.toString(), zipFilename);
             this.zipArchive.createZip(agentPath.toString(), targetZipPath, tmpPath);
+            if (clusterArchives != null) {
+                // Cluster mode: the download may reach another node.
+                clusterArchives.publish(zipFilename, Paths.get(targetZipPath), Duration.ofMinutes(retentionMinutes()));
+            }
             return Response.ok().location(URI.create("/backup/export/" + zipFilename)).build();
         } catch (RuntimeException e) {
             metrics.exportFailed();

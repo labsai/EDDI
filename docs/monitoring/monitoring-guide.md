@@ -142,15 +142,16 @@ can reach EDDI.
 | `eddi_vault_cache_misses` | Counter | Vault cache misses |
 | `eddi_vault_resolve_time` | Timer | End-to-end resolve time (incl. cache) |
 
-### NATS (when `eddi.messaging.type=nats`)
+### Cluster mode (when `eddi.messaging.type=nats`)
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `eddi_nats_publish_count` | Counter | Messages published to NATS |
-| `eddi_nats_publish_duration` | Timer | Publish latency |
-| `eddi_nats_consume_count` | Counter | Messages consumed from NATS |
-| `eddi_nats_consume_duration` | Timer | Consume/processing latency |
-| `eddi_nats_dead_letter_count` | Counter | Messages sent to dead-letter stream |
+Cluster mode registers the `eddi_cluster_*` family — NATS connection and degraded state,
+conversation leases and fencing, KV latency, cluster events and RPCs, degraded-mode decisions,
+shared rate limits and audit sequences. The full list is in
+[Metrics → Cluster mode](../metrics.md); the
+[EDDI Cluster dashboard](eddi-cluster-dashboard.json) charts it, and
+[`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) holds alerting rules for it. None of these
+series exists in the default in-memory mode. Dead letters are counted by
+`eddi_coordinator_total_dead_lettered_total` and `eddi_coordinator_dead_letters` in both modes.
 
 ## Distributed Tracing
 
@@ -319,10 +320,12 @@ bug report; steady high load needs the cap raised (each entry is small).
 
 ### EddiConversationTurnsDeadLettered
 
-A turn failed after it had started and was dead-lettered by the in-memory
-coordinator. `GET /administration/coordinator/dead-letters` lists them with the
-error; the conversation itself stays usable. Replay or discard them there once the
-cause is fixed.
+A turn failed after it had started and was dead-lettered — by the in-memory
+coordinator, or in cluster mode to the shared dead-letter stream (reasons
+`failed`, `timeout`, `lease-lost`, `fenced`). `GET /administration/coordinator/dead-letters`
+lists them with the error (in cluster mode the Manager's **Cluster** screen too);
+the conversation itself stays usable. Replay or discard them there once the
+cause is fixed. See [Clustering → Runbook](../clustering.md#runbook).
 
 ### EddiPipelineTaskErrors
 
@@ -430,12 +433,6 @@ quota to spare. Check the datastore.
 A schedule exhausted its retries. `GET /schedulestore/schedules/{id}/fires` shows the
 failed fire and its error; `POST /schedulestore/schedules/{id}/retry`
 fires it again once the cause is fixed. See [scheduling.md](../scheduling.md).
-
-### EddiNatsDeadLetters
-
-The NATS coordinator moved conversation tasks to the dead-letter stream after
-exhausting their retries. Inspect them through the coordinator admin API
-(`/administration/coordinator/dead-letters`) and the NATS stream.
 
 ### EddiHeapAfterGcHigh
 
