@@ -8,9 +8,11 @@ import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
+import ai.labs.eddi.secrets.VaultGrantService;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -56,6 +58,17 @@ public class RestSecretStore implements IRestSecretStore {
     private final ISecretProvider secretProvider;
     private final SecretResolver secretResolver;
     private final VaultGrantImpactAnalyzer grantImpactAnalyzer;
+
+    /**
+     * Field-injected so the existing constructor (and its tests) keep their
+     * signature. The append endpoint answers 503 without it.
+     */
+    @Inject
+    VaultGrantService grantService;
+
+    /** The caller, recorded as the actor of a grant append; null in tests. */
+    @Inject
+    SecurityIdentity identity;
 
     @Inject
     public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer) {
@@ -368,6 +381,52 @@ public class RestSecretStore implements IRestSecretStore {
             response.put("warning", String.join(" ", warnings));
         }
         return response;
+    }
+
+    @Override
+    public Response grantAgent(String tenantId, String keyName, String agentId, boolean dryRun) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        try {
+            validateId(tenantId, "tenantId");
+            validateId(keyName, "keyName");
+            validateId(agentId, "agentId");
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
+        if (grantService == null) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE).entity(Map.of("error", "Grant service unavailable")).build();
+        }
+
+        var ref = new SecretReference(tenantId, keyName);
+        try {
+            var result = grantService.grantAgent(ref, agentId, actor(), "rest", dryRun);
+            // An append removes nobody, so this is expected to be empty; computed
+            // rather than assumed, so the response can never claim it falsely.
+            var impact = grantImpactAnalyzer.agentsLosingAccess(ref, result.after().allowedAgents());
+            var body = grantResponse(ref, result.before(), result.after(), impact, dryRun);
+            body.put("changed", result.changed());
+            body.put("agentId", agentId);
+            return Response.ok(body).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "Secret not found", "reference", ref.toReferenceString(), "action",
+                            "Grants can only be changed on a secret that exists. Check the key name, or store the secret first."))
+                    .build();
+        } catch (ISecretProvider.GrantConflictException e) {
+            return grantConflictResponse(ref, e.getCurrentAllowedAgents());
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to add an agent to the grant of secret: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to update secret grant")).build();
+        }
+    }
+
+    private String actor() {
+        return identity != null && !identity.isAnonymous() && identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
     }
 
     @Override

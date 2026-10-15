@@ -1,0 +1,119 @@
+import type { TFunction } from "i18next";
+import { toast } from "sonner";
+import type { DeploymentFailure } from "@/lib/api/agents";
+import { getErrorMessage } from "@/lib/api-client";
+import {
+  isGrantFailure,
+  runDeployWithGrants,
+  type DeployWithGrantsOptions,
+  type DeployManyResult,
+  type DeployWithGrantsOutcome,
+} from "@/hooks/use-deploy-with-grants";
+
+/**
+ * The text for a deployment that did not end READY: the backend's reason when
+ * it gave one, otherwise the generic "Deployment failed" (or "timed out" for a
+ * deploy that never left IN_PROGRESS).
+ */
+export function deployFailureMessage(
+  outcome: Extract<DeployWithGrantsOutcome, { kind: "failed" }>,
+  t: TFunction,
+): string {
+  if (outcome.message) return outcome.message;
+  if (outcome.result.status === "IN_PROGRESS") return t("chatDrawer.timeout", "Deploy timed out");
+  return t("editor.deployFailed", "Deployment failed");
+}
+
+/**
+ * Re-open the grant dialog for a refused deployment and deploy again — what a
+ * "Fix" button next to a VAULT_GRANT_MISSING failure does. Reports its own
+ * outcome the same way.
+ */
+export async function fixGrantAndRedeploy(
+  options: DeployWithGrantsOptions & { failure: DeploymentFailure },
+  t: TFunction,
+  onSettled?: () => void,
+): Promise<DeployWithGrantsOutcome> {
+  try {
+    const outcome = await runDeployWithGrants(options);
+    reportDeployOutcome(outcome, options, t, undefined, onSettled);
+    return outcome;
+  } catch (err) {
+    // A transport error (network, 403, 5xx): the callers discard the promise,
+    // so an uncaught rejection would leave Fix with no feedback at all.
+    const message = getErrorMessage(err);
+    toast.error(message);
+    return {
+      kind: "failed",
+      result: {
+        status: "ERROR",
+        agentId: options.agentId,
+        version: options.version,
+        environment: options.environment ?? "production",
+        error: message,
+      },
+      message,
+    };
+  } finally {
+    onSettled?.();
+  }
+}
+
+/**
+ * Toast the outcome of a grant-aware deploy, for the flows that have no other
+ * place to show it (the agent card, the "Deploy" action of a save toast). A
+ * grant refusal gets a **Fix** action that reopens the grant dialog.
+ */
+export function reportDeployOutcome(
+  outcome: DeployWithGrantsOutcome,
+  options: DeployWithGrantsOptions,
+  t: TFunction,
+  successMessage?: string,
+  /** Run after a Fix-triggered redeploy ends — the caller's cache refresh. */
+  onSettled?: () => void,
+): void {
+  if (outcome.kind === "deployed") {
+    toast.success(successMessage ?? t("agents.deploySuccess", "Agent deployed successfully"));
+    return;
+  }
+  if (outcome.kind === "cancelled") {
+    toast.info(t("grantRequired.cancelled", "Not deployed — the vault key was not granted."));
+    return;
+  }
+  const message = deployFailureMessage(outcome, t);
+  const failure = outcome.failure;
+  toast.error(message, {
+    action: isGrantFailure(failure)
+      ? {
+          label: t("grantRequired.fix", "Fix"),
+          onClick: () => void fixGrantAndRedeploy({ ...options, failure }, t, onSettled),
+        }
+      : undefined,
+  });
+}
+
+/**
+ * The sentence for a batch deploy that left agents un-deployed — what a team
+ * wizard shows instead of "done". Empty when nothing is wrong. The agents DO
+ * exist, so it says so, and how to finish: try again, or deploy from the agent
+ * page.
+ */
+export function describeUndeployed(results: DeployManyResult[], t: TFunction): string {
+  const bad = results.filter((r) => r.outcome.kind !== "deployed");
+  if (bad.length === 0) return "";
+  const failed = bad.filter((r) => r.outcome.kind === "failed");
+  if (failed.length === 0) {
+    return t(
+      "deployMany.cancelled",
+      "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
+    );
+  }
+  const names = bad.map((r) => r.target.agentName || r.target.agentId).join(", ");
+  const first = failed[0]!.outcome as Extract<DeployWithGrantsOutcome, { kind: "failed" }>;
+  return t("deployMany.failed", {
+    names,
+    reason: deployFailureMessage(first, t),
+    defaultValue:
+      "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
+  });
+}
