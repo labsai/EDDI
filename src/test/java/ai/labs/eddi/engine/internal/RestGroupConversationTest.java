@@ -317,6 +317,87 @@ class RestGroupConversationTest {
             verify(groupService, never()).deleteGroupConversation(anyString());
         }
 
+        // L9 (security review 2026-10-15): the write paths used the non-strict check,
+        // which lets any authenticated caller drive a legacy record that names no
+        // owner.
+
+        private GroupConversation unownedLegacyRecord() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId(null);
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            return gc;
+        }
+
+        private RestGroupConversation asNonAdmin(String name) {
+            var caller = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(name);
+            when(caller.getPrincipal()).thenReturn(principal);
+            when(caller.hasRole("eddi-admin")).thenReturn(false);
+            return new RestGroupConversation(groupService, jsonSerialization, caller, new OwnershipValidator(true),
+                    mock(HitlAccessGuard.class), resourceAccessGuard);
+        }
+
+        @Test
+        @DisplayName("L9: a follow-up on a legacy record with no owner is refused to a non-admin")
+        void followUp_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.followUpWithMember("group-1", "gc-1", new IRestGroupConversation.FollowUpRequest("q", "agent-1", null)));
+            verify(groupService, never()).followUpWithMember(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("L9: a continuation of a legacy record with no owner is refused to a non-admin")
+        void continueDiscussion_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.continueDiscussion("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null)));
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("L9: a streamed continuation of a legacy record with no owner is refused to a non-admin")
+        void continueDiscussionStreaming_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.continueDiscussionStreaming("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null),
+                            eventSink, sse));
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("L9: the write paths consult the strict check, never the lenient one")
+        void writePathsUseTheStrictCheck() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId("user-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "user-1", "group conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.followUpWithMember("group-1", "gc-1",
+                            new IRestGroupConversation.FollowUpRequest("q", "agent-1", null)));
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.continueDiscussion("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null)));
+
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+            verify(groupService, never()).followUpWithMember(anyString(), anyString(), anyString());
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
+        }
+
         @Test
         @DisplayName("F6: a legacy record with no owner is not deletable by just any authenticated caller")
         void deleteGroupConversation_legacyUnowned_refusedToNonAdmin() throws Exception {
@@ -534,7 +615,9 @@ class RestGroupConversationTest {
                     new FollowUpRequest("q", "agentA", "user-1"));
 
             assertEquals(200, response.getStatus());
-            verify(ownershipValidator).requireOwnerOrAdmin(identity, "user-1", "group conversation");
+            // Strict (L9): a follow-up writes the transcript, so a legacy record with no
+            // owner is an administrator's to drive.
+            verify(ownershipValidator).requireOwnerOrAdminStrict(identity, "user-1", "group conversation");
         }
 
         @Test

@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMappe
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -490,7 +491,8 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response cancelConversation(String conversationId) {
-        validateConversationOwnership(conversationId, true);
+        String ownerId = validateConversationOwnership(conversationId, true);
+        requireApproverCancelsOnlyPausedConversations(conversationId, ownerId);
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
             // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
@@ -825,6 +827,31 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     private void validateConversationOwnership(String conversationId) {
         validateConversationOwnership(conversationId, false);
+    }
+
+    /**
+     * The approver role exists to decide pauses, and a cancel is one of the
+     * decisions it may take — on a conversation that is <em>waiting</em> for one.
+     * The same endpoint also stops a turn that is executing, and the HITL ownership
+     * check admits an approver to every conversation, so an approver could cancel
+     * any user's running turn, paused or not (L9 of the 2026-10-15 security
+     * review). A caller who is only an approver — neither the owner nor an admin —
+     * is therefore limited to conversations in
+     * {@link ConversationState#AWAITING_HUMAN}; for anything else the request is
+     * refused with 403, exactly as it would be without the role. The state read
+     * races the pause like any other decision: a cancel that loses the race is
+     * arbitrated downstream, as before.
+     */
+    private void requireApproverCancelsOnlyPausedConversations(String conversationId, String ownerId) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId)) {
+            return;
+        }
+        ConversationState state = conversationMemoryStore.getConversationState(conversationId);
+        if (state != ConversationState.AWAITING_HUMAN) {
+            LOGGER.warnf("Cancel of conversation %s refused: the caller holds only the approver role and the conversation is %s, "
+                    + "not awaiting a decision", sanitize(conversationId), state);
+            throw new ForbiddenException("Access denied: an approver may only cancel a conversation that is awaiting a human decision");
+        }
     }
 
     /**

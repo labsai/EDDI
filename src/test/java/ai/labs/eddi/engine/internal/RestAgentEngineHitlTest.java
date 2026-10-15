@@ -62,6 +62,8 @@ class RestAgentEngineHitlTest {
     private Principal principal;
     @Mock
     private IHitlToolJournalStore hitlToolJournalStore;
+    @Mock
+    private IConversationMemoryStore conversationMemoryStore;
 
     private RestAgentEngine restAgentEngine;
 
@@ -88,7 +90,7 @@ class RestAgentEngineHitlTest {
         var conversationAccessGuard = new ConversationAccessGuard(
                 identity, ownershipValidator, conversationDescriptorStore);
         restAgentEngine = new RestAgentEngine(
-                conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
+                conversationService, conversationMemoryStore, identity, ownershipValidator,
                 conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, hitlToolJournalStore, mock(AgentDisplayNameResolver.class),
                 AGENT_TIMEOUT);
     }
@@ -100,6 +102,11 @@ class RestAgentEngineHitlTest {
     @Nested
     @DisplayName("cancelConversation")
     class CancelConversation {
+
+        @BeforeEach
+        void callerOwnsTheConversation() {
+            doReturn(true).when(ownershipValidator).isOwner(identity, USER_ID);
+        }
 
         @Test
         @DisplayName("returns 200 OK when the service reports CANCELLED, attributing the caller")
@@ -134,6 +141,79 @@ class RestAgentEngineHitlTest {
             Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
 
             assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
+        }
+
+        // L9 (security review 2026-10-15): the approver role decides pauses; it is
+        // not a licence to stop any user's executing turn.
+
+        @Nested
+        @DisplayName("an approver who is neither owner nor admin")
+        class ApproverOnly {
+
+            @BeforeEach
+            void approverOnly() {
+                doReturn(false).when(ownershipValidator).isOwner(eq(identity), any());
+                doReturn(false).when(ownershipValidator).isAdmin(identity);
+                doReturn(true).when(ownershipValidator).isApprover(identity);
+            }
+
+            @Test
+            @DisplayName("may cancel a conversation that is awaiting a human decision")
+            void cancelsAPausedConversation() throws Exception {
+                doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+                doReturn(IConversationService.CancelOutcome.CANCELLED)
+                        .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
+
+                Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+                assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+                verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL, USER_ID);
+            }
+
+            @Test
+            @DisplayName("is refused with 403 on an executing conversation, and the service is never asked")
+            void cannotCancelAnExecutingTurn() throws Exception {
+                doReturn(ConversationState.IN_PROGRESS).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+                assertThrows(ForbiddenException.class, () -> restAgentEngine.cancelConversation(CONVERSATION_ID));
+
+                verify(conversationService, never()).cancelConversation(any(), any(), any());
+            }
+
+            @Test
+            @DisplayName("is refused with 403 on a READY conversation too")
+            void cannotCancelAnIdleConversation() throws Exception {
+                doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+                assertThrows(ForbiddenException.class, () -> restAgentEngine.cancelConversation(CONVERSATION_ID));
+
+                verify(conversationService, never()).cancelConversation(any(), any(), any());
+            }
+        }
+
+        @Test
+        @DisplayName("an admin cancels an executing conversation without a state check")
+        void adminIsNotStateLimited() throws Exception {
+            doReturn(false).when(ownershipValidator).isOwner(eq(identity), any());
+            doReturn(true).when(ownershipValidator).isAdmin(identity);
+            doReturn(IConversationService.CancelOutcome.CANCELLED)
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
+
+            Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+            assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
+            verify(conversationMemoryStore, never()).getConversationState(any());
+        }
+
+        @Test
+        @DisplayName("the owner cancels an executing conversation without a state check")
+        void ownerIsNotStateLimited() throws Exception {
+            doReturn(IConversationService.CancelOutcome.CANCELLED)
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
+
+            restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+            verify(conversationMemoryStore, never()).getConversationState(any());
         }
     }
 
@@ -470,6 +550,9 @@ class RestAgentEngineHitlTest {
         @Test
         @DisplayName("cancel uses the approver-INCLUSIVE variant (requireOwnerAdminOrApprover)")
         void cancelUsesApproverInclusiveVariant() throws Exception {
+            // An approver-only caller is admitted while the conversation awaits a decision
+            // (L9); the ownership variant under test is what admits them at all.
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doReturn(IConversationService.CancelOutcome.CANCELLED)
                     .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
 
