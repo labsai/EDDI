@@ -25,6 +25,13 @@ import {
   useWorkspaceSettings,
 } from "@/hooks/use-workspace-admin";
 import type { SpaceInfo, WorkspaceSetting } from "@/lib/api/workspaces";
+import { AllowedHostsField } from "@/components/secrets/allowed-hosts-field";
+import {
+  allowedHostsMissing,
+  newAllowedHostsDraft,
+  resolveAllowedHostsDraft,
+  type AllowedHostsDraft,
+} from "@/lib/api/secrets";
 
 /**
  * Workspaces: which spaces you are in, the secrets and variables each one
@@ -154,16 +161,27 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
   const remove = useDeleteSpaceSecret(space.id);
   const [keyName, setKeyName] = useState("");
   const [value, setValue] = useState("");
+  /* Where the secret may be sent — required on a create, see AllowedHostsField. */
+  const [hosts, setHosts] = useState<AllowedHostsDraft>(() => newAllowedHostsDraft());
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const save = () => {
+    const resolved = resolveAllowedHostsDraft(hosts);
+    if ("problem" in resolved) {
+      const problem = resolved.problem;
+      if (problem !== "missing") setHosts((d) => ({ ...d, problem }));
+      return;
+    }
+    const name = keyName.trim();
     store.mutate(
-      { keyName: keyName.trim(), value },
+      // An existing key is a rotation: it sends no grant, so the stored one is kept.
+      { keyName: name, value, allowedHosts: resolved.allowedHosts, existing: !!data?.some((s) => s.keyName === name) },
       {
         onSuccess: () => {
           toast.success(t("workspacesPage.secretStored", "Secret stored"));
           setKeyName("");
           setValue("");
+          setHosts(newAllowedHostsDraft());
         },
         onError: (e) => toast.error(getErrorMessage(e)),
       }
@@ -190,6 +208,16 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="truncate text-sm font-medium">{secret.keyName}</p>
                 <CopyReference reference={secret.reference} />
+                {secret.allowedHosts && secret.allowedHosts.length > 0 && (
+                  <p
+                    className="truncate text-xs text-muted-foreground"
+                    data-testid={`space-secret-hosts-${secret.keyName}`}
+                  >
+                    {t("workspacesPage.secretHosts", "Sent only to: {{hosts}}", {
+                      hosts: secret.allowedHosts.join(", "),
+                    })}
+                  </p>
+                )}
               </div>
               <Button
                 variant="ghost"
@@ -220,11 +248,16 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
           autoComplete="new-password"
           data-testid="space-secret-value"
         />
-        <Button onClick={save} disabled={!keyName.trim() || !value || store.isPending} data-testid="space-secret-save">
+        <Button
+          onClick={save}
+          disabled={!keyName.trim() || !value || allowedHostsMissing(hosts) || store.isPending}
+          data-testid="space-secret-save"
+        >
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t("workspacesPage.add", "Add")}
         </Button>
       </div>
+      <AllowedHostsField draft={hosts} onChange={setHosts} testId="space-secret-hosts" />
       <AlertDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}

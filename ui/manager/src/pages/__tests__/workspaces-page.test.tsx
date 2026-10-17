@@ -108,3 +108,97 @@ describe("WorkspacesPage — settings", () => {
     expect(body!.legacyVisibility).toBe("admin-only");
   });
 });
+
+describe("WorkspacesPage — storing a space secret", () => {
+  function captureSecretWrites(stored: Record<string, unknown>[] = []) {
+    const writes: Record<string, unknown>[] = [];
+    server.use(
+      http.get("*/spacestore/secrets", () => HttpResponse.json(stored)),
+      http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
+        writes.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ keyName: String(params.key), reference: "${vault:u.alice/k}" });
+      }),
+    );
+    return writes;
+  }
+
+  async function fillNameAndValue(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(await screen.findByTestId("space-secret-name"), "openai-key");
+    await user.type(screen.getByTestId("space-secret-value"), "sk-test");
+  }
+
+  it("is not submittable until a host or Any host is chosen", async () => {
+    enableWorkspaces();
+    const writes = captureSecretWrites();
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+    const user = userEvent.setup();
+    await fillNameAndValue(user);
+
+    expect(screen.getByTestId("space-secret-save")).toBeDisabled();
+    expect(screen.getByTestId("space-secret-hosts-missing")).toBeInTheDocument();
+    expect(writes).toEqual([]);
+  });
+
+  it("sends every agent and the hosts typed", async () => {
+    enableWorkspaces();
+    const writes = captureSecretWrites();
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+    const user = userEvent.setup();
+    await fillNameAndValue(user);
+    await user.type(screen.getByTestId("space-secret-hosts-input-input"), "api.openai.com");
+    await user.click(screen.getByTestId("space-secret-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      value: "sk-test",
+      allowedAgents: ["*"],
+      allowedHosts: ["api.openai.com"],
+    });
+  });
+
+  it("sends [\"*\"] as allowedHosts for Any host", async () => {
+    enableWorkspaces();
+    const writes = captureSecretWrites();
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+    const user = userEvent.setup();
+    await fillNameAndValue(user);
+    await user.click(screen.getByTestId("space-secret-hosts-mode-any"));
+    await user.click(screen.getByTestId("space-secret-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({ allowedAgents: ["*"], allowedHosts: ["*"] });
+  });
+
+  it("re-saving an existing key sends no grant, so a narrowed one is kept", async () => {
+    enableWorkspaces();
+    const writes = captureSecretWrites([
+      { keyName: "openai-key", reference: "${vault:u.alice/openai-key}", allowedAgents: ["agent1"], allowedHosts: ["api.openai.com"] },
+    ]);
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+    const user = userEvent.setup();
+    await screen.findByText("openai-key");
+    await fillNameAndValue(user);
+    await user.type(screen.getByTestId("space-secret-hosts-input-input"), "api.openai.com");
+    await user.click(screen.getByTestId("space-secret-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).not.toHaveProperty("allowedAgents");
+    expect(writes[0]).toMatchObject({ value: "sk-test", allowedHosts: ["api.openai.com"] });
+  });
+
+  it("shows a stored secret's destinations", async () => {
+    enableWorkspaces();
+    server.use(
+      http.get("*/spacestore/secrets", () =>
+        HttpResponse.json([
+          { keyName: "narrow", reference: "${vault:u.alice/narrow}", allowedHosts: ["api.openai.com"] },
+          { keyName: "open", reference: "${vault:u.alice/open}", allowedHosts: [] },
+        ]),
+      ),
+    );
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+
+    expect(await screen.findByTestId("space-secret-hosts-narrow")).toHaveTextContent("api.openai.com");
+    expect(screen.queryByTestId("space-secret-hosts-open")).not.toBeInTheDocument();
+  });
+});

@@ -53,8 +53,8 @@ export function useSpaceSecrets(space: string | null) {
 export function useStoreSpaceSecret(space: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (args: { keyName: string; value: string; description?: string }) =>
-      storeSpaceSecret(space, args.keyName, args.value, args.description),
+    mutationFn: (args: { keyName: string; value: string; allowedHosts: string[]; description?: string; existing?: boolean }) =>
+      storeSpaceSecret(space, args.keyName, args.value, args.allowedHosts, args.description, args.existing),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.secrets(space) }),
   });
 }

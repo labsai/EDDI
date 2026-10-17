@@ -9,6 +9,10 @@ import {
   getVaultHealth,
   rotateSecret,
   findSecret,
+  hostFromUrl,
+  newAllowedHostsDraft,
+  resolveAllowedHostsDraft,
+  allowedHostsMissing,
 } from "../secrets";
 
 describe("secrets API — uses ApiClient (C2 fix)", () => {
@@ -53,7 +57,7 @@ describe("listSecrets", () => {
 
 describe("storeSecret", () => {
   it("stores a secret and returns response with keyName", async () => {
-    const result = await storeSecret("default", "test-key", "test-value");
+    const result = await storeSecret("default", "test-key", "test-value", undefined, ["*"], ["*"]);
     expect(result).toBeDefined();
     expect(result.keyName).toBeDefined();
   });
@@ -88,6 +92,22 @@ describe("storeSecret", () => {
     );
     await storeSecret("default", "agents-key", "val", undefined, ["agent1", "agent2"]);
     expect(capturedBody.allowedAgents).toEqual(["agent1", "agent2"]);
+  });
+
+  it("sends allowedHosts when given, and omits it when not", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ reference: "r", tenantId: "default", keyName: "k" });
+      })
+    );
+    await storeSecret("default", "k", "v", undefined, ["*"], ["api.openai.com"]);
+    await storeSecret("default", "k", "v", undefined, ["*"], ["*"]);
+    await storeSecret("default", "k", "v", undefined, ["*"]);
+    expect(bodies[0]!.allowedHosts).toEqual(["api.openai.com"]);
+    expect(bodies[1]!.allowedHosts).toEqual(["*"]);
+    expect(bodies[2]).not.toHaveProperty("allowedHosts");
   });
 
   it("throws on 503 with vault not configured message", async () => {
@@ -314,5 +334,52 @@ describe("path segments are encoded", () => {
       expect(new URL(url).search).toBe("");
     }
     expect(urls).toHaveLength(2);
+  });
+});
+
+describe("hostFromUrl", () => {
+  it("takes the host, with a non-default port, lower-cased", () => {
+    expect(hostFromUrl("https://API.OpenAI.com/v1")).toBe("api.openai.com");
+    expect(hostFromUrl("http://mcp.internal:8080/mcp")).toBe("mcp.internal:8080");
+    expect(hostFromUrl("https://api.example.com:443/x")).toBe("api.example.com");
+  });
+
+  it("takes nothing it would have to guess", () => {
+    expect(hostFromUrl(undefined)).toBeUndefined();
+    expect(hostFromUrl("")).toBeUndefined();
+    expect(hostFromUrl("not a url")).toBeUndefined();
+    expect(hostFromUrl("ftp://files.example.com")).toBeUndefined();
+    expect(hostFromUrl("https://{properties.host}/v1")).toBeUndefined();
+    expect(hostFromUrl("${vars:endpoint}")).toBeUndefined();
+  });
+});
+
+describe("resolveAllowedHostsDraft", () => {
+  it("sends the explicit wildcard for any host, whatever the list holds", () => {
+    expect(resolveAllowedHostsDraft({ ...newAllowedHostsDraft("a.example"), anyHost: true })).toEqual({
+      allowedHosts: ["*"],
+    });
+  });
+
+  it("refuses an empty list rather than sending one", () => {
+    const draft = newAllowedHostsDraft();
+    expect(allowedHostsMissing(draft)).toBe(true);
+    expect(resolveAllowedHostsDraft(draft)).toEqual({ problem: "missing" });
+  });
+
+  it("folds in the text still in the box, lower-cased and de-duplicated", () => {
+    const draft = { ...newAllowedHostsDraft("a.example"), pending: " B.example:8443 " };
+    expect(allowedHostsMissing(draft)).toBe(false);
+    expect(resolveAllowedHostsDraft(draft)).toEqual({ allowedHosts: ["a.example", "b.example:8443"] });
+    expect(resolveAllowedHostsDraft({ ...draft, pending: "A.example" })).toEqual({ allowedHosts: ["a.example"] });
+  });
+
+  it("refuses a pending entry the backend would refuse", () => {
+    expect(resolveAllowedHostsDraft({ ...newAllowedHostsDraft("a.example"), pending: "https://b.example" })).toEqual({
+      problem: "scheme",
+    });
+    expect(resolveAllowedHostsDraft({ ...newAllowedHostsDraft(), pending: "*.example.com" })).toEqual({
+      problem: "shape",
+    });
   });
 });

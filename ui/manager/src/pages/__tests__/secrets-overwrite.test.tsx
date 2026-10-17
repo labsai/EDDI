@@ -52,6 +52,7 @@ describe("Add Secret never overwrites", () => {
     await user.click(screen.getByTestId("create-secret-button"));
     await user.type(screen.getByTestId("new-key-input"), "google-gemini-key");
     await user.type(screen.getByTestId("new-value-input"), "replacement");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
     await user.click(screen.getByTestId("confirm-create-button"));
 
     expect(await screen.findByTestId("secret-exists-error")).toHaveTextContent(
@@ -76,6 +77,7 @@ describe("Add Secret never overwrites", () => {
     await user.click(screen.getByTestId("create-secret-button"));
     await user.type(screen.getByTestId("new-key-input"), "openai-api-key");
     await user.type(screen.getByTestId("new-value-input"), "v");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
     await user.click(screen.getByTestId("confirm-create-button"));
     await screen.findByTestId("secret-exists-error");
 
@@ -92,6 +94,7 @@ describe("Add Secret never overwrites", () => {
     await user.click(screen.getByTestId("create-secret-button"));
     await user.type(screen.getByTestId("new-key-input"), "  padded-key  ");
     await user.type(screen.getByTestId("new-value-input"), " pass phrase ");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
     await user.click(screen.getByTestId("confirm-create-button"));
 
     await waitFor(() => expect(stores).toHaveLength(1));
