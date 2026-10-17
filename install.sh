@@ -957,8 +957,72 @@ else
   SCRIPT_DIR=""
 fi
 
+# ── Release checksums ─────────────────────────────────────
+#
+# Every file this script downloads (compose files, the Keycloak realm and theme,
+# the monitoring configuration) comes from raw.githubusercontent.com over TLS.
+# When EDDI_BRANCH is a release tag, the release job in ci.yml publishes a
+# SHA256SUMS asset listing the hash of each of those files AT THAT TAG, and a
+# downloaded file whose hash disagrees is refused — so a tag moved after the
+# release, or a tampered file, does not get installed. A ref with no SHA256SUMS
+# (main, a branch, a release older than the asset) is installed as before, with a
+# warning that only TLS vouches for it.
+RELEASE_CHECKSUMS=""
+RELEASE_CHECKSUMS_LOADED=false
+
+sha256_of() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+
+load_release_checksums() {
+  [[ "$RELEASE_CHECKSUMS_LOADED" == "true" ]] && return 0
+  RELEASE_CHECKSUMS_LOADED=true
+  if [[ ! "$EDDI_BRANCH" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    warn "Files from '${EDDI_BRANCH}' are not a release: no checksums to verify them against (TLS only)."
+    return 0
+  fi
+  if ! sha256_of /dev/null &>/dev/null; then
+    warn "Neither sha256sum nor shasum is installed — downloaded files are not checksum-verified."
+    return 0
+  fi
+  local sums
+  sums=$(mktemp "${TMPDIR:-/tmp}/eddi-sums.XXXXXX")
+  if curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS" -o "$sums" 2>/dev/null \
+      && [[ -s "$sums" ]]; then
+    RELEASE_CHECKSUMS="$sums"
+    info "Verifying downloads against the SHA256SUMS of release ${EDDI_BRANCH}"
+  else
+    rm -f "$sums"
+    warn "Release ${EDDI_BRANCH} publishes no SHA256SUMS — downloaded files are verified by TLS only."
+  fi
+}
+
+# verify_download <repository path> <downloaded file>: refuses a file whose hash
+# is not the one the release lists. Returns 0 when there is nothing to check.
+verify_download() {
+  local rel="$1" file="$2" expected actual
+  [[ -n "$RELEASE_CHECKSUMS" ]] || return 0
+  expected=$(awk -v f="$rel" '$2 == f || $2 == "*" f { print $1; exit }' "$RELEASE_CHECKSUMS")
+  if [[ -z "$expected" ]]; then
+    warn "${rel} is not listed in the SHA256SUMS of release ${EDDI_BRANCH} — not verified."
+    return 0
+  fi
+  actual=$(sha256_of "$file") || return 0
+  if [[ "$actual" != "$expected" ]]; then
+    rm -f "$file"
+    fail "Checksum mismatch for ${rel} from release ${EDDI_BRANCH}.\n     Expected: ${expected}\n     Got:      ${actual}\n     The file was not installed. Retry later; if it persists, report it."
+  fi
+}
+
 resolve_compose_files() {
   mkdir -p "$EDDI_DIR"
+  load_release_checksums
 
   local needed_files=()
   COMPOSE_FILES=()
@@ -1007,6 +1071,7 @@ resolve_compose_files() {
       local download_url="${COMPOSE_BASE_URL}/${f}"
       echo -ne "  Downloading ${f}... "
       if curl -fsSL "${download_url}" -o "$target"; then
+        verify_download "$f" "$target"
         echo -e "${GREEN}✅${RESET}"
       else
         fail "Failed to download ${f}.\n     URL: ${download_url}\n     Check your internet connection and that the branch '${EDDI_BRANCH}' exists."
@@ -1041,6 +1106,7 @@ resolve_compose_files() {
         local mf_url="${COMPOSE_BASE_URL}/${mf}"
         echo -ne "  Downloading ${mf}... "
         if curl -fsSL "${mf_url}" -o "$mf_target"; then
+          verify_download "$mf" "$mf_target"
           echo -e "${GREEN}✅${RESET}"
         else
           # Every one of these is bind-mounted as a FILE by
@@ -1111,6 +1177,7 @@ resolve_compose_files() {
         local kf_url="${COMPOSE_BASE_URL}/${kf}"
         echo -ne "  Downloading ${kf}... "
         if curl -fsSL "${kf_url}" -o "$kf_target"; then
+          verify_download "$kf" "$kf_target"
           echo -e "${GREEN}✅${RESET}"
         elif [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
           fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"

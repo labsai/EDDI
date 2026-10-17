@@ -842,6 +842,22 @@ For audited false positives, EDDI provides override files at the repository root
 
 Both files should be reviewed periodically to ensure suppressions remain valid.
 
+### Installer Downloads
+
+`install.sh` and `install.ps1` fetch the compose files, the Keycloak realm and login
+theme, and the monitoring configuration from `raw.githubusercontent.com` at a git ref
+(`EDDI_BRANCH`; by default the newest release tag). Each release now publishes a
+`SHA256SUMS` asset — the release job in `ci.yml` hashes those files at the tag — and when
+the ref is a release tag the installers check every downloaded file against it and refuse
+one whose hash differs. A ref without the asset (`main`, a branch, a release published
+before it existed) still installs, with a warning that only TLS vouches for the files; an
+unlisted file is warned about, not refused. The installers do not verify themselves —
+fetch `install.sh` from a release tag rather than `main` for a pinned install. The CLI's
+`eddi update` re-downloads compose files without this check. The GCP provisioner
+(`gcp/provision-vm.sh`) now defaults `--eddi-branch` to `--eddi-version`'s tag or the
+newest stable release instead of `main`, falling back to `main` with a warning when the
+lookup fails.
+
 ### Fuzz Testing
 
 Security-critical input parsers are tested with [Jazzer](https://github.com/CodeIntelligenceTesting/jazzer) coverage-guided fuzzing:

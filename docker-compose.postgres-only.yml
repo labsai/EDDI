@@ -64,7 +64,7 @@ services:
   # docker-compose.auth.yml overrides it, so it must exist in every stack that
   # overlay is layered on. Runs on the postgres image this stack pulls anyway.
   bind-guard:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     entrypoint: ["/bin/sh", "-c"]
     environment:
       - "EDDI_BIND=${EDDI_BIND:-127.0.0.1}"
@@ -94,7 +94,7 @@ services:
         exit 1
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     restart: always
     environment:
       POSTGRES_DB: eddi

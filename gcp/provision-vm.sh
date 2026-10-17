@@ -52,7 +52,10 @@ DEFAULT_IMAGE_FAMILY="ubuntu-2204-lts"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_EDDI_PORT="7070"
 DEFAULT_EDDI_HTTPS_PORT="7443"
-DEFAULT_EDDI_BRANCH="main"
+# Empty = the newest stable release tag, looked up at create time (resolve_eddi_branch),
+# falling back to main with a warning. It used to be `main`, so a VM ran whatever
+# install.sh and compose files main held at that moment, as root.
+DEFAULT_EDDI_BRANCH=""
 DEFAULT_EDDI_VERSION="latest"
 NETWORK_TAG="eddi-server"
 FIREWALL_RULE_HTTP="allow-eddi-http"
@@ -102,7 +105,7 @@ ${BOLD}Create options:${RESET}
   --machine-type=TYPE       GCP machine type             [${DEFAULT_MACHINE_TYPE}]
   --disk-size=GB            Boot disk size in GB         [${DEFAULT_DISK_SIZE}]
   --project=PROJECT_ID      GCP project ID               [from gcloud config]
-  --eddi-branch=BRANCH      EDDI GitHub branch           [${DEFAULT_EDDI_BRANCH}]
+  --eddi-branch=BRANCH      EDDI git ref for install.sh  [--eddi-version's tag, else the latest release]
   --eddi-version=TAG        EDDI Docker image tag        [${DEFAULT_EDDI_VERSION}]
   --with-auth               Enable Keycloak OIDC auth
   --with-monitoring         Include Grafana + Prometheus
@@ -1049,7 +1052,31 @@ print_config_summary() {
 
 # ── Command: create ───────────────────────────────────────────────────────────
 
+# The git ref install.sh and the compose files are fetched from: --eddi-branch when
+# given, else the tag of a pinned --eddi-version, else the newest stable release,
+# else main (with a warning). Release tags are immutable in practice and match the
+# image `latest` points at; `main` is whatever was merged last.
+resolve_eddi_branch() {
+  [[ -n "$EDDI_BRANCH" ]] && return 0
+  if [[ "$EDDI_VERSION" != "latest" ]]; then
+    EDDI_BRANCH="$EDDI_VERSION"
+    return 0
+  fi
+  local body tag
+  body=$(curl -fsSL --max-time 10 -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/labsai/EDDI/releases/latest" 2>/dev/null) || body=""
+  tag=$(printf '%s\n' "$body" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/') || tag=""
+  if [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    EDDI_BRANCH="$tag"
+  else
+    EDDI_BRANCH="main"
+    warn "Could not look up the newest EDDI release; the VM will install from 'main'. Pass --eddi-branch=<tag> to pin it."
+  fi
+}
+
 cmd_create() {
+  resolve_eddi_branch
   require_auth_or_public_ack
   check_prerequisites
   resolve_project

@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:16.15-alpine
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

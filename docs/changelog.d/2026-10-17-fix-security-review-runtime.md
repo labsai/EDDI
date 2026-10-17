@@ -110,3 +110,23 @@ L7, L8 and the small L12/L13 items. One commit per finding.
 [`eddi-realm.json`](../../keycloak/eddi-realm.json),
 [`provision-vm.sh`](../../gcp/provision-vm.sh),
 [`network-policy.yaml`](../../k8s/overlays/production/network-policy.yaml)
+
+- **L8 — installer integrity (the minimal version).** The release job in `ci.yml` now
+  checks out the tag, hashes every file the installers download (`docker-compose*.yml`, the
+  realm, the login theme, `docs/monitoring/`) into `SHA256SUMS` and attaches it to the
+  GitHub release. `install.sh` and `install.ps1` fetch that asset when `EDDI_BRANCH` is a
+  release tag and refuse a downloaded file whose hash differs (the file is deleted); with no
+  asset — `main`, a branch, every release before this one — they warn that only TLS vouches
+  for the files and carry on, so existing installs do not break. Exercised with stubbed
+  downloads for both scripts (accept, unlisted → warn, mismatch → refuse and delete,
+  non-release ref → warn). `gcp/provision-vm.sh` defaults `--eddi-branch` to the
+  `--eddi-version` tag or the newest stable release (GitHub API), falling back to `main`
+  with a warning. `postgres:16-alpine` is pinned to `postgres:16.15-alpine` in the compose
+  stack (database and bind-guard), the kustomize overlay and the Helm values. **Not done:**
+  the installers cannot verify themselves (`curl | bash` from `main` stays TLS-only), the
+  CLI's `eddi update` refresh path does not verify, there is no cosign signature on the
+  asset, compose still defaults to `labsai/eddi:latest`, and `mcp-sidecar/Dockerfile`'s
+  unpinned `nodejs npm` is untouched.
+
+**Files:** [`install.sh`](../../install.sh), [`install.ps1`](../../install.ps1),
+[`ci.yml`](../../.github/workflows/ci.yml), [`security.md`](../security.md#installer-downloads)

@@ -826,8 +826,60 @@ $script:MonitoringFiles = @(
     "docs/monitoring/eddi-full-metrics-dashboard.json"
 )
 
+# -- Release checksums ------------------------------------
+#
+# Same contract as install.sh: when $EddiBranch is a release tag, every downloaded
+# file is checked against the SHA256SUMS asset the release job publishes, and a
+# mismatch is refused. A ref without one (main, a branch, an older release) is
+# installed as before, with a warning that only TLS vouches for it.
+$script:ReleaseChecksums = $null
+$script:ReleaseChecksumsLoaded = $false
+
+function Initialize-ReleaseChecksums {
+    if ($script:ReleaseChecksumsLoaded) { return }
+    $script:ReleaseChecksumsLoaded = $true
+    if ($EddiBranch -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+        Write-Warn "Files from '$EddiBranch' are not a release: no checksums to verify them against (TLS only)."
+        return
+    }
+    try {
+        $response = Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+        $content = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        $table = @{}
+        foreach ($line in ($content -split "`n")) {
+            if ($line -match '^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$') { $table[$Matches[2]] = $Matches[1].ToLowerInvariant() }
+        }
+        if ($table.Count -gt 0) {
+            $script:ReleaseChecksums = $table
+            Write-Information -MessageData "  Verifying downloads against the SHA256SUMS of release $EddiBranch"
+            return
+        }
+    }
+    catch {
+        # fall through to the warning below
+    }
+    Write-Warn "Release $EddiBranch publishes no SHA256SUMS -- downloaded files are verified by TLS only."
+}
+
+# Refuses a downloaded file whose hash is not the one the release lists.
+function Confirm-DownloadChecksum {
+    param([string]$RelativePath, [string]$Path)
+    if (-not $script:ReleaseChecksums) { return }
+    $expected = $script:ReleaseChecksums[$RelativePath]
+    if (-not $expected) {
+        Write-Warn "$RelativePath is not listed in the SHA256SUMS of release $EddiBranch -- not verified."
+        return
+    }
+    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        Remove-Item -Path $Path -Force -ErrorAction SilentlyContinue
+        Write-Fail "Checksum mismatch for $RelativePath from release $EddiBranch.`n     Expected: $expected`n     Got:      $actual`n     The file was not installed. Retry later; if it persists, report it."
+    }
+}
+
 function Get-ComposeFiles {
     New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
+    Initialize-ReleaseChecksums
 
     # Detect script directory (empty when piped via iwr | iex)
     $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { "" }
@@ -879,6 +931,7 @@ function Get-ComposeFiles {
             Write-Information -MessageData "  Downloading $f... "
             try {
                 Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
+                Confirm-DownloadChecksum -RelativePath $f -Path $target
                 Write-Information -MessageData "✅"
             }
             catch {
@@ -907,6 +960,7 @@ function Get-ComposeFiles {
                 Write-Information -MessageData "  Downloading $mf... "
                 try {
                     Invoke-WebRequest -Uri $mfUrl -OutFile $mfTarget -UseBasicParsing -ErrorAction Stop
+                    Confirm-DownloadChecksum -RelativePath $mf -Path $mfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {
@@ -950,6 +1004,7 @@ function Get-ComposeFiles {
                 Write-Information -MessageData "  Downloading $kf... "
                 try {
                     Invoke-WebRequest -Uri $kfUrl -OutFile $kfTarget -UseBasicParsing -ErrorAction Stop
+                    Confirm-DownloadChecksum -RelativePath $kf -Path $kfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {
