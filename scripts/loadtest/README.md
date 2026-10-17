@@ -80,6 +80,22 @@ on `LOADTEST_EDDI_PORT + i - 1`, so keep that range free too.
 
 `--warmup-turns N` runs N turns per conversation first and does not record them (JIT, pools, caches).
 
+**Clients that honour 503 + Retry-After: `--retry-503 N`.** By default a refused turn (503) uses up
+the VU's iteration and the next request goes out at once. That keeps every earlier result comparable,
+but it makes any load shedding read as collapsed goodput, and a 503 storm keeps the HTTP workers busy
+answering refusals. With `--retry-503 N` (k6 `RETRY_503=N`) a VU that gets a 503 sleeps for its
+`Retry-After` (capped at `--retry-cap-ms`, default 10000, with ±20 % jitter so refused VUs do not come
+back in lockstep; 1 s when the header is missing) and resends the same turn, at most N attempts in
+all, after which the turn counts as **abandoned**. The result adds the latency the user actually
+waited (`total_latency_ms`, refusals and backoff included), attempts per turn and `turns_abandoned`;
+`turns_503` then counts refused *attempts*, not lost turns. Result files get a `-retryN` suffix. Use
+this mode to measure an admission-control change; compare like with like (retry against retry), and
+run `down` (fresh database) between configurations.
+
+**Changing EDDI settings.** `LOADTEST_COMPOSE_EXTRA` names one or more extra compose files
+(separated by the OS path separator) that are applied last, e.g. a file setting
+`EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS` on the `eddi` service. Set it before `up` and keep it set.
+
 **EDDI overhead** is reported for every turn run: turn latency minus the mock's configured delay
 (`turn_overhead` in k6, p50/p95/p99 in the result and the report). One turn is one LLM call here, so
 it is everything the platform adds — HTTP, the pipeline, conversation load and save, audit. With

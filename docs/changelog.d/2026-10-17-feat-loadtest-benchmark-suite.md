@@ -16,6 +16,11 @@ those numbers can be published reproducibly and regressions caught. Nothing unde
   with a configurable first-chunk delay, token count and spacing. Driver:
   [`drivers/stream_driver.py`](../../scripts/loadtest/drivers/stream_driver.py), asyncio on the standard
   library, in a pinned `python` image on the compose network.
+- **`--retry-503 N`** (k6 `RETRY_503`, off by default so earlier results stay comparable): a client
+  that honours 503 + `Retry-After` (capped, jittered) and resends the same turn up to N attempts;
+  reports latency including backoff, attempts per turn and abandoned turns. Requested by the
+  admission-control work, whose shedding otherwise read as collapsed goodput. `LOADTEST_COMPOSE_EXTRA`
+  adds compose overrides for EDDI settings under test.
 - **Overhead as a first-class metric**: every turn run reports `turn_overhead` (latency minus the
   mock's delay) at p50/p95/p99.
 - **`up --nodes N` and `scaling --nodes 1,2,4`**: the cluster-demo topology (NATS JetStream,

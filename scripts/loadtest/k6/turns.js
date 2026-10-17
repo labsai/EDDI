@@ -9,6 +9,9 @@
 //   THINK_MS   pause between a VU's turns
 //   RAMP       burst: ramp-up duration (default 30s); HOLD: time at peak (default 60s)
 //   DELAY_MS   the mock LLM's delay for this run; turn_overhead = turn latency minus it
+//   RETRY_503  0 (default): a 503 ends the iteration. N > 0: on 503 sleep Retry-After (capped at
+//              RETRY_CAP_MS, default 10000, ±RETRY_JITTER, default 0.2) and resend the same turn,
+//              at most N attempts in all; then the turn counts as abandoned
 //   OUT        summary file name under /results
 //
 // Every VU owns one conversation (except same-conversation), started on its first iteration,
@@ -27,6 +30,10 @@ const THINK_MS = parseInt(__ENV.THINK_MS || '0', 10);
 const TIMEOUT = __ENV.HTTP_TIMEOUT || '180s';
 
 const DELAY_MS = parseInt(__ENV.DELAY_MS || '0', 10);
+const RETRY_503 = parseInt(__ENV.RETRY_503 || '0', 10);
+const RETRY_CAP_MS = parseInt(__ENV.RETRY_CAP_MS || '10000', 10);
+const RETRY_DEFAULT_MS = parseInt(__ENV.RETRY_DEFAULT_MS || '1000', 10);
+const RETRY_JITTER = parseFloat(__ENV.RETRY_JITTER || '0.2');
 
 const turnDuration = new Trend('turn_duration', true);
 // EDDI's own share of a turn: its latency minus the time the mock LLM was told to wait. One turn
@@ -44,6 +51,21 @@ const turnsNoResponse = new Counter('turns_no_response');
 // fallback, so it is neither a successful turn nor part of its latency.
 const turnsAppError = new Counter('turns_app_error');
 const startFailed = new Counter('start_failed');
+// Retry mode (RETRY_503 > 0): a client that honours 503 + Retry-After, as a well-behaved SDK does.
+// Without it, load shedding reads as collapsed goodput: each refused VU fires again at once.
+const turnTotalDuration = new Trend('turn_total_duration', true);
+const turnAttempts = new Trend('turn_attempts');
+const turnsAbandoned = new Counter('turns_abandoned');
+
+// Retry-After in seconds (EDDI sends delta-seconds), capped, with ±JITTER so that refused VUs
+// do not come back in lockstep. Missing or unparsable: RETRY_DEFAULT_MS.
+function backoffMs(res) {
+  const header = res.headers['Retry-After'] || res.headers['retry-after'];
+  const seconds = parseFloat(header);
+  const base = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : RETRY_DEFAULT_MS;
+  const capped = Math.min(base, RETRY_CAP_MS);
+  return Math.max(0, capped * (1 + RETRY_JITTER * (2 * Math.random() - 1)));
+}
 
 function executor() {
   switch (SCENARIO) {
@@ -107,12 +129,29 @@ export default function (data) {
     }
   }
   const body = JSON.stringify({ input: `turn ${exec.vu.iterationInScenario} from vu ${exec.vu.idInTest}` });
-  const res = http.post(`${BASE}/agents/${conv}?returnCurrentStepOnly=true`, body, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: TIMEOUT,
-    tags: { kind: 'turn' },
-  });
+  const started = Date.now();
+  let res;
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    res = http.post(`${BASE}/agents/${conv}?returnCurrentStepOnly=true`, body, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: TIMEOUT,
+      tags: { kind: 'turn' },
+    });
+    // Off by default (RETRY_503=0): a refusal used the iteration up, as in every earlier result.
+    if (res.status !== 503 || RETRY_503 === 0) break;
+    turns503.add(1);
+    if (attempt >= RETRY_503) {
+      turnsAbandoned.add(1);
+      turnAttempts.add(attempt);
+      if (THINK_MS > 0) sleep(THINK_MS / 1000);
+      return;
+    }
+    sleep(backoffMs(res) / 1000);
+  }
   const s = res.status;
+  if (RETRY_503 > 0) turnAttempts.add(attempt);
   if (s === 200) {
     let error = null;
     try {
@@ -126,6 +165,8 @@ export default function (data) {
       turnsOk.add(1);
       turnDuration.add(res.timings.duration);
       turnOverhead.add(res.timings.duration - DELAY_MS);
+      // What the user waited, refusals and backoff included; equals turn_duration without retries.
+      turnTotalDuration.add(RETRY_503 > 0 ? Date.now() - started : res.timings.duration);
     }
   } else if (s === 503) turns503.add(1);
   else if (s === 429) turns429.add(1);

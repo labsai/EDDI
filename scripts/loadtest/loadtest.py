@@ -62,7 +62,7 @@ COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_tot
                      r"eddi_conversation_processing_duration_seconds_(count|sum)|eddi_llm_circuit[a-z_]*_total|"
                      r"http_server_requests_seconds_count)")
 TURN_ERRORS = ["turns_503", "turns_429", "turns_408", "turns_409", "turns_5xx_other", "turns_other", "turns_no_response",
-               "turns_app_error", "start_failed"]
+               "turns_app_error", "start_failed", "turns_abandoned"]
 STATS = ["med", "p(90)", "p(95)", "p(99)", "max"]
 
 
@@ -97,6 +97,9 @@ def compose_files(state):
         files += ["-f", os.path.join(HERE, "docker-compose.app.yml")]
     if state.get("nodes"):
         files += ["-f", os.path.join(HERE, "docker-compose.cluster.yml")]
+    # Your own overrides last, e.g. EDDI settings under test (README: "Changing EDDI settings").
+    for extra in filter(None, os.environ.get("LOADTEST_COMPOSE_EXTRA", "").split(os.pathsep)):
+        files += ["-f", os.path.abspath(extra)]
     return files
 
 
@@ -579,7 +582,8 @@ def write_result(result):
 
 def turns_k6_env(agent, args, turns=None):
     return {"AGENT_ID": agent, "SCENARIO": args.scenario, "VUS": args.vus, "TURNS": turns or args.turns,
-            "THINK_MS": args.think_ms, "DELAY_MS": args.delay_ms, "RAMP": args.ramp, "HOLD": args.hold}
+            "THINK_MS": args.think_ms, "DELAY_MS": args.delay_ms, "RAMP": args.ramp, "HOLD": args.hold,
+            "RETRY_503": getattr(args, "retry_503", 0), "RETRY_CAP_MS": getattr(args, "retry_cap_ms", 10000)}
 
 
 def cmd_run(args, label=None, name=None, kind="turns"):
@@ -590,7 +594,8 @@ def cmd_run(args, label=None, name=None, kind="turns"):
     label = label or args.label
     wait_for_quiet(args)
     set_mock_delay(args.delay_ms)
-    name = name or f"{label}-{args.scenario}{topology_suffix(state)}-{args.vus}vu-{args.delay_ms}ms"
+    retry = getattr(args, "retry_503", 0)
+    name = name or f"{label}-{args.scenario}{topology_suffix(state)}{f'-retry{retry}' if retry else ''}-{args.vus}vu-{args.delay_ms}ms"
     os.makedirs(RESULTS, exist_ok=True)
     if getattr(args, "warmup_turns", 0):
         # Not recorded: JIT, connection pools and configuration caches warm up here.
@@ -605,6 +610,10 @@ def cmd_run(args, label=None, name=None, kind="turns"):
         "turns_ok": ok, "turns_per_s": metric(summary, "turns_ok", "rate"),
         "latency_ms": {k: metric(summary, "turn_duration", k) for k in STATS},
         "overhead_ms": {k: metric(summary, "turn_overhead", k) for k in STATS},
+        # Retry mode only (--retry-503 N): what the user waited, refusals and backoff included.
+        "retry_503": retry, "retry_cap_ms": getattr(args, "retry_cap_ms", 10000) if retry else None,
+        "total_latency_ms": {k: metric(summary, "turn_total_duration", k) for k in STATS} if retry else None,
+        "attempts": {k: metric(summary, "turn_attempts", k) for k in ["avg", "med", "p(95)", "p(99)", "max"]} if retry else None,
         "errors": {k: metric(summary, k, "count") or 0 for k in TURN_ERRORS},
         "db": m.db, "db_ops_per_turn": per_turn(m.db, ok), "peaks": m.peaks, "counters": m.counters,
         "contended_by": m.contended,
@@ -619,7 +628,11 @@ def one_line(r):
     errs = ", ".join(f"{k[6:] if k.startswith('turns_') else k}={int(v)}" for k, v in r["errors"].items() if v)
     return (f"{r['name']}: {r['turns_ok']:.0f} ok, {r['turns_per_s'] or 0:.1f} turns/s, p50 {fmt(lat['med'])} p95 {fmt(lat['p(95)'])} "
             f"p99 {fmt(lat['p(99)'])} ms; EDDI overhead p50 {fmt(ovh['med'])} p95 {fmt(ovh['p(95)'])} p99 {fmt(ovh['p(99)'])} ms; "
-            f"db ops/turn {r['db_ops_per_turn'].get('total', '-')}; errors: {errs or 'none'}")
+            f"db ops/turn {r['db_ops_per_turn'].get('total', '-')}; errors: {errs or 'none'}"
+            + (f"; with backoff p50 {fmt(r['total_latency_ms']['med'])} p95 {fmt(r['total_latency_ms']['p(95)'])} "
+               f"p99 {fmt(r['total_latency_ms']['p(99)'])} ms, attempts avg {fmt(r['attempts']['avg'], 2)} "
+               f"max {fmt(r['attempts']['max'])}, abandoned {r['errors'].get('turns_abandoned', 0):.0f}"
+               if r.get("retry_503") else ""))
 
 
 def fmt(v, digits=0):
@@ -1051,6 +1064,20 @@ def cmd_report(args):
                      f"{ms(r['latency_ms'], 'p(99)')} | {ms(r['overhead_ms'], 'med')} / {ms(r['overhead_ms'], 'p(95)')} / "
                      f"{ms(r['overhead_ms'], 'p(99)')} | {errs} | {ops_cell(r['db_ops_per_turn'])} |")
         L.append("")
+        retried = [r for r in rows if r.get("retry_503")]
+        if retried:
+            L += ["Runs with a client that honours 503 + Retry-After (`--retry-503 N`): a refused turn waits Retry-After "
+                  "(capped, ±20 % jitter) and is resent, at most N attempts. Latency above is the accepted attempt; "
+                  "the user waited the total below. `turns_503` counts refused attempts, not lost turns.", "",
+                  "| Scenario | Concurrent conv. | Max attempts | Retry-After cap ms | OK turns | Total p50 ms | Total p95 ms | "
+                  "Total p99 ms | Attempts avg / p99 / max | Abandoned |",
+                  "|---|---|---|---|---|---|---|---|---|---|"]
+            for r in sorted(retried, key=lambda r: (r["scenario"], r["vus"])):
+                t, a = r["total_latency_ms"] or {}, r["attempts"] or {}
+                L.append(f"| {r['scenario']}{flag(r)} | {r['vus']} | {r['retry_503']} | {r['retry_cap_ms']} | {r['turns_ok']:.0f} | "
+                         f"{ms(t, 'med')} | {ms(t, 'p(95)')} | {ms(t, 'p(99)')} | {fmt(a.get('avg'), 2)} / {ms(a, 'p(99)')} / "
+                         f"{ms(a, 'max')} | {r['errors'].get('turns_abandoned', 0):.0f} |")
+            L.append("")
     for r in by.get("stream", []):
         m = r["mock"]["metrics"]
         L += [f"## Streaming — time to first token ({r['vus']} concurrent streams)", "",
@@ -1170,6 +1197,9 @@ def main():
         p.add_argument("--ramp", default="30s")
         p.add_argument("--hold", default="60s")
         p.add_argument("--agent", help="agent id (default: the one `up` created)")
+        p.add_argument("--retry-503", type=int, default=0, metavar="N",
+                       help="honour 503 + Retry-After: back off and resend the turn, at most N attempts (default 0: off)")
+        p.add_argument("--retry-cap-ms", type=int, default=10000, help="longest Retry-After the client waits")
         p.add_argument("--warmup-turns", type=int, default=3 if name == "scaling" else 0,
                        help="turns per conversation run first and not recorded")
         if name == "scaling":
