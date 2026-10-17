@@ -682,8 +682,8 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
-        guardStoreHost(host, "pgvector");
         int port = parseIntParam(params, "port", 5432);
+        guardStoreHost(host + ":" + port, "pgvector");
         String database = params.getOrDefault("database", "eddi");
         String user = params.getOrDefault("user", "eddi");
         String password = requireParam(params, "password", "pgvector");
@@ -803,8 +803,8 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String host = params.getOrDefault("host", "localhost");
-        guardStoreHost(host, "qdrant");
         int port = parseIntParam(params, "port", 6334);
+        guardStoreHost(host + ":" + port, "qdrant");
         String collectionName = physicalName(params, "collectionName", ragConfigId, config);
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 

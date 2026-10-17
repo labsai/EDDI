@@ -14,6 +14,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -156,6 +157,58 @@ class OutboundTargetPolicyTest {
         void selfOriginLimits() {
             assertThrows(IllegalArgumentException.class, () -> onWithSelf("http://169.254.169.254:80").validateUrl("http://169.254.169.254/latest"));
             assertThrows(IllegalArgumentException.class, () -> onWithSelf("http://127.0.0.1:7070").validateHost("127.0.0.1"));
+        }
+    }
+
+    @Nested
+    @DisplayName("protection on, with eddi.security.ssrf-protection.allowed-hosts")
+    class AllowedHosts {
+
+        private OutboundTargetPolicy withAllowList(String raw) {
+            return new OutboundTargetPolicy(true, null, RESOLVER, OutboundTargetPolicy.parseAllowedHosts(raw));
+        }
+
+        @Test
+        @DisplayName("an allow-listed private host passes as a URL and as a bare host, on any port")
+        void allowListedHostPasses() {
+            OutboundTargetPolicy policy = withAllowList(" " + PRIVATE_HOST.toUpperCase() + " , 10.0.0.5");
+            assertDoesNotThrow(() -> policy.validateUrl("http://" + PRIVATE_HOST + ":11434/v1"));
+            assertDoesNotThrow(() -> policy.validateUrl("https://" + PRIVATE_HOST + "/v1"));
+            assertDoesNotThrow(() -> policy.validateHost(PRIVATE_HOST));
+            assertDoesNotThrow(() -> policy.validateHost("10.0.0.5:5432"));
+            assertThrows(IllegalArgumentException.class, () -> policy.validateUrl("http://10.0.0.6:5432/"), "not listed");
+        }
+
+        @Test
+        @DisplayName("a host:port entry matches only that port, and a URL without a port counts as its scheme default")
+        void hostPortEntry() {
+            OutboundTargetPolicy policy = withAllowList(PRIVATE_HOST + ":443,10.0.0.5:5432");
+            assertDoesNotThrow(() -> policy.validateUrl("https://" + PRIVATE_HOST + "/v1"));
+            assertDoesNotThrow(() -> policy.validateUrl("https://" + PRIVATE_HOST + ":443/v1"));
+            assertThrows(IllegalArgumentException.class, () -> policy.validateUrl("http://" + PRIVATE_HOST + ":8080/v1"));
+            assertDoesNotThrow(() -> policy.validateHost("10.0.0.5:5432"));
+            assertThrows(IllegalArgumentException.class, () -> policy.validateHost("10.0.0.5:5433"));
+            assertThrows(IllegalArgumentException.class, () -> policy.validateHost("10.0.0.5"), "no port given, so a port-bound entry cannot match");
+        }
+
+        @Test
+        @DisplayName("the allow-list never covers the metadata service")
+        void metadataStillRefused() {
+            OutboundTargetPolicy policy = withAllowList("169.254.169.254," + METADATA_HOST);
+            assertThrows(IllegalArgumentException.class, () -> policy.validateUrl("http://169.254.169.254/latest"));
+            assertThrows(IllegalArgumentException.class, () -> policy.validateHost(METADATA_HOST));
+        }
+
+        @Test
+        @DisplayName("parsing trims, lower-cases and drops empty entries; portOf reads host:port and [v6]:port")
+        void parsing() {
+            assertEquals(Set.of("a.example", "b.example:5432"), OutboundTargetPolicy.parseAllowedHosts(" A.example ,, b.EXAMPLE:5432 , "));
+            assertTrue(OutboundTargetPolicy.parseAllowedHosts(null).isEmpty());
+            assertEquals(5432, OutboundTargetPolicy.portOf("db.example:5432"));
+            assertEquals(5432, OutboundTargetPolicy.portOf("[::1]:5432"));
+            assertEquals(-1, OutboundTargetPolicy.portOf("::1"));
+            assertEquals(-1, OutboundTargetPolicy.portOf("db.example"));
+            assertEquals(-1, OutboundTargetPolicy.portOf("db.example:x"));
         }
     }
 

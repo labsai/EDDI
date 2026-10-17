@@ -13,8 +13,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The one answer to "may this deployment open a connection to that address?"
@@ -30,8 +32,10 @@ import java.util.Optional;
  * instance's cloud credentials and nobody configures it as an API.</li>
  * <li>With the flag <b>on</b>, the target is run through the full
  * {@link UrlValidationUtils#validateUrl} policy — http(s) only, and no
- * loopback, private, link-local or otherwise internal address — with one escape
- * hatch: a URL on this deployment's own origin ({@link SelfUrlResolver}, i.e.
+ * loopback, private, link-local or otherwise internal address — with two escape
+ * hatches. A host on {@value #ALLOWED_HOSTS_KEY}, the same operator allow-list
+ * httpcalls honour, skips the private-address check (never the metadata check).
+ * And a URL on this deployment's own origin ({@link SelfUrlResolver}, i.e.
  * {@code eddi.self.base-url} or the derived loopback address) is allowed,
  * because it is set by the operator and an agent that talks to EDDI's own
  * {@code /v1} API is a supported arrangement.</li>
@@ -58,16 +62,25 @@ public class OutboundTargetPolicy {
     /** The switch, shared with the httpcalls, MCP and A2A paths. */
     public static final String CONFIG_KEY = "eddi.security.ssrf-protection.enabled";
 
+    /**
+     * Operator allow-list of internal hosts, shared with httpcalls
+     * ({@code ApiCallExecutor} parses it the same way): comma-separated
+     * {@code host} or {@code host:port}, case-insensitive, no wildcards; a bare
+     * host matches any port.
+     */
+    public static final String ALLOWED_HOSTS_KEY = "eddi.security.ssrf-protection.allowed-hosts";
+
     private static final OutboundTargetPolicy PERMISSIVE = new OutboundTargetPolicy(false, null, InetAddress::getAllByName);
 
     private final boolean ssrfProtectionEnabled;
     private final SelfUrlResolver selfUrlResolver;
     private final UrlValidationUtils.HostResolver hostResolver;
+    private final Set<String> allowedHosts;
 
     @Inject
     public OutboundTargetPolicy(@ConfigProperty(name = CONFIG_KEY, defaultValue = "false") boolean ssrfProtectionEnabled,
-            SelfUrlResolver selfUrlResolver) {
-        this(ssrfProtectionEnabled, selfUrlResolver, InetAddress::getAllByName);
+            @ConfigProperty(name = ALLOWED_HOSTS_KEY) Optional<String> allowedHosts, SelfUrlResolver selfUrlResolver) {
+        this(ssrfProtectionEnabled, selfUrlResolver, InetAddress::getAllByName, parseAllowedHosts(allowedHosts.orElse("")));
     }
 
     /**
@@ -75,9 +88,18 @@ public class OutboundTargetPolicy {
      * simulated without DNS, and a {@code null} self resolver for "no self origin".
      */
     public OutboundTargetPolicy(boolean ssrfProtectionEnabled, SelfUrlResolver selfUrlResolver, UrlValidationUtils.HostResolver hostResolver) {
+        this(ssrfProtectionEnabled, selfUrlResolver, hostResolver, Set.of());
+    }
+
+    /**
+     * As above, with an allow-list as {@value #ALLOWED_HOSTS_KEY} would hold it.
+     */
+    public OutboundTargetPolicy(boolean ssrfProtectionEnabled, SelfUrlResolver selfUrlResolver, UrlValidationUtils.HostResolver hostResolver,
+            Set<String> allowedHosts) {
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.selfUrlResolver = selfUrlResolver;
         this.hostResolver = hostResolver;
+        this.allowedHosts = Set.copyOf(allowedHosts);
     }
 
     /**
@@ -101,15 +123,15 @@ public class OutboundTargetPolicy {
 
     /**
      * Refuses {@code url} when it targets the metadata service (always), or, with
-     * protection on, when it is not an http(s) URL on a public address — unless it
-     * is on this deployment's own origin.
+     * protection on, when it is not an http(s) URL on a public address — unless its
+     * host is allow-listed or it is on this deployment's own origin.
      *
      * @throws IllegalArgumentException
      *             naming the reason; the message says which rule refused it
      */
     public void validateUrl(String url) {
         UrlValidationUtils.rejectCloudMetadataTarget(url, hostResolver);
-        if (!ssrfProtectionEnabled || isSelf(url)) {
+        if (!ssrfProtectionEnabled || isSelf(url) || isAllowListed(url)) {
             return;
         }
         UrlValidationUtils.validateUrl(url, hostResolver);
@@ -120,8 +142,9 @@ public class OutboundTargetPolicy {
      * pgvector, Qdrant or MongoDB address that is opened as a raw TCP connection
      * rather than fetched as a URL. Wrapped in an {@code http://} URL for the
      * metadata check; with protection on the host must resolve, and to no private
-     * address. There is no self escape hatch here: EDDI's own listener is an HTTP
-     * endpoint, never a database.
+     * address, unless it (or its {@code host:port}) is allow-listed. There is no
+     * self escape hatch here: EDDI's own listener is an HTTP endpoint, never a
+     * database.
      *
      * @throws IllegalArgumentException
      *             when the host is unusable, is the metadata service, or (flag on)
@@ -133,7 +156,7 @@ public class OutboundTargetPolicy {
             return;
         }
         UrlValidationUtils.rejectCloudMetadataTarget("http://" + bracketed(bare) + "/", hostResolver);
-        if (!ssrfProtectionEnabled) {
+        if (!ssrfProtectionEnabled || isAllowListedHost(bare, portOf(host))) {
             return;
         }
         if (isPrivateHost(bare)) {
@@ -164,6 +187,74 @@ public class OutboundTargetPolicy {
             return false;
         } catch (UnknownHostException e) {
             return true;
+        }
+    }
+
+    /**
+     * {@value #ALLOWED_HOSTS_KEY}, parsed as {@code ApiCallExecutor} parses it:
+     * trimmed, lower-cased, empty entries dropped.
+     */
+    static Set<String> parseAllowedHosts(String raw) {
+        Set<String> hosts = new HashSet<>();
+        if (raw == null) {
+            return hosts;
+        }
+        for (String entry : raw.split(",")) {
+            String trimmed = entry.trim().toLowerCase(Locale.ROOT);
+            if (!trimmed.isEmpty()) {
+                hosts.add(trimmed);
+            }
+        }
+        return hosts;
+    }
+
+    /**
+     * Whether the URL's host, or {@code host:port} (a URL without a port uses its
+     * scheme's default, so {@code host:443} matches {@code https://host}), is on
+     * the allow-list.
+     */
+    private boolean isAllowListed(String url) {
+        if (allowedHosts.isEmpty()) {
+            return false;
+        }
+        URI uri;
+        try {
+            uri = URI.create(url.trim());
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        if (uri.getHost() == null) {
+            return false;
+        }
+        int port = uri.getPort() >= 0
+                ? uri.getPort()
+                : "https".equalsIgnoreCase(uri.getScheme()) ? 443 : "http".equalsIgnoreCase(uri.getScheme()) ? 80 : -1;
+        return isAllowListedHost(bareHost(uri.getHost()), port);
+    }
+
+    private boolean isAllowListedHost(String bare, int port) {
+        if (bare == null || allowedHosts.isEmpty()) {
+            return false;
+        }
+        String host = bare.toLowerCase(Locale.ROOT);
+        return allowedHosts.contains(host) || (port >= 0 && allowedHosts.contains(host + ":" + port));
+    }
+
+    /** The port in a {@code host:port} or {@code [v6]:port} value, else -1. */
+    static int portOf(String host) {
+        if (host == null) {
+            return -1;
+        }
+        String trimmed = host.trim();
+        int colon = trimmed.lastIndexOf(':');
+        boolean hasPort = colon > 0 && (trimmed.startsWith("[") ? trimmed.charAt(colon - 1) == ']' : colon == trimmed.indexOf(':'));
+        if (!hasPort) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(trimmed.substring(colon + 1));
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
