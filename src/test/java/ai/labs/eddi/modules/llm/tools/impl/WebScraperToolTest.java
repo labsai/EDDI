@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,7 @@ class WebScraperToolTest {
 
     @BeforeEach
     void setUp() {
-        webScraperTool = new WebScraperTool(new SafeHttpClient(10000), new HtmlToMarkdownConverter());
+        webScraperTool = new WebScraperTool(TestOutbound.standalone(), new HtmlToMarkdownConverter());
     }
 
     // === SSRF Protection Tests ===

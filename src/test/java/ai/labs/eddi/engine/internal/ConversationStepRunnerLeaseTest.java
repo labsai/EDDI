@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -193,25 +194,133 @@ class ConversationStepRunnerLeaseTest {
         verify(store, never()).raiseFence(anyString(), anyLong());
     }
 
+    private static ConversationService describingService() throws Exception {
+        ConversationService service = mock(ConversationService.class, CALLS_REAL_METHODS);
+        setFinal(service, "captureDeadLetterInput", true);
+        return service;
+    }
+
+    /**
+     * An agent that does, or does not, carry a {@code scope: secret} instruction.
+     */
+    private static IAgent agentExpectingSecrets(boolean expectsSecrets) {
+        IAgent agent = mock(IAgent.class);
+        when(agent.hasSecretPropertyInstructions()).thenReturn(expectsSecrets);
+        return agent;
+    }
+
     @Test
     @DisplayName("a dead letter of a secretInput turn records neither the input nor its context, and is not replayable")
     void secretInputNeverReachesADeadLetter() throws Exception {
-        ConversationService service = mock(ConversationService.class, CALLS_REAL_METHODS);
-        setFinal(service, "captureDeadLetterInput", true);
+        ConversationService service = describingService();
+        IAgent plainAgent = agentExpectingSecrets(false);
         IConversationMemory turnMemory = mock(IConversationMemory.class);
         when(turnMemory.getAgentId()).thenReturn("agent1");
 
         var secret = new InputData("my-password", Map.of("secretInput", new Context(Context.ContextType.string, "true")));
-        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, secret, false);
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, secret, false, plainAgent);
         assertFalse(turn.containsKey("input"), "the secret must not be kept");
         assertFalse(turn.containsKey("context"));
         assertEquals(true, turn.get("secretInput"));
         assertFalse(new DeadLetterEntry("1", ID, "e", 1, "{}", turn).isReplayable());
 
         var plain = new InputData("hello", Map.of("lang", new Context(Context.ContextType.string, "en")));
-        Map<String, Object> plainTurn = service.describeTurn(Environment.production, turnMemory, ID, plain, false);
+        Map<String, Object> plainTurn = service.describeTurn(Environment.production, turnMemory, ID, plain, false, plainAgent);
         assertEquals("hello", plainTurn.get("input"), "an ordinary turn keeps its input for replay");
         assertTrue(new DeadLetterEntry("2", ID, "e", 1, "{}", plainTurn).isReplayable());
+    }
+
+    // L6 (security review 2026-10-15): the capture runs before the pipeline, so the
+    // scope: secret scrub cannot have happened — the describe step must stand in.
+
+    @Test
+    @DisplayName("a turn for an agent with a scope: secret instruction is recorded as secretInput even without the client flag")
+    void agentWithSecretInstructionsIsNeverCaptured() throws Exception {
+        ConversationService service = describingService();
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        when(turnMemory.getAgentVersion()).thenReturn(3);
+
+        var unflagged = new InputData("hunter2", Map.of("lang", new Context(Context.ContextType.string, "en")));
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, unflagged, false,
+                agentExpectingSecrets(true));
+
+        assertFalse(turn.containsKey("input"), "the agent expects secrets: the input must not be kept");
+        assertFalse(turn.containsKey("context"));
+        assertEquals(true, turn.get("secretInput"));
+        assertFalse(new DeadLetterEntry("3", ID, "e", 1, "{}", turn).isReplayable());
+    }
+
+    @Test
+    @DisplayName("a turn without a resolved agent is treated as one that expects secrets")
+    void unresolvedAgentFailsClosed() throws Exception {
+        ConversationService service = describingService();
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, new InputData("hello", Map.of()), false,
+                null);
+
+        assertFalse(turn.containsKey("input"));
+        assertEquals(true, turn.get("secretInput"));
+    }
+
+    @Test
+    @DisplayName("a captured input and its string context values pass through the secret redaction filter")
+    void capturedInputIsRedacted() throws Exception {
+        ConversationService service = describingService();
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        var original = new Context(Context.ContextType.string, "Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789");
+        var input = new InputData("my key is api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789 ok",
+                Map.of("auth", original, "lang", new Context(Context.ContextType.string, "en")));
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, input, false,
+                agentExpectingSecrets(false));
+
+        String captured = (String) turn.get("input");
+        assertFalse(captured.contains("sk-abcdefghijklmnopqrstuvwxyz0123456789"), "the credential must be masked: " + captured);
+        assertTrue(captured.startsWith("my key is"), "the rest of the input is kept for replay: " + captured);
+        @SuppressWarnings("unchecked")
+        Map<String, Context> context = (Map<String, Context>) turn.get("context");
+        assertFalse(String.valueOf(context.get("auth").getValue()).contains("abcdefghijklmnopqrstuvwxyz0123456789"));
+        assertEquals("Bearer sk-abcdefghijklmnopqrstuvwxyz0123456789", original.getValue(), "the live turn's context is not rewritten");
+        assertEquals("en", context.get("lang").getValue());
+        assertTrue(new DeadLetterEntry("4", ID, "e", 1, "{}", turn).isReplayable());
+    }
+
+    @Test
+    @DisplayName("a context entry marked secret, or under a credential-named key, is dropped; structured values are redacted inside")
+    void sensitiveContextEntriesAreDroppedOrRedactedInside() throws Exception {
+        ConversationService service = describingService();
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        var flagged = new Context(Context.ContextType.string, "plain-looking-but-flagged");
+        flagged.setSecret(true);
+        var nested = new Context(Context.ContextType.object, Map.of(
+                "password", "correct horse battery staple",
+                "note", "token=sk-abcdefghijklmnopqrstuvwxyz0123456789 ok",
+                "items", List.of("fine", "api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789")));
+        var input = new InputData("hello", Map.of(
+                "flagged", flagged,
+                "password", new Context(Context.ContextType.string, "hunter2hunter2"),
+                "profile", nested,
+                "lang", new Context(Context.ContextType.string, "en")));
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, input, false, agentExpectingSecrets(false));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Context> context = (Map<String, Context>) turn.get("context");
+        assertFalse(context.containsKey("flagged"), "an entry the client marked secret is not captured");
+        assertFalse(context.containsKey("password"), "an entry under a credential-named key is not captured");
+        assertEquals("en", context.get("lang").getValue());
+        String profile = String.valueOf(context.get("profile").getValue());
+        assertFalse(profile.contains("correct horse"), "a credential-named key inside an object value is masked: " + profile);
+        assertFalse(profile.contains("abcdefghijklmnopqrstuvwxyz0123456789"), "string leaves inside an object value are redacted: " + profile);
+        assertTrue(profile.contains("fine"), "ordinary leaves are kept: " + profile);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> original = (Map<String, Object>) nested.getValue();
+        assertEquals("correct horse battery staple", original.get("password"), "the live turn's context is not rewritten");
     }
     private ConversationService.ProcessingTurn processingTurn() throws Exception {
         Constructor<ConversationService.ProcessingTurn> ctor = ConversationService.ProcessingTurn.class.getDeclaredConstructor(AtomicInteger.class);

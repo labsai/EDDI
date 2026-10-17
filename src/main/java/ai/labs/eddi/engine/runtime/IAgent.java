@@ -123,4 +123,13 @@ public interface IAgent {
     default List<String> getDeploymentWarnings() {
         return List.of();
     }
+
+    /**
+     * Whether any workflow of this agent sets a {@code scope: "secret"} property:
+     * the agent is designed to be told secrets, so a turn's raw input must not be
+     * copied out of the pipeline (a dead letter keeps it for days).
+     */
+    default boolean hasSecretPropertyInstructions() {
+        return false;
+    }
 }

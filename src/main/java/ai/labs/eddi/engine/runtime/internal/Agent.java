@@ -44,6 +44,7 @@ public class Agent implements IAgent {
     private ToolApprovalsConfig toolApprovalsConfig;
     private Integer compatibilityGeneration;
     private volatile List<String> deploymentWarnings = List.of();
+    private volatile boolean secretPropertyInstructions;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -54,6 +55,14 @@ public class Agent implements IAgent {
     @Override
     public void addWorkflow(IExecutableWorkflow executableWorkflow) throws IllegalAccessException {
         executableWorkflows.add(executableWorkflow);
+        if (executableWorkflow.hasSecretPropertyInstructions()) {
+            secretPropertyInstructions = true;
+        }
+    }
+
+    @Override
+    public boolean hasSecretPropertyInstructions() {
+        return secretPropertyInstructions;
     }
 
     @Override

@@ -139,8 +139,8 @@ class RestImportServiceSyncCoverageTest {
 
             WebApplicationException thrown;
             try (var statics = mockStatic(RemoteApiResourceSource.class)) {
-                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(
-                        eq(PUBLIC_SOURCE_URL), eq("Bearer stale"), any())).thenThrow(cause);
+                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(any(), eq(PUBLIC_SOURCE_URL), eq("Bearer stale"), any()))
+                        .thenThrow(cause);
 
                 thrown = assertThrows(WebApplicationException.class,
                         () -> importService.listRemoteAgents(PUBLIC_SOURCE_URL, "Bearer stale"));
@@ -158,8 +158,8 @@ class RestImportServiceSyncCoverageTest {
             var descriptors = List.of(new DocumentDescriptor());
 
             try (var statics = mockStatic(RemoteApiResourceSource.class)) {
-                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(
-                        eq(PUBLIC_SOURCE_URL), isNull(), any())).thenReturn(descriptors);
+                statics.when(() -> RemoteApiResourceSource.listRemoteAgentDescriptors(any(), eq(PUBLIC_SOURCE_URL), isNull(), any()))
+                        .thenReturn(descriptors);
 
                 assertSame(descriptors, importService.listRemoteAgents(PUBLIC_SOURCE_URL, null));
             }

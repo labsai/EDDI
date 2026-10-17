@@ -45,13 +45,41 @@ import java.util.List;
  *            list of agent IDs allowed to use this secret, or {@code ["*"]} for
  *            all agents. {@code null} or empty means unrestricted, not "deny
  *            all". Enforced at deployment time, not at resolution time.
+ * @param allowedHosts
+ *            the destinations this secret may be sent to, as exact {@code host}
+ *            or {@code host:port} entries (no scheme, no path, no wildcard).
+ *            {@code null} or empty means any destination. Unlike the agent
+ *            grant this one is enforced where the reference is resolved for an
+ *            outbound request — an API call's target URL, an LLM provider's
+ *            {@code baseUrl} — by
+ *            {@link ai.labs.eddi.secrets.VaultHostAllowlist}, because the
+ *            destination is only known at that moment.
  *
  * @author ginccc
  * @since 6.0.0
  */
 public record SecretMetadata(String tenantId, String keyName, @JsonFormat(shape = JsonFormat.Shape.STRING) Instant createdAt,
         @JsonFormat(shape = JsonFormat.Shape.STRING) Instant lastAccessedAt, @JsonFormat(shape = JsonFormat.Shape.STRING) Instant lastRotatedAt,
-        String checksum, String description, List<String> allowedAgents) {
+        String checksum, String description, List<String> allowedAgents, List<String> allowedHosts) {
+
+    /**
+     * A secret without a destination allow-list — the shape every row had before
+     * {@code allowedHosts} existed.
+     */
+    public SecretMetadata(String tenantId, String keyName, Instant createdAt, Instant lastAccessedAt, Instant lastRotatedAt, String checksum,
+            String description, List<String> allowedAgents) {
+        this(tenantId, keyName, createdAt, lastAccessedAt, lastRotatedAt, checksum, description, allowedAgents, null);
+    }
+
+    /**
+     * Whether {@code allowedHosts} restricts where the secret may be sent.
+     * {@code null} and empty both mean "anywhere", for the same reason the agent
+     * grant reads them that way: every row written before the field existed has
+     * neither.
+     */
+    public static boolean restrictsHosts(List<String> allowedHosts) {
+        return allowedHosts != null && !allowedHosts.isEmpty();
+    }
 
     /**
      * The one spelling of "every agent may use this secret". Defined here, next to

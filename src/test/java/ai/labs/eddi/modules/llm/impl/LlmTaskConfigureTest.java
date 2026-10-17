@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -89,7 +90,7 @@ class LlmTaskConfigureTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
 
         var mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());

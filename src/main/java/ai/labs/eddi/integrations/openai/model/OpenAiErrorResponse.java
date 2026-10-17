@@ -31,6 +31,16 @@ public record OpenAiErrorResponse(OpenAiError error) {
     public static final String CODE_AMBIGUOUS_MODEL = "ambiguous_model";
     public static final String CODE_NO_USER_MESSAGE = "no_user_message";
     public static final String CODE_AGENT_NOT_READY = "agent_not_ready";
+    /**
+     * The node refused the turn for capacity; the same code the REST surface
+     * answers.
+     */
+    public static final String CODE_CAPACITY_EXCEEDED = "capacity_exceeded";
+    /**
+     * The tenant-quota store could not answer; the same code the REST surface
+     * answers.
+     */
+    public static final String CODE_QUOTA_ACCOUNTING_UNAVAILABLE = "quota_accounting_unavailable";
     public static final String CODE_UNKNOWN_ENDPOINT = "unknown_endpoint";
     public static final String CODE_INVALID_REQUEST_FIELD = "invalid_request_field";
     public static final String CODE_INVALID_REQUEST_BODY = "invalid_request_body";

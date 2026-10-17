@@ -276,7 +276,7 @@ public class IngestionSource {
          * <p>
          * Literals only, deliberately. Resolving a hostname here would make saving a
          * knowledge base depend on DNS and would reject a perfectly good configuration
-         * during an outage; the real check runs per request in {@code SafeHttpClient},
+         * during an outage; the real check runs per request in {@code OutboundHttp},
          * where it belongs.
          */
         private static void requireRoutableHost(String url, String field, String sourceName) {

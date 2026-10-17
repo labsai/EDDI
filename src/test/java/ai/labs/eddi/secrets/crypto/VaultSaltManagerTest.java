@@ -13,8 +13,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -119,6 +124,96 @@ class VaultSaltManagerTest {
 
             assertTrue(saltManager.isUsingLegacySalt());
             assertArrayEquals(LEGACY_SALT, saltManager.getSalt());
+        }
+
+        // L12 (security review 2026-10-15): one boot on the legacy salt is an upgrade
+        // in progress; a second is a rotation nobody ran, and is logged as an ERROR.
+
+        @Test
+        @DisplayName("the first boot on the legacy salt warns, records when, and names the rotation command")
+        void firstLegacyBootWarnsAndRecordsIt() {
+            when(persistence.getMetaValue(VaultSaltManager.SALT_META_KEY)).thenReturn(null);
+            when(persistence.getMetaValue(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY)).thenReturn(null);
+            when(persistence.listAllDeks()).thenReturn(List.of(new EncryptedDek()));
+
+            List<LogRecord> records = captureLogs(() -> saltManager.initialize());
+
+            verify(persistence).setMetaValueIfAbsent(eq(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY), anyString());
+            var legacy = records.stream().filter(r -> r.getMessage().contains("legacy")).toList();
+            assertFalse(legacy.isEmpty(), "the legacy-salt boot must be logged");
+            assertTrue(legacy.stream().allMatch(r -> r.getLevel().intValue() == Level.WARNING.intValue()),
+                    "the first boot is a WARN, not an ERROR: " + legacy);
+            assertTrue(legacy.stream().anyMatch(r -> r.getMessage().contains(VaultSaltManager.ROTATION_COMMAND)));
+        }
+
+        @Test
+        @DisplayName("a later boot still on the legacy salt is an ERROR naming the rotation command and the first adoption")
+        void laterLegacyBootIsAnError() {
+            when(persistence.getMetaValue(VaultSaltManager.SALT_META_KEY)).thenReturn(null);
+            when(persistence.getMetaValue(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY)).thenReturn("2026-10-01T00:00:00Z");
+            when(persistence.listAllDeks()).thenReturn(List.of(new EncryptedDek()));
+
+            List<LogRecord> records = captureLogs(() -> saltManager.initialize());
+
+            assertTrue(saltManager.isUsingLegacySalt(), "the DEKs must stay readable");
+            verify(persistence, never()).setMetaValueIfAbsent(eq(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY), anyString());
+            var errors = records.stream().filter(r -> r.getLevel().intValue() == Level.SEVERE.intValue()).toList();
+            assertEquals(1, errors.size(), "exactly one ERROR: " + records);
+            assertTrue(errors.get(0).getMessage().contains(VaultSaltManager.ROTATION_COMMAND));
+            assertTrue(errors.get(0).getMessage().contains("2026-10-01T00:00:00Z"));
+        }
+
+        @Test
+        @DisplayName("a per-deployment salt clears the legacy-salt boot record")
+        void persistedSaltClearsTheLegacyRecord() {
+            when(persistence.getMetaValue(VaultSaltManager.SALT_META_KEY)).thenReturn(Base64.getEncoder().encodeToString(OTHER_SALT));
+            when(persistence.getMetaValue(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY)).thenReturn("2026-10-01T00:00:00Z");
+
+            saltManager.initialize();
+
+            verify(persistence).deleteMetaValue(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY);
+        }
+
+        @Test
+        @DisplayName("a salt migration clears the legacy-salt boot record")
+        void migrationClearsTheLegacyRecord() {
+            saltManager.migrateSalt(OTHER_SALT);
+
+            verify(persistence).deleteMetaValue(VaultSaltManager.LEGACY_SALT_SEEN_META_KEY);
+        }
+
+        private List<LogRecord> captureLogs(Runnable action) {
+            List<LogRecord> records = new ArrayList<>();
+            var handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    records.add(record);
+                }
+
+                @Override
+                public void flush() {
+                    // nothing is buffered
+                }
+
+                @Override
+                public void close() {
+                    // nothing to release
+                }
+            };
+            var logger = Logger.getLogger(VaultSaltManager.class.getName());
+            var previousLevel = logger.getLevel();
+            boolean previousUseParentHandlers = logger.getUseParentHandlers();
+            logger.setLevel(Level.ALL);
+            logger.setUseParentHandlers(false);
+            logger.addHandler(handler);
+            try {
+                action.run();
+            } finally {
+                logger.removeHandler(handler);
+                logger.setLevel(previousLevel);
+                logger.setUseParentHandlers(previousUseParentHandlers);
+            }
+            return records;
         }
 
         /**

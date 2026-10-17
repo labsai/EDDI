@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.PageBounds;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
@@ -114,6 +115,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
     private List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit,
                                                      AccessScope scope) {
+        // A page is a page: ?limit=2147483647 used to return every descriptor at once.
+        PageBounds.require(index, limit);
         try {
             // Filtered in the query rather than on the returned page: post-filtering
             // returns short pages and forces the scan-budgeted back-fill that conversation

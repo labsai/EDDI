@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.templating.impl;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.Settings;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.TemplateLimitExceededException;
+import ai.labs.eddi.modules.templating.impl.extensions.TemplateOutputLimit;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.quarkus.qute.Engine;
@@ -93,6 +94,9 @@ public class TemplatingEngine implements ITemplatingEngine {
             @ConfigProperty(name = "quarkus.qute.timeout", defaultValue = "10000") long timeoutMillis) {
         this(quarkusEngine, new Settings(maxOutputChars, maxIterations, strictRendering, removeStandaloneLines, iterationMetadataPrefix,
                 timeoutMillis));
+        // The string extensions pre-check their result size against the same bound,
+        // but Qute invokes them statically — the value has to be published for them.
+        TemplateOutputLimit.configure(maxOutputChars);
     }
 
     /** Restricted engine built from {@code source} with the shipped defaults. */
@@ -131,13 +135,32 @@ public class TemplatingEngine implements ITemplatingEngine {
             } else {
                 return template;
             }
-        } catch (Exception e) {
+        } catch (Exception | OutOfMemoryError e) {
+            // An OutOfMemoryError is caught on purpose: it is raised by the render's own
+            // allocation (a value the bound did not catch in time), which the unwinding
+            // has just released. Letting it escape would fail the turn with no record
+            // of which template did it, where a TemplateLimitExceededException — the
+            // same class of failure, caught in time — is reported like any other
+            // malformed template. Both now are.
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
             Throwable failure = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
             String preview = template.length() > 200 ? template.substring(0, 200) + "…" : template;
-            String cause = failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName();
+            // Either may arrive wrapped (CompletionException, Qute's TemplateException),
+            // so the chain is searched, not just the top.
+            String cause = null;
+            for (Throwable t = failure; t != null && cause == null; t = t.getCause()) {
+                if (t instanceof OutOfMemoryError) {
+                    cause = "the render exhausted the available memory before reaching the limit of " + settings.maxOutputChars()
+                            + " characters (eddi.templating.max-output-chars)";
+                } else if (t instanceof TemplateLimitExceededException) {
+                    cause = t.getMessage();
+                }
+            }
+            if (cause == null) {
+                cause = failure.getMessage() != null ? failure.getMessage() : failure.getClass().getSimpleName();
+            }
             String message = "Template rendering failed: " + cause
                     + " | Template preview: " + preview;
             throw new TemplateEngineException(message, failure);

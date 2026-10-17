@@ -47,6 +47,7 @@ public class BaseRuntime implements IRuntime {
      */
     private final PoolLoad managedLoad = new PoolLoad();
     private final PoolLoad nestedLoad = new PoolLoad();
+    private final PoolLoad turnLoad = new PoolLoad();
 
     /** Submitted-but-not-started and running counts for one executor. */
     static final class PoolLoad {
@@ -79,10 +80,34 @@ public class BaseRuntime implements IRuntime {
      * points already drive full turns with no request context active.
      * <p>
      * Only the work BODY is marked as nested — completion callbacks run with the
-     * marker cleared, so the coordinator's {@code submitNext} still schedules the
-     * next turn's outer task on the ManagedExecutor exactly as before.
+     * marker cleared, so a callback's follow-up submission is a top-level one again
+     * and is routed by its own callback type (see {@link #turnExecutorService}).
      */
     private final ExecutorService nestedExecutorService;
+
+    /**
+     * Executor for conversation TURNS — the coordinators' outer tasks, recognised
+     * by an {@link IRuntime.ITurnExecution} callback.
+     * <p>
+     * Removing the half-pool cliff (above) still left every in-flight turn holding
+     * one ManagedExecutor platform thread, blocked on the pipeline's Future for as
+     * long as the LLM takes. The pool (~200) was therefore the node's turn ceiling:
+     * past it turns queued unboundedly in front of the pool, and blocking REST
+     * endpoints sharing it slowed down with them — latency, never a clean
+     * rejection. On a virtual thread the blocked wait costs no carrier, so the
+     * ceiling moves to the admission limit
+     * ({@code eddi.conversation.max-in-flight-turns}), which rejects with 503.
+     * <p>
+     * The body runs exactly as on the ManagedExecutor: the same thread bindings,
+     * the nested marker (so the pipeline still goes to
+     * {@link #nestedExecutorService}), the one-shot callback and the abandonment
+     * token. The coordinators' {@code submitNext} passes a turn callback too, so
+     * follow-up turns land here as well. Nothing on the outer path depends on the
+     * ManagedExecutor's context propagation: the caller identity travels with the
+     * callable ({@code CallerIdentityContext.withIdentity}), and group and Slack
+     * turns already run whole turns from virtual threads.
+     */
+    private final ExecutorService turnExecutorService;
 
     /**
      * Set on a thread for the duration of a submitted callable's BODY (not its
@@ -109,6 +134,8 @@ public class BaseRuntime implements IRuntime {
         });
         this.nestedExecutorService = Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name("eddi-nested-", 0).factory());
+        this.turnExecutorService = Executors.newThreadPerTaskExecutor(
+                Thread.ofVirtual().name("eddi-turn-", 0).factory());
 
         init();
     }
@@ -124,6 +151,7 @@ public class BaseRuntime implements IRuntime {
         }
         registerPool("managed", managedLoad);
         registerPool("nested", nestedLoad);
+        registerPool("turn", turnLoad);
         // The ManagedExecutor is Quarkus' worker pool. Its bound is not readable from
         // the executor, so it is read from the property Quarkus sizes it from, with
         // Quarkus' documented default when that is unset.
@@ -131,7 +159,7 @@ public class BaseRuntime implements IRuntime {
                 .orElse(Math.max(8 * Runtime.getRuntime().availableProcessors(), 200));
         Gauge.builder("eddi.runtime.executor.max_threads", () -> maxThreads)
                 .tag("pool", "managed")
-                .description("Upper bound of the worker pool conversation turns are submitted to")
+                .description("Upper bound of the worker pool; conversation turns run on virtual threads (pool=turn) and do not count against it")
                 .register(meterRegistry);
     }
 
@@ -151,12 +179,18 @@ public class BaseRuntime implements IRuntime {
         return managedLoad;
     }
 
+    /** Package-private for tests. */
+    PoolLoad turnLoad() {
+        return turnLoad;
+    }
+
     @PreDestroy
     void shutdown() {
         scheduledExecutorService.shutdownNow();
         // shutdown() (not shutdownNow()) so in-flight pipeline executions are given
         // the chance to finish — the graceful-shutdown drain runs before this.
         nestedExecutorService.shutdown();
+        turnExecutorService.shutdown();
     }
 
     public void init() {
@@ -237,11 +271,14 @@ public class BaseRuntime implements IRuntime {
          */
         final AtomicBoolean callbackFired = new AtomicBoolean(false);
 
+        // Nested first: work submitted from inside a running body is that body's own
+        // sub-work, whatever its callback says.
         final boolean nested = Boolean.TRUE.equals(EXECUTING_SUBMITTED_CALLABLE.get());
+        final boolean turn = !nested && completion instanceof IRuntime.ITurnExecution;
         final ExecutorService target = nested
                 ? nestedExecutorService
-                : getExecutorService();
-        final PoolLoad load = nested ? nestedLoad : managedLoad;
+                : turn ? turnExecutorService : getExecutorService();
+        final PoolLoad load = nested ? nestedLoad : turn ? turnLoad : managedLoad;
 
         /*
          * Leaves the queued count exactly once: when the body starts, or when the

@@ -1208,6 +1208,17 @@
               },
               "editorMode": "code",
               "range": true
+            },
+            {
+              "refId": "C",
+              "expr": "sum(eddi_conversation_max_in_flight_turns{job=~\"$job\"})",
+              "legendFormat": "limit (max-in-flight-turns)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
             }
           ],
           "fieldConfig": {
@@ -1248,13 +1259,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }
@@ -1672,7 +1683,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_coordinator_total_processed_total`.",
+          "description": "Rate of `eddi_coordinator_total_processed_total`, and of turns refused because the node already ran `eddi.conversation.max-in-flight-turns` (`eddi_turn_rejected_total`, answered 503 `capacity_exceeded`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1683,6 +1694,18 @@
             {
               "refId": "A",
               "expr": "sum(rate(eddi_coordinator_total_processed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "processed",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_turn_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "rejected ({{reason}})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1728,13 +1751,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }
@@ -11946,7 +11969,7 @@
           }
         },
         {
-          "id": 202,
+          "id": 207,
           "type": "timeseries",
           "title": "Tenant cost metering by outcome",
           "datasource": {
@@ -12022,7 +12045,7 @@
           }
         },
         {
-          "id": 203,
+          "id": 208,
           "type": "timeseries",
           "title": "LLM spend gate refusals",
           "datasource": {
@@ -14048,6 +14071,324 @@
       ]
     },
     {
+      "id": 202,
+      "type": "row",
+      "title": "Outbound HTTP",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "panels": [
+        {
+          "id": 203,
+          "type": "timeseries",
+          "title": "Outbound requests by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_http_outbound_requests_total`",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 27
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (profile, outcome) (rate(eddi_http_outbound_requests_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{profile}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 204,
+          "type": "timeseries",
+          "title": "Outbound exchange time (mean)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_http_outbound_duration_seconds` — mean over the interval",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 27
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (profile) (rate(eddi_http_outbound_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (profile) (rate(eddi_http_outbound_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{profile}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 205,
+          "type": "timeseries",
+          "title": "Outbound requests refused by policy",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_http_outbound_blocked_total` — ssrf, cap, redirect",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 34
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (profile, reason) (rate(eddi_http_outbound_blocked_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{profile}} {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 206,
+          "type": "timeseries",
+          "title": "Outbound body bytes read",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_http_outbound_bytes_total`",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 34
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (profile) (rate(eddi_http_outbound_bytes_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{profile}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": 152,
       "type": "row",
       "title": "Runtime context (Quarkus / JVM built-ins)",
@@ -14056,7 +14397,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 27
       },
       "panels": [
         {
@@ -14681,7 +15022,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 27
       },
       "targets": [
         {

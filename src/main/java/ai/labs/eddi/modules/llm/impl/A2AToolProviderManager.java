@@ -8,13 +8,21 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
-import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,17 +36,11 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
@@ -68,15 +70,20 @@ public class A2AToolProviderManager {
     private final SecretResolver secretResolver;
 
     /**
-     * Built on first use, not in the constructor.
-     * <p>
-     * This bean is {@code @ApplicationScoped}, so an eager client meant every EDDI
-     * boot created an HTTP client and its selector thread whether or not a single
-     * A2A peer was configured — and made the class impossible to construct at all
-     * where a selector cannot be opened, which is every unit test in a sandboxed
-     * environment. Deferring it costs one volatile read per call and buys both.
+     * Enforces a vault apiKey's {@code allowedHosts} against the peer each request
+     * goes to. Field-injected so the constructors keep their shape; null only in
+     * tests that construct the manager directly.
      */
-    private volatile HttpClient httpClient;
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * The outbound facade. Injected in the container; the back-compat constructors
+     * leave it null and {@link #outbound()} creates a standalone one on first use,
+     * so constructing this manager never opens a selector (unit tests in a
+     * sandboxed environment construct it where none can be opened).
+     */
+    private volatile OutboundHttp outbound;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
     private final int maxSchemaBytes;
@@ -88,20 +95,6 @@ public class A2AToolProviderManager {
      */
     @Inject
     MeterRegistry meterRegistry;
-
-    /**
-     * Interrupts a response-body read that stalled after the headers arrived — see
-     * {@link BoundedBodyReader}. The JDK request timeout bounds only the wait for
-     * the response, not the streaming of an {@code ofInputStream} body, so without
-     * this a peer that sends 200 and then trickles (or never completes) the body
-     * holds the worker thread. One daemon thread for this
-     * {@code @ApplicationScoped} bean.
-     */
-    private final ScheduledExecutorService bodyReadWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "a2a-body-watchdog");
-        thread.setDaemon(true);
-        return thread;
-    });
 
     /**
      * Resolves a {@code ${connection:name}} apiKey per call. Nullable, because two
@@ -163,7 +156,18 @@ public class A2AToolProviderManager {
             @ConfigProperty(name = "eddi.a2a.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars,
             @ConfigProperty(name = "eddi.a2a.tool-schema.max-bytes", defaultValue = "32768") int maxSchemaBytes,
             @ConfigProperty(name = "eddi.a2a.tool-schema.max-bytes-per-agent", defaultValue = "524288") long maxSchemaBytesPerAgent,
-            ConnectionResolver connectionResolver) {
+            ConnectionResolver connectionResolver, OutboundHttp outbound) {
+        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, maxDescriptionChars, maxSchemaBytes, maxSchemaBytesPerAgent,
+                connectionResolver);
+        this.outbound = outbound;
+    }
+
+    /**
+     * Every setting, no facade: {@link #outbound()} creates a standalone one on
+     * first use. The target of the back-compat constructors below.
+     */
+    A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled,
+            int maxDescriptionChars, int maxSchemaBytes, long maxSchemaBytesPerAgent, ConnectionResolver connectionResolver) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
@@ -174,27 +178,35 @@ public class A2AToolProviderManager {
     }
 
     /**
-     * The shared outbound client, created on first use.
-     * <p>
-     * Double-checked locking on a volatile field: two concurrent first calls must
-     * not each build a client, because the loser's would be dropped with its
-     * selector thread still running.
+     * The outbound facade: the injected one, or a standalone one created on first
+     * use. Double-checked locking on a volatile field, so two concurrent first
+     * calls do not each build one.
      */
-    private HttpClient httpClient() {
-        HttpClient client = httpClient;
-        if (client == null) {
+    private OutboundHttp outbound() {
+        OutboundHttp current = outbound;
+        if (current == null) {
             synchronized (this) {
-                client = httpClient;
-                if (client == null) {
-                    // JDK HttpClient defaults to Redirect.NEVER, so validating the
-                    // target URL is sufficient — there is no redirect hop to
-                    // re-validate.
-                    client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-                    httpClient = client;
+                current = outbound;
+                if (current == null) {
+                    current = OutboundHttp.standalone(Duration.ofSeconds(10));
+                    outbound = current;
                 }
             }
         }
-        return client;
+        return current;
+    }
+
+    /**
+     * An A2A request. The target was validated by the caller, before any credential
+     * was resolved, and the facade validates it again under the same rule. No
+     * redirect is followed: a peer's 3xx is a failed call, never a replayed
+     * credential.
+     */
+    private OutboundRequest.Builder a2aRequest(String url, A2AAgentConfig config) {
+        return OutboundRequest.builder(Profile.DEFAULT, URI.create(url))
+                .ssrf(ssrfProtectionEnabled ? SsrfPolicy.STRICT : SsrfPolicy.METADATA_ONLY)
+                .redirects(RedirectPolicy.NEVER)
+                .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000));
     }
 
     /**
@@ -494,29 +506,26 @@ public class A2AToolProviderManager {
             UrlValidationUtils.rejectCloudMetadataTarget(cardUrl);
         }
 
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(cardUrl))
-                .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).GET();
+        OutboundRequest.Builder requestBuilder = a2aRequest(cardUrl, config).method("GET");
 
         applyCredential(requestBuilder, config, agentUrl, true);
 
-        HttpRequest cardRequest = requestBuilder.build();
-        HttpResponse<InputStream> response = httpClient().send(cardRequest, HttpResponse.BodyHandlers.ofInputStream());
+        // Bounded read: the body is capped as it arrives rather than buffered whole
+        // and measured afterwards. A body cut short (over the cap or past its read
+        // budget) is rejected outright.
+        OutboundResponse<byte[]> response = outbound().send(requestBuilder.build(),
+                BodyMode.bytes(MAX_RESPONSE_SIZE_BYTES, BodyMode.OnOverflow.TRUNCATE));
 
-        if (response.statusCode() != 200) {
-            LOGGER.warnf("Agent Card fetch returned %d from %s", response.statusCode(), cardUrl);
+        if (response.status() != 200) {
+            LOGGER.warnf("Agent Card fetch returned %d from %s", response.status(), cardUrl);
             return null;
         }
-
-        // Bounded read: the body is capped as it arrives rather than buffered whole
-        // and measured afterwards. A body over the cap is rejected outright.
-        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), MAX_RESPONSE_SIZE_BYTES,
-                cardRequest.timeout().orElse(null), bodyReadWatchdog);
-        if (bounded.truncated()) {
+        if (response.truncated()) {
             LOGGER.warnf("Agent Card response from %s exceeds %d bytes — rejecting", cardUrl, MAX_RESPONSE_SIZE_BYTES);
             return null;
         }
 
-        Map<String, Object> card = MAPPER.readValue(new String(bounded.bytes(), StandardCharsets.UTF_8), Map.class);
+        Map<String, Object> card = MAPPER.readValue(new String(response.body(), StandardCharsets.UTF_8), Map.class);
 
         // Basic schema validation — must have "name" at minimum
         if (!card.containsKey("name")) {
@@ -680,32 +689,29 @@ public class A2AToolProviderManager {
             UrlValidationUtils.rejectCloudMetadataTarget(agentUrl);
         }
 
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(agentUrl))
-                .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body));
+        OutboundRequest.Builder requestBuilder = a2aRequest(agentUrl, config)
+                .header("Content-Type", "application/json")
+                .method("POST", RequestBody.ofString(body));
         if (endpoint.dialect() == RemoteDialect.V1_0) {
             requestBuilder.header("A2A-Version", "1.0");
         }
 
         applyCredential(requestBuilder, config, agentUrl);
 
-        HttpRequest taskRequest = requestBuilder.build();
-        HttpResponse<InputStream> response = httpClient().send(taskRequest, HttpResponse.BodyHandlers.ofInputStream());
-
-        if (response.statusCode() != 200) {
-            return "A2A agent returned HTTP " + response.statusCode();
-        }
-
         // Bounded read: the body is capped as it arrives rather than buffered whole
-        // and measured afterwards. A body over the cap is rejected outright.
-        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), MAX_RESPONSE_SIZE_BYTES,
-                taskRequest.timeout().orElse(null), bodyReadWatchdog);
-        if (bounded.truncated()) {
+        // and measured afterwards. A body cut short is rejected outright.
+        OutboundResponse<byte[]> response = outbound().send(requestBuilder.build(),
+                BodyMode.bytes(MAX_RESPONSE_SIZE_BYTES, BodyMode.OnOverflow.TRUNCATE));
+
+        if (response.status() != 200) {
+            return "A2A agent returned HTTP " + response.status();
+        }
+        if (response.truncated()) {
             return "A2A agent response exceeds size limit (" + MAX_RESPONSE_SIZE_BYTES + " bytes)";
         }
 
         // Validate JSON-RPC response schema
-        Map<String, Object> rpcResponse = MAPPER.readValue(new String(bounded.bytes(), StandardCharsets.UTF_8), Map.class);
+        Map<String, Object> rpcResponse = MAPPER.readValue(new String(response.body(), StandardCharsets.UTF_8), Map.class);
         if (!rpcResponse.containsKey("jsonrpc") || !"2.0".equals(rpcResponse.get("jsonrpc"))) {
             return "Invalid A2A response: not a valid JSON-RPC 2.0 response";
         }
@@ -858,7 +864,7 @@ public class A2AToolProviderManager {
      * distinction the two paths genuinely have.
      */
     // Package-private so a test can assert what actually lands on the request.
-    void applyCredential(HttpRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl) {
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl) {
         applyCredential(requestBuilder, config, agentUrl, false);
     }
 
@@ -883,7 +889,7 @@ public class A2AToolProviderManager {
      *            CALLER is deliberately not consulted, since on a HITL resume that
      *            is the approver rather than the user whose call was approved.
      */
-    void applyCredential(HttpRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
         String apiKey = config.getApiKey();
         if (isNullOrEmpty(apiKey)) {
             return;
@@ -918,7 +924,14 @@ public class A2AToolProviderManager {
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
-        String resolved = secretResolver.resolveValue(globalVariableResolver.resolveValue(apiKey));
+        String withVariables = globalVariableResolver.resolveValue(apiKey);
+        // Against agentUrl, the request's own target: for a task call that is the
+        // endpoint the peer's agent card announced, which need not be the host the
+        // configuration names.
+        if (vaultHostAllowlist != null) {
+            vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
+        }
+        String resolved = secretResolver.resolveValue(withVariables);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

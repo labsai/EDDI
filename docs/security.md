@@ -463,6 +463,22 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `3xx` from a configured MCP URL fails the handshake instead of carrying the
 > session — and its `Authorization` header — to a host nobody validated. (Until
 > 6.6.0 the MCP transport followed redirects: security review 2026-10-15, M2.)
+>
+> **Configured endpoints beyond httpCalls are covered by the same switch.** LLM
+> provider `baseUrl`/`endpoint`/`apiEndpoint` in every builder, embedding
+> endpoints, vector-store addresses (Elasticsearch, Chroma as URLs; pgvector,
+> Qdrant and every host in a MongoDB connection string as bare hosts, opened as
+> raw connections) and the OpenAPI spec location of endpoint discovery and the
+> setup wizard all go through `OutboundTargetPolicy`: the metadata service is
+> refused always, and with protection on any private, loopback or link-local
+> address is too — with two exemptions: a host on
+> `eddi.security.ssrf-protection.allowed-hosts` (the same list httpCalls honour),
+> and a URL on this deployment's own origin (`eddi.self.base-url`), so an agent
+> may still call EDDI's own `/v1` API. The spec document is fetched by EDDI
+> itself (`OpenApiSpecFetcher`: every redirect hop checked, body capped at 16 MB)
+> rather than by swagger-parser. Residual:
+> `$ref`s inside a fetched spec are resolved by swagger-parser's own resolver,
+> which checks each reference's URL but follows that URL's redirects itself.
 
 ### Scheme Allowlist
 
@@ -596,6 +612,22 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 
 A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
 
+`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`.
+
+---
+
+## Parser and Matcher Bounds
+
+Three small parsers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
+
+| Parser | Reached by | Bound | On exceeding it |
+|---|---|---|---|
+| Expression parser (`ExpressionProvider`) | Any client — a `context` entry of type `expressions` is parsed by the property-setter and by every `contextmatcher` rule; also dictionaries, `inputmatcher` text | `eddi.expressions.max-length` (32,768 characters) and `eddi.expressions.max-depth` (32 nested parentheses), checked in one linear scan before parsing; the parser itself works on index ranges of the one string | A client-sent context entry: `413` `input_too_large` before the turn starts. Inside a turn: the task fails, counted and audited like any other task failure |
+| Dictionary `regEx` (`RegEx`) | Every token of every user input, against every pattern of the deployed dictionaries | 200 ms per match, enforced through a deadline-checking `CharSequence` (`RegexDeadline`); the pattern must also compile when the dictionary is **saved** | A match past its budget is a miss (logged at WARN); an invalid pattern is refused with `400` at save time, naming the syntax error |
+| Path expressions (`PathNavigator`) | `fromObjectPath` and the other property-instruction paths in `httpcalls`/`mcpcalls`/`property` configs | 64 `+`/`-` operands per expression (the longest-prefix search is quadratic in that count) | The expression resolves to nothing |
+
+A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
+
 ---
 
 ## Tool Execution Pipeline
@@ -717,6 +749,8 @@ quarkus.http.ssl-port=8443
 quarkus.http.insecure-requests=disabled
 ```
 
+For post-quantum key exchange (`X25519MLKEM768`) and what the JDK supports today, see [Cryptography → TLS key exchange](cryptography.md#tls-key-exchange).
+
 ### Internal Traffic
 
 If EDDI and its database run on the same host or within a private network,
@@ -794,3 +828,4 @@ are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-ba
 - [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide
 - [EU AI Act Compliance](eu-ai-act-compliance.md) — EU AI Act compliance
 - [Compliance Data Flow](compliance-data-flow.md) — Data flow diagram for auditors
+- [Cryptography](cryptography.md) — Algorithm inventory and post-quantum readiness
