@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -531,6 +532,20 @@ public class PostgresScheduleStore implements IScheduleStore {
             LOGGER.infof("Cascade-deleted %d schedule(s) for Agent %s", count, sanitize(agentId));
         }
         return count;
+    }
+
+    @Override
+    public Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT 1")) {
+            ps.setString(1, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(fromResultSet(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedule by name: " + name, e);
+        }
     }
 
     @Override

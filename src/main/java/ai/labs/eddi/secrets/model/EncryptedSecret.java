@@ -41,6 +41,12 @@ public class EncryptedSecret {
      * means unrestricted, not "deny all". Enforced at deployment time.
      */
     private List<String> allowedAgents;
+    /**
+     * Exact {@code host[:port]} entries this secret may be sent to. Null or empty
+     * means any destination. Enforced at resolution time by
+     * {@link ai.labs.eddi.secrets.VaultHostAllowlist}.
+     */
+    private List<String> allowedHosts;
     private Instant createdAt;
     private Instant lastAccessedAt;
     /** When the secret value was last rotated (updated) */
@@ -51,6 +57,13 @@ public class EncryptedSecret {
 
     public EncryptedSecret(String id, String tenantId, String keyName, String encryptedValue, String iv, String dekId, String checksum,
             String description, List<String> allowedAgents, Instant createdAt, Instant lastAccessedAt, Instant lastRotatedAt) {
+        this(id, tenantId, keyName, encryptedValue, iv, dekId, checksum, description, allowedAgents, null, createdAt, lastAccessedAt,
+                lastRotatedAt);
+    }
+
+    public EncryptedSecret(String id, String tenantId, String keyName, String encryptedValue, String iv, String dekId, String checksum,
+            String description, List<String> allowedAgents, List<String> allowedHosts, Instant createdAt, Instant lastAccessedAt,
+            Instant lastRotatedAt) {
         this.id = id;
         this.tenantId = tenantId;
         this.keyName = keyName;
@@ -60,6 +73,7 @@ public class EncryptedSecret {
         this.checksum = checksum;
         this.description = description;
         this.allowedAgents = allowedAgents;
+        this.allowedHosts = allowedHosts;
         this.createdAt = createdAt;
         this.lastAccessedAt = lastAccessedAt;
         this.lastRotatedAt = lastRotatedAt;
@@ -140,6 +154,14 @@ public class EncryptedSecret {
 
     public void setAllowedAgents(List<String> allowedAgents) {
         this.allowedAgents = allowedAgents;
+    }
+
+    public List<String> getAllowedHosts() {
+        return allowedHosts;
+    }
+
+    public void setAllowedHosts(List<String> allowedHosts) {
+        this.allowedHosts = allowedHosts;
     }
 
     public Instant getCreatedAt() {

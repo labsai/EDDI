@@ -120,7 +120,9 @@ The JSON body (`InputData`) has two fields: `input` (the message) and `context`
 `expressions`, `object` or `array`). Context keys the engine reserves for itself
 are removed from client-supplied context. Input longer than
 `eddi.conversations.max-input-chars` (default 200,000 characters) is refused
-with `413`.
+with `413`, and so is a context entry of type `expressions` that is longer
+than `eddi.expressions.max-length` (32,768 characters) or nests deeper than
+`eddi.expressions.max-depth` (32 levels).
 
 **Response** (`200`, abridged — `conversationSteps` is cut short):
 
@@ -459,7 +461,7 @@ delete a conversation they do not own.
 | `404` | `No conversation found! (conversationId=…)`; `Conversation not found.` from cancel, resume and approval-status | Unknown conversation id |
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
-| `413` | — | Input longer than `eddi.conversations.max-input-chars` |
+| `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |
 

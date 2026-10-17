@@ -119,7 +119,7 @@ class VaultSecretProviderBranchTest {
 
             // Store should succeed, creating a new DEK along the way
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                    "test-value", "desc", null);
+                    "test-value", "desc", List.of("*"));
 
             // Inserted, never upserted: an upsert let a concurrent first store replace
             // generation 1 underneath a secret already sealed with it.
@@ -142,7 +142,7 @@ class VaultSecretProviderBranchTest {
 
             SecretProviderException thrown = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                            "value", null, null));
+                            "value", null, List.of("*")));
             assertSame(writeFailure, thrown.getCause(), "the DEK write failure must be what surfaces");
         }
     }
@@ -387,7 +387,7 @@ class VaultSecretProviderBranchTest {
     class StoreDefaults {
 
         @Test
-        @DisplayName("null allowedAgents is passed down as 'not supplied' — the store defaults it on insert, keeps it on update")
+        @DisplayName("null allowedAgents on a create is refused — the wildcard is said, never defaulted; on an update it is 'keep'")
         void nullAllowedAgentsDefaults() throws Exception {
             VaultSecretProvider provider = createAvailableProvider();
 
@@ -397,6 +397,12 @@ class VaultSecretProviderBranchTest {
             when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.empty());
 
+            assertThrows(IllegalArgumentException.class, () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME), "value", null, null));
+            verify(persistence, never()).upsertSecret(any());
+
+            // An update: null is passed down as "not supplied", so the store keeps the
+            // row's grant.
+            when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.of(createEncryptedSecret(KEY_NAME, dek)));
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "value", null, null);
 
@@ -560,7 +566,7 @@ class VaultSecretProviderBranchTest {
 
             var ex = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                            "value", null, null));
+                            "value", null, List.of("*")));
 
             assertTrue(ex.getMessage().contains("3 secret(s) are stored"),
                     "Expected '3 secret(s) are stored' but got: " + ex.getMessage());
@@ -582,7 +588,7 @@ class VaultSecretProviderBranchTest {
 
             var ex = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                            "value", null, null));
+                            "value", null, List.of("*")));
 
             assertTrue(ex.getMessage().contains("No secrets are stored"),
                     "Expected 'No secrets are stored' but got: " + ex.getMessage());
@@ -602,7 +608,7 @@ class VaultSecretProviderBranchTest {
 
             var ex = assertThrows(SecretProviderException.class,
                     () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                            "value", null, null));
+                            "value", null, List.of("*")));
 
             assertTrue(ex.getMessage().contains("Unable to determine"),
                     "Expected 'Unable to determine' but got: " + ex.getMessage());
@@ -627,7 +633,7 @@ class VaultSecretProviderBranchTest {
 
             // Store a secret — this forces DEK creation
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
-                    "test-secret-value", "desc", null);
+                    "test-secret-value", "desc", List.of("*"));
 
             // Verify a new DEK was inserted
             var dekCaptor = ArgumentCaptor.forClass(EncryptedDek.class);

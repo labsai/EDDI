@@ -878,9 +878,14 @@ class AgentSigningServiceTest {
         }
 
         @Override
-        public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+        public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents, List<String> allowedHosts)
                 throws SecretProviderException {
             store.put(reference.tenantId() + ":" + reference.keyName(), plaintext);
+        }
+
+        @Override
+        public SecretMetadata updateAllowedHosts(SecretReference reference, List<String> allowedHosts) throws SecretProviderException {
+            throw new SecretProviderException("InMemorySecretProvider does not model allowed hosts");
         }
 
         @Override

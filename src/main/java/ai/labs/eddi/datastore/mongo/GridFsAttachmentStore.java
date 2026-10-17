@@ -91,10 +91,10 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600") // 100 MB
     long maxTotalBytesPerConversation;
 
-    @ConfigProperty(name = "eddi.attachments.max-per-user", defaultValue = "0")
+    @ConfigProperty(name = "eddi.attachments.max-per-user", defaultValue = "500")
     long maxPerUser;
 
-    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-user", defaultValue = "0")
+    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-user", defaultValue = "1073741824")
     long maxTotalBytesPerUser;
 
     @Inject

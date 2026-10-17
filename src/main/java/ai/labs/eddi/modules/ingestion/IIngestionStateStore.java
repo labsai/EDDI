@@ -228,12 +228,46 @@ public interface IIngestionStateStore {
      */
     void invalidateContent(String sourceId);
 
+    /**
+     * The fingerprint of the vector store this source's document state was written
+     * against, as last recorded by {@link #recordStoreFingerprint}.
+     *
+     * <p>
+     * Content hashes say what a document was embedded as; they cannot say
+     * <em>where</em>. An in-memory store is gone after a restart, and a knowledge
+     * base whose embedding configuration changes gets a fresh one, while the hashes
+     * survive both — so every document read as "unchanged" over an empty store and
+     * nothing re-embedded it. A run compares this value with the store it is about
+     * to write to and, on any difference, re-embeds everything.
+     *
+     * <p>
+     * An opaque string: the caller composes it (today the store's epoch; an
+     * embedding-model component is planned) and the store only keeps it. Empty for
+     * a source that has never recorded one — including every source whose state
+     * predates this method, which the caller treats as unknown.
+     */
+    Optional<String> storeFingerprint(String sourceId);
+
+    /**
+     * Records the fingerprint this source's state is now written against. Call it
+     * only after {@link #invalidateContent} has made every existing row re-embed,
+     * so that a crash between the two leaves rows that re-embed rather than a
+     * fingerprint that vouches for vectors that are not there.
+     *
+     * <p>
+     * Not fenced: it is written right after a run claims the source, by that run.
+     * Removed by {@link #purgeSource}.
+     */
+    void recordStoreFingerprint(String sourceId, String fingerprint);
+
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
 
     /**
-     * Forgets a source entirely. Used when the source is deleted or a full
-     * re-ingest is requested; the caller purges the vectors separately.
+     * Forgets a source entirely — documents, runs and its
+     * {@linkplain #storeFingerprint store fingerprint}. Used when the source is
+     * deleted or a full re-ingest is requested; the caller purges the vectors
+     * separately.
      */
     void purgeSource(String sourceId);
 
@@ -271,6 +305,20 @@ public interface IIngestionStateStore {
 
     /** Closes a run with its outcome and counters. */
     void finishRun(IngestionRun run);
+
+    /**
+     * Writes a run's counters so far onto its row while it is still
+     * {@code RUNNING}, so the run history shows progress instead of a row of zeroes
+     * until the run ends.
+     *
+     * <p>
+     * Only the counters and the trigger are written, and only while the row is
+     * still {@code RUNNING}: a progress write that loses the race with
+     * {@link #finishRun} or with the reaper matches nothing, and never reopens or
+     * overwrites a closed run. Best effort — a caller treats a failure here as a
+     * missed update, never as a reason to stop the run.
+     */
+    void reportProgress(IngestionRun progress);
 
     /** The run currently in flight for a source, if any. */
     Optional<IngestionRun> activeRun(String sourceId);
@@ -378,7 +426,45 @@ public interface IIngestionStateStore {
             int documentsTombstoned,
             int segmentsStored,
             double costUsd,
-            String error) {
+            String error,
+            int documentsSkipped,
+            String stopReason,
+            Trigger trigger) {
+
+        /**
+         * A run as recorded before skipped documents, stop reasons and triggers were —
+         * and as most callers still build it.
+         */
+        public IngestionRun(String runId, String sourceId, Status status, Instant startedAt, Instant finishedAt,
+                int documentsSeen, int documentsIngested, int documentsUnchanged, int documentsFailed,
+                int documentsTombstoned, int segmentsStored, double costUsd, String error) {
+            this(runId, sourceId, status, startedAt, finishedAt, documentsSeen, documentsIngested,
+                    documentsUnchanged, documentsFailed, documentsTombstoned, segmentsStored, costUsd, error, 0,
+                    null, null);
+        }
+
+        /**
+         * What started a run. Null on a row written before it was recorded, which the
+         * Manager shows as unknown rather than guessing.
+         */
+        public enum Trigger {
+            /** "Run now", from the Manager or the REST API. */
+            MANUAL,
+            /** The source's cron. */
+            SCHEDULED;
+
+            /** Reads a stored trigger, tolerating one this build does not know. */
+            public static Trigger parse(String stored) {
+                if (stored == null) {
+                    return null;
+                }
+                try {
+                    return valueOf(stored);
+                } catch (IllegalArgumentException e) {
+                    return null;
+                }
+            }
+        }
 
         public enum Status {
             RUNNING, COMPLETED, FAILED, CANCELLED,

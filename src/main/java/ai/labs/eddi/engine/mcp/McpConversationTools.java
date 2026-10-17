@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -516,6 +517,10 @@ public class McpConversationTools {
                 LOGGER.debug("Could not read Agent descriptor", e);
             }
             result.put("configuration", config);
+            // The effective fallback for every LLM task of this agent whose
+            // maxBudgetPerConversation does not set enforceBudget itself (M8): an
+            // operator reading the stored ceiling must also see whether it refuses.
+            result.put("toolBudgetEnforcedByDefault", ToolBudgetEnforcement.isEnforcedByDefault());
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_agent failed for Agent " + agentId, e);

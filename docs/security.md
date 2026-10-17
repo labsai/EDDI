@@ -21,7 +21,7 @@ The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick sta
 
 EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
 
-The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token in the URL (`?token=`) is a login-CSRF vector and is logged by the first request before the widget can strip it, so the widget ignores it unless the operator sets `eddi.chat.url-token.enabled=true` (served to the widget by `/chat/__config__.js`); enabled, it is read once and stripped from the address bar on load. Prefer the config or `postMessage` paths.
 
 ```
 Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
@@ -419,6 +419,34 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > variable). Leave it off only if every outbound target is a fixed literal and you
 > genuinely need to reach private addresses.
 >
+> **A templated host is refused while it is off.** An httpCall whose scheme, host
+> or port contains a template expression (`https://{properties.apiHost}`,
+> `http://127.0.0.1:{properties.port}`) fails to deploy, and a turn that still
+> reaches one fails, with a message naming this flag. A property is routinely
+> captured from user input, so without validation of the rendered host the
+> chatting user could pick loopback — EDDI's own admin API included. A
+> `${vars:…}` reference in the host is still accepted: its value is set by an
+> operator. Templating the *path* or query is unaffected.
+>
+> **Keep internal APIs with protection on** by listing them:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true
+> eddi.security.ssrf-protection.allowed-hosts=billing.internal,10.0.0.5:9200
+> ```
+>
+> Entries are exact `host` or `host:port` values, compared case-insensitively,
+> with no wildcards; a bare host matches any port. An httpCall to a listed host
+> skips the private-address check but never the cloud-metadata check, and
+> redirects stay off. A templated host can then only resolve to a listed host or
+> a public one. The allow-list applies to httpCalls; MCP servers and A2A peers
+> are validated as before.
+>
+> **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
+> WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
+> `false`. The default stays `false` because configured targets legitimately reach
+> internal hosts (the rule-based reference agent calls `http://localhost:7070`).
+>
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse
 > `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`,
@@ -428,8 +456,29 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > the instance's cloud credentials; nobody configures it as an API. With protection
 > off redirects are still followed, so the httpCalls client checks every redirect
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
-> instead of being followed. For MCP servers and A2A peers only the configured
-> target is checked while protection is off; turn it on to stop a redirect there.
+> instead of being followed. The MCP client and the A2A client never follow a
+> redirect at all, protection on or off: the transport is built with
+> `followRedirects(false)` (pinned in `McpToolProviderManager`, held to its word
+> by `McpTransportRedirectTest` against an embedded redirecting server), so a
+> `3xx` from a configured MCP URL fails the handshake instead of carrying the
+> session — and its `Authorization` header — to a host nobody validated. (Until
+> 6.6.0 the MCP transport followed redirects: security review 2026-10-15, M2.)
+>
+> **Configured endpoints beyond httpCalls are covered by the same switch.** LLM
+> provider `baseUrl`/`endpoint`/`apiEndpoint` in every builder, embedding
+> endpoints, vector-store addresses (Elasticsearch, Chroma as URLs; pgvector,
+> Qdrant and every host in a MongoDB connection string as bare hosts, opened as
+> raw connections) and the OpenAPI spec location of endpoint discovery and the
+> setup wizard all go through `OutboundTargetPolicy`: the metadata service is
+> refused always, and with protection on any private, loopback or link-local
+> address is too — with two exemptions: a host on
+> `eddi.security.ssrf-protection.allowed-hosts` (the same list httpCalls honour),
+> and a URL on this deployment's own origin (`eddi.self.base-url`), so an agent
+> may still call EDDI's own `/v1` API. The spec document is fetched by EDDI
+> itself (`OpenApiSpecFetcher`: every redirect hop checked, body capped at 16 MB)
+> rather than by swagger-parser. Residual:
+> `$ref`s inside a fetched spec are resolved by swagger-parser's own resolver,
+> which checks each reference's URL but follows that URL's redirects itself.
 
 ### Scheme Allowlist
 
@@ -563,6 +612,22 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 
 A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
 
+`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`.
+
+---
+
+## Parser and Matcher Bounds
+
+Three small parsers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
+
+| Parser | Reached by | Bound | On exceeding it |
+|---|---|---|---|
+| Expression parser (`ExpressionProvider`) | Any client — a `context` entry of type `expressions` is parsed by the property-setter and by every `contextmatcher` rule; also dictionaries, `inputmatcher` text | `eddi.expressions.max-length` (32,768 characters) and `eddi.expressions.max-depth` (32 nested parentheses), checked in one linear scan before parsing; the parser itself works on index ranges of the one string | A client-sent context entry: `413` `input_too_large` before the turn starts. Inside a turn: the task fails, counted and audited like any other task failure |
+| Dictionary `regEx` (`RegEx`) | Every token of every user input, against every pattern of the deployed dictionaries | 200 ms per match, enforced through a deadline-checking `CharSequence` (`RegexDeadline`); the pattern must also compile when the dictionary is **saved** | A match past its budget is a miss (logged at WARN); an invalid pattern is refused with `400` at save time, naming the syntax error |
+| Path expressions (`PathNavigator`) | `fromObjectPath` and the other property-instruction paths in `httpcalls`/`mcpcalls`/`property` configs | 64 `+`/`-` operands per expression (the longest-prefix search is quadratic in that count) | The expression resolves to nothing |
+
+A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
+
 ---
 
 ## Tool Execution Pipeline
@@ -597,11 +662,11 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 ### Cost Tracking
 
-- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `false`, deployment fallback `eddi.tools.budget.enforce-by-default`)
+- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `true`, deployment fallback `eddi.tools.budget.enforce-by-default`)
 - **Scope:** `maxBudgetPerConversation` bounds **tool** cost only. LLM token spend is governed separately and per run by the model cascade's `maxCostPerRun`; the two are not summed
 - **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001, `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
 - **Eviction:** To prevent unbounded memory growth, the tracker caps per-conversation entries at 10 000 and evicts the oldest ~10% when the limit is reached
-- **Behaviour:** Enforcement is **opt-in**. A configured `maxBudgetPerConversation` records cost but refuses nothing until `enforceBudget: true` (per task) or `eddi.tools.budget.enforce-by-default=true` (per deployment). Once enforced, the budget is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Enforcing by default was rejected because built-ins priced at $0.00 until the canonical-slug fix, so it would make those ceilings bind for the first time and abort tool calls on upgrade. The converse cost is real — http/MCP/A2A/dynamic tools dispatch under their configured name, so an agent with a tool called `websearch`/`webscraper`/`pdfreader` *was* being refused before this release — so every task carrying a ceiling without the flag is named once in a startup WARN rather than lapsing silently
+- **Behaviour:** Enforcement is the **default** (6.6.0, security review finding M8). A configured `maxBudgetPerConversation` is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Opting out — `enforceBudget: false` per task, or `eddi.tools.budget.enforce-by-default=false` per deployment — keeps cost tracking and reporting and turns the refusal off; every task whose ceiling is opted out is named once in a WARN rather than lapsing silently, and the MCP `get_agent`/`deploy_agent` tools report the effective default as `toolBudgetEnforcedByDefault`. Until 6.6.0 this was an opt-in whose deployment key was not declared, so every stored ceiling was advisory
 
 ### Configuration Example
 
@@ -684,6 +749,8 @@ quarkus.http.ssl-port=8443
 quarkus.http.insecure-requests=disabled
 ```
 
+For post-quantum key exchange (`X25519MLKEM768`) and what the JDK supports today, see [Cryptography → TLS key exchange](cryptography.md#tls-key-exchange).
+
 ### Internal Traffic
 
 If EDDI and its database run on the same host or within a private network,
@@ -761,3 +828,4 @@ are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-ba
 - [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide
 - [EU AI Act Compliance](eu-ai-act-compliance.md) — EU AI Act compliance
 - [Compliance Data Flow](compliance-data-flow.md) — Data flow diagram for auditors
+- [Cryptography](cryptography.md) — Algorithm inventory and post-quantum readiness

@@ -1,6 +1,6 @@
 import { formatUsd } from "@/lib/utils";
 import { useState, useEffect, useCallback, useMemo, useId, Fragment } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -106,6 +106,16 @@ function isSystemManagedSchedule(s: ScheduleConfiguration): boolean {
     nonEmpty(md.dreamType) ||
     nonEmpty(md.teamCadenceType)
   );
+}
+
+/** Where an ingestion schedule is defined: its knowledge base's editor. */
+function ragIngestionTarget(s: ScheduleConfiguration): string | null {
+  const md = s.metadata;
+  if (md?.ragIngestion !== true || typeof md.ragConfigId !== "string" || !md.ragConfigId) {
+    return null;
+  }
+  const version = typeof md.ragConfigVersion === "number" ? md.ragConfigVersion : undefined;
+  return `/manage/resources/rag/${encodeURIComponent(md.ragConfigId)}${version ? `?version=${version}` : ""}`;
 }
 
 /** Render a cost value, treating -1 / undefined as "unlimited". */
@@ -1849,6 +1859,17 @@ export function SchedulesPage() {
                               >
                                 {t("schedules.systemManaged", "System")}
                               </span>
+                            )}
+                            {/* An ingestion schedule is changed on its knowledge
+                                base's source card, so say which one and go there. */}
+                            {ragIngestionTarget(s) && (
+                              <Link
+                                to={ragIngestionTarget(s) as string}
+                                className="mt-0.5 block text-xs text-primary hover:underline"
+                                data-testid={`rag-schedule-link-${s.id}`}
+                              >
+                                {t("schedules.openKnowledgeBase", "Open the knowledge base")}
+                              </Link>
                             )}
                           </td>
                           <td className="px-5 py-3">

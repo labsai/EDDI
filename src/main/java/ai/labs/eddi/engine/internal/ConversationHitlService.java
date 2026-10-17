@@ -146,6 +146,23 @@ class ConversationHitlService {
                                                                  ControlSignal mode,
                                                                  String cancelledBy)
             throws ResourceStoreException {
+        return cancel(conversationId, mode, cancelledBy, false);
+    }
+
+    /**
+     * The approver's cancel: the {@code AWAITING_HUMAN} compare-and-set alone. No
+     * in-flight signal, no {@code IN_PROGRESS} transition — so a resume that lands
+     * between the caller's authorization and this call leaves nothing for the
+     * approver to stop, and the CAS simply fails (L9 of the 2026-10-15 security
+     * review, review thread on the read-then-cancel race).
+     */
+    public IConversationService.CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy)
+            throws ResourceStoreException {
+        return cancel(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy, true);
+    }
+
+    private IConversationService.CancelOutcome cancel(String conversationId, ControlSignal mode, String cancelledBy, boolean pausedOnly)
+            throws ResourceStoreException {
         ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
         if (currentState == null) {
             return IConversationService.CancelOutcome.NOT_FOUND;
@@ -155,19 +172,20 @@ class ConversationHitlService {
         // flag at task boundaries and stops before the next lifecycle task.
         // CANCEL_IMMEDIATE currently degrades to graceful semantics on the
         // regular surface (no per-conversation future handle to interrupt).
-        var inFlightMemory = inFlightConversations.get(conversationId);
+        // A paused-only cancel never signals: an executing turn is not its to stop.
+        var inFlightMemory = pausedOnly ? null : inFlightConversations.get(conversationId);
         if (inFlightMemory != null) {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
         }
         // Cluster mode: the turn may be running on another node (the lease holder) —
         // ask that node to signal it. Always false on a single node.
-        boolean remoteSignalled = inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
+        boolean remoteSignalled = !pausedOnly && inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
         boolean changed = pauseCancelled;
-        if (!changed) {
+        if (!changed && !pausedOnly) {
             changed = conversationMemoryStore.compareAndSetState(conversationId,
                     ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
         }

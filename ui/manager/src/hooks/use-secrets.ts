@@ -104,6 +104,7 @@ export function useUpdateSecretGrant() {
       keyName: string;
       allowedAgents: string[];
       description?: string;
+      allowedHosts?: string[];
     }) => updateSecretGrant(args),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: secretKeys.list(vars.tenantId) });

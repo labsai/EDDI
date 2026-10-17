@@ -59,6 +59,15 @@ class MongoScheduleStoreTest extends MongoTestBase {
         }
 
         @Test
+        @DisplayName("readScheduleByName — finds the schedule a system writer named, and nothing for an unknown name")
+        void readByName() throws Exception {
+            String id = store.createSchedule(newSchedule("rag-ingestion:kb-1:src-1", "agent-1"));
+
+            assertEquals(id, store.readScheduleByName("rag-ingestion:kb-1:src-1").orElseThrow().getId());
+            assertTrue(store.readScheduleByName("rag-ingestion:kb-1:src-2").isEmpty());
+        }
+
+        @Test
         @DisplayName("read non-existent — throws ResourceNotFoundException")
         void readNotFound() {
             assertThrows(IResourceStore.ResourceNotFoundException.class,

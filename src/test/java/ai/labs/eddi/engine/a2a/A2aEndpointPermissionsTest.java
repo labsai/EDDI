@@ -4,11 +4,17 @@
  */
 package ai.labs.eddi.engine.a2a;
 
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.engine.a2a.A2AModels.JsonRpcRequest;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.Authenticated;
 import io.quarkus.vertx.http.runtime.security.HttpSecurityUtils;
 import io.quarkus.vertx.http.runtime.security.ImmutablePathMatcher;
 import jakarta.annotation.security.PermitAll;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.Path;
 import org.junit.jupiter.api.BeforeAll;
@@ -24,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
@@ -31,7 +38,14 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * Which A2A endpoints an anonymous caller can reach, decided by
@@ -163,6 +177,39 @@ class A2aEndpointPermissionsTest {
             // but role-less token is refused (403) rather than allowed to run a
             // conversation. The path layer only expresses "authenticated" here.
             assertPolicies("/a2a/agents/" + SAMPLE_AGENT_ID, "POST", AUTHENTICATED);
+        }
+
+        /**
+         * M9 of the 2026-10-15 security review: authentication and a role are the path
+         * layer's and RBAC's share; the per-agent {@code USE} grant that {@code POST
+         * /agents/{id}/start} and {@code /v1} apply under enforced workspaces is the
+         * endpoint's own, and used to be missing here — any peer with {@code eddi-user}
+         * could start a conversation with any agent.
+         */
+        @Test
+        @DisplayName("POST /a2a/agents/{agentId} — SEND and STREAM apply the per-agent USE gate before the task handler")
+        void jsonRpcAppliesPerAgentUseGate() {
+            var guard = mock(ResourceAccessGuard.class);
+            var taskHandler = mock(A2ATaskHandler.class);
+            var endpoint = new RestA2AEndpoint(mock(AgentCardService.class), taskHandler, mock(CapabilityRegistryService.class), guard,
+                    true, false, new ObjectMapper(), new SimpleMeterRegistry());
+            doThrow(new ForbiddenException("Access denied")).when(guard).requireAgentUseAccess(SAMPLE_AGENT_ID);
+            var message = Map.<String, Object>of("message",
+                    Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi"))));
+
+            for (var method : List.of("SendMessage", "message/send", "tasks/send", "SendStreamingMessage", "message/stream",
+                    "tasks/sendSubscribe")) {
+                var request = new JsonRpcRequest("2.0", method, message, "req-1");
+                assertThrows(ForbiddenException.class, () -> endpoint.handleJsonRpc(SAMPLE_AGENT_ID, null, request),
+                        method + " must be refused with 403 by the USE gate, not answered as a JSON-RPC error");
+            }
+            verifyNoInteractions(taskHandler);
+            verify(guard, times(6)).requireAgentUseAccess(SAMPLE_AGENT_ID);
+
+            // tasks/get only ever reaches a task this principal created — which it could
+            // only have done after passing the gate — so it stays principal-scoped.
+            endpoint.handleJsonRpc(SAMPLE_AGENT_ID, null, new JsonRpcRequest("2.0", "tasks/get", Map.of("id", "t-1"), "req-2"));
+            verifyNoMoreInteractions(guard);
         }
 
         @Test

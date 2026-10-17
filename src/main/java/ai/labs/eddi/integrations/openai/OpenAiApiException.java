@@ -20,6 +20,8 @@ import jakarta.ws.rs.core.Response;
 public class OpenAiApiException extends RuntimeException {
 
     private final int status;
+    /** Seconds for a {@code Retry-After} header, or {@code null} for none. */
+    private Integer retryAfterSeconds;
     private final String type;
     private final String code;
 
@@ -63,6 +65,27 @@ public class OpenAiApiException extends RuntimeException {
     public static OpenAiApiException serverError(String code, String message) {
         return new OpenAiApiException(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(),
                 OpenAiErrorResponse.TYPE_SERVER_ERROR, code, message);
+    }
+
+    /**
+     * The node refused the turn because it is at capacity (the in-flight-turn
+     * limit, coordinator saturation, or a shutdown drain). 503 with
+     * {@code capacity_exceeded} and {@code Retry-After}, exactly what the REST
+     * surface answers, so a client or proxy that retries elsewhere on 503 does so
+     * here too. Not 429: nothing about the caller is over a limit.
+     */
+    public static OpenAiApiException capacityExceeded(String message) {
+        return unavailable(OpenAiErrorResponse.CODE_CAPACITY_EXCEEDED, message).withRetryAfter(5);
+    }
+
+    /** Sets the {@code Retry-After} the mapper sends with this error. */
+    public OpenAiApiException withRetryAfter(int seconds) {
+        this.retryAfterSeconds = seconds;
+        return this;
+    }
+
+    public Integer getRetryAfterSeconds() {
+        return retryAfterSeconds;
     }
 
     public static OpenAiApiException unavailable(String code, String message) {
