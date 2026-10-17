@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -40,6 +41,8 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -55,11 +58,12 @@ class McpHitlToolsCoverageTest {
     OwnershipValidator ownershipValidator;
     IJsonSerialization json;
     SecurityIdentity identity;
+    ResourceAccessGuard resourceAccessGuard = mock(ResourceAccessGuard.class);
     McpHitlTools tools;
 
     McpHitlTools build(boolean authEnabled, boolean mutationsEnabled) {
         return new McpHitlTools(conversationService, groupConversationService, guard,
-                ownershipValidator, json, identity, new SimpleMeterRegistry(),
+                ownershipValidator, resourceAccessGuard, json, identity, new SimpleMeterRegistry(),
                 authEnabled, mutationsEnabled);
     }
 
@@ -68,12 +72,16 @@ class McpHitlToolsCoverageTest {
         conversationService = mock(IConversationService.class);
         groupConversationService = mock(IGroupConversationService.class);
         guard = mock(HitlAccessGuard.class);
+        // The default caller owns what it touches; the approver-only tests override it.
+        when(guard.mayCancelExecuting(any())).thenReturn(true);
         ownershipValidator = mock(OwnershipValidator.class);
         json = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         Principal p = mock(Principal.class);
         lenient().when(p.getName()).thenReturn("alice");
         lenient().when(identity.getPrincipal()).thenReturn(p);
+        // L5: the HITL tools carry the REST HITL role tier; alice is an approver.
+        lenient().when(identity.hasRole("eddi-approver")).thenReturn(true);
         tools = build(true, true);
     }
 
@@ -239,6 +247,31 @@ class McpHitlToolsCoverageTest {
                 .thenThrow(new ResourceStoreException("db"));
         String out = tools.cancelConversation("c1");
         assertTrue(out.contains("\"errorCode\":\"INTERNAL\""), out);
+    }
+
+    // L9 (security review 2026-10-15): an approver who is neither owner nor admin
+    // gets the paused-only cancel over MCP too.
+
+    @Test
+    void cancel_approverOnly_usesThePausedOnlyCancel() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(conversationService.cancelPausedConversation("c1", "mcp:alice")).thenReturn(CancelOutcome.CANCELLED);
+
+        String out = tools.cancelConversation("c1");
+
+        assertTrue(out.contains("CANCELLED"), out);
+        verify(conversationService, never()).cancelConversation(any(), any(), any());
+    }
+
+    @Test
+    void cancel_approverOnly_onAnExecutingConversation_isForbidden() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(conversationService.cancelPausedConversation("c1", "mcp:alice")).thenReturn(CancelOutcome.NOTHING_TO_CANCEL);
+
+        String out = tools.cancelConversation("c1");
+
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+        verify(conversationService, never()).cancelConversation(any(), any(), any());
     }
 
     @Test

@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   KeySquare,
   RotateCw,
+  Server,
   ShieldCheck,
 } from "lucide-react";
 import {
@@ -36,6 +37,7 @@ import {
 } from "@/hooks/use-secrets";
 import {
   grantsAllAgents,
+  ALL_AGENTS,
   SecretsError,
   SECRET_EXISTS,
   SECRET_NOT_FOUND,
@@ -194,8 +196,12 @@ export function SecretsPage() {
         keyName,
         value: newValue,
         description: newDescription.trim() || undefined,
+        // Always sent. Under eddi.vault.grant-enforcement=enforce (the default)
+        // the backend refuses a create without a grant rather than defaulting
+        // to every agent, so "leave empty for all agents" is spelled out as the
+        // wildcard here — the decision is the operator's, made in this dialog.
         allowedAgents:
-          finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
+          finalAllowedAgents.length > 0 ? finalAllowedAgents : [ALL_AGENTS],
         // "Add" never overwrites. Replacing a value is Rotate, which keeps the
         // grant; an upsert from here reset it.
         createOnly: true,
@@ -618,6 +624,28 @@ export function SecretsPage() {
                           </span>
                         ))}
                       </button>
+                      {/* Where the key may be sent, when that is restricted. An
+                          unrestricted secret shows nothing: the agent chips above
+                          already say who may use it, and "any host" on every row
+                          would be noise. */}
+                      {(s.allowedHosts?.length ?? 0) > 0 && (
+                        <div
+                          className="mt-1 flex flex-wrap gap-1 px-1"
+                          data-testid={`allowed-hosts-${s.keyName}`}
+                          title={t("secrets.allowedHosts", "Allowed destinations")}
+                        >
+                          {s.allowedHosts!.map((host) => (
+                            <span
+                              key={host}
+                              dir="ltr"
+                              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                            >
+                              <Server className="h-2.5 w-2.5" aria-hidden="true" />
+                              {host}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-end">
                       <div className="flex items-center justify-end gap-1">

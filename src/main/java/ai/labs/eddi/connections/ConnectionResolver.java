@@ -352,7 +352,7 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
                             + "the current validation rules.");
         }
-        String password = resolveReferences(staticAuth.getPasswordRef(), connection);
+        String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
         return new ResolvedCredential(staticAuth.getHeaderName(), "Basic " + encoded);

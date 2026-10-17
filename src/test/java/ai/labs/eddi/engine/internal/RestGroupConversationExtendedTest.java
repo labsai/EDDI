@@ -398,7 +398,7 @@ class RestGroupConversationExtendedTest {
         void forbidden_isRethrown() throws Exception {
             when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
             doThrow(new ForbiddenException("denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(any(), eq("user-1"), anyString());
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(any(), eq("user-1"), anyString());
 
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.continueDiscussionStreaming("group-1", "gc-1",

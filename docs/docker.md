@@ -8,7 +8,37 @@
 docker compose up
 ```
 
-This starts EDDI on port `7070` and MongoDB, both published on `127.0.0.1` only. No login required: `docker-compose.yml` sets the three authentication opt-outs described below, which is why it does not publish EDDI on other interfaces unless you set `EDDI_BIND`.
+This starts EDDI on port `7070` and MongoDB, both published on `127.0.0.1` only. No login required: `docker-compose.yml` sets the three authentication opt-outs described below, which is why it does not publish EDDI on other interfaces unless you set `EDDI_BIND` — and refuses to do even that while authentication is off, see [Publishing EDDI on the network](#publishing-eddi-on-the-network).
+
+### Publishing EDDI on the network
+
+`EDDI_BIND` is the host interface EDDI is published on (`127.0.0.1` by default,
+so a laptop install is never reachable from the LAN by accident). Setting it to
+`0.0.0.0` or a LAN address is allowed only once authentication is on:
+`docker-compose.yml` carries a one-shot `bind-guard` service that `eddi`
+depends on, and it exits 1 — so EDDI never starts — when `EDDI_BIND` is not a
+loopback address while `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` is still `true`.
+The message it prints names the way out:
+
+```bash
+# in .env — then bring the Keycloak overlay up
+EDDI_BIND=0.0.0.0
+EDDI_SECURITY_ALLOW_UNAUTHENTICATED=false
+QUARKUS_OIDC_TENANT_ENABLED=true
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
+```
+
+The guard runs on the `mongo` image the stack pulls anyway, so it costs no
+extra image, works offline and works with `docker-compose.local.yml`. It
+checks the two variables as compose resolves them, so a value set in `.env`,
+in the shell or by an overlay all count. `install.sh` performs the same check
+before it pulls images.
+
+To expose an **unauthenticated** instance on purpose — an isolated network
+only you can reach — set `EDDI_I_UNDERSTAND_PUBLIC=true` as well; the GCP
+provisioner's `--i-understand-public` does exactly that. Every API endpoint,
+the secrets vault and the MCP server are then open to whoever can reach the
+port, and EDDI's own `AuthStartupGuard` says so in its log every hour.
 
 ### With Keycloak Authentication
 
@@ -102,6 +132,10 @@ docker run --name eddi \
 | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
 | `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
 | `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters or a known default) |
+| `POSTGRES_PASSWORD`        | *(required)*                                  | `docker-compose.postgres-only.yml` only: the database password for both PostgreSQL and EDDI. No default — the file used to ship `eddi`/`eddi`. The postgres image reads it at first init only, so keep it stable; `install.sh --db=postgres` generates one into `.env` |
+| `MONGO_PASSWORD`           | *(required)*                                  | `docker-compose.cluster.yml` only: the MongoDB root password, required like `NATS_PASSWORD` (it used to default to `changeme`). Read by the mongo image at first init only |
+| `EDDI_BIND`                | `127.0.0.1`                                   | Host interface EDDI is published on. Anything but loopback is refused while `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` is `true` — see [Publishing EDDI on the network](#publishing-eddi-on-the-network) |
+| `EDDI_I_UNDERSTAND_PUBLIC` | `false`                                       | Acknowledges a deliberately unauthenticated, non-loopback `EDDI_BIND`; lifts the refusal above |
 
 Set configuration through environment variables like these rather than by overriding `JAVA_OPTS_APPEND`: the image sets `JAVA_OPTS_APPEND` itself, and a runtime value replaces it instead of adding to it.
 

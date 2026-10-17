@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -40,6 +42,7 @@ class RestAgentManagementTest {
     private IUserConversationStore userConversationStore;
     private IRestAgentTriggerStore agentTriggerStore;
     private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestAgentManagement restAgentManagement;
     private AsyncResponse asyncResponse;
 
@@ -49,6 +52,7 @@ class RestAgentManagementTest {
         userConversationStore = mock(IUserConversationStore.class);
         agentTriggerStore = mock(IRestAgentTriggerStore.class);
         identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
         asyncResponse = mock(AsyncResponse.class);
 
         // Auth disabled for tests
@@ -59,6 +63,82 @@ class RestAgentManagementTest {
         Field identityField = RestAgentManagement.class.getDeclaredField("identity");
         identityField.setAccessible(true);
         identityField.set(restAgentManagement, identity);
+        Field validatorField = RestAgentManagement.class.getDeclaredField("ownershipValidator");
+        validatorField.setAccessible(true);
+        validatorField.set(restAgentManagement, ownershipValidator);
+    }
+
+    /**
+     * L9 (security review 2026-10-15): the {@code {userId}} in the path used to be
+     * bound to nobody — the only check asked whether the caller was anonymous — so
+     * any authenticated user could drive another user's managed conversation, and
+     * the ended-conversation branch deleted the mapping before the engine's
+     * transitive 403 arrived. Every method now binds it first.
+     */
+    @Nested
+    @DisplayName("the path userId is bound to the caller")
+    class UserIdBoundToCaller {
+
+        @BeforeEach
+        void callerIsSomebodyElse() {
+            doThrow(new ForbiddenException("Access denied: you do not own this user's data"))
+                    .when(ownershipValidator).validateUserAccess(identity, "user-1");
+        }
+
+        @Test
+        void loadConversationMemory() throws Exception {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.loadConversationMemory("intent-1", "user-1", null,
+                    false, false, List.of(), asyncResponse));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void sayWithinContextResumesTheForbiddenException() throws Exception {
+            restAgentManagement.sayWithinContext("intent-1", "user-1", false, false, List.of(), new InputData("hi", Map.of()),
+                    asyncResponse);
+            verify(asyncResponse).resume(any(ForbiddenException.class));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void endCurrentConversation() throws Exception {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.endCurrentConversation("intent-1", "user-1"));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void isUndoAvailable() {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.isUndoAvailable("intent-1", "user-1"));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void undo() {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.undo("intent-1", "user-1"));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void isRedoAvailable() {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.isRedoAvailable("intent-1", "user-1"));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        void redo() {
+            assertThrows(ForbiddenException.class, () -> restAgentManagement.redo("intent-1", "user-1"));
+            verifyNoInteractions(userConversationStore, restAgentEngine);
+        }
+
+        @Test
+        @DisplayName("the check names the path userId, not whatever the caller is")
+        void validatorSeesThePathUserId() throws Exception {
+            when(userConversationStore.readUserConversation("intent-1", "user-2")).thenReturn(null);
+
+            restAgentManagement.undo("intent-1", "user-2");
+
+            verify(ownershipValidator).validateUserAccess(identity, "user-2");
+        }
     }
 
     @Nested

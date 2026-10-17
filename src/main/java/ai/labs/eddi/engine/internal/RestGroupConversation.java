@@ -388,7 +388,11 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict, as for delete: a follow-up runs a member agent and writes the
+            // transcript, so a legacy record that names no owner is an administrator's
+            // to drive — not every authenticated caller's, as requireOwnerOrAdmin would
+            // have it (L9 of the 2026-10-15 security review).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -605,7 +609,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict: a continuation is a write (see followUpWithMember).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             // A continuation re-runs every member, exactly like a new discussion: owning
             // the transcript is not the same as still being allowed to run the group.
             requireGroupUseAccess(groupId);
@@ -663,7 +668,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict: a continuation is a write (see followUpWithMember).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             requireGroupUseAccess(groupId);
 
             // Reuse the shared streaming listener so a continuation that pauses or is

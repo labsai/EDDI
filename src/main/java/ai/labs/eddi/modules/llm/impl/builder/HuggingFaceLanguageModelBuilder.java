@@ -4,10 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.huggingface.HuggingFaceChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.Map;
@@ -45,6 +46,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_ACCESS_TOKEN = "accessToken";
     private static final String KEY_MODEL_ID = "modelId";
     private static final String KEY_TEMPERATURE = "temperature";
@@ -67,7 +76,7 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return applyTo(HuggingFaceChatModel.builder(), parameters).build();
+        return applyTo(HuggingFaceChatModel.builder(), parameters, OutboundTargetPolicy.orPermissive(targetPolicy)).build();
     }
 
     /**
@@ -80,8 +89,13 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
      * {@code https://api-inference.huggingface.co/models/<id>} and never set
      * {@code modelId}, which fails that check.
      */
-    @SuppressWarnings("removal")
     static HuggingFaceChatModel.Builder applyTo(HuggingFaceChatModel.Builder builder, Map<String, String> parameters) {
+        return applyTo(builder, parameters, OutboundTargetPolicy.permissive());
+    }
+
+    @SuppressWarnings("removal")
+    static HuggingFaceChatModel.Builder applyTo(HuggingFaceChatModel.Builder builder, Map<String, String> parameters,
+                                                OutboundTargetPolicy targetPolicy) {
         if (!isNullOrEmpty(parameters.get(KEY_ACCESS_TOKEN))) {
             builder.accessToken(parameters.get(KEY_ACCESS_TOKEN));
         }
@@ -96,9 +110,9 @@ public class HuggingFaceLanguageModelBuilder implements ILanguageModelBuilder {
 
         String baseUrl = stringValue(parameters, KEY_BASE_URL);
         if (baseUrl != null) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(baseUrl);
             builder.baseUrl(baseUrl);
         }
 

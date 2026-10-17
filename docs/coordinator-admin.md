@@ -207,7 +207,8 @@ node lost the lease while the turn ran, so the turn was stopped before it was st
 or `failed`; the console shows any other reason by its code), the node it failed on (`nodeId`) and, for a fenced write, both tokens (`fence`:
 `token` — what the refused write carried — and `storedFence`, what the conversation already
 had). An entry that cannot be replayed says why (`notReplayableReason`): `SECRET_INPUT` (the
-client flagged the turn `secretInput`, so its input was never stored), `INPUT_NOT_CAPTURED`
+client flagged the turn `secretInput`, or the agent carries a `scope: secret` property
+instruction and so expects secrets in its input — either way the input was never stored), `INPUT_NOT_CAPTURED`
 (`eddi.coordinator.dead-letter.capture-input=false`) or `NOT_A_TURN` (a HITL resume or a group
 member's turn). A replay claims its entry first (`replay.<id>` in the `<prefix>_ADMIN` KV bucket,
 TTL 60 s), so two administrators replaying one entry run its turn once; the other gets

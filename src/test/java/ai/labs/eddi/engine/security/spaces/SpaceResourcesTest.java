@@ -104,7 +104,7 @@ class SpaceResourcesTest {
             vault = mock(ISecretProvider.class);
             when(vault.isAvailable()).thenReturn(true);
             variables = mock(IGlobalVariableStore.class);
-            sut = new RestSpaceResources(guard, vault, mock(SecretResolver.class), variables, mock(GlobalVariableResolver.class));
+            sut = new RestSpaceResources(guard, vault, mock(SecretResolver.class), variables, mock(GlobalVariableResolver.class), "enforce");
         }
 
         @Test
@@ -114,9 +114,9 @@ class SpaceResourcesTest {
             var reference = new SecretReference(tenant, "openai");
             when(vault.getMetadata(reference)).thenReturn(new SecretMetadata(tenant, "openai", Instant.EPOCH, null, null, null, "key", List.of("*")));
 
-            var response = sut.storeSecret(ENGINEERING, "openai", new IRestSpaceResources.SecretWrite("sk-test", "key", null));
+            var response = sut.storeSecret(ENGINEERING, "openai", new IRestSpaceResources.SecretWrite("sk-test", "key", List.of("*")));
 
-            verify(vault).store(reference, "sk-test", "key", null);
+            verify(vault).store(reference, "sk-test", "key", List.of("*"), null);
             var stored = (IRestSpaceResources.SpaceSecret) response.getEntity();
             assertEquals("${vault:" + tenant + "/openai}", stored.reference());
         }
@@ -129,7 +129,7 @@ class SpaceResourcesTest {
             assertThrows(ForbiddenException.class, () -> sut.listVariables(FINANCE));
             assertThrows(ForbiddenException.class, () -> sut.storeVariable(FINANCE, "k", new IRestSpaceResources.VariableWrite("v", null)));
 
-            verify(vault, never()).store(any(), anyString(), any(), any());
+            verify(vault, never()).store(any(), anyString(), any(), any(), any());
             verify(variables, never()).upsert(any());
         }
 
