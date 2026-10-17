@@ -494,12 +494,36 @@ ingress:
 # where EDDI cannot run more than one replica. While enabled the HPA owns the
 # replica count and eddi.replicas is not rendered.
 
+#
+# CPU is a weak load signal for EDDI: a node waiting on LLM answers is busy
+# with hundreds of turns at little CPU, so a CPU-only HPA may never scale up
+# while turns queue or are refused with 503. The signal that matches the work
+# is in-flight turns per pod — eddi_runtime_executor_active{pool="turn"}
+# against eddi_conversation_max_in_flight_turns — exposed to the HPA through
+# a custom-metrics adapter (prometheus-adapter or KEDA) and added under
+# extraMetrics. Set a target to null to drop that metric. Before raising
+# maxReplicas, size the database for it: every replica opens its own pool
+# (see "Sizing" in docs/clustering.md).
+
 autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+  # Further autoscaling/v2 metric entries, appended as given. Example, with a
+  # prometheus-adapter rule that exposes eddi_runtime_executor_active{pool="turn"}
+  # as the pod metric eddi_turns_in_flight:
+  #   - type: Pods
+  #     pods:
+  #       metric:
+  #         name: eddi_turns_in_flight
+  #       target:
+  #         type: AverageValue
+  #         averageValue: "700"   # ~70 % of a 3 GiB pod's ~1000 in-flight limit
+  extraMetrics: []
+  # autoscaling/v2 behavior (scale-up/down policies and stabilization), as given.
+  behavior: {}
 
 # ── Pod Disruption Budget ──────────────────────────────────
 #

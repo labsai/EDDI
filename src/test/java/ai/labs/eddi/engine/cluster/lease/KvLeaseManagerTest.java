@@ -32,6 +32,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -470,6 +471,127 @@ class KvLeaseManagerTest {
         kv.create("c.conv1", "{\"node\":\"b\",\"boot\":\"b1\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
         a.release(lease);
         assertTrue(kv.get("c.conv1").isPresent(), "b's lease survives a's late release");
+    }
+
+    /**
+     * A KV whose compare-and-set writes and guarded deletes each take
+     * {@code millis}.
+     */
+    private static ISharedKv slow(ISharedKv backing, long millis) {
+        return new FlakyKv(backing, new AtomicBoolean()) {
+            @Override
+            public OptionalLong update(String key, byte[] value, long expectedRevision) {
+                pause(millis);
+                return super.update(key, value, expectedRevision);
+            }
+
+            @Override
+            public boolean delete(String key, long expectedRevision) {
+                pause(millis);
+                return super.delete(key, expectedRevision);
+            }
+        };
+    }
+
+    private static void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Test
+    @DisplayName("a heartbeat renews every held lease side by side, so a slow NATS cannot stretch one pass past the TTL")
+    void heartbeatRenewsInParallel() throws Exception {
+        KvLeaseManager a = manager(slow(kv, 300), "a", "a1");
+        List<LeaseHandle> leases = new CopyOnWriteArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            leases.add(get(a.acquire("conv" + i, Duration.ofSeconds(1))));
+        }
+        Map<String, Long> before = new ConcurrentHashMap<>();
+        for (int i = 0; i < 6; i++) {
+            before.put("c.conv" + i, kv.get("c.conv" + i).orElseThrow().revision());
+        }
+
+        long start = System.nanoTime();
+        a.heartbeatAll();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        // One after another this pass takes 6 x 300 ms = 1.8 s; side by side about 300
+        // ms.
+        assertTrue(elapsedMillis < 1_200, "the renewals ran one after another: " + elapsedMillis + " ms");
+        for (int i = 0; i < 6; i++) {
+            assertTrue(kv.get("c.conv" + i).orElseThrow().revision() > before.get("c.conv" + i),
+                    "heartbeatAll must return only once every lease is renewed (c.conv" + i + ")");
+        }
+        assertTrue(leases.stream().noneMatch(LeaseHandle::isLost));
+    }
+
+    @Test
+    @DisplayName("a lease whose renewal is still in flight is not renewed a second time concurrently")
+    void heartbeatSkipsALeaseStillBeingRenewed() throws Exception {
+        AtomicInteger updates = new AtomicInteger();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        ISharedKv gated = new FlakyKv(kv, new AtomicBoolean()) {
+            @Override
+            public OptionalLong update(String key, byte[] value, long expectedRevision) {
+                updates.incrementAndGet();
+                gate.join();
+                return super.update(key, value, expectedRevision);
+            }
+        };
+        KvLeaseManager a = manager(gated, "a", "a1");
+        LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+
+        CompletableFuture<Void> first = CompletableFuture.runAsync(a::heartbeatAll);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (updates.get() == 0 && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        a.heartbeatAll(); // the first renewal is still blocked
+        assertEquals(1, updates.get(), "a second pass must skip the lease whose renewal is in flight");
+
+        gate.complete(null);
+        first.get(3, TimeUnit.SECONDS);
+        assertFalse(lease.isLost(), "the in-flight renewal used the current revision and must not read as a takeover");
+    }
+
+    @Test
+    @DisplayName("releaseAll at shutdown releases the leases side by side, within a bounded time")
+    void releaseAllReleasesInParallel() throws Exception {
+        KvLeaseManager a = manager(slow(kv, 300), "a", "a1");
+        for (int i = 0; i < 6; i++) {
+            get(a.acquire("conv" + i, Duration.ofSeconds(1)));
+        }
+        long start = System.nanoTime();
+        a.releaseAll();
+        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertTrue(elapsedMillis < 1_200, "the releases ran one after another: " + elapsedMillis + " ms");
+        assertEquals(0, a.heldCount());
+        for (int i = 0; i < 6; i++) {
+            assertTrue(kv.get("c.conv" + i).isEmpty(), "c.conv" + i + " was not released");
+        }
+    }
+
+    @Test
+    @DisplayName("draining hands a leader lease over at once, so another node takes up the leader's work")
+    void drainReleasesLeaderLeases() throws Exception {
+        KvLeaseManager a = manager("a", "a1");
+        KvLeaseManager b = manager("b", "b1");
+        assertTrue(a.tryAcquireKey("leader.hitl-recovery").isPresent());
+        LeaseHandle running = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        assertTrue(b.tryAcquireKey("leader.hitl-recovery").isEmpty(), "precondition: a leads");
+
+        a.setDraining(true);
+
+        assertTrue(kv.get("leader.hitl-recovery").isEmpty(), "the drained node kept its leader lease");
+        assertTrue(b.tryAcquireKey("leader.hitl-recovery").isPresent(), "another node must be able to lead now");
+        assertTrue(a.tryAcquireKey("leader.hitl-recovery").isEmpty(), "a drained node does not lead");
+        assertTrue(kv.get("c.conv1").isPresent(), "a running turn keeps its conversation lease through a drain");
+        assertFalse(running.isLost());
+        a.heartbeatAll();
+        assertTrue(b.tryAcquireKey("leader.hitl-recovery").isPresent(), "the drained node's heartbeat must not take it back");
     }
 
     /**

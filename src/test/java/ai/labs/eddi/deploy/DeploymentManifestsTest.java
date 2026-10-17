@@ -2772,6 +2772,29 @@ class DeploymentManifestsTest {
          * mode, and the HPA template carries its own copy of the gate, because it
          * renders independently of the Deployment.
          */
+        /**
+         * CPU is a weak load signal for a node that mostly waits on LLMs, so the HPA
+         * takes further metrics (in-flight turns through a custom-metrics adapter) and
+         * lets either resource target be dropped — but never renders with no metric,
+         * which the API server would reject only at install time.
+         */
+        @Test
+        @DisplayName("the HPA takes extra metrics and a behavior, and refuses to render without any metric")
+        void hpaTakesCustomMetrics() throws IOException {
+            String hpa = read(HELM_TEMPLATES.resolve("hpa.yaml"));
+            assertTrue(hpa.contains("{{- with $a.extraMetrics }}"), "hpa.yaml must append autoscaling.extraMetrics");
+            assertTrue(hpa.contains("{{- with $a.behavior }}"), "hpa.yaml must render autoscaling.behavior");
+            assertTrue(hpa.contains("{{- if $a.targetCPUUtilizationPercentage }}")
+                    && hpa.contains("{{- if $a.targetMemoryUtilizationPercentage }}"),
+                    "each resource target must be optional, so an operator can scale on in-flight turns alone");
+            assertTrue(hpa.contains("needs at least one metric"), "an HPA with no metric must be refused at render time");
+            JsonNode autoscaling = YAML.readTree(HELM.resolve("values.yaml").toFile()).path("autoscaling");
+            assertTrue(autoscaling.path("extraMetrics").isArray() && autoscaling.path("extraMetrics").isEmpty(),
+                    "autoscaling.extraMetrics defaults to an empty list");
+            assertTrue(autoscaling.path("behavior").isObject() && autoscaling.path("behavior").isEmpty(),
+                    "autoscaling.behavior defaults to an empty map");
+        }
+
         @Test
         @DisplayName("replicas, autoscaling and rolling updates need cluster mode")
         void scalingRequiresClusterMode() throws IOException {
@@ -2981,7 +3004,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.8.0";
+        private static final String EXPECTED_CHART_VERSION = "2.9.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and

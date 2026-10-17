@@ -170,6 +170,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
+| `eddi.coordinator.dead-letter.max-bytes` | `1073741824` | Size cap of the dead-letter stream in bytes (`<= 0`: none). When full, new dead letters are refused — the oldest are kept for the operator — and stay in the node-local ring (audit entries go to the JSONL file) until there is room |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---

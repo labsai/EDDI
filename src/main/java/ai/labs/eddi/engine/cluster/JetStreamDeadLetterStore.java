@@ -11,6 +11,7 @@ import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.PublishOptions;
 import io.nats.client.PurgeOptions;
+import io.nats.client.api.DiscardPolicy;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
 import io.nats.client.api.RetentionPolicy;
@@ -29,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import io.nats.client.api.StreamInfo;
 import io.nats.client.api.StreamInfoOptions;
 import io.nats.client.api.StreamState;
@@ -39,7 +41,9 @@ import io.nats.client.api.Subject;
  * {@code eddi.nats.dead-letter-stream-name} ({@code EDDI_DEAD_LETTERS}),
  * subjects {@code eddi.<prefix>.dlq.turn.<conv>} and
  * {@code eddi.<prefix>.dlq.audit}, kept for
- * {@code eddi.coordinator.dead-letter.max-age} (7 d).
+ * {@code eddi.coordinator.dead-letter.max-age} (7 d) and at most
+ * {@code eddi.coordinator.dead-letter.max-bytes} (1 GiB; when full, new entries
+ * are refused and stay node-local).
  * <p>
  * Entries are read by sequence with {@code getNextMessage}, which skips deleted
  * sequences; the id of an entry is its stream sequence. This replaces the old
@@ -92,9 +96,16 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
 
     void provision() {
         ClusterConfig config = connections.config();
+        // Capped by size as well as age: a burst of failing turns with large inputs
+        // must
+        // not fill the NATS volume, which the leases and every other bucket share. When
+        // full the stream refuses new entries (DiscardPolicy.New) rather than dropping
+        // the oldest, which an operator may still have to replay; a refused dead letter
+        // stays in the node-local ring and is forwarded once there is room again.
         StreamConfiguration desired = StreamConfiguration.builder().name(stream).subjects(subjects.deadLetterWildcard())
-                .retentionPolicy(RetentionPolicy.Limits).maxAge(config.deadLetterMaxAge()).storageType(StorageType.File)
-                .duplicateWindow(DUPLICATE_WINDOW).replicas(config.natsReplicas()).build();
+                .retentionPolicy(RetentionPolicy.Limits).maxAge(config.deadLetterMaxAge())
+                .maxBytes(config.deadLetterMaxBytes() > 0 ? config.deadLetterMaxBytes() : -1).discardPolicy(DiscardPolicy.New)
+                .storageType(StorageType.File).duplicateWindow(DUPLICATE_WINDOW).replicas(config.natsReplicas()).build();
         JetStreamManagement jsm = connections.jetStreamManagement();
         try {
             try {
@@ -122,14 +133,25 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
      * answers only once its leader is elected: until then a publish fails with "no
      * responders". Without the wait, the first dead letter of a new cluster failed
      * over to the node-local ring (seen live).
+     * <p>
+     * The wait is bounded by time, not only by attempts. "No responders" comes back
+     * at once, so ten attempts take about two seconds; but against a NATS that
+     * accepts the connection and answers nothing, every attempt runs into the full
+     * request timeout, and ten of them held the failing turn's thread for over
+     * twenty seconds. A dead letter that does not get through within the budget
+     * goes to the node-local ring, which forwards it once NATS answers again.
      */
     private PublishAck publishOnceReady(String subject, byte[] payload, PublishOptions options) throws IOException, JetStreamApiException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_ATTEMPTS * READY_BACKOFF_MILLIS);
         IOException last = null;
         for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
             try {
                 return connections.jetStream().publish(subject, payload, options);
             } catch (IOException notReadyYet) {
                 last = notReadyYet;
+                if (!connections.isConnected() || System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_BACKOFF_MILLIS) >= deadline) {
+                    break;
+                }
                 try {
                     Thread.sleep(READY_BACKOFF_MILLIS);
                 } catch (InterruptedException e) {
@@ -185,6 +207,9 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             try {
                 ack = connections.jetStream().publish(subject, payload, options);
             } catch (IOException | JetStreamApiException noStreamYet) {
+                if (!connections.isConnected()) {
+                    throw noStreamYet; // not a missing stream: NATS is gone; the caller keeps it locally
+                }
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();

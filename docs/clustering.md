@@ -48,15 +48,17 @@ one node. NATS adds:
 |---|---|
 | Turns of one conversation never overlap anywhere | A conversation **lease** in the `<prefix>_LEASES` KV bucket (create = acquire, heartbeat every `lease.heartbeat-interval`, server-side TTL `lease.ttl`). Turns on one node stay FIFO. |
 | A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input (`reason: fenced`, both tokens). |
-| A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary. It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
+| A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary — and inside an LLM task's tool loop before its next model call or tool call, so a long agent loop does not keep spending and calling tools for a conversation another node now runs (the one call already in flight finishes). It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
 | Caches stay coherent | Cluster events on the `<prefix>_EVENTS` stream: secrets, global variables, connections, deployments, deleted workflows, agent triggers, user conversations, conversation states, GDPR restriction verdicts. A node that missed events (gap, long disconnect, outbox overflow) flushes everything. |
 | Deploy and undeploy reach every node | A `deployment.changed` event (about a second), plus a two-way reconciliation sweep every 10 s that undeploys what the database no longer lists as deployed. A deploy with `autoDeploy=false` (deliberately not recorded) is announced the same way and deployed, unrecorded, on every node. A request that reaches a node before its sweep has caught up deploys the agent there on demand and waits for it (at most 15 s) instead of answering 404. |
 | Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
 | Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node (the user travels as a hash). Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease. |
 | Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
-| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. |
-| HITL crash recovery does not hit live turns | No recovery at boot; a leader-elected sweep recovers only conversations without a lease that stayed unchanged for `hitl-recovery.min-age`. |
+| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. |
+| A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. |
+| HITL crash recovery does not hit live turns | No recovery at boot; a leader-elected sweep recovers only conversations without a lease that stayed unchanged for `hitl-recovery.min-age`. A drained node hands its leader lease over at once. |
+| A busy node does not lose its leases | Lease heartbeats run on a scheduler thread of their own, and renew all held leases side by side: reconnect work (outbox flush, bucket provisioning, stale-lease sweep runs on separate threads) or a NATS that answers slowly can no longer push a renewal past `lease.ttl`. |
 
 ## Ordering contract
 
@@ -86,7 +88,7 @@ out. Longer, each area applies its policy:
 | Cost budgets | local total | — |
 | A2A mappings, tool pages, Slack dedup, thread locks | node-local copy | — |
 | Audit chain positions | entries recorded unsequenced (verification: UNAVAILABLE, never BROKEN) | — |
-| Cache events | outbox, flushed on reconnect; overflow ⇒ cluster-wide resync | — |
+| Cache events | outbox, flushed on reconnect (and every 2 s while connected, for a publish that failed without a disconnect); overflow ⇒ cluster-wide resync, coalesced per node so N nodes asking at once cause one flush each | — |
 | Cancel / GDPR stop | this node + database CAS only | — |
 | HITL recovery | paused | — |
 
@@ -107,8 +109,9 @@ that set `degraded.turns=reject`. Security state always fails closed.
 | `kill -9` of an EDDI node mid-turn | Its clients see a reset. The conversation's lease expires within `lease.ttl` (or is taken over immediately after the pod restarts under the same name). The next turn runs normally; a late write from the dead node is refused by the fence. |
 | One NATS node lost (R3) | Nothing visible: JetStream keeps quorum. |
 | All NATS lost | Degraded mode as above; automatic recovery and resync when NATS returns. |
-| Rolling update | Readiness goes DOWN first, the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
-| Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary and dead-lettered (`lease-lost`). Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). |
+| NATS accepts connections but stops answering | Calls fail after `eddi.nats.request-timeout` (2 s) each. A failed turn's dead letter tries the stream for at most about 2 s before it is kept node-local; audit positions stop being requested for one timeout after a failure (entries are recorded unsequenced meanwhile), so a turn does not wait out one timeout per entry. |
+| Rolling update | Readiness goes DOWN first, the node drains (`eddi.shutdown.drain-timeout-seconds`), releases its leases (side by side, within a few NATS timeouts; what it misses expires by TTL) and leaves presence; queued turns that never got a lease are answered 409 + `Retry-After` and retried by clients on another node. |
+| Lease lost while a turn runs (long GC pause, partition, an administrator releasing it) | The turn is cancelled at the next task boundary (or the next round of an LLM tool loop) and dead-lettered (`lease-lost`). Its caller gets 409 + `Retry-After` unless the reply had already gone out. If it still reaches a write, the fence refuses it and it is dead-lettered (`fenced`). |
 
 ## Sizing
 
@@ -119,11 +122,36 @@ that set `degraded.turns=reject`. Security state always fails closed.
   ample for thousands of turns per second.
 - **EDDI**: unchanged per-node sizing; add replicas for throughput. The
   database is the shared bottleneck.
+- **Database connections**: every replica opens its own pool, so the database
+  sees *replicas × pool size*. The defaults are the drivers': MongoDB 100 per
+  node (`maxPoolSize` in the connection string), PostgreSQL 50 per node
+  (`quarkus.datasource.jdbc.max-size`). A stock PostgreSQL allows 100
+  connections in total (`max_connections`), so a third replica at the default
+  pool already fails to connect under load. Either lower the pool per node —
+  turns spend most of their time waiting on the LLM, not holding a connection,
+  so 10–20 is usually enough — raise `max_connections`, or put PgBouncer in
+  front in **session** pooling mode. Transaction pooling breaks EDDI: it takes
+  session-level advisory locks (the startup lock that runs the schema migrations
+  one replica at a time, and maintenance jobs such as the audit store's). Size
+  for the HPA's `maxReplicas`, not for the current replica count.
 - **Timings**: keep `lease.acquire-timeout` (45 s) below
   `systemRuntime.agentTimeoutInSeconds` (60 s) and above `lease.ttl` (20 s).
   An agent's turn deadline (`turnDeadlineMs`, or the caller's `X-EDDI-Turn-Deadline-Ms`)
   counts from the request's arrival, so time a turn spends waiting for its lease is
   spent from that budget too.
+
+### Autoscaling
+
+A node that waits on LLM answers runs hundreds of turns at little CPU, so an HPA on
+CPU alone may never scale up while turns queue or are refused with 503
+`capacity_exceeded`. Scale on in-flight turns per pod instead:
+`eddi_runtime_executor_active{pool="turn"}` against the node's limit
+`eddi_conversation_max_in_flight_turns` (about 1000 on a 3 GiB pod). Expose it to the
+HPA with a custom-metrics adapter (prometheus-adapter or KEDA's Prometheus scaler) and
+add it under the chart's `autoscaling.extraMetrics`; a target of about 70 % of the limit
+leaves room for the turns that arrive while a new pod starts. `autoscaling.behavior`
+takes scale-down stabilization — scaling in drains a pod for up to
+`eddi.shutdown.drain-timeout-seconds`, so avoid flapping.
 
 ## Runbook
 
@@ -143,7 +171,7 @@ API behind it, and why each action is safe, is in
 | `eddi_coordinator_dead_letters > 0` | `GET /administration/coordinator/dead-letters` | Replay (`POST …/{id}/replay`) or discard (`DELETE …/{id}`) — see [Coordinator Admin](coordinator-admin.md). |
 | An agent still answers after undeploy | Node log ("Undeployed agent … on this node"), `deployment.propagated` entries on the activity timeline | It is undeployed within ~1 s (event) or 10–20 s (sweep); *Reconcile deployments* runs the sweep on every node at once. |
 | A conversation answers 409 for a long time | The console's stuck-conversation lookup, the lease list (`HOLDER_GONE`, `NOT_RENEWED`, `LONG_RUNNING`) | Wait for the lease TTL, or force-release it — the fence keeps a late write of the old holder out. |
-| A node must be restarted without failed turns | Its node card | *Drain* it: no new turns reach it (409 + `Retry-After`, readiness `DOWN`), running ones finish; restart it, or *Undrain*. |
+| A node must be restarted without failed turns | Its node card | *Drain* it: no new turns reach it (409 + `Retry-After`, readiness `DOWN`), running ones finish, and a leader lease it held passes to another node; restart it, or *Undrain*. |
 
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
