@@ -44,6 +44,9 @@ services:
     # explicit, deliberate choice rather than the default.
     ports:
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+      # 7443 is Quarkus' HTTPS port. Nothing listens on it until a TLS certificate
+      # is configured (docs/security.md, "TLS Directly in Quarkus") — the mapping is
+      # here for that case and refuses connections otherwise.
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_HTTPS_PORT:-7443}:7443"
       # - "127.0.0.1:5005:5005"
     depends_on:

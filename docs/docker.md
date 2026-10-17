@@ -19,6 +19,11 @@ refuses cross-site `POST`/`PUT`/`PATCH`/`DELETE` from origins not in
 as before; if you reach EDDI under another name, add it to the list. See
 [Running without authentication](security.md#running-without-authentication).
 
+The stack also publishes `7443` (`EDDI_HTTPS_PORT`), Quarkus' HTTPS port. Nothing
+listens there until you configure a TLS certificate
+([TLS Directly in Quarkus](security.md#option-2-tls-directly-in-quarkus)); until then a
+connection to it is refused.
+
 ### Publishing EDDI on the network
 
 `EDDI_BIND` is the host interface EDDI is published on (`127.0.0.1` by default,

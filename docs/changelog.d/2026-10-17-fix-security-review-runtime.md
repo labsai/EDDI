@@ -27,12 +27,11 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   exists, rendered with `docker compose config`. That sweep also found
   `docs/mcp-server.md` telling users to run `docker compose -f docker-compose.auth.yml
   down -v` on its own, which compose refuses; fixed.
-
-**Files:** [`docker-compose.postgres-only.yml`](../../docker-compose.postgres-only.yml),
-[`docker-compose.cluster.yml`](../../docker-compose.cluster.yml),
-[`docker-compose.auth.yml`](../../docker-compose.auth.yml),
-[`ComposeStackTest.java`](../../src/test/java/ai/labs/eddi/ComposeStackTest.java),
-[`docker.md`](../docker.md), [`mcp-server.md`](../mcp-server.md)
+  Files: [`docker-compose.postgres-only.yml`](../../docker-compose.postgres-only.yml),
+  [`docker-compose.cluster.yml`](../../docker-compose.cluster.yml),
+  [`docker-compose.auth.yml`](../../docker-compose.auth.yml),
+  [`ComposeStackTest.java`](../../src/test/java/ai/labs/eddi/ComposeStackTest.java),
+  [`docker.md`](../docker.md), [`mcp-server.md`](../mcp-server.md)
 
 - **M7 — the unauthenticated quick start had no `Host`/`Origin` check.** Loopback binding
   stops the network, not the browser: a DNS-rebinding page (`Host: evil.example` resolved to
@@ -55,11 +54,10 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   Open WebUI reach EDDI by service name), the kustomize base and quickstart to the Service's
   in-cluster names, and the Helm chart (when OIDC is off) to the Service names plus any
   acknowledged ingress host. Chart `2.8.0` → `2.9.0`.
-
-**Files:** [`UnauthenticatedRequestGuard.java`](../../src/main/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuard.java),
-[`UnauthenticatedRequestGuardTest.java`](../../src/test/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuardTest.java),
-[`security.md`](../security.md#running-without-authentication),
-[`configuration-reference.md`](../configuration-reference.md)
+  Files: [`UnauthenticatedRequestGuard.java`](../../src/main/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuard.java),
+  [`UnauthenticatedRequestGuardTest.java`](../../src/test/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuardTest.java),
+  [`security.md`](../security.md#running-without-authentication),
+  [`configuration-reference.md`](../configuration-reference.md)
 
 - **L7 — runtime defaults.** Done:
   - **HSTS.** The GCP provisioner's nginx sends `Strict-Transport-Security: max-age=31536000`
@@ -104,12 +102,11 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   plaintext service-to-service traffic, NATS without auth and the unauthenticated MongoDB in
   the kustomize quickstart, and `quarkus.log.console.level=DEBUG` (the handler level only;
   categories stay at INFO).
-
-**Files:** [`HstsHeaderFilter.java`](../../src/main/java/ai/labs/eddi/engine/security/HstsHeaderFilter.java),
-[`ClusterHealthCheck.java`](../../src/main/java/ai/labs/eddi/engine/cluster/ClusterHealthCheck.java),
-[`eddi-realm.json`](../../keycloak/eddi-realm.json),
-[`provision-vm.sh`](../../gcp/provision-vm.sh),
-[`network-policy.yaml`](../../k8s/overlays/production/network-policy.yaml)
+  Files: [`HstsHeaderFilter.java`](../../src/main/java/ai/labs/eddi/engine/security/HstsHeaderFilter.java),
+  [`ClusterHealthCheck.java`](../../src/main/java/ai/labs/eddi/engine/cluster/ClusterHealthCheck.java),
+  [`eddi-realm.json`](../../keycloak/eddi-realm.json),
+  [`provision-vm.sh`](../../gcp/provision-vm.sh),
+  [`network-policy.yaml`](../../k8s/overlays/production/network-policy.yaml)
 
 - **L8 — installer integrity (the minimal version).** The release job in `ci.yml` now
   checks out the tag, hashes every file the installers download (`docker-compose*.yml`, the
@@ -127,6 +124,37 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   CLI's `eddi update` refresh path does not verify, there is no cosign signature on the
   asset, compose still defaults to `labsai/eddi:latest`, and `mcp-sidecar/Dockerfile`'s
   unpinned `nodejs npm` is untouched.
+  Files: [`install.sh`](../../install.sh), [`install.ps1`](../../install.ps1),
+  [`ci.yml`](../../.github/workflows/ci.yml), [`security.md`](../security.md#installer-downloads)
+  
 
-**Files:** [`install.sh`](../../install.sh), [`install.ps1`](../../install.ps1),
-[`ci.yml`](../../.github/workflows/ci.yml), [`security.md`](../security.md#installer-downloads)
+- **L12/L13 — small items.** `quarkus.http.cors.exposed-headers` now exposes
+  `Mcp-Session-Id` and `Retry-After` next to `Location`, so a browser-based MCP client on an
+  allowed origin can read its session id and a 429/503's back-off. The `7443` mapping the
+  compose stacks publish is documented rather than removed: it is Quarkus' HTTPS port,
+  opened only once a certificate is configured, and removing it would have touched every
+  installer's port resolution for no security gain (nothing listens). Dependabot #716 was
+  *not* stale, contrary to the review: it bumps the `eclipse-temurin:25-jre` digest in
+  `src/main/docker/Dockerfile.demo` (the Open WebUI demo image), which still uses that base
+  — nothing changed here.
+  Files: [`application.properties`](../../src/main/resources/application.properties),
+  [`docker-compose.yml`](../../docker-compose.yml), [`docker.md`](../docker.md)
+
+### Design decisions
+
+- `bind-guard` is duplicated into every base stack rather than moved to an overlay, and a
+  test pins the copies together — moving it out would have left `docker compose up` on a
+  base alone unguarded.
+- The M7 guard answers any IP-literal `Host` (see above) and reads only the raw `Host`
+  header; `*` in the allow-list switches the Host check off, logged at boot.
+- `/q/health` detail is gated in the health check (`eddi.health.verbose`) instead of
+  narrowing the public permit, because the sensitive data is in `/q/health/ready` itself.
+- Installer checksum verification is warn-only when no `SHA256SUMS` exists, so every
+  release before this one keeps installing.
+
+### What's next
+
+- The Platform Operator (`ui/manager/src/lib/operator/system-prompt.ts`, WS-F's area) does
+  not yet know about `eddi.security.unauthenticated.allowed-hosts`, `eddi.health.verbose` or
+  `eddi.security.hsts.enabled`; an admin asking "why 421?" will not get an answer from it.
+- L7 and L8 items listed as not done above.

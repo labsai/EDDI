@@ -49,6 +49,9 @@ services:
     # Set EDDI_BIND=0.0.0.0 in .env to expose it — after enabling auth.
     ports:
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+      # 7443 is Quarkus' HTTPS port. Nothing listens on it until a TLS certificate
+      # is configured (docs/security.md, "TLS Directly in Quarkus") — the mapping is
+      # here for that case and refuses connections otherwise.
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_HTTPS_PORT:-7443}:7443"
     depends_on:
       postgres:
