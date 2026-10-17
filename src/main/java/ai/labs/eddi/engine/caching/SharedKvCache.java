@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.caching;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.KvKeys;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -45,8 +46,25 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
 
     private static final Logger LOGGER = Logger.getLogger(SharedKvCache.class);
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
-    /** Value classes a shared entry may name; anything else is ignored on read. */
-    private static final String[] ALLOWED_PACKAGES = {"ai.labs.eddi.", "java.lang.", "java.util."};
+    /**
+     * The exact value classes the shared caches store (see
+     * {@link CacheFactory#SHARED_BUCKETS} and their callers): nonce, erasing and
+     * de-duplication flags, A2A context ids, A2A task records and principal
+     * indexes, paginated tool responses and channel thread targets. The class name
+     * is read from the NATS bucket and loaded, so it is matched exactly: the
+     * package-prefix list this replaced admitted any class in {@code java.util.}
+     * and {@code java.lang.} — {@code java.util.logging.FileHandler} among them —
+     * for whoever could write the bucket (security review 2026-10-17, L15). A new
+     * shared cache with a new value type must be added here; a value of any other
+     * class is refused on read and logged.
+     */
+    static final Set<String> ALLOWED_VALUE_CLASSES = Set.of(
+            "java.lang.Boolean",
+            "java.lang.String",
+            "ai.labs.eddi.engine.a2a.A2AModels$A2ATaskRecord",
+            "ai.labs.eddi.engine.a2a.CachedA2ATaskStore$PrincipalIndex",
+            "ai.labs.eddi.modules.llm.tools.PaginatedResponseStore$PaginatedResponse",
+            "ai.labs.eddi.configs.channels.model.ChannelTarget");
 
     /**
      * Most keys remembered as node-local only; beyond it a refused value is simply
@@ -92,11 +110,9 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         try {
             JsonNode node = JSON.readTree(bytes);
             String type = node.path("t").asText("");
-            boolean allowed = false;
-            for (String prefix : ALLOWED_PACKAGES) {
-                allowed |= type.startsWith(prefix);
-            }
-            if (!allowed) {
+            if (!ALLOWED_VALUE_CLASSES.contains(type)) {
+                LOGGER.errorf("Refused a shared cache value in %s naming class '%s', which no shared cache stores", shared.bucket(),
+                        LogSanitizer.sanitize(type.length() > 200 ? type.substring(0, 200) : type));
                 return null;
             }
             return (V) JSON.treeToValue(node.get("v"), Class.forName(type, false, SharedKvCache.class.getClassLoader()));

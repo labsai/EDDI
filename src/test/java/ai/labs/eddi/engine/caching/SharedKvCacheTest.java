@@ -21,6 +21,7 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -284,5 +285,31 @@ class SharedKvCacheTest {
         assertSame(writer, reader);
         assertEquals("big", reader.get("page-1"));
         assertNotSame(writer, factory.getCache("paginated-tool-responses", Duration.ofMinutes(5)), "another TTL is another local cache");
+    }
+
+    /**
+     * Security review L15: the value's class name comes from the NATS bucket and is
+     * loaded, so only the exact classes the shared caches store are accepted.
+     */
+    @Test
+    @DisplayName("a shared entry naming any class but the stored value types is refused, not loaded")
+    void decodeAcceptsOnlyTheStoredValueClasses() {
+        var kv = new InMemorySharedKv("X", Duration.ofMinutes(5));
+        ICache<String, Object> cache = new SharedKvCache<>(local("l15"), kv, false);
+        for (String type : new String[]{"java.util.logging.FileHandler", "java.util.HashMap", "java.lang.ProcessBuilder",
+                "ai.labs.eddi.engine.caching.CacheFactory"}) {
+            kv.put(KvKeys.hashed("k-" + type), ("{\"t\":\"" + type + "\",\"v\":{}}").getBytes(StandardCharsets.UTF_8));
+            assertNull(cache.get("k-" + type), type + " must be refused");
+        }
+        kv.put(KvKeys.hashed("ok"), "{\"t\":\"java.lang.String\",\"v\":\"fine\"}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("fine", cache.get("ok"));
+    }
+
+    @Test
+    @DisplayName("every allow-listed value class exists, so a rename cannot silently disable a shared cache")
+    void allowListedClassesExist() {
+        for (String type : SharedKvCache.ALLOWED_VALUE_CLASSES) {
+            assertDoesNotThrow(() -> Class.forName(type, false, SharedKvCache.class.getClassLoader()), type);
+        }
     }
 }
