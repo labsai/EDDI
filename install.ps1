@@ -1004,10 +1004,12 @@ function Get-ComposeFiles {
                     # This list must stay in step with every file-type bind mount in
                     # docker-compose.monitoring.yml. Adding a dashboard there without
                     # adding it here breaks -WithMonitoring outright.
-                    # -Recurse as well as -Force: what is in the way is most
-                    # likely a DIRECTORY left by a previous run's failed mount,
-                    # and -Force alone will not remove one.
-                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
+                    # Only a DIRECTORY left by a previous run's failed mount is
+                    # removed (-Recurse, since -Force alone will not remove one).
+                    # An existing FILE is a valid dashboard from an earlier install:
+                    # Save-VerifiedDownload never touched it, and deleting it would
+                    # turn a failed download into a stack that cannot restart.
+                    if (Test-Path $mfTarget -PathType Container) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
                     Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }
