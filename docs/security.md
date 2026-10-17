@@ -138,6 +138,14 @@ a nameless caller with `403` as a second line of defence. Background work
 (schedule fires, group members, sub-agents) never authenticates a request and is
 unaffected.
 
+The principal is also the id a share is stored under and the `subject` the
+[user directory](workspaces.md#finding-people-the-user-directory) returns beside a
+person's name, so whatever claim it comes from is visible to anyone who can share
+with that person. Where `preferred_username` is an email address, set
+`quarkus.oidc.token.principal-claim` to a stable, non-address claim such as `sub`
+if colleagues' addresses are not everyone's business; the directory hides
+addresses it holds as *email* or *username*, but cannot hide the principal itself.
+
 If you see that WARN, either add one of those claims to the access token — for the
 shipped realm, [Identity claims, and realms imported from EDDI
 6.1.0–6.4.0](#identity-claims-and-realms-imported-from-eddi-610640) below is the

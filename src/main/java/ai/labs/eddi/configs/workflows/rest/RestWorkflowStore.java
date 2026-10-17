@@ -192,11 +192,11 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             return;
         }
         for (Map.Entry<String, URI> reference : referencedResources(workflowConfiguration).entrySet()) {
-            String resourceId = reference.getKey();
-            if (alreadyReferenced.contains(resourceId)) {
+            if (alreadyReferenced.contains(reference.getKey())) {
                 continue;
             }
             URI uri = reference.getValue();
+            String resourceId = RestUtilities.extractResourceId(uri).getId();
             String label = "configuration referenced by this workflow (" + withoutQuery(uri) + ")";
             if (USE_ONLY_REFERENCE_TYPES.contains(uri.getHost())) {
                 resourceAccessGuard.requireUseAccess(resourceId, label);
@@ -223,9 +223,13 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     /**
      * Every {@code eddi://} resource a workflow names — each step's
      * {@code config.uri} and each extension element's {@code config.uri} — keyed by
-     * resource id. The same shape {@link #updateResourceInWorkflow} walks; anything
-     * that is not a parseable {@code eddi://} reference with an id is skipped,
-     * since the engine cannot resolve it either.
+     * resource type and id ({@code <host>|<id>}). The type is part of the key
+     * because it decides the check: an agent reference needs {@code USE}, a
+     * configuration {@code VIEW}, and keying by id alone would let an agent URI
+     * naming a configuration's id stand in for the configuration and get it the
+     * weaker check. The same shape {@link #updateResourceInWorkflow} walks;
+     * anything that is not a parseable {@code eddi://} reference with an id is
+     * skipped, since the engine cannot resolve it either.
      */
     static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
         Map<String, URI> references = new LinkedHashMap<>();
@@ -272,7 +276,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(uri);
         if (resourceId != null && resourceId.getId() != null && !resourceId.getId().isBlank()) {
-            references.putIfAbsent(resourceId.getId(), uri);
+            references.putIfAbsent(uri.getHost() + "|" + resourceId.getId(), uri);
         }
     }
 

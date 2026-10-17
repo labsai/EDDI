@@ -190,7 +190,9 @@ its search is deliberately narrow:
   as one: it is never used as a person's label, and as the secondary line it
   follows the same rule as the email. (The principal is the id a grant is
   stored under, so where the identity provider uses the address as the
-  principal, the grant's `subject` carries it regardless.)
+  principal, the grant's `subject` carries it regardless — see
+  [the token must name the user](security.md#the-token-must-name-the-user) for
+  the `principal-claim` setting that avoids this.)
 - **Teams are what the token carried at the person's last recorded sign-in.**
   The directory is refreshed from the token about every ten minutes while
   someone is signed in; a person removed from a team keeps that membership in

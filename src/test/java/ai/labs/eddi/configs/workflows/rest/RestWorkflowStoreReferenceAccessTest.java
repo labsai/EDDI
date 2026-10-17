@@ -134,6 +134,25 @@ class RestWorkflowStoreReferenceAccessTest {
     }
 
     @Test
+    @DisplayName("an agent reference naming a configuration's id does not get the configuration the weaker USE check")
+    void sameIdUnderTwoTypesIsCheckedForEach() throws Exception {
+        // USE grants nothing about a configuration, so the type must be part of what
+        // makes two references "the same": keyed by id alone, the agent URI (first)
+        // would stand in for the LLM configuration and only USE would be checked.
+        var config = new WorkflowConfiguration();
+        var agentStep = new WorkflowStep();
+        agentStep.setType(URI.create("eddi://ai.labs.llm"));
+        agentStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.agent/agentstore/agents/" + FOREIGN_LLM + "?version=1")));
+        config.getWorkflowSteps().add(agentStep);
+        config.getWorkflowSteps().addAll(workflow(FOREIGN_LLM).getWorkflowSteps());
+
+        assertThrows(ForbiddenException.class, () -> sut.createWorkflow(config));
+
+        verify(guard).requireAccess(eq(FOREIGN_LLM), eq(AccessLevel.VIEW), anyString());
+        verify(workflowStore, never()).create(any());
+    }
+
+    @Test
     @DisplayName("without enforced workspaces (or for an administrator) nothing is checked")
     void noOpWhenNotEnforced() throws Exception {
         var permissive = mock(ResourceAccessGuard.class);
