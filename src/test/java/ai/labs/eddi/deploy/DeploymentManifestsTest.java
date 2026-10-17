@@ -4726,6 +4726,12 @@ class DeploymentManifestsTest {
      * Two spellings, because two shells resolve commands differently: PowerShell on
      * Windows runs what PATHEXT says is executable, and an extensionless file is
      * not that.
+     * <p>
+     * The batch stub names Windows' {@code find.exe} by full path. A bare
+     * {@code find} resolves through the inherited PATH, and a Maven started from
+     * Git Bash puts Git's Unix {@code find} ahead of System32: that one rejects the
+     * quoted argument, the {@code errorlevel 1} branch takes it for "not the
+     * probe", and every probe exits 0 — every mode reads as "a Secret is there".
      */
     private static Path kubectlStub(String forShell, boolean batch) throws IOException {
         Path directory = Files.createDirectories(Path.of("target", "kubectl-stub", forShell));
@@ -4733,7 +4739,7 @@ class DeploymentManifestsTest {
             Files.writeString(directory.resolve("kubectl.cmd"), """
                     @echo off
                     >>"%KUBECTL_LOG%" echo %*
-                    echo %*| find "get secret eddi-secrets" >nul
+                    echo %*| "%SystemRoot%\\System32\\find.exe" "get secret eddi-secrets" >nul
                     if errorlevel 1 goto ok
                     if "%KUBECTL_STUB_MODE%"=="exists" goto exists
                     if "%KUBECTL_STUB_MODE%"=="notfound" goto notfound
