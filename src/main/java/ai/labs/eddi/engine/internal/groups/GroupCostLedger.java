@@ -86,6 +86,17 @@ public final class GroupCostLedger {
         if (cost == null || !Double.isFinite(cost) || cost < 0.0) {
             return;
         }
+        // A turn that timed out on a conversation since retired can still complete,
+        // and its callback arrives with the SAME attributionKey. Recorded there it
+        // would overwrite the replacement conversation's total with the ended one's
+        // (or be counted again beside its retired entry). The snapshot names the
+        // conversation it came from, so route it to that conversation's retired key.
+        String activeConversationId = gc.getMemberConversationIds().get(attributionKey);
+        String conversationId = snapshot.getConversationId();
+        if (activeConversationId != null && conversationId != null && !activeConversationId.equals(conversationId)) {
+            recordRetired(gc, attributionKey + ":" + conversationId, cost);
+            return;
+        }
         recordAndReSum(gc, attributionKey, cost);
     }
 
@@ -107,8 +118,20 @@ public final class GroupCostLedger {
         synchronized (gc.getMemberCosts()) {
             Double spent = gc.getMemberCosts().remove(attributionKey);
             if (spent != null) {
-                gc.getMemberCosts().merge(attributionKey + ":" + endedConversationId, spent, Math::max);
+                recordRetired(gc, attributionKey + ":" + endedConversationId, spent);
             }
+        }
+    }
+
+    /**
+     * A retired conversation's entry only ever grows: its running total is
+     * monotonic, so keeping the larger value makes a late callback carrying an
+     * older total harmless, whichever order it and the retirement run in.
+     */
+    private static void recordRetired(GroupConversation gc, String retiredKey, double cost) {
+        synchronized (gc.getMemberCosts()) {
+            gc.getMemberCosts().merge(retiredKey, cost, Math::max);
+            gc.setTotalCost(gc.getMemberCosts().values().stream().mapToDouble(Double::doubleValue).sum());
         }
     }
 

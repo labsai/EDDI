@@ -52,6 +52,12 @@ class GroupCostLedgerTest {
         return snapshot;
     }
 
+    private SimpleConversationMemorySnapshot withCost(Double conversationCost, String conversationId) {
+        var snapshot = withCost(conversationCost);
+        snapshot.setConversationId(conversationId);
+        return snapshot;
+    }
+
     /**
      * A persisted member conversation whose steps each carry their own
      * {@code audit:cost}, as {@code LlmTask} writes it: one value per step, the
@@ -226,6 +232,39 @@ class GroupCostLedgerTest {
         assertEquals(0.30, gc.getMemberCosts().get("agent-a:conv-ended"));
         assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
         assertEquals(0.35, gc.getTotalCost(), 1e-9, "the fresh conversation must not overwrite the ended one's spend");
+    }
+
+    @Test
+    void lateCallbackFromARetiredConversation_landsOnItsRetiredKey() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05, "conv-new"));
+
+        // A turn that timed out on the ended conversation completes now, with that
+        // conversation's (larger) final total, under the same attribution key.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.40, "conv-ended"));
+
+        assertEquals(0.05, gc.getMemberCosts().get("agent-a"), "the replacement conversation's total must not be overwritten");
+        assertEquals(0.40, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.45, gc.getTotalCost(), 1e-9);
+    }
+
+    @Test
+    void lateCallbackBeforeRetirement_stillCountedOnce() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+        // An older total arriving after retirement must not lower the retired entry.
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.20, "conv-ended"));
+
+        assertEquals(0.30, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertNull(gc.getMemberCosts().get("agent-a"));
+        assertEquals(0.30, gc.getTotalCost(), 1e-9);
     }
 
     @Test

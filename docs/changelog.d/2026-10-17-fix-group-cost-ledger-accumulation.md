@@ -44,6 +44,12 @@
   is the `key:child` shape nested groups already use, and the Manager's
   per-member digest already sums it. Before, the fresh conversation's first
   total overwrote the member's whole earlier spend.
+- **Late callbacks from a retired conversation.** A turn that timed out on the
+  ended conversation can still finish, and its callback arrives under the same
+  key. The ledger compares the snapshot's conversation id with the member's
+  active one and routes a mismatch to `key:<thatConversationId>`. That entry
+  keeps the larger value, so the callback and the retirement can run in either
+  order without double-counting or overwriting the replacement's total.
 
 ### Design decisions
 
@@ -70,4 +76,6 @@
 - Mutation-checked. Each of these reverts fails the new tests:
   - restoring the last-step read;
   - summing only the projected steps;
-  - dropping the `retireConversation` call.
+  - dropping the `retireConversation` call;
+  - removing the late-callback routing;
+  - recording a retired entry by plain replacement instead of the larger value.
