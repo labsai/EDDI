@@ -941,7 +941,10 @@ class ToolLoopRunner {
                                        List<ChatMessage> currentMessages, List<Map<String, Object>> trace,
                                        Map<String, String> toolSources, ToolExchangeRecorder exchangeRecorder,
                                        Supplier<ToolCallResult> execution) {
-        if (guard == null) {
+        // A nameless call (the approval gate sends it through) has no identity to track
+        // and no name for a trace entry; it stays on the unguarded path and degrades to
+        // "tool not found" as before.
+        if (guard == null || request.name() == null) {
             addResult(currentMessages, call, request, execution.get().governed(), exchangeRecorder);
             return;
         }

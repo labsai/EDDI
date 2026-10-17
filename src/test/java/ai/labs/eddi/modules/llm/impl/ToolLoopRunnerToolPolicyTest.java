@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -87,7 +88,7 @@ class ToolLoopRunnerToolPolicyTest {
         service.init();
 
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(), null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
@@ -243,6 +244,36 @@ class ToolLoopRunnerToolPolicyTest {
             assertTrue(!firstResult.equals(raw) && !firstResult.stripLeading().startsWith("{"),
                     "precondition: the model is shown a guardrail-wrapped result, not the raw JSON: " + firstResult);
             assertEquals(1, executed.get(), "refused although the governed text no longer looks like a 403");
+        }
+
+        /**
+         * Maps that tolerate a null key, like the real ones; Map.of throws on a null
+         * lookup.
+         */
+        private AgentOrchestrator.ToolSetup hashMapSetup() {
+            var spec = ToolSpecification.builder().name("getUser").description("d").build();
+            return new AgentOrchestrator.ToolSetup(List.of(spec), new HashMap<>(), new HashMap<>(), List.of(spec),
+                    new HashMap<>(), new HashMap<>(), new HashMap<>());
+        }
+
+        @Test
+        @DisplayName("a repeated nameless call degrades to tool-not-found instead of failing the turn")
+        void namelessRepeatedCallDoesNotFailTheTurn() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                return requests.size() <= 3
+                        ? ChatResponse.builder().aiMessage(AiMessage.from(
+                                ToolExecutionRequest.builder().id("call_" + requests.size()).name(null).arguments("{}").build())).build()
+                        : ChatResponse.builder().aiMessage(AiMessage.from("done")).build();
+            });
+
+            var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), hashMapSetup(), task, memory("conv-1"), null, -1,
+                    0, null);
+
+            assertEquals("done", result.response());
         }
 
         @Test
