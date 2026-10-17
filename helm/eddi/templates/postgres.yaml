@@ -1,4 +1,12 @@
 {{- if .Values.postgres.enabled }}
+{{- $pgSecretName := .Values.postgres.existingSecret | default (printf "%s-postgres" (include "eddi.fullname" .)) }}
+{{- /*
+  Skipped when postgres.existingSecret names an operator-managed Secret carrying
+  the same four keys (deployment.yaml projects postgres-secrets.properties out
+  of it, the StatefulSet below reads POSTGRES_*); nothing then passes through
+  values.
+*/}}
+{{- if not .Values.postgres.existingSecret }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -20,6 +28,7 @@ stringData:
     quarkus.datasource.username={{ .Values.postgres.username }}
     quarkus.datasource.password={{ $pgPassword }}
 ---
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -60,17 +69,17 @@ spec:
             - name: POSTGRES_DB
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "eddi.fullname" . }}-postgres
+                  name: {{ $pgSecretName }}
                   key: POSTGRES_DB
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "eddi.fullname" . }}-postgres
+                  name: {{ $pgSecretName }}
                   key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "eddi.fullname" . }}-postgres
+                  name: {{ $pgSecretName }}
                   key: POSTGRES_PASSWORD
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata

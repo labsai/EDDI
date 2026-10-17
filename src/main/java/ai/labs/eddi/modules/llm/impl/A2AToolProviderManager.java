@@ -10,10 +10,12 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
+import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +23,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -66,6 +69,14 @@ public class A2AToolProviderManager {
     private final SecretResolver secretResolver;
 
     /**
+     * Enforces a vault apiKey's {@code allowedHosts} against the peer each request
+     * goes to. Field-injected so the constructors keep their shape; null only in
+     * tests that construct the manager directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
+
+    /**
      * Built on first use, not in the constructor.
      * <p>
      * This bean is {@code @ApplicationScoped}, so an eager client meant every EDDI
@@ -77,6 +88,15 @@ public class A2AToolProviderManager {
     private volatile HttpClient httpClient;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
+    private final int maxSchemaBytes;
+    private final long maxSchemaBytesPerAgent;
+
+    /**
+     * Optional, as in the MCP manager: the back-compat constructors build this
+     * class without a container, and governance must not depend on a registry.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
 
     /**
      * Interrupts a response-body read that stalled after the headers arrived — see
@@ -123,6 +143,12 @@ public class A2AToolProviderManager {
      */
     static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
 
+    /** As the MCP manager's {@code DEFAULT_MAX_SCHEMA_BYTES} (M7). */
+    static final int DEFAULT_MAX_SCHEMA_BYTES = 32_768;
+
+    /** As the MCP manager's per-server cap, per A2A peer (M7). */
+    static final long DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT = 524_288L;
+
     private final Map<String, CircuitState> circuitBreakers = new ConcurrentHashMap<>();
 
     /**
@@ -144,11 +170,15 @@ public class A2AToolProviderManager {
     public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.a2a.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars,
+            @ConfigProperty(name = "eddi.a2a.tool-schema.max-bytes", defaultValue = "32768") int maxSchemaBytes,
+            @ConfigProperty(name = "eddi.a2a.tool-schema.max-bytes-per-agent", defaultValue = "524288") long maxSchemaBytesPerAgent,
             ConnectionResolver connectionResolver) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
+        this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
+        this.maxSchemaBytesPerAgent = maxSchemaBytesPerAgent > 0 ? maxSchemaBytesPerAgent : DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT;
         this.connectionResolver = connectionResolver;
     }
 
@@ -182,7 +212,8 @@ public class A2AToolProviderManager {
      * and constructed the same way.
      */
     A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled) {
-        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, DEFAULT_MAX_DESCRIPTION_CHARS, null);
+        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_MAX_SCHEMA_BYTES,
+                DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, null);
     }
 
     /**
@@ -196,7 +227,8 @@ public class A2AToolProviderManager {
      */
     A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled,
             ConnectionResolver connectionResolver) {
-        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, DEFAULT_MAX_DESCRIPTION_CHARS, connectionResolver);
+        this(globalVariableResolver, secretResolver, ssrfProtectionEnabled, DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_MAX_SCHEMA_BYTES,
+                DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver);
     }
 
     /**
@@ -278,6 +310,11 @@ public class A2AToolProviderManager {
 
         // Build the parameter schema for the "message" parameter
         JsonObjectSchema paramSchema = JsonObjectSchema.builder().addStringProperty("message", "The message to send to the agent").build();
+        // M7: the schema is built here, not read off the card, so governing it is
+        // a symmetry with the MCP manager — the same walk, the same caps, so a
+        // future skill-level inputSchema taken from the card is governed from day
+        // one rather than being the next finding.
+        var schemaBudget = new ToolSchemaGovernor.ServerBudget(maxSchemaBytesPerAgent);
 
         List<Map<String, Object>> skills = (List<Map<String, Object>>) agentCard.get("skills");
         if (skills == null || skills.isEmpty()) {
@@ -288,6 +325,10 @@ public class A2AToolProviderManager {
             ToolSpecification spec = ToolSpecification.builder().name(toolName).description(governDescription(desc, agentName))
                     .parameters(paramSchema)
                     .build();
+            spec = governSchema(spec, agentName, schemaBudget);
+            if (spec == null) {
+                return;
+            }
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(endpoint, config));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
@@ -295,6 +336,7 @@ public class A2AToolProviderManager {
         }
 
         // Create a tool for each skill
+        Set<String> seenToolNames = new HashSet<>();
         for (Map<String, Object> skill : skills) {
             String skillId = (String) skill.getOrDefault("id", "skill");
             String skillName = (String) skill.getOrDefault("name", skillId);
@@ -308,6 +350,15 @@ public class A2AToolProviderManager {
             }
 
             String toolName = sanitizeToolName(agentName + "_" + skillId);
+            // A repeated skill id would produce the same tool name: the later copy
+            // would silently replace the executor while both specs reached the model
+            // — and, charged before the replacement, eat the per-agent schema budget
+            // of a distinct skill further down the card.
+            if (!seenToolNames.add(toolName)) {
+                LOGGER.warnf("A2A agent '%s' advertises skill '%s' more than once — keeping the first, dropping the duplicate",
+                        sanitizeForLog(agentName), sanitizeForLog(toolName));
+                continue;
+            }
 
             // The provenance suffix is appended AFTER governance so a remote card
             // cannot forge it: sanitizing the concatenation would let a skill whose
@@ -316,6 +367,10 @@ public class A2AToolProviderManager {
             String description = governDescription(skillDesc, agentName) + " (via A2A agent: " + governDescription(agentName, agentName) + ")";
 
             ToolSpecification spec = ToolSpecification.builder().name(toolName).description(description).parameters(paramSchema).build();
+            spec = governSchema(spec, agentName, schemaBudget);
+            if (spec == null) {
+                continue;
+            }
 
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(endpoint, config));
@@ -342,6 +397,57 @@ public class A2AToolProviderManager {
                     maxDescriptionChars);
         }
         return RemoteTextGovernor.govern(description, maxDescriptionChars);
+    }
+
+    /**
+     * Governs a tool's parameter schema exactly as {@code McpToolProviderManager}
+     * does (M7): every description, title and enum value redacted and capped, the
+     * serialised size bounded per tool ({@code eddi.a2a.tool-schema.max-bytes}) and
+     * per peer ({@code eddi.a2a.tool-schema.max-bytes-per-agent}), each change
+     * counted in {@code eddi.a2a.tool-schema.governed}.
+     *
+     * @return the governed spec, or {@code null} when the tool must be dropped
+     */
+    ToolSpecification governSchema(ToolSpecification spec, String agentName, ToolSchemaGovernor.ServerBudget budget) {
+        ToolSchemaGovernor.Result result = ToolSchemaGovernor.govern(spec.parameters(), maxDescriptionChars, maxSchemaBytes);
+        if (result.dropped()) {
+            LOGGER.warnf("A2A tool '%s' of agent '%s' dropped: its parameter %s", sanitizeForLog(spec.name()), sanitizeForLog(agentName),
+                    sanitizeForLog(result.dropReason()));
+            countSchema("dropped");
+            return null;
+        }
+        if (!budget.admit(result.bytes())) {
+            LOGGER.warnf("A2A tool '%s' of agent '%s' dropped: the peer's tool schemas already fill %d of the %d bytes allowed per "
+                    + "agent (eddi.a2a.tool-schema.max-bytes-per-agent) and this one adds %d", sanitizeForLog(spec.name()),
+                    sanitizeForLog(agentName), budget.used(), budget.maxBytes(), result.bytes());
+            countSchema("dropped_server_cap");
+            return null;
+        }
+        if (result.redacted()) {
+            LOGGER.warnf("A2A tool '%s' of agent '%s' had directive-shaped content in its parameter schema — redacted before prompting",
+                    sanitizeForLog(spec.name()), sanitizeForLog(agentName));
+            countSchema("redacted");
+        }
+        if (result.truncated()) {
+            LOGGER.warnf("A2A tool '%s' of agent '%s' parameter schema was cut to fit: text over %d chars, or descriptions stripped "
+                    + "to stay under %d bytes", sanitizeForLog(spec.name()), sanitizeForLog(agentName), maxDescriptionChars, maxSchemaBytes);
+            countSchema("truncated");
+        }
+        if (!result.changed()) {
+            return spec;
+        }
+        return ToolSpecification.builder().name(spec.name()).description(spec.description()).parameters(result.schema()).build();
+    }
+
+    /**
+     * {@code eddi.a2a.tool-schema.governed}, tag {@code outcome}: redacted,
+     * truncated, dropped, dropped_server_cap.
+     */
+    private void countSchema(String outcome) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.a2a.tool-schema.governed", "outcome", outcome).increment();
     }
 
     /**
@@ -821,7 +927,14 @@ public class A2AToolProviderManager {
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
-        String resolved = secretResolver.resolveValue(globalVariableResolver.resolveValue(apiKey));
+        String withVariables = globalVariableResolver.resolveValue(apiKey);
+        // Against agentUrl, the request's own target: for a task call that is the
+        // endpoint the peer's agent card announced, which need not be the host the
+        // configuration names.
+        if (vaultHostAllowlist != null) {
+            vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
+        }
+        String resolved = secretResolver.resolveValue(withVariables);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

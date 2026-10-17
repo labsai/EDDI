@@ -95,7 +95,8 @@ final class InMemorySecretPersistence implements ISecretPersistence {
 
     static EncryptedSecret copyOf(EncryptedSecret s) {
         return new EncryptedSecret(s.getId(), s.getTenantId(), s.getKeyName(), s.getEncryptedValue(), s.getIv(), s.getDekId(), s.getChecksum(),
-                s.getDescription(), s.getAllowedAgents() == null ? null : List.copyOf(s.getAllowedAgents()), s.getCreatedAt(), s.getLastAccessedAt(),
+                s.getDescription(), s.getAllowedAgents() == null ? null : List.copyOf(s.getAllowedAgents()),
+                s.getAllowedHosts() == null ? null : List.copyOf(s.getAllowedHosts()), s.getCreatedAt(), s.getLastAccessedAt(),
                 s.getLastRotatedAt());
     }
 
@@ -119,6 +120,9 @@ final class InMemorySecretPersistence implements ISecretPersistence {
             }
             if (secret.getDescription() == null) {
                 written.setDescription(existing.getDescription());
+            }
+            if (secret.getAllowedHosts() == null) {
+                written.setAllowedHosts(existing.getAllowedHosts());
             }
         } else if (secret.getAllowedAgents() == null) {
             written.setAllowedAgents(List.of(SecretMetadata.WILDCARD_AGENT));
@@ -182,6 +186,16 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         }
         stored.setAllowedAgents(allowedAgents == null ? null : List.copyOf(allowedAgents));
         stored.setDescription(description);
+        return true;
+    }
+
+    @Override
+    public boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts) {
+        EncryptedSecret stored = secrets.get(key(tenantId, keyName));
+        if (stored == null) {
+            return false;
+        }
+        stored.setAllowedHosts(allowedHosts == null ? List.of() : List.copyOf(allowedHosts));
         return true;
     }
 

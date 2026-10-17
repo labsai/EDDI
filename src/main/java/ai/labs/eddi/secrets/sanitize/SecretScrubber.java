@@ -121,14 +121,24 @@ public class SecretScrubber {
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
             "secretkey", "secret_key", "token", "accesstoken", "access_token", "authorization", "auth", "credential", "credentials", "privatekey",
-            "private_key", "clientsecret", "client_secret");
+            "private_key", "clientsecret", "client_secret",
+            // The abbreviations and the key-material names a config author reaches for
+            // when the field is not literally called "password": a short pwd/pass/pin/otp
+            // value scores under the entropy threshold, so the name is the only thing that
+            // catches it.
+            "pwd", "pass", "passphrase", "pin", "otp", "private_key_pem", "privatekeypem", "pem");
 
     /**
      * Name suffixes that mark a credential wherever the field appears — unless the
      * name in front of them measures a quantity, see {@link #QUANTITY_QUALIFIERS}.
+     * <p>
+     * {@code pin}, {@code otp} and {@code pem} are deliberately NOT suffixes: as
+     * suffixes they would match {@code spin}, {@code item} and
+     * {@code totalPostsSystem}-style names, and a scrubber that over-matches breaks
+     * the export → import round trip. They are whole-name matches above.
      */
     private static final Set<String> SECRET_FIELD_NAME_SUFFIXES = Set.of("token", "secret", "password", "passwd", "credential", "credentials",
-            "authorization");
+            "authorization", "pwd", "passphrase", "privatekey", "private_key");
 
     /**
      * Qualifiers that turn a credential noun into a COUNT of them.

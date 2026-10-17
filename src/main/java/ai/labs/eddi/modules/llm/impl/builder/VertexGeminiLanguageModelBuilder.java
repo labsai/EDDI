@@ -4,12 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.vertexai.gemini.HarmCategory;
 import dev.langchain4j.model.vertexai.gemini.SafetyThreshold;
 import dev.langchain4j.model.vertexai.gemini.VertexAiGeminiChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
@@ -28,6 +29,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_PUBLISHER = "publisher";
     /**
      * Spelled exactly {@code modelId} — the same key Bedrock and HuggingFace use
@@ -141,7 +150,7 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        var builder = applyTo(VertexAiGeminiChatModel.builder(), parameters);
+        var builder = applyTo(VertexAiGeminiChatModel.builder(), parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
 
         // executeWithRetry is the single retry owner; library retries multiply it.
         builder.maxRetries(NO_LIBRARY_RETRIES);
@@ -161,6 +170,11 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
      */
     static VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder applyTo(VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder builder,
                                                                           Map<String, String> parameters) {
+        return applyTo(builder, parameters, OutboundTargetPolicy.permissive());
+    }
+
+    static VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder applyTo(VertexAiGeminiChatModel.VertexAiGeminiChatModelBuilder builder,
+                                                                          Map<String, String> parameters, OutboundTargetPolicy targetPolicy) {
 
         if (!isNullOrEmpty(parameters.get(KEY_PROJECT_ID))) {
             builder.project(parameters.get(KEY_PROJECT_ID));
@@ -202,9 +216,9 @@ public class VertexGeminiLanguageModelBuilder implements ILanguageModelBuilder {
         String apiEndpoint = stringValue(parameters, KEY_API_ENDPOINT);
         if (apiEndpoint != null) {
             // Vertex takes a bare "host[:port]"; give the check a scheme so it sees the
-            // host. Never let it point at the cloud instance-metadata service (always-on,
-            // independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(apiEndpoint.contains("://") ? apiEndpoint : "https://" + apiEndpoint);
+            // host. Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(apiEndpoint.contains("://") ? apiEndpoint : "https://" + apiEndpoint);
             builder.apiEndpoint(apiEndpoint);
         }
         return builder;

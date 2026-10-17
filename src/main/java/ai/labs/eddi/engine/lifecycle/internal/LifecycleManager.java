@@ -408,7 +408,15 @@ public class LifecycleManager implements ILifecycleManager {
                 // execution where the loop index is offset-relative.
                 checkIfPauseConversationAction(conversationMemory, absoluteIndex, actionsBefore);
 
-            } catch (LifecycleException | RuntimeException e) {
+            } catch (LifecycleException | RuntimeException | StackOverflowError caught) {
+                // A StackOverflowError is an Error, so it used to escape this block: no
+                // error counter, no task_failed event, no audit entry, no strict-write
+                // rollback — the turn just died. The stack has unwound by the time the
+                // catch runs, so handling it here is as safe as any other task failure.
+                // It is wrapped so the accounting below, typed on Exception, is unchanged.
+                Exception e = caught instanceof StackOverflowError soe
+                        ? new IllegalStateException("Task overflowed the stack (unbounded recursion on its input)", soe)
+                        : (Exception) caught;
                 // HITL tool pause: a gated LLM tool call is NOT a task failure. Convert
                 // it to a ConversationPauseException(TOOL_CALL) BEFORE the error counter
                 // and strict-write rollback — the partially-executed step data (incl. the
@@ -1195,6 +1203,9 @@ public class LifecycleManager implements ILifecycleManager {
             if (current instanceof ConnectException
                     || current instanceof UnknownHostException) {
                 return "transport";
+            }
+            if (current instanceof StackOverflowError) {
+                return "stack_overflow";
             }
         }
         // Substring matching is easily fooled (e.g. "failed after 429ms"), so it only

@@ -37,6 +37,14 @@ public class PathNavigator {
     private static final Pattern SEGMENT_PATTERN = Pattern.compile("([^.\\[]+)(?:\\[(-?\\d+)])?");
 
     /**
+     * Most {@code +}/{@code -} operands one arithmetic or concatenation expression
+     * may have; beyond it the expression resolves to null, and {@link #tokenize}
+     * stops at the cap rather than materialising the rest. See
+     * {@link #evaluateExpression}.
+     */
+    static final int MAX_OPERANDS = 64;
+
+    /**
      * Navigate a dot-separated path through a Map/List structure and return the
      * value.
      *
@@ -111,10 +119,16 @@ public class PathNavigator {
             if (c == '\'') {
                 insideLiteral = !insideLiteral;
             } else if (!insideLiteral && (c == '+' || c == '-') && !isBlank(expression, start, i)) {
+                if (operands.size() >= MAX_OPERANDS) {
+                    return null; // over the cap: stop before allocating any more
+                }
                 operands.add(new Operand(start, i));
                 operators.add(String.valueOf(c));
                 start = i + 1;
             }
+        }
+        if (operands.size() >= MAX_OPERANDS) {
+            return null;
         }
         operands.add(new Operand(start, expression.length()));
         return operands;
@@ -160,6 +174,15 @@ public class PathNavigator {
     private static Object evaluateExpression(String expression, Object root) {
         List<String> operators = new ArrayList<>();
         List<Operand> operands = tokenize(expression, operators);
+        if (operands == null) {
+            // Over MAX_OPERANDS. The longest-prefix searches below try every operand
+            // range, so the work grows with the square of the operand count — and each
+            // probe is a regex pass over the range. An expression with more operands
+            // than this is not a path anyone wrote by hand; it resolves to nothing
+            // instead of burning the CPU on it, and tokenize stopped allocating at the
+            // cap.
+            return null;
+        }
         if (operators.isEmpty()) {
             return null; // no operator: plain navigation already answered
         }

@@ -126,7 +126,7 @@ class ToolLoopResumerSelfUngatingTest {
     @DisplayName("a missing acting agent id refuses nothing on that rule")
     void blankAgentIdRefusesNothing() {
         assertNull(resumer.selfUngating(call("{}"), null,
-                resolving("PUT", "http://eddi/agentstore/agents/" + OTHER_AGENT_ID, "{}"), null));
+                resolving("PUT", "http://eddi/agentstore/agents/" + OTHER_AGENT_ID, "{}"), (String) null));
         assertNull(resumer.selfUngating(call("{}"), null,
                 resolving("PUT", "http://eddi/agentstore/agents/" + OTHER_AGENT_ID, "{}"), " "));
     }

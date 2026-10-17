@@ -4,13 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import com.azure.ai.openai.models.ReasoningEffortValue;
 import dev.langchain4j.model.azure.AzureOpenAiChatModel;
 import dev.langchain4j.model.azure.AzureOpenAiStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.List;
@@ -53,6 +54,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_NON_AZURE_API_KEY = "nonAzureApiKey";
     private static final String KEY_ENDPOINT = "endpoint";
@@ -95,12 +104,19 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
             Map<String, String> customHeaders) {
     }
 
+    /**
+     * {@link #read(Map, OutboundTargetPolicy)} with protection off — for the tests.
+     */
     static Settings read(Map<String, String> p) {
+        return read(p, OutboundTargetPolicy.permissive());
+    }
+
+    static Settings read(Map<String, String> p, OutboundTargetPolicy targetPolicy) {
         String endpoint = stringValue(p, KEY_ENDPOINT);
         if (endpoint != null) {
-            // Never let the endpoint point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(endpoint);
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(endpoint);
         }
         // An unknown effort is passed through: ReasoningEffortValue is an expandable
         // enum, and Azure adds values before the SDK names them.
@@ -118,7 +134,7 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AzureOpenAiChatModel.builder();
         if (s.endpoint() != null)
             b.endpoint(s.endpoint());
@@ -169,7 +185,7 @@ public class AzureOpenAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AzureOpenAiStreamingChatModel.builder();
         if (s.endpoint() != null)
             b.endpoint(s.endpoint());

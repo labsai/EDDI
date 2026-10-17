@@ -152,6 +152,23 @@ public interface ISecretPersistence {
                                          String description);
 
     /**
+     * Rewrites one secret's {@code allowedHosts} and nothing else — the destination
+     * allow-list counterpart of {@link #updateSecretGrant}, narrow for the same
+     * reason: an operator adding a host to a vaulted key no longer has its
+     * plaintext, and a method whose signature cannot name the ciphertext cannot
+     * touch it.
+     *
+     * @param allowedHosts
+     *            the replacement list, already validated and lower-cased by the
+     *            caller; an empty list removes the restriction
+     * @return false if no such {@code (tenantId, keyName)} row exists, in which
+     *         case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts);
+
+    /**
      * Records that a secret was just resolved, writing {@code lastAccessedAt} and
      * nothing else.
      * <p>

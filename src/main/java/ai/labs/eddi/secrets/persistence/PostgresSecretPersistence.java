@@ -86,6 +86,14 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             CREATE UNIQUE INDEX IF NOT EXISTS uq_svd_tenant_generation ON secret_vault_deks (tenant_id, generation)
             """;
 
+    /**
+     * The destination allow-list, added after the table existed. No default: a NULL
+     * column is "any destination", the behaviour every row had before.
+     */
+    private static final String MIGRATE_SECRETS_TABLE = """
+            ALTER TABLE secret_vault_secrets ADD COLUMN IF NOT EXISTS allowed_hosts JSONB
+            """;
+
     private static final String CREATE_INDEXES = """
             CREATE INDEX IF NOT EXISTS idx_svs_tenant ON secret_vault_secrets (tenant_id);
             CREATE INDEX IF NOT EXISTS idx_svd_tenant ON secret_vault_deks (tenant_id)
@@ -113,7 +121,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             stmt.execute(CREATE_SECRETS_TABLE);
             stmt.execute(CREATE_DEKS_TABLE);
             stmt.execute(CREATE_META_TABLE);
-            for (String sql : (MIGRATE_DEKS_TABLE + ";" + CREATE_INDEXES).split(";")) {
+            for (String sql : (MIGRATE_DEKS_TABLE + ";" + MIGRATE_SECRETS_TABLE + ";" + CREATE_INDEXES).split(";")) {
                 sql = sql.trim();
                 if (!sql.isEmpty())
                     stmt.execute(sql);
@@ -133,13 +141,14 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         String sql = """
                 INSERT INTO secret_vault_secrets
                     (tenant_id, key_name, encrypted_value, iv, dek_id, checksum,
-                     description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                     description, allowed_agents, allowed_hosts, created_at, last_accessed_at, last_rotated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?)
                 ON CONFLICT (tenant_id, key_name)
                 DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value,
                     iv = EXCLUDED.iv, dek_id = EXCLUDED.dek_id, checksum = EXCLUDED.checksum,
                     description = CASE WHEN ? THEN EXCLUDED.description ELSE secret_vault_secrets.description END,
                     allowed_agents = CASE WHEN ? THEN EXCLUDED.allowed_agents ELSE secret_vault_secrets.allowed_agents END,
+                    allowed_hosts = CASE WHEN ? THEN EXCLUDED.allowed_hosts ELSE secret_vault_secrets.allowed_hosts END,
                     last_accessed_at = EXCLUDED.last_accessed_at, last_rotated_at = EXCLUDED.last_rotated_at
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -151,14 +160,17 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setString(6, secret.getChecksum());
             ps.setString(7, secret.getDescription());
             ps.setString(8, MAPPER.writeValueAsString(secret.getAllowedAgents() != null ? secret.getAllowedAgents() : List.of("*")));
-            ps.setTimestamp(9, instantToTimestamp(secret.getCreatedAt()));
-            ps.setTimestamp(10, instantToTimestamp(secret.getLastAccessedAt()));
-            ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
+            ps.setString(9, hostsJson(secret.getAllowedHosts()));
+            ps.setTimestamp(10, instantToTimestamp(secret.getCreatedAt()));
+            ps.setTimestamp(11, instantToTimestamp(secret.getLastAccessedAt()));
+            ps.setTimestamp(12, instantToTimestamp(secret.getLastRotatedAt()));
             // Null means "not supplied" — see ISecretPersistence#upsertSecret. The
             // insert branch still writes the defaults bound above; the update branch
-            // keeps the stored grant and description unless the caller gave new ones.
-            ps.setBoolean(12, secret.getDescription() != null);
-            ps.setBoolean(13, secret.getAllowedAgents() != null);
+            // keeps the stored grant, host list and description unless the caller gave
+            // new ones.
+            ps.setBoolean(13, secret.getDescription() != null);
+            ps.setBoolean(14, secret.getAllowedAgents() != null);
+            ps.setBoolean(15, secret.getAllowedHosts() != null);
             ps.executeUpdate();
         } catch (Exception e) {
             throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
@@ -171,8 +183,8 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         String sql = """
                 INSERT INTO secret_vault_secrets
                     (tenant_id, key_name, encrypted_value, iv, dek_id, checksum,
-                     description, allowed_agents, created_at, last_accessed_at, last_rotated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                     description, allowed_agents, allowed_hosts, created_at, last_accessed_at, last_rotated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?)
                 ON CONFLICT (tenant_id, key_name) DO NOTHING
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -184,9 +196,10 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setString(6, secret.getChecksum());
             ps.setString(7, secret.getDescription());
             ps.setString(8, MAPPER.writeValueAsString(secret.getAllowedAgents() != null ? secret.getAllowedAgents() : List.of("*")));
-            ps.setTimestamp(9, instantToTimestamp(secret.getCreatedAt()));
-            ps.setTimestamp(10, instantToTimestamp(secret.getLastAccessedAt()));
-            ps.setTimestamp(11, instantToTimestamp(secret.getLastRotatedAt()));
+            ps.setString(9, hostsJson(secret.getAllowedHosts()));
+            ps.setTimestamp(10, instantToTimestamp(secret.getCreatedAt()));
+            ps.setTimestamp(11, instantToTimestamp(secret.getLastAccessedAt()));
+            ps.setTimestamp(12, instantToTimestamp(secret.getLastRotatedAt()));
             // The affected-row count is the answer: 0 means the conflict arm fired.
             return ps.executeUpdate() > 0;
         } catch (Exception e) {
@@ -314,6 +327,26 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         } catch (Exception e) {
             throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
         }
+    }
+
+    @Override
+    public boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts) {
+        ensureSchema();
+        // One column, no INSERT branch — see updateSecretGrant for why.
+        String sql = "UPDATE secret_vault_secrets SET allowed_hosts = ?::jsonb WHERE tenant_id = ? AND key_name = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, MAPPER.writeValueAsString(allowedHosts == null ? List.of() : allowedHosts));
+            ps.setString(2, tenantId);
+            ps.setString(3, keyName);
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to update the allowed hosts of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    /** The JSON for an allowed-hosts column: SQL NULL for "not supplied". */
+    private static String hostsJson(List<String> allowedHosts) throws Exception {
+        return allowedHosts == null ? null : MAPPER.writeValueAsString(allowedHosts);
     }
 
     @Override
@@ -599,6 +632,17 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             }
         } else {
             secret.setAllowedAgents(List.of("*"));
+        }
+        String hostsJson = rs.getString("allowed_hosts");
+        if (hostsJson != null) {
+            try {
+                secret.setAllowedHosts(MAPPER.readValue(hostsJson, List.class));
+            } catch (Exception e) {
+                // A column this code cannot read is not "any destination": refuse to
+                // resolve the secret anywhere until an operator rewrites the list.
+                throw new PersistenceException("Secret " + secret.getTenantId() + "/" + secret.getKeyName()
+                        + " has an unreadable allowed_hosts column; rewrite it with PUT .../grant", e);
+            }
         }
 
         Timestamp createdTs = rs.getTimestamp("created_at");
