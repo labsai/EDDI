@@ -573,6 +573,34 @@ and caches live in the JVM. The Helm chart refuses `eddi.replicas` above 1,
 rolls out with `Recreate` so two JVMs never share the database. Scale **vertically**
 via `eddi.resources`.
 
+### Sizing a node
+
+EDDI waits on LLMs far more than it computes, so **memory, not CPU**, decides how many
+conversation turns a node runs at once. Each in-flight turn holds its conversation (about
+1 MB for short conversations in load tests, more with long histories and tool payloads).
+
+| Setting | Default | Why |
+|---|---|---|
+| Memory limit | 3 GiB (Helm, base), 4 GiB (production overlay) | The heap is **75 %** of it (`JAVA_MAX_MEM_RATIO` in the image); the rest covers metaspace, thread stacks and direct buffers. Raise it for more turns per node |
+| Memory request | equal to the limit | Guaranteed QoS: the pod is not the first evicted under node pressure |
+| CPU | request 1, limit 4 | The JVM sizes its GC, virtual-thread carrier and Jlama threads from the **limit**; without one it sees every core on the node |
+| GC | G1 (`GC_CONTAINER_OPTIONS`) | Short pauses with hundreds of turns in flight. For heaps of 8 GB and more, `-XX:+UseZGC` |
+| Out of memory | the JVM exits (`-XX:+ExitOnOutOfMemoryError`) | The orchestrator restarts it instead of a half-working JVM holding its turns |
+
+Guidelines:
+
+- **Keep the database close.** A turn makes about 20 database round trips, so latency to
+  MongoDB or PostgreSQL matters more than CPU speed. Size its pool with the node (MongoDB
+  `maxPoolSize` in the connection string, default 100; PostgreSQL
+  `quarkus.datasource.jdbc.max-size`, Quarkus default 50).
+- **File descriptors:** allow at least 65536 (`nofile`). The compose file sets it; on
+  Kubernetes it is a property of the node's container runtime.
+- **Scale out** with cluster mode (below) when one node would need a heap above about
+  16 GB, when CPU stays above 60–70 %, or when you need availability during upgrades.
+- **In-process Jlama models** are memory-mapped outside the heap: lower
+  `JAVA_MAX_MEM_RATIO` and add the model size to the memory limit, see
+  [LLM configuration](langchain.md).
+
 ### Upgrades replace the pod (no surge)
 
 With in-memory messaging the EDDI Deployment uses the **`Recreate`** strategy (Helm
