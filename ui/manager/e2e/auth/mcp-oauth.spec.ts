@@ -59,7 +59,10 @@ async function acceptConsentIfAsked(request: APIRequestContext, location: string
   const page = await request.get(location);
   expect(page.status(), `Keycloak did not render its consent page: ${location}`).toBe(200);
   const html = await page.text();
-  const action = /<form[^>]+action="([^"]+)"/i.exec(html)?.[1]?.replace(/&amp;/g, "&");
+  // Keycloak renders the consent form's action as a path; resolve it against
+  // the page, or the request context would send it to its own baseURL.
+  const rawAction = /<form[^>]+action="([^"]+)"/i.exec(html)?.[1]?.replace(/&amp;/g, "&");
+  const action = rawAction ? new URL(rawAction, location).toString() : undefined;
   const code = /<input[^>]+name="code"[^>]+value="([^"]+)"/i.exec(html)?.[1]
     ?? /<input[^>]+value="([^"]+)"[^>]+name="code"/i.exec(html)?.[1];
   expect(action, "no form on the consent page").toBeTruthy();
