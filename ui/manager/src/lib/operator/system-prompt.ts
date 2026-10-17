@@ -277,10 +277,14 @@ const BODY_CAPACITY_COORDINATOR = `- The coordinator status tool shows this node
   \`queueDepths\`; a long queue on one conversation means its turns arrive faster
   than they finish. It does not show the in-flight limit.`;
 
-const BODY_CAPACITY_LOGS = `- The platform logs may still hold the startup line with the resolved limit and
-  heap, and every refusal of a NEW conversation (a WARN, "Coordinator capacity
-  exceeded"). In-flight refusals are not logged above DEBUG, so their absence
-  from the logs proves nothing.`;
+const BODY_CAPACITY_LOGS = `- The platform logs show refusals too. A refused message to an existing
+  conversation (say or rerun) is a WARN "Turn rejected for conversation <id>:"
+  followed by the refusal message, so the logs tell you which limit refused it
+  and for which conversation. A refused NEW conversation under the coordinator
+  cap is a WARN "Coordinator capacity exceeded". A conversation START refused
+  by the in-flight limit is logged only at DEBUG, so no log line does not mean
+  no refusal. The startup line with the resolved limit and heap may still be
+  there too.`;
 
 function buildCapacitySection(endpoints: readonly string[]): string {
   const lines = [BODY_CAPACITY];

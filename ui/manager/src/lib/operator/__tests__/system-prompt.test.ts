@@ -506,14 +506,17 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
   it("adds the coordinator and log lines only when those reads are granted", () => {
     const withTools = buildOperatorPromptBody(READ_ENDPOINTS);
     expect(withTools).toContain("The coordinator status tool shows");
-    expect(withTools).toContain("The platform logs may still hold the startup line");
+    expect(withTools).toContain("The platform logs show refusals too");
+    // RestAgentEngine.sayInternal logs every refused say/rerun at WARN; only a
+    // refused conversation START (through the mapper) stays at DEBUG.
+    expect(withTools).toContain('WARN "Turn rejected for conversation <id>:"');
 
     const without = buildOperatorPromptBody(
       READ_ENDPOINTS.filter((e) => e !== "GET /administration/coordinator/status" && e !== "GET /administration/logs"),
     );
     expect(without).toContain("Turn capacity");
     expect(without).not.toContain("The coordinator status tool shows");
-    expect(without).not.toContain("The platform logs may still hold");
+    expect(without).not.toContain("The platform logs show refusals too");
   });
 });
 
