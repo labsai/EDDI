@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
@@ -133,7 +132,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -204,7 +203,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        return buildStreaming(parameters, JdkHttpClient.builder());
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder());
     }
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */

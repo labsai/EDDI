@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.mistralai.MistralAiChatModel;
@@ -103,7 +102,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -159,7 +158,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder());
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)
