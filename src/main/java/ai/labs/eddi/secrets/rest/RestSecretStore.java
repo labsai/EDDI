@@ -253,14 +253,16 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant, allowedHosts != null ? allowedHosts : before.allowedHosts());
             } else {
+                if (allowedHosts != null) {
+                    // Two independent writes, the host list FIRST. The precondition below
+                    // does not cover the hosts, and if the second write fails the row must
+                    // be left in its tighter state: a narrowed host list without the widened
+                    // grant is safe, a widened grant without the narrowed host list is not.
+                    secretProvider.updateAllowedHosts(ref, allowedHosts);
+                }
                 after = expected == null
                         ? secretProvider.updateGrant(ref, grant, body.description())
                         : secretProvider.updateGrant(ref, grant, body.description(), expected);
-                if (allowedHosts != null) {
-                    // A second, unconditional write: the host list is independent of the
-                    // agent grant, so the precondition above does not cover it.
-                    after = secretProvider.updateAllowedHosts(ref, allowedHosts);
-                }
                 // Deliberately NOT invalidating the SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may

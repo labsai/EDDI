@@ -116,8 +116,14 @@ public class VaultHostAllowlist {
         if (colon < 0 || entry.endsWith("]")) {
             return true;
         }
-        int port = Integer.parseInt(entry.substring(colon + 1));
-        return port >= 1 && port <= 65535;
+        try {
+            int port = Integer.parseInt(entry.substring(colon + 1));
+            return port >= 1 && port <= 65535;
+        } catch (NumberFormatException e) {
+            // ENTRY admits only digits here, but an overlong run overflows parseInt;
+            // either way the entry is not a port.
+            return false;
+        }
     }
 
     /**

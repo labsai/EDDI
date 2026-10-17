@@ -151,6 +151,30 @@ public class CredentialReferenceResolver {
         throw new IllegalArgumentException(field + " " + notVaultBacked(value, expanded));
     }
 
+    /**
+     * The save-time half of the header-template rule in {@link #resolveRequired}:
+     * refuses a {@code staticAuth.valueTemplate} whose variables, expanded now,
+     * leave something {@link ConnectionConfiguration#isAcceptableValueTemplate}
+     * would not accept — a key where only a reference or scaffolding may stand. A
+     * variable that does not exist yet is let through, as in
+     * {@link #requireVaultBacked}; the use-time check closes that.
+     *
+     * @throws IllegalArgumentException
+     *             with the message the 400 carries
+     */
+    public void requireAcceptableTemplate(String template, String field) {
+        if (template == null || !template.contains("${vars:")) {
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        if (expanded.contains("${vars:") || ConnectionConfiguration.isAcceptableValueTemplate(expanded)) {
+            return;
+        }
+        throw new IllegalArgumentException(field + " expands a ${vars:…} reference into something that is not a ${vault:…} reference or "
+                + "short scaffolding around one. A global variable is readable by every editor, so a credential may only live in the "
+                + "vault: store it with PUT /secretstore/secrets/{tenantId}/{keyName} and let the variable hold the ${vault:…} reference.");
+    }
+
     /** Never quotes the expansion: it may be the very credential this refuses. */
     private static String notVaultBacked(String template, String expanded) {
         String reason = expanded.contains("${vault:") || expanded.contains("${eddivault:")

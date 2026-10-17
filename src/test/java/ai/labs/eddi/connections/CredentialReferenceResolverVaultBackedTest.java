@@ -118,6 +118,33 @@ class CredentialReferenceResolverVaultBackedTest {
     }
 
     @Nested
+    @DisplayName("requireAcceptableTemplate — a header template at save")
+    class TemplateAtSave {
+
+        @Test
+        @DisplayName("scaffolding, a vault reference and a missing variable pass")
+        void acceptableExpansionsPass() {
+            when(globalVariableResolver.resolveValue("${vars:scheme} ${vault:k}")).thenReturn("Bearer ${vault:k}");
+            assertDoesNotThrow(() -> resolver.requireAcceptableTemplate("${vars:scheme} ${vault:k}", "staticAuth.valueTemplate"));
+            assertDoesNotThrow(() -> resolver.requireAcceptableTemplate("Bearer ${vars:not-yet}", "staticAuth.valueTemplate"));
+            assertDoesNotThrow(() -> resolver.requireAcceptableTemplate("Bearer ${vault:k}", "staticAuth.valueTemplate"));
+            assertDoesNotThrow(() -> resolver.requireAcceptableTemplate(null, "staticAuth.valueTemplate"));
+        }
+
+        @Test
+        @DisplayName("a variable holding the key is refused with the field, never the value")
+        void plaintextExpansionRefused() {
+            when(globalVariableResolver.resolveValue("Bearer ${vars:token}")).thenReturn("Bearer " + PLAINTEXT_SECRET);
+
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> resolver.requireAcceptableTemplate("Bearer ${vars:token}", "staticAuth.valueTemplate"));
+
+            assertTrue(error.getMessage().startsWith("staticAuth.valueTemplate "), error.getMessage());
+            assertFalse(error.getMessage().contains(PLAINTEXT_SECRET), error.getMessage());
+        }
+    }
+
+    @Nested
     @DisplayName("resolveRequired — a header template")
     class HeaderTemplate {
 

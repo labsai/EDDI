@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -181,16 +182,20 @@ class RestSecretStoreGrantOnCreateTest {
         @DisplayName("the grant endpoint changes it without the value, and echoes it")
         void grantEndpointUpdatesHosts() throws Exception {
             SecretMetadata before = existing(null);
-            when(secretProvider.updateGrant(any(SecretReference.class), any(), any())).thenReturn(before);
-            when(secretProvider.updateAllowedHosts(any(SecretReference.class), eq(List.of("api.openai.com:443")))).thenReturn(
-                    new SecretMetadata("default", "k", before.createdAt(), null, null, "cs", "desc", List.of("agentOne"),
-                            List.of("api.openai.com:443")));
+            var withHosts = new SecretMetadata("default", "k", before.createdAt(), null, null, "cs", "desc", List.of("agentOne"),
+                    List.of("api.openai.com:443"));
+            // The grant update, which runs second, reads the row the host write left.
+            when(secretProvider.updateGrant(any(SecretReference.class), any(), any())).thenReturn(withHosts);
+            when(secretProvider.updateAllowedHosts(any(SecretReference.class), eq(List.of("api.openai.com:443")))).thenReturn(withHosts);
 
             Response resp = rest(VaultGrantGate.Mode.ENFORCE).updateGrant("default", "k", false,
                     new IRestSecretStore.GrantRequest(List.of("agentOne"), null, null, List.of("API.openai.com:443")));
 
             assertEquals(200, resp.getStatus());
-            verify(secretProvider).updateAllowedHosts(any(SecretReference.class), eq(List.of("api.openai.com:443")));
+            // Hosts first, then the grant: a failure in between leaves the tighter state.
+            var order = inOrder(secretProvider);
+            order.verify(secretProvider).updateAllowedHosts(any(SecretReference.class), eq(List.of("api.openai.com:443")));
+            order.verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne")), isNull());
             verify(secretProvider, never()).store(any(), any(), any(), any(), any());
             assertEquals(List.of("api.openai.com:443"), entityOf(resp).get("allowedHosts"));
         }

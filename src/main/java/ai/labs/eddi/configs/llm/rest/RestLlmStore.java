@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * @author ginccc
@@ -204,12 +205,20 @@ public class RestLlmStore implements IRestLlmStore {
     }
 
     /**
+     * A reference ({@code ${vault:…}}, {@code ${vars:…}}, {@code ${connection:…}},
+     * …) or a Qute template ({@code {properties.key}}). Anchored to those shapes
+     * rather than to a brace: a literal such as {@code hunter{two} is a credential
+     * with a brace in it, not a template.
+     */
+    private static final Pattern REFERENCE_OR_TEMPLATE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}|\\{[A-Za-z_][^{}]*}");
+
+    /**
      * Whether one parameter is a credential by name holding a literal rather than a
      * reference or template.
      */
     private static boolean isPlaintextSecret(String name, String value) {
         return name != null && SECRET_PARAMETER_NAMES.contains(name.toLowerCase(Locale.ROOT)) && value != null && !value.isBlank()
-                && !value.contains("{");
+                && !REFERENCE_OR_TEMPLATE.matcher(value).find();
     }
 
     @Override

@@ -80,6 +80,19 @@ class RestLlmStoreReadRedactionTest {
     }
 
     @Test
+    @DisplayName("a brace inside a literal does not make it a template: hunter{two is redacted")
+    void braceInsideALiteralIsStillRedacted() throws Exception {
+        var task = new LlmConfiguration.Task();
+        task.setType("anthropic");
+        task.setParameters(new LinkedHashMap<>(Map.of("apiKey", "hunter{two", "password", "a}b{c")));
+
+        Map<String, String> parameters = read(new LlmConfiguration(List.of(task)), false).tasks().get(0).getParameters();
+
+        assertEquals(RestLlmStore.REDACTED, parameters.get("apiKey"));
+        assertEquals(RestLlmStore.REDACTED, parameters.get("password"));
+    }
+
+    @Test
     @DisplayName("a document without a plaintext credential is returned as it is")
     void cleanDocumentUnchanged() throws Exception {
         var task = new LlmConfiguration.Task();
