@@ -27,6 +27,7 @@ import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -124,6 +125,18 @@ public class RestApiCallsStore implements IRestApiCallsStore {
      */
     static final Set<String> NOT_CONFIGURATION = Set.of("httpCalls[].parameters");
 
+    /**
+     * {@link #readApiCalls} without the read-redaction, for server-side work an
+     * editor's request starts whose result never reaches the caller as this
+     * document — upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public ApiCallsConfiguration readUnredacted(String id, Integer version) {
+        return restVersionInfo.read(id, version);
+    }
+
     @Override
     public Response updateApiCalls(String id, Integer version, ApiCallsConfiguration httpCallsConfiguration) {
         requireMayAuthorCallerToken(httpCallsConfiguration);
@@ -191,6 +204,9 @@ public class RestApiCallsStore implements IRestApiCallsStore {
      * path treats a non-200 update as "create it directly instead".
      */
     private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }

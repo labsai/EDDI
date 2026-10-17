@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -100,6 +101,18 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
                 : ConfigSecretRedactor.redact(stored, McpCallsConfiguration.class);
     }
 
+    /**
+     * {@link #readMcpCalls} without the read-redaction, for server-side work an
+     * editor's request starts whose result never reaches the caller as this
+     * document — upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public McpCallsConfiguration readUnredacted(String id, Integer version) {
+        return restVersionInfo.read(id, version);
+    }
+
     @Override
     public Response updateMcpCalls(String id, Integer version, McpCallsConfiguration mcpCallsConfiguration) {
         validateForWrite(mcpCallsConfiguration);
@@ -171,6 +184,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
      * path treats a non-200 update as "create it directly instead".
      */
     private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }

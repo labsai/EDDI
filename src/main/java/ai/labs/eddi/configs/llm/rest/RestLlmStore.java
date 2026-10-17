@@ -16,6 +16,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -96,6 +97,18 @@ public class RestLlmStore implements IRestLlmStore {
         // RestConnectionStore.readConnection. isAdmin() is true for everyone when
         // authorization.enabled=false, which is also when @RolesAllowed is off.
         return resourceAccessGuard.isAdmin() ? stored : redactPlaintextSecrets(stored);
+    }
+
+    /**
+     * {@link #readLlm} without the read-redaction, for server-side work an editor's
+     * request starts whose result never reaches the caller as this document —
+     * upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public LlmConfiguration readUnredacted(String id, Integer version) {
+        return restVersionInfo.read(id, version);
     }
 
     /**
@@ -185,6 +198,9 @@ public class RestLlmStore implements IRestLlmStore {
      * path treats a non-200 update as "create it directly instead".
      */
     private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }

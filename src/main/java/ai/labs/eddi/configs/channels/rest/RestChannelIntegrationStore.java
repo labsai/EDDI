@@ -17,6 +17,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -241,6 +242,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     }
 
     void validateConfiguration(ChannelIntegrationConfiguration config) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(config);
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }

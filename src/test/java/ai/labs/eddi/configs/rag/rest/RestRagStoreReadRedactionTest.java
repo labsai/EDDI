@@ -90,6 +90,6 @@ class RestRagStoreReadRedactionTest {
         when(store.read(ID, 3)).thenReturn(stored);
         when(accessGuard.isAdmin()).thenReturn(false);
 
-        assertSame(stored, rest.readRagForIngestion(ID, 3));
+        assertSame(stored, rest.readUnredacted(ID, 3));
     }
 }

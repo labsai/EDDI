@@ -157,3 +157,41 @@ forever.
 **Tests:** `VaultLegacySealingRetirementTest` (re-seal on read, swap refused afterwards,
 a store racing the write-back wins, a failing write-back does not fail the read) and
 guard tests in the Mongo and Postgres persistence unit tests; mutation-checked.
+
+## 🔒 fix(security): the read-redaction marker is never stored; upgrade and sync read targets unredacted (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-secrets-redaction`)
+
+Follow-up to the M1 read-redaction above, so it can never turn into stored corruption.
+
+- **Writes refuse the marker.** New `RedactionMarkerGuard` (`configs/rest`): every create,
+  update, JSON Patch and duplicate of the LLM, MCP-calls, channel, RAG and httpcalls
+  stores, `RestImportService.createResourceDirect` and `UpgradeExecutor.createExtension`
+  answer `400 {"error": "bad_request", "message": …, "fields": […]}` when any string in the
+  document contains `<redacted: `, for administrators too. Before this, an editor who
+  opened a configuration in the Manager and saved it replaced the stored key with the
+  marker, and the agent broke at its next deploy.
+- **One recognisable marker.** The in-string marker `ConfigSecretRedactor` writes into
+  URLs, headers and bodies is now `<redacted: credential>` instead of the filter's
+  generic `<REDACTED>`, which a prompt or output template may legitimately contain. Both
+  markers share the `<redacted: ` prefix the guard looks for.
+- **Unredacted internal reads.** `RestLlmStore`, `RestMcpCallsStore`, `RestApiCallsStore`
+  and `RestRagStore` expose `readUnredacted` (same access check; `readRagForIngestion`
+  became `readUnredacted`). `StructuralMatcher` reads upgrade/sync targets through it
+  instead of the loopback REST client, so an editor-run upgrade neither diffs against the
+  marker nor writes it: the export's `${vault:REDACTED}` placeholder is replaced by the
+  target's own key.
+- A sync **source** read from a peer through a non-admin credential carries the peer's
+  marker; such resources are now refused rather than stored.
+
+**Tests:** a `*RedactionMarkerWriteTest` per store, a marker case in
+`RestImportServiceCallerTokenTest`, and `EditorUpgradeKeepsTargetCredentialTest` (an
+editor-run upgrade of an agent whose LLM config holds a plaintext key keeps it and is
+not refused); each mutation-checked.
+
+**Files:** [`RedactionMarkerGuard.java`](../../src/main/java/ai/labs/eddi/configs/rest/RedactionMarkerGuard.java),
+[`ConfigSecretRedactor.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/ConfigSecretRedactor.java),
+[`StructuralMatcher.java`](../../src/main/java/ai/labs/eddi/backup/impl/StructuralMatcher.java),
+[`UpgradeExecutor.java`](../../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java),
+[`RestImportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
+[`security.md`](../security.md#editors-never-read-a-plaintext-credential-back)

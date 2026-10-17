@@ -67,13 +67,13 @@ public class RestRagIngestion implements IRestRagIngestion {
      * credentials: {@link RestRagStore#readRag} redacts plaintext literals for a
      * non-administrator, and an editor ingesting into a knowledge base whose
      * {@code apiKey} is a literal would otherwise send the redaction marker to the
-     * provider. {@link RestRagStore#readRagForIngestion} applies the same access
-     * check without the redaction; the document never leaves the server. Anything
-     * other than the real store (a test double) is read through the interface.
+     * provider. {@link RestRagStore#readUnredacted} applies the same access check
+     * without the redaction; the document never leaves the server. Anything other
+     * than the real store (a test double) is read through the interface.
      */
     private RagConfiguration readEngineConfig(String ragConfigId, Integer version) {
         return restRagStore instanceof RestRagStore store
-                ? store.readRagForIngestion(ragConfigId, version)
+                ? store.readUnredacted(ragConfigId, version)
                 : restRagStore.readRag(ragConfigId, version);
     }
 

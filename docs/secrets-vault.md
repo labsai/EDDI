@@ -1080,7 +1080,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 ### Configuration Read Redaction
 
-`ConfigSecretRedactor` is applied by the LLM, MCP-calls, httpcalls, RAG and channel stores whenever a caller who is not `eddi-admin` reads a document (including `?version=` reads and MCP `read_resource`). A plaintext credential — by field name anywhere in the document, by header name in a header map, as a userinfo password or credential-named query value in a URL, or by shape in an httpcall body — is replaced; a `${vault:…}`, `${vars:…}`, `${connection:…}` or `${caller:…}` reference is returned as it is. Details in [Security → Editors never read a plaintext credential back](security.md#editors-never-read-a-plaintext-credential-back).
+`ConfigSecretRedactor` is applied by the LLM, MCP-calls, httpcalls, RAG and channel stores whenever a caller who is not `eddi-admin` reads a document (including `?version=` reads and MCP `read_resource`). A plaintext credential — by field name anywhere in the document, by header name in a header map, as a userinfo password or credential-named query value in a URL, or by shape in an httpcall body — is replaced; a `${vault:…}`, `${vars:…}`, `${connection:…}` or `${caller:…}` reference is returned as it is. A write that carries the marker back is refused with a `400` naming the fields. Details in [Security → Editors never read a plaintext credential back](security.md#editors-never-read-a-plaintext-credential-back).
 
 ### Memory Protection
 

@@ -87,8 +87,21 @@ public final class ConfigSecretRedactor {
      */
     public static final String REDACTED = "<redacted: a plaintext credential - an eddi-admin must move it into the vault and reference it as ${vault:...}>";
 
-    /** The marker written inside a URL, header or body value. */
-    public static final String IN_STRING_REDACTED = SecretRedactionFilter.REDACTED;
+    /**
+     * The marker written inside a URL, header or body value. Deliberately not
+     * {@link SecretRedactionFilter#REDACTED}: that one appears in logs and approval
+     * cards, and could legitimately be quoted in a prompt or output template. This
+     * one shares {@link #MARKER_PREFIX} with {@link #REDACTED}, so a write that
+     * carries either can be recognised and refused.
+     */
+    public static final String IN_STRING_REDACTED = "<redacted: credential>";
+
+    /**
+     * What both markers begin with. A document being written that contains it
+     * anywhere was read through a redacted view and must not be stored — see
+     * {@link #markerPaths}.
+     */
+    public static final String MARKER_PREFIX = "<redacted: ";
 
     private static final ObjectMapper MAPPER = JsonMapper.builder().findAndAddModules()
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
@@ -370,7 +383,7 @@ public final class ConfigSecretRedactor {
      */
     static String scanText(String value) {
         Masked masked = mask(value);
-        return masked.unmask(SecretRedactionFilter.redact(masked.text()));
+        return masked.unmask(filter(masked.text()));
     }
 
     /**
@@ -384,7 +397,7 @@ public final class ConfigSecretRedactor {
         String fragment = "";
         int hash = text.indexOf('#');
         if (hash >= 0) {
-            fragment = SecretRedactionFilter.redact(text.substring(hash));
+            fragment = filter(text.substring(hash));
             text = text.substring(0, hash);
         }
         String query = null;
@@ -412,7 +425,7 @@ public final class ConfigSecretRedactor {
     private static String redactBeforeQuery(String text) {
         int scheme = text.indexOf("://");
         if (scheme < 0) {
-            return SecretRedactionFilter.redact(text);
+            return filter(text);
         }
         int authorityStart = scheme + 3;
         int pathStart = text.indexOf('/', authorityStart);
@@ -432,13 +445,13 @@ public final class ConfigSecretRedactor {
             }
             authority = userInfo + authority.substring(at);
         }
-        return text.substring(0, authorityStart) + authority + SecretRedactionFilter.redact(path);
+        return text.substring(0, authorityStart) + authority + filter(path);
     }
 
     private static String redactQueryPair(String pair) {
         int eq = pair.indexOf('=');
         if (eq < 0) {
-            return SecretRedactionFilter.redact(pair);
+            return filter(pair);
         }
         String name = pair.substring(0, eq);
         String rawValue = pair.substring(eq + 1);
@@ -455,6 +468,48 @@ public final class ConfigSecretRedactor {
             // Scan the raw form rather than skip the check.
         }
         return SecretRedactionFilter.redact(decoded).equals(decoded) ? pair : name + "=" + IN_STRING_REDACTED;
+    }
+
+    /**
+     * {@link SecretRedactionFilter#redact}, with whatever it replaced restated in
+     * {@link #IN_STRING_REDACTED}.
+     */
+    private static String filter(String text) {
+        String redacted = SecretRedactionFilter.redact(text);
+        return redacted.equals(text) ? text : redacted.replace(SecretRedactionFilter.REDACTED, IN_STRING_REDACTED);
+    }
+
+    /**
+     * Every place in {@code document} where a string value carries
+     * {@link #MARKER_PREFIX}, as paths such as {@code tasks[0].parameters.apiKey}.
+     * Empty for a document that never went through a redacted read. Unlike the
+     * redaction itself this skips nothing: a marker is corruption wherever it sits.
+     */
+    public static List<String> markerPaths(Object document) {
+        List<String> found = new ArrayList<>();
+        if (document != null) {
+            collectMarkers(MAPPER.valueToTree(document), "", found);
+        }
+        return found;
+    }
+
+    private static void collectMarkers(JsonNode node, String path, List<String> found) {
+        if (node == null) {
+            return;
+        }
+        if (node.isTextual()) {
+            if (node.asText().contains(MARKER_PREFIX)) {
+                found.add(path.isEmpty() ? "$" : path);
+            }
+        } else if (node instanceof ObjectNode object) {
+            for (Map.Entry<String, JsonNode> field : object.properties()) {
+                collectMarkers(field.getValue(), path.isEmpty() ? field.getKey() : path + "." + field.getKey(), found);
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (int i = 0; i < array.size(); i++) {
+                collectMarkers(array.get(i), path + "[" + i + "]", found);
+            }
+        }
     }
 
     private static boolean isOnlySentinels(String text) {

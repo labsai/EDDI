@@ -21,6 +21,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -94,12 +95,13 @@ public class RestRagStore implements IRestRagStore {
     }
 
     /**
-     * {@link #readRag} without the redaction, for the engine work an editor's
+     * {@link #readRag} without the redaction, for the server-side work an editor's
      * request starts: ingestion builds the embedding model and store from this
-     * document, and a redacted {@code apiKey} would fail it. The same access check
-     * applies, and the document never leaves the server.
+     * document (a redacted {@code apiKey} would fail it), and upgrade and sync
+     * compare against it and write it back. The same access check applies, and the
+     * document never leaves the server.
      */
-    public RagConfiguration readRagForIngestion(String id, Integer version) {
+    public RagConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
@@ -322,6 +324,9 @@ public class RestRagStore implements IRestRagStore {
             // RestVersionInfo rejects null with its own error message.
             return;
         }
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(ragConfiguration);
 
         normalizeLegacyChunkStrategy(ragConfiguration);
         warnOnPlaintextSecrets(ragConfiguration);
@@ -526,6 +531,7 @@ public class RestRagStore implements IRestRagStore {
     public Response duplicateRag(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
+        RedactionMarkerGuard.requireNone(config);
         // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
         // document must not be refused just because the rules tightened after it was
         // stored.

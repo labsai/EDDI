@@ -83,6 +83,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -1460,6 +1461,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * failure can delete it again.
      */
     private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
+        // The direct create bypasses the REST stores, so it repeats their refusal of a
+        // document carrying the read-redaction marker. Outside the try, like the
+        // caller-token check: a refusal must fail (and roll back) the import.
+        RedactionMarkerGuard.requireNone(document);
         if (callerTokenAuthorPolicy != null) {
             // Outside the try: a 403 must fail the import (and roll it back), not be
             // reported as a store failure.

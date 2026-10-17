@@ -57,6 +57,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
@@ -854,7 +855,13 @@ public class UpgradeExecutor {
                 // run with earlier resources already written and no rollback.
                 callerTokenAuthorPolicy.requireMayAuthor(source.contentJson(), source.type());
             }
-            IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));
+            Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
+            // The REST stores refuse a document carrying the read-redaction marker; this
+            // direct create must too. A sync source read through a non-admin peer
+            // credential carries it, and storing it would replace a credential with the
+            // marker. Recorded as this resource failing, like the check above.
+            RedactionMarkerGuard.requireNone(content);
+            IResourceId created = store.create(content);
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
