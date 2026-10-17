@@ -12,6 +12,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getAuthConfig, type AuthConfig } from "@/lib/auth-config";
 import { api } from "@/lib/api-client";
+import { clearWorkforcePins } from "@/lib/workforce-pins";
 import {
   AuthContext,
   GUEST_CONTEXT,
@@ -220,6 +221,9 @@ function KeycloakAuthProvider({
 
   const logout = useCallback(() => {
     api.clearAuthToken();
+    // Pinned Workforce responses are agent output kept in localStorage, which
+    // outlives the session. Whoever uses this browser next must not inherit them.
+    clearWorkforcePins();
     // Keycloak 26 only terminates the SSO session when id_token_hint is present.
     // keycloak.idToken may have been deleted by a token refresh that didn't
     // return a new id_token — restore it from the ref so the hint is always sent.
