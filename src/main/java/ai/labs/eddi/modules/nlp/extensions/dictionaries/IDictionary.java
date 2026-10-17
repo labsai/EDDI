@@ -86,6 +86,19 @@ public interface IDictionary {
 
     interface IRegEx extends IWord {
         boolean match(String lookup);
+
+        /**
+         * Matches with a deadline shared across the patterns of one lookup, so a
+         * dictionary of many slow patterns cannot multiply the per-match budget. The
+         * default ignores the deadline and matches as {@link #match(String)}.
+         *
+         * @param deadlineNanos
+         *            a {@link System#nanoTime()} instant after which the match is
+         *            abandoned and counts as a miss
+         */
+        default boolean match(String lookup, long deadlineNanos) {
+            return match(lookup);
+        }
     }
 
     interface IPhrase extends IWord {

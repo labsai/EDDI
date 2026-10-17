@@ -3779,6 +3779,8 @@ type MockSecret = {
   checksum: string;
   description: string;
   allowedAgents: string[];
+  /** Omitted when unrestricted, as EDDI's mapper drops null fields. */
+  allowedHosts?: string[];
 };
 
 /** The seed. Never mutated: the handlers work on `secretsState` below. */
@@ -3812,6 +3814,7 @@ const MOCK_SECRETS: readonly MockSecret[] = [
     checksum: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
     description: "Google Gemini 2.5 Flash API key",
     allowedAgents: ["agent5", "agent7"],
+    allowedHosts: ["generativelanguage.googleapis.com"],
   },
   {
     tenantId: "default",
@@ -4029,6 +4032,7 @@ export const secretsHandlers = [
       const body = (await request.json()) as {
         allowedAgents?: string[];
         description?: string;
+        allowedHosts?: string[];
       };
       const existing = findMockSecret(tenantId, keyName);
       if (!existing) {
@@ -4049,7 +4053,12 @@ export const secretsHandlers = [
       if (!dryRun) {
         existing.allowedAgents = [...body.allowedAgents];
         if (body.description !== undefined) existing.description = body.description;
+        // Present means "replace"; `[]` lifts the restriction, as on the backend.
+        if (body.allowedHosts !== undefined) {
+          existing.allowedHosts = body.allowedHosts.length > 0 ? [...body.allowedHosts] : undefined;
+        }
       }
+      const allowedHosts = body.allowedHosts ?? existing.allowedHosts;
       return HttpResponse.json({
         reference:
           tenantId === "default"
@@ -4065,6 +4074,7 @@ export const secretsHandlers = [
         createdAt: existing.createdAt,
         lastRotatedAt: existing.lastRotatedAt,
         agentsLosingAccess: [],
+        ...(allowedHosts && allowedHosts.length > 0 ? { allowedHosts } : {}),
       });
     },
   ),

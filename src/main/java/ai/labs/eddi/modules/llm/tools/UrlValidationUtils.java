@@ -145,7 +145,7 @@ public final class UrlValidationUtils {
      * Checks whether the hostname is a known internal/local hostname that should be
      * blocked.
      */
-    static boolean isBlockedHostname(String host) {
+    public static boolean isBlockedHostname(String host) {
         return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1") || host.endsWith(".local")
                 || host.endsWith(".internal") || host.equals("metadata.google.internal") || host.equals("169.254.169.254"); // Cloud metadata endpoint
     }

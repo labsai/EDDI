@@ -224,6 +224,19 @@ better than pretending otherwise at runtime.
 **must** be `${vault:…}` or `${vars:…}`. A literal is refused with a 400 that
 names `PUT /secretstore/secrets/{tenantId}/{keyName}`, the call that stores it in the vault.
 
+**A `${vars:…}` here may only point at the vault.** The global variable store is
+readable by every editor (`GET /variablestore/variables`), so a variable holding
+the client secret itself would be the plaintext field in a different document.
+For `clientSecret` and `passwordRef` the variable must expand to exactly one
+`${vault:…}` reference; in a `valueTemplate` it must expand to a vault reference
+or to scaffolding that passes the literal-text rules below (`Bearer `, never a
+key). This is checked twice: at save, where a variable that exists and holds
+anything else is a 400 naming the field (a variable that does not exist yet is
+let through, since the connection may be saved first), and at every use, where
+`CredentialReferenceResolver` refuses the connection with `INVALID_CONFIGURATION`
+instead of sending the variable's value as the credential — so changing the
+variable afterwards cannot reopen the hole. Neither message quotes the value.
+
 This is not stylistic. A plaintext key in a connection document would sit outside
 the vault, outside export scrubbing, and outside `VaultGrantChecker`'s
 `${vault:}` scan — one field defeating three controls. `extraAuthParams` is

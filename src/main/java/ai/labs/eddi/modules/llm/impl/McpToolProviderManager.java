@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -86,6 +87,14 @@ public class McpToolProviderManager {
     private final int maxDescriptionChars;
     private final int maxSchemaBytes;
     private final long maxSchemaBytesPerServer;
+
+    /**
+     * Enforces a vault apiKey's {@code allowedHosts} against the server URL.
+     * Field-injected so the constructors keep their shape; null only in tests that
+     * construct the manager directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
 
     /**
      * Resolves a {@code ${connection:name}} apiKey per request. Injected as an
@@ -409,6 +418,7 @@ public class McpToolProviderManager {
                 validateTransport(serverConfig.getTransport());
                 validateCallerBoundKey(serverConfig);
                 validateConnectionBoundKey(serverConfig);
+                validateSecretDestination(serverConfig);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -637,6 +647,7 @@ public class McpToolProviderManager {
         validateTransport(serverConfig.getTransport());
         validateCallerBoundKey(serverConfig);
         validateConnectionBoundKey(serverConfig);
+        validateSecretDestination(serverConfig);
 
         String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
         String prefix = toolNamePrefix(serverName, url);
@@ -1003,6 +1014,36 @@ public class McpToolProviderManager {
         }
     }
 
+    /**
+     * Refuses a static apiKey whose vault secret's {@code allowedHosts} does not
+     * name the server URL — a static configuration error, so reported as one
+     * ({@code INVALID_CONFIGURATION}) and kept away from the circuit breaker. A
+     * caller- or connection-bound key is not a vault reference and is left alone.
+     *
+     * @throws IllegalArgumentException
+     *             when the secret may not be sent to this server
+     */
+    void validateSecretDestination(McpServerConfig config) {
+        String apiKey = config.getApiKey();
+        if (vaultHostAllowlist == null || isNullOrEmpty(apiKey) || CallerIdentityResolver.containsReference(apiKey)
+                || ConnectionResolver.containsReference(apiKey)) {
+            return;
+        }
+        try {
+            requireSecretsAllowedAt(globalVariableResolver.resolveValue(apiKey), config);
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void requireSecretsAllowedAt(String apiKey, McpServerConfig config) {
+        if (vaultHostAllowlist == null || apiKey == null) {
+            return;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(apiKey)), config.getUrl(), "MCP server '" + serverName + "'");
+    }
+
     void validateServerUrl(String url) {
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");
@@ -1172,6 +1213,9 @@ public class McpToolProviderManager {
         }
         if (!isNullOrEmpty(apiKey) && !callerBound && !connectionBound) {
             apiKey = globalVariableResolver.resolveValue(apiKey);
+            // Checked again here, immediately before resolution, because a transport
+            // is also built for a tool call on a client the discovery pass never saw.
+            requireSecretsAllowedAt(apiKey, config);
             apiKey = secretResolver.resolveValue(apiKey);
         }
 
