@@ -4573,7 +4573,7 @@ export const scheduleHandlers = [
       }),
       sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
       sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
-      sseEvent("member_tool_call", { agentId: "agent1", tool: "search_knowledge_base" }),
+      sseEvent("member_tool_call", { agentId: "agent1", displayName: "Support Agent", tool: "search_knowledge_base" }),
       sseEvent("speaker_complete", {
         agentId: "agent1",
         displayName: "Support Agent",

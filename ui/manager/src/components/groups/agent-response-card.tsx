@@ -227,7 +227,7 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
-            <span className="min-w-0 break-all text-xs text-muted-foreground ms-1">
+            <span role="status" aria-relevant="text" className="min-w-0 break-all text-xs text-muted-foreground ms-1">
               {toolName
                 ? t("groups.usingTool", "using {{tool}}…", { tool: toolName })
                 : t("groups.responding", "responding…")}
