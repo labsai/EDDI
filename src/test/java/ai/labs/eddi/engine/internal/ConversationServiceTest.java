@@ -827,6 +827,38 @@ class ConversationServiceTest {
             verify(conversationMemoryStore, atLeastOnce()).loadConversationMemorySnapshot(CONVERSATION_ID);
         }
 
+        @Test
+        @DisplayName("WS3a: the conversation is loaded once per turn, not again when the turn is admitted")
+        void loadsTheConversationOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()), false,
+                            (s) -> {
+                            }));
+
+            verify(conversationMemoryStore, times(1)).loadConversationMemorySnapshot(CONVERSATION_ID);
+            // ...and the admission ran against that load: it got as far as asking for the
+            // agent.
+            verify(agentFactory, atLeastOnce()).getAgent(ENV, AGENT_ID, snapshot.getAgentVersion());
+        }
+
+        @Test
+        @DisplayName("WS3a: the streaming entry point loads the conversation once too")
+        void streamingLoadsTheConversationOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()),
+                            mock(IConversationService.StreamingResponseHandler.class)));
+
+            verify(conversationMemoryStore, times(1)).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+
         private void softDeletedBeforeTheFix() throws Exception {
             var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
             snapshot.setEnvironment(ENV);

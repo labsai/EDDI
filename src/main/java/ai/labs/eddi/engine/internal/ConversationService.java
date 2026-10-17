@@ -907,7 +907,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
             throws Exception {
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
+        say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler,
+                null);
+    }
+
+    /**
+     * @param preloaded
+     *            the conversation as the caller has just loaded it, so the turn
+     *            does not load it a second time; {@code null} to load it here
+     */
+    private void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler,
+                     ConversationMemorySnapshot preloaded)
+            throws Exception {
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -930,8 +943,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception {
+        sayStreaming(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, streamingHandler,
+                null);
+    }
+
+    /**
+     * As
+     * {@link #say(Environment, String, String, Boolean, Boolean, List, InputData, boolean, ConversationResponseHandler, ConversationMemorySnapshot)}.
+     */
+    private void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler,
+                              ConversationMemorySnapshot preloaded)
+            throws Exception {
         ConversationEventSink eventSink = eventSinkFor(streamingHandler);
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false,
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -1060,7 +1085,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     private void admitTurn(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
                            Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData, boolean rerunOnly,
-                           TurnListener listener)
+                           ConversationMemorySnapshot preloaded, TurnListener listener)
             throws Exception {
 
         long startTime = System.nanoTime();
@@ -1070,7 +1095,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         // need an effectively-final alias (processingTurn).
         ProcessingTurn admittedTurn = null;
         try {
-            final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
+            // The conversation-id entry points have just loaded the conversation to find
+            // its agent and run the pre-turn checks; loading it again here was a second
+            // full-document read on every turn.
+            final IConversationMemory conversationMemory = preloaded != null
+                    ? convertConversationMemorySnapshot(preloaded)
+                    : loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             // GDPR Art. 18 — processing restriction check
@@ -1519,7 +1549,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    rerunOnly, handler);
+                    rerunOnly, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
@@ -1622,7 +1652,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                    inputData, handler);
+                    inputData, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
