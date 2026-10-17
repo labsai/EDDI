@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,13 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private static final String KEY_TYPE = "type";
     private static final String KEY_DICTIONARIES = "dictionaries";
     private static final String DICTIONARY_TYPE_HOST = "ai.labs.parser.dictionaries.regular";
+    private static final String EDDI_SCHEME_PREFIX = "eddi://";
+    /**
+     * Referenced types a caller needs only USE on, because using them is what a
+     * reference does — an agent or a group is talked to, never read. Everything
+     * else a step names is configuration, which needs VIEW.
+     */
+    private static final Set<String> USE_ONLY_REFERENCE_TYPES = Set.of("ai.labs.agent", "ai.labs.group");
     /**
      * How many resources a cascade deliberately did not delete (still referenced,
      * not routable, or the delete itself failed). Absent when the cascade removed
@@ -140,7 +148,138 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response updateWorkflow(String id, Integer version, WorkflowConfiguration workflowConfiguration) {
+        if (enforcesReferences()) {
+            restVersionInfo.requireEditAccess(id);
+            requireAccessToReferences(workflowConfiguration, referencedIdsOfStoredVersion(id, version));
+        }
         return restVersionInfo.update(id, version, workflowConfiguration);
+    }
+
+    /**
+     * Whether references must be checked at all: only under enforced workspaces,
+     * and never for an administrator.
+     */
+    private boolean enforcesReferences() {
+        return resourceAccessGuard != null && !resourceAccessGuard.seesEverything();
+    }
+
+    /**
+     * Refuses a workflow that names a configuration the caller may not read (M3).
+     * <p>
+     * A workflow step is a pointer: {@code config.uri} names the LLM, rules,
+     * httpcalls, RAG, property or output configuration it runs, and a parser step's
+     * extensions name its dictionaries. Nothing used to check those pointers, so a
+     * caller with edit access to their own workflow could point a step at another
+     * space's private configuration by id, then read it back through an export of
+     * their own agent or watch it run in a conversation — the engine resolves
+     * references below the access guard. The agent store checks the workflows an
+     * agent names; this is the same check one level down.
+     * <p>
+     * Configuration needs {@code VIEW}; an agent or a group named by a step needs
+     * only {@code USE} ({@link #USE_ONLY_REFERENCE_TYPES}). A no-op unless
+     * workspaces are enforced, and for administrators.
+     *
+     * @param alreadyReferenced
+     *            resource ids the stored version already references; an update may
+     *            keep (or re-version) those without the caller holding access to
+     *            them, because keeping a reference somebody with access made grants
+     *            nothing new. Empty for a create or a copy, which check everything.
+     * @throws jakarta.ws.rs.ForbiddenException
+     *             naming the first reference the caller may not use
+     */
+    private void requireAccessToReferences(WorkflowConfiguration workflowConfiguration, Set<String> alreadyReferenced) {
+        if (!enforcesReferences()) {
+            return;
+        }
+        for (Map.Entry<String, URI> reference : referencedResources(workflowConfiguration).entrySet()) {
+            String resourceId = reference.getKey();
+            if (alreadyReferenced.contains(resourceId)) {
+                continue;
+            }
+            URI uri = reference.getValue();
+            String label = "configuration referenced by this workflow (" + withoutQuery(uri) + ")";
+            if (USE_ONLY_REFERENCE_TYPES.contains(uri.getHost())) {
+                resourceAccessGuard.requireUseAccess(resourceId, label);
+            } else {
+                resourceAccessGuard.requireAccess(resourceId, AccessLevel.VIEW, label);
+            }
+        }
+    }
+
+    /**
+     * The resource ids the stored {@code version} of the workflow references, or an
+     * empty set when it cannot be read — which only makes the check stricter.
+     */
+    private Set<String> referencedIdsOfStoredVersion(String id, Integer version) {
+        try {
+            Integer resolved = restVersionInfo.validateParameters(id, version);
+            return referencedResources(workflowStore.read(id, resolved)).keySet();
+        } catch (Exception e) {
+            log.debugf("Could not read workflow %s v%s to compare its references: %s", sanitize(id), version, sanitize(e.getMessage()));
+            return Set.of();
+        }
+    }
+
+    /**
+     * Every {@code eddi://} resource a workflow names — each step's
+     * {@code config.uri} and each extension element's {@code config.uri} — keyed by
+     * resource id. The same shape {@link #updateResourceInWorkflow} walks; anything
+     * that is not a parseable {@code eddi://} reference with an id is skipped,
+     * since the engine cannot resolve it either.
+     */
+    static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
+        Map<String, URI> references = new LinkedHashMap<>();
+        if (workflowConfiguration == null || workflowConfiguration.getWorkflowSteps() == null) {
+            return references;
+        }
+        for (WorkflowStep step : workflowConfiguration.getWorkflowSteps()) {
+            if (step == null) {
+                continue;
+            }
+            addReference(step.getConfig(), references);
+            Map<String, Object> extensions = step.getExtensions();
+            if (extensions == null) {
+                continue;
+            }
+            for (Object extensionValue : extensions.values()) {
+                if (!(extensionValue instanceof List<?> elements)) {
+                    continue;
+                }
+                for (Object element : elements) {
+                    if (element instanceof Map<?, ?> elementMap && elementMap.get(KEY_CONFIG) instanceof Map<?, ?> config) {
+                        addReference(config, references);
+                    }
+                }
+            }
+        }
+        return references;
+    }
+
+    private static void addReference(Map<?, ?> config, Map<String, URI> references) {
+        Object raw = config == null ? null : config.get(KEY_URI);
+        if (raw == null) {
+            return;
+        }
+        String text = raw.toString().trim();
+        if (!text.startsWith(EDDI_SCHEME_PREFIX)) {
+            return;
+        }
+        URI uri;
+        try {
+            uri = URI.create(text);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(uri);
+        if (resourceId != null && resourceId.getId() != null && !resourceId.getId().isBlank()) {
+            references.putIfAbsent(resourceId.getId(), uri);
+        }
+    }
+
+    private static String withoutQuery(URI uri) {
+        String text = uri.toString();
+        int query = text.indexOf('?');
+        return query >= 0 ? text.substring(0, query) : text;
     }
 
     @Override
@@ -216,6 +355,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response createWorkflow(WorkflowConfiguration workflowConfiguration) {
+        requireAccessToReferences(workflowConfiguration, Set.of());
         return restVersionInfo.create(workflowConfiguration);
     }
 
@@ -557,6 +697,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         version = restVersionInfo.validateParameters(id, version);
         try {
             WorkflowConfiguration workflowConfig = workflowStore.read(id, version);
+            // The copy is the caller's, so it may only keep references the caller could
+            // have written into a new workflow; a deep copy additionally reads each of
+            // them to duplicate it.
+            requireAccessToReferences(workflowConfig, Set.of());
             if (deepCopy) {
                 for (var workflowStep : workflowConfig.getWorkflowSteps()) {
                     // Guarded exactly as deleteWorkflow guards it: a stored step without a

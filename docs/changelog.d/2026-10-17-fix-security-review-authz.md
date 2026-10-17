@@ -15,3 +15,7 @@ Findings M2, M3, M5, L2, L3 and L4 of the 2026-10-17 security review. Every chan
 - Typing an exact username, verified e-mail or `team:<name>` still resolves (`resolveSubject` unchanged): only *suggestion* is narrowed.
 
 Docs: [`workspaces.md`](../workspaces.md#finding-people-the-user-directory), [`configuration-reference.md`](../configuration-reference.md).
+
+### M3.1 — a workflow could reference another space's private configuration
+
+[`RestWorkflowStore`](../../src/main/java/ai/labs/eddi/configs/workflows/rest/RestWorkflowStore.java) now checks every `eddi://` reference a workflow names — each step's `config.uri` and each extension element's `config.uri` (parser dictionaries) — through `ResourceAccessGuard` on create, update (and so `updateResourceUri` and `AgentCascadeService`, which reach it over the loopback REST client with the caller's identity) and duplicate (deep or not). Configuration needs `VIEW`; an `ai.labs.agent`/`ai.labs.group` reference needs `USE`. An update need not re-justify a resource id the stored version already referenced — keeping (or re-versioning) a reference somebody with access made grants nothing new — but a new id must pass, including the prefix trick `updateResourceUri` allowed (a target id that is a prefix of the stored one replaces it with a different resource).

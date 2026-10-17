@@ -329,6 +329,13 @@ Three properties are worth knowing:
   creating or re-pointing one at an agent requires `USE` on that agent. The fire
   (or the group's member turn) runs system-initiated and is deliberately not
   re-checked — the vet happens where the human is.
+- **Workflow references** are checked when a workflow is created, updated or
+  duplicated: every configuration a step names (`config.uri`, and each
+  extension's — a parser's dictionaries, for instance) requires `VIEW`, and an
+  agent or group a step names requires `USE`. An update need not re-justify a
+  reference the stored version already had. Without this, a workflow could point
+  at another space's private LLM or RAG configuration by id and read it back
+  through an export of the caller's own agent.
 - **Agent triggers** (managed-agent intents) require `EDIT` on every agent the
   trigger routes to — the agents it routes to now *and*, for an update, the ones
   it routed to before — to create, re-point or delete one. A trigger has no owner
