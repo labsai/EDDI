@@ -97,14 +97,14 @@ class SecretScrubberStructuredValuesTest {
         var out = scrub("""
                 {"description":"call it with sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 please",
                  "notes":["gh token ghp_abcdefghijklmnopqrstuvwxyz0123456789AB",
-                          "aws AKIAABCDEFGHIJKLMNOP", "db mongodb://eddi:hunter2secret@db:27017/eddi"]}""");
+                          "aws AKIAIOSFODNN7EXAMPLE", "db mongodb://eddi:hunter2secret@db:27017/eddi"]}""");
 
         String description = out.at("/description").asText();
         assertFalse(description.contains("abcdefghijklmnopqrstuvwxyz0123456789"), description);
         assertTrue(description.startsWith("call it with sk-"), description);
         assertTrue(description.endsWith(" please"), description);
         assertFalse(out.at("/notes/0").asText().contains("ghp_abcdefghij"), out.at("/notes/0").asText());
-        assertFalse(out.at("/notes/1").asText().contains("AKIAABCDEFGHIJKLMNOP"), out.at("/notes/1").asText());
+        assertFalse(out.at("/notes/1").asText().contains("AKIAIOSFODNN7EXAMPLE"), out.at("/notes/1").asText());
         assertEquals("db mongodb://eddi:" + SecretRedactionFilter.REDACTED + "@db:27017/eddi", out.at("/notes/2").asText());
     }
 
