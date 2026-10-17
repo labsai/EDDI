@@ -91,7 +91,11 @@ principal, not a user: erasing or exporting it is refused with 400.
    answers the stop does the same before it replies, so its late entries are
    pseudonymised and redacted too; see [Clustering](clustering.md#residual-limitations).
 1. User memories — **permanently deleted**
-2. Binary attachments of the user's conversations — **permanently deleted**
+2. Binary attachments of the user's conversations — **permanently deleted**. This
+   includes the files shared in the user's group discussions (stored under the group
+   conversation's id) and the blobs of every member conversation those discussions
+   created; the discussions are looked up before step 8 deletes them. A failed lookup
+   is reported as `groupConversationAttachments`
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
@@ -103,8 +107,15 @@ principal, not a user: erasing or exporting it is refused with 400.
 11. Pending OAuth authorization flows the user started are invalidated first (a
     callback completing afterwards would otherwise mint a new grant), then the OAuth connection grants (linked accounts) of the user, in every tenant — **permanently deleted**. Each holds a live refresh token for the user's account at the provider; the provider-side consent is not revoked by EDDI and may be revoked by the user there
 12. User memories — **re-swept**, for writes that landed while the cascade ran
-13. Database logs — userId **pseudonymized** (SHA-256 hash). The log message text is
-    not rewritten; bound its lifetime with `eddi.logs.db-retention-days`
+13. Database logs — userId **pseudonymized** with a *keyed* pseudonym: the audit
+    ledger's `gdpr-erased:k1:…` when the ledger signs, otherwise
+    `gdpr-erased:s1:…` under a random per-deployment salt kept in the vault's
+    metadata store (`gdpr-pseudonym-salt`, created on first use, shared by every
+    replica). Neither can be recomputed from a list of candidate ids. Rows erased
+    by an earlier release keep their unsalted `gdpr-erased:<sha256>` value — there
+    is no migration, as the raw id is gone from them; only when the metadata store
+    cannot be read does an erasure fall back to that form (logged at WARN). The log
+    message text is not rewritten; bound its lifetime with `eddi.logs.db-retention-days`
 14. Audit ledger — rows **kept, content redacted, userId pseudonymized**. The write
     queue is flushed first, so entries still queued are caught. Each row's prompt,
     response, LLM detail and tool calls are replaced by a redaction marker and its
@@ -143,18 +154,25 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   dates) — never token material
 - A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
   message sent, the reply, state and timestamps)
+- Group discussions the user started (`groupConversations`: question, transcript,
+  state and dates; capped at 1,000, `groupConversationsTruncated` when the cap bit),
+  and the shared artifacts of those discussions (`sharedArtifacts`: content and
+  revision history; capped at 1,000, `sharedArtifactsTruncated`). The attachment
+  metadata above includes the discussions' files and those of their member
+  conversations. A store that fails is named in `failedCategories`
 
 > **Check `complete` before handing the bundle to the data subject.** The endpoint
 > answers **200** only when the bundle covers everything EDDI holds on the user,
-> and **207 Multi-Status** otherwise. Three things can make it incomplete, and each
+> and **207 Multi-Status** otherwise. Several things can make it incomplete, and each
 > is named in the payload:
 >
 > - `omittedCategories` — personal-data categories this exporter does not reach.
->   **Today this list is never empty**: group conversation transcripts, shared
->   artifacts, schedules and HITL journal entries are erased by the Art. 17
->   cascade as this user's personal data but are not yet exportable. So the export
->   endpoint currently answers **207 on every request** and `complete` is always
->   `false`. It becomes 200 when those four exporters land.
+>   **Today this list is never empty**: schedules and HITL journal entries are
+>   erased by the Art. 17 cascade as this user's personal data but are not yet
+>   exportable (group transcripts and shared artifacts are exported since the
+>   2026-10-17 review). So the export endpoint currently answers **207 on every
+>   request** and `complete` is always `false`. It becomes 200 when those two
+>   exporters land.
 > - `conversationsTruncated` — the per-request conversation cap (1,000) bit,
 >   because each snapshot is a full document load assembled in memory on the
 >   request thread. `totalConversations` says how many the user actually has, and
@@ -162,6 +180,8 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
 > - `failedConversationIds` — conversations the exporter could not load at all,
 >   listed by id, and therefore absent from `conversations`. Retry the export or
 >   fetch those ids individually.
+> - `groupConversationsTruncated`, `sharedArtifactsTruncated` and
+>   `failedCategories` — the same two signals for the group sections.
 >
 > A bundle with `complete: false` is **not** a complete Art. 15 / Art. 20
 > response — do not file the request as fulfilled on it. (The audit-record cap of
@@ -354,8 +374,7 @@ and reduce them to the minimum necessary for your use case.
 Erasure covers every store EDDI keys by a user — the fourteen steps and the
 participants listed above. Export is narrower: it is the bundle described under
 [Right of Access](#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100),
-and what it leaves out — group conversation transcripts, shared artifacts,
-schedules and HITL journal entries among them — is named in its
+and what it leaves out — schedules and HITL journal entries among them — is named in its
 `omittedCategories`, so an export must not be handed over as complete without
 reading that field. Beyond both, four classes of data sit outside EDDI's reach
 altogether, each for a different reason; a controller's record of processing
@@ -445,8 +464,8 @@ Document this in your CCPA privacy notice.
 ### Right to Know (§1798.100)
 
 Use the export endpoint (`GET /admin/gdpr/{userId}/export`). It does **not**
-yet cover every category: group transcripts, shared artifacts, schedules and
-HITL journal entries are listed in `omittedCategories`, so today the response is
+yet cover every category: schedules and HITL journal entries are listed in
+`omittedCategories`, so today the response is
 always `207` with `complete: false` — see
 [Right of Access](#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100).
 Supplement those categories by hand before answering the consumer.
