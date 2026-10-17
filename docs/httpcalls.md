@@ -177,12 +177,20 @@ reflects what the caller actually addressed:
 ```properties
 quarkus.http.proxy.proxy-address-forwarding=true
 quarkus.http.proxy.enable-forwarded-host=true
+# The proxy's address(es) — only forwarded headers arriving FROM these are honoured
+quarkus.http.proxy.trusted-proxies=10.0.0.5,10.0.1.0/24
 ```
 
 This is deliberately **not** on by default. It makes EDDI trust `X-Forwarded-*`
 headers, which any client can send — safe when a trusted proxy overwrites them,
 wrong when EDDI is directly reachable. Turn it on only together with a proxy
-that sets those headers itself.
+that sets those headers itself, and **always set `trusted-proxies`** alongside:
+without it Quarkus honours forwarded headers from *every* source address, so a
+client that can reach EDDI directly (another pod, a host on the LAN, a port-forward)
+spoofs its own origin, which is exactly the check `${caller:token}` relies on. The
+value is a comma-separated list of the proxy's IPs or CIDRs (hostnames resolve
+once at startup; use addresses). With `trusted-proxies` set, a request whose
+peer address is not in the list has its forwarded headers ignored.
 
 ## HttpCalls Configuration
 
