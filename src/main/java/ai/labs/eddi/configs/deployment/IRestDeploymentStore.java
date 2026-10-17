@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.deployment;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.GET;
@@ -25,5 +26,6 @@ public interface IRestDeploymentStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read deployment infos.")
+    @APIResponse(responseCode = "200", description = "Deployment information list")
     List<DeploymentInfo> readDeploymentInfos();
 }
