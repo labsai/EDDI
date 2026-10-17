@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
@@ -533,6 +534,24 @@ class ConversationServiceHitlCoverageTest {
             AtomicReference<IConversationMemory> mem = drivePlainResume(null);
 
             assertNull(mem.get().getAgentToolApprovalsConfig());
+        }
+
+        @Test
+        @DisplayName("the pinned agent config is read from the store once, not on every turn")
+        void pinnedConfig_readOnce() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
+            hitl.setToolApprovals(toolApprovals);
+            agentConfig.setHitlConfig(hitl);
+            doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+            conversationService.agentConfigurationCache = new AgentConfigurationCache(agentStore);
+
+            drivePlainResume(agentConfig);
+            AtomicReference<IConversationMemory> mem = drivePlainResume(agentConfig);
+
+            assertSame(toolApprovals, mem.get().getAgentToolApprovalsConfig());
+            verify(agentStore, times(1)).read(AGENT_ID, AGENT_VERSION);
         }
 
         @Test

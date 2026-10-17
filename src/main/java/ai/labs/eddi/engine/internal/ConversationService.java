@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.KvKeys;
@@ -193,6 +194,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     Instance<ConversationDescriptorMemo> descriptorMemoInstance;
+
+    /**
+     * Serves the pinned agent configuration {@link ConversationHitlService} reads
+     * on every turn from memory instead of the store. Field-injected for the same
+     * reason as {@link #attachmentStore}; {@code null} means every read goes to the
+     * store.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
