@@ -20,7 +20,13 @@ those numbers can be published reproducibly and regressions caught. Nothing unde
   that honours 503 + `Retry-After` (capped, jittered) and resends the same turn up to N attempts;
   reports latency including backoff, attempts per turn and abandoned turns. Requested by the
   admission-control work, whose shedding otherwise read as collapsed goodput. `LOADTEST_COMPOSE_EXTRA`
-  adds compose overrides for EDDI settings under test.
+  adds compose overrides for EDDI settings under test
+  ([`overrides/in-flight-100.yml`](../../scripts/loadtest/overrides/in-flight-100.yml)). Measured live (laptop,
+  [`results/retry-2026-10-18-report.md`](../../scripts/loadtest/results/retry-2026-10-18-report.md)): 500 conversations
+  against 100 in-flight turns, 1 s mock, fresh database each: the default client completed 339 of 2,500
+  turns (17.5 turns/s, 762 failed starts); the retrying client 2,404 (43.3 turns/s, 74 abandoned, 22
+  failed starts), with p95 including backoff of 18 s. The first live run showed refused *starts*
+  were not retried, so starts now back off too.
 - **Overhead as a first-class metric**: every turn run reports `turn_overhead` (latency minus the
   mock's delay) at p50/p95/p99.
 - **`up --nodes N` and `scaling --nodes 1,2,4`**: the cluster-demo topology (NATS JetStream,

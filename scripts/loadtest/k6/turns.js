@@ -11,7 +11,8 @@
 //   DELAY_MS   the mock LLM's delay for this run; turn_overhead = turn latency minus it
 //   RETRY_503  0 (default): a 503 ends the iteration. N > 0: on 503 sleep Retry-After (capped at
 //              RETRY_CAP_MS, default 10000, ±RETRY_JITTER, default 0.2) and resend the same turn,
-//              at most N attempts in all; then the turn counts as abandoned
+//              at most N attempts in all; then the turn counts as abandoned. Conversation starts
+//              back off the same way (starts_refused)
 //   OUT        summary file name under /results
 //
 // Every VU owns one conversation (except same-conversation), started on its first iteration,
@@ -56,6 +57,7 @@ const startFailed = new Counter('start_failed');
 const turnTotalDuration = new Trend('turn_total_duration', true);
 const turnAttempts = new Trend('turn_attempts');
 const turnsAbandoned = new Counter('turns_abandoned');
+const startsRefused = new Counter('starts_refused');
 
 // Retry-After in seconds (EDDI sends delta-seconds), capped, with ±JITTER so that refused VUs
 // do not come back in lockstep. Missing or unparsable: RETRY_DEFAULT_MS.
@@ -97,7 +99,14 @@ export const options = {
 };
 
 function startConversation(tag) {
-  const res = http.post(`${BASE}/agents/${AGENT}/start?userId=loadtest-${tag}`, null, { timeout: TIMEOUT, tags: { kind: 'start' } });
+  let res;
+  // Starts are admitted like turns, so in retry mode a refused start backs off the same way.
+  for (let attempt = 1; ; attempt++) {
+    res = http.post(`${BASE}/agents/${AGENT}/start?userId=loadtest-${tag}`, null, { timeout: TIMEOUT, tags: { kind: 'start' } });
+    if (res.status !== 503 || RETRY_503 === 0 || attempt >= RETRY_503) break;
+    startsRefused.add(1);
+    sleep(backoffMs(res) / 1000);
+  }
   const loc = res.headers['Location'] || res.headers['location'] || '';
   const m = /conversations\/([0-9a-f-]+)/.exec(loc);
   if (!m) {

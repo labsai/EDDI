@@ -86,7 +86,8 @@ but it makes any load shedding read as collapsed goodput, and a 503 storm keeps 
 answering refusals. With `--retry-503 N` (k6 `RETRY_503=N`) a VU that gets a 503 sleeps for its
 `Retry-After` (capped at `--retry-cap-ms`, default 10000, with ±20 % jitter so refused VUs do not come
 back in lockstep; 1 s when the header is missing) and resends the same turn, at most N attempts in
-all, after which the turn counts as **abandoned**. The result adds the latency the user actually
+all, after which the turn counts as **abandoned**. Conversation starts are admitted like turns, so a
+refused start backs off the same way (`starts_refused`). The result adds the latency the user actually
 waited (`total_latency_ms`, refusals and backoff included), attempts per turn and `turns_abandoned`;
 `turns_503` then counts refused *attempts*, not lost turns. Result files get a `-retryN` suffix. Use
 this mode to measure an admission-control change; compare like with like (retry against retry), and
@@ -94,7 +95,10 @@ run `down` (fresh database) between configurations.
 
 **Changing EDDI settings.** `LOADTEST_COMPOSE_EXTRA` names one or more extra compose files
 (separated by the OS path separator) that are applied last, e.g. a file setting
-`EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS` on the `eddi` service. Set it before `up` and keep it set.
+`EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS` on the `eddi` service —
+[`overrides/in-flight-100.yml`](overrides/in-flight-100.yml) does exactly that. Set it before `up` and keep it set.
+[`results/retry-2026-10-18-report.md`](results/retry-2026-10-18-report.md) is a laptop run of both clients against
+that limit: 500 conversations, the default client completed 339 of 2,500 turns, the retrying one 2,404 (74 abandoned).
 
 **EDDI overhead** is reported for every turn run: turn latency minus the mock's configured delay
 (`turn_overhead` in k6, p50/p95/p99 in the result and the report). One turn is one LLM call here, so

@@ -62,7 +62,7 @@ COUNTED = re.compile(r"^(eddi_audit_entries_dropped_total|eddi_turn_rejected_tot
                      r"eddi_conversation_processing_duration_seconds_(count|sum)|eddi_llm_circuit[a-z_]*_total|"
                      r"http_server_requests_seconds_count)")
 TURN_ERRORS = ["turns_503", "turns_429", "turns_408", "turns_409", "turns_5xx_other", "turns_other", "turns_no_response",
-               "turns_app_error", "start_failed", "turns_abandoned"]
+               "turns_app_error", "start_failed", "turns_abandoned", "starts_refused"]
 STATS = ["med", "p(90)", "p(95)", "p(99)", "max"]
 
 
@@ -1025,6 +1025,10 @@ def ms(d, k):
     return fmt((d or {}).get(k))
 
 
+def scenario_cell(r):
+    return r["scenario"] + (f" (retry {r['retry_503']})" if r.get("retry_503") else "")
+
+
 def flag(r):
     """A marker on a row measured while another stack's load test ran on the same machine."""
     return " ⚠" if r.get("contended_by") else ""
@@ -1091,7 +1095,7 @@ def cmd_report(args):
               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in sorted(rows, key=lambda r: (r["scenario"], r["llm_delay_ms"], r["vus"])):
             errs = ", ".join(f"{k}={int(v)}" for k, v in r["errors"].items() if v) or "none"
-            L.append(f"| {r['scenario']}{flag(r)} | {r['nodes']} | {r['db_kind']} | {r['vus']} | {r['llm_delay_ms']} | {r['turns_ok']:.0f} | "
+            L.append(f"| {scenario_cell(r)}{flag(r)} | {r['nodes']} | {r['db_kind']} | {r['vus']} | {r['llm_delay_ms']} | {r['turns_ok']:.0f} | "
                      f"{r['turns_per_s'] or 0:.1f} | {ms(r['latency_ms'], 'med')} | {ms(r['latency_ms'], 'p(95)')} | "
                      f"{ms(r['latency_ms'], 'p(99)')} | {ms(r['overhead_ms'], 'med')} / {ms(r['overhead_ms'], 'p(95)')} / "
                      f"{ms(r['overhead_ms'], 'p(99)')} | {errs} | {ops_cell(r['db_ops_per_turn'])} |")
@@ -1179,11 +1183,13 @@ def cmd_report(args):
         own = r.get("env_overrides") or {}
         prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in own.items() if overrides.get(k) != v)
         up = f"{prefix} {r.get('up_command') or ''}".strip()
-        if up != stack:
+        # Same command, new stack: `collected` is stamped by each `up`.
+        key = (up, (r.get("env") or {}).get("collected"))
+        if key != stack:
             if stack is not None:
                 seen.append("python scripts/loadtest/loadtest.py down")
             seen.append(up)
-            stack = up
+            stack = key
         line = f"{prefix} {r.get('command')}".strip()
         if line not in seen:
             seen.append(line)
