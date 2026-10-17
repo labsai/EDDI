@@ -4,43 +4,79 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.DisplayName;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Nested;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.ArgumentCaptor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.Mock;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.time.Instant;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.HashMap;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.LinkedHashMap;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.Map;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.MockitoAnnotations.openMocks;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.io.IOException;
 
 @DisplayName("McpAdminTools — Branch Coverage")
@@ -70,7 +106,7 @@ class McpAdminToolsBranchCoverageTest {
         tools = new McpAdminTools(restInterfaceFactory, agentAdmin, jsonSerialization,
                 strictConfigurationParser(),
                 scheduleStore, scheduleFireExecutor, schedulePollerService,
-                identity, false);
+                identity, false, new AgentCascadeService(restInterfaceFactory, agentAdmin));
         // fire_schedule_now claims the schedule first, exactly as the poller and the
         // REST endpoint do. Default the claim to "won" so tests about anything else
         // still reach the fire.
@@ -637,7 +673,7 @@ class McpAdminToolsBranchCoverageTest {
             assertEquals(false, result.get("redeployed"));
             assertEquals("ERROR", result.get("deploymentStatus"));
             assertEquals("Deployment failed. Check server logs for details.", result.get("deployError"));
-            assertEquals(false, result.get("previousVersionStillDeployed"));
+            assertEquals(true, result.get("previousVersionStillDeployed"), "a failed deploy retires nothing: the previous version still serves");
         }
 
         @Test

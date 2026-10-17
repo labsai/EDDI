@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -328,13 +329,16 @@ class EmbeddingStoreFactoryTest {
         @Test
         @DisplayName("rotating a secret rebuilds the store")
         void rotatingASecretEvictsTheCachedStore() {
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(globalVariableResolver, secretResolver, 50_000,
+                    Ticker.systemTicker());
             var secretListener = ArgumentCaptor.forClass(Consumer.class);
             factory.registerInvalidation();
             verify(secretResolver).registerInvalidationListener(secretListener.capture());
 
+            // An external store, whose client carries the credential. In-memory stores
+            // hold none and must survive this — see EmbeddingStoreFactoryInMemoryTest.
             var config = new RagConfiguration();
-            config.setStoreNamespace("id");
-            config.setStoreType("in-memory");
+            config.setStoreType("elasticsearch");
             var before = factory.getOrCreate("kb1", config);
 
             @SuppressWarnings("unchecked")
@@ -348,13 +352,14 @@ class EmbeddingStoreFactoryTest {
         @Test
         @DisplayName("editing a global variable rebuilds the store")
         void editingAGlobalVariableEvictsTheCachedStore() {
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(globalVariableResolver, secretResolver, 50_000,
+                    Ticker.systemTicker());
             var variableListener = ArgumentCaptor.forClass(Runnable.class);
             factory.registerInvalidation();
             verify(globalVariableResolver).registerInvalidationListener(variableListener.capture());
 
             var config = new RagConfiguration();
-            config.setStoreNamespace("id");
-            config.setStoreType("in-memory");
+            config.setStoreType("elasticsearch");
             var before = factory.getOrCreate("kb1", config);
 
             variableListener.getValue().run();

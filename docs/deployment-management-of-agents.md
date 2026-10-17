@@ -154,6 +154,54 @@ conversation, and managed conversations and the `/v1` API start a new one on the
 Conversations that another deployed version of the **same compatibility generation** can take over
 do not count here at all — see the next section.
 
+## Landing resource changes in one pass
+
+Nothing in EDDI changes in place: editing a behavior rule set, an LLM config or a workflow writes
+the *next version of that document*, while the workflow still references the old config version and
+the agent still references the old workflow version. Wiring a change in by hand is a chain — repoint
+the workflow, repoint the agent, deploy — and each hop writes a version of its own.
+
+`POST /agentstore/agents/{id}/cascade?version=N` does the whole chain in one request, writing every
+changed workflow and the agent **once**:
+
+```json
+{
+  "resourceMappings": [
+    { "oldUri": "eddi://ai.labs.llm/llmstore/llms/6a1b…?version=1",
+      "newUri": "eddi://ai.labs.llm/llmstore/llms/6a1b…?version=2" },
+    { "oldUri": "eddi://ai.labs.workflow/workflowstore/workflows/9c2d…?version=1",
+      "newUri": "eddi://ai.labs.workflow/workflowstore/workflows/9c2d…?version=2" }
+  ],
+  "redeploy": true,
+  "environment": "production",
+  "compatible": false
+}
+```
+
+- **Mappings.** An `oldUri` must be a reference the agent really holds — a step of one of its
+  workflows, or a workflow the agent itself references. A mapping naming a workflow moves the agent to another *version of that same workflow* (a different workflow is refused, as it is for `updateResourceUri`) and repoints the
+  agent at that version first and applies the step mappings to *its* steps, so a workflow you
+  edited in the same batch is picked up rather than overwritten by a rewrite of the version the agent
+  still points at.
+- **Validation, before anything is written.** Both URIs must carry a `?version=`, name the same kind
+  of resource (a step cannot be re-aimed at a different type of document), and match a reference the
+  agent holds. Any pair that does not answers `400` and **nothing is written**. A `version` that is
+  not the agent's current one answers `409`, also before any write.
+- **What it cannot change.** The request carries URI pairs and nothing else. The only fields touched
+  are `config.uri` on workflow steps and the agent's workflow list; every other agent setting —
+  the approval gate (`hitlConfig`) included — is the stored value, written back unchanged.
+- **`redeploy`** goes through the normal deploy endpoint, so the tenant quota and the vault-grant
+  check apply exactly as for `POST /administration/{environment}/deploy/{agentId}`. The documents are
+  written either way; the response's `deployment` says whether it went live. When the deploy reports why it failed (a missing vault grant names the secrets and the exact grant calls), `deployment.failure` carries that, and the MCP tool reports it as `failureCode`, `secrets`, `fix` and `humanActionRequired`, as `deploy_agent` does.
+- **Partial failure.** Workflows are written first, then the agent. If the agent save (or a later workflow write) fails, the error says the agent was **not** changed, names the workflow versions already written (unreferenced, harmless) and tells you to retry from the agent''s current version; a concurrent edit is a 409, anything else a 500. A store that does not report the version it wrote is an error, never a guessed version.
+- **`compatible`** is the flag described in the next section.
+- **Roles.** `eddi-admin` or `eddi-editor`, the same as the writes it composes, and the usual
+  per-document edit access applies.
+
+The response names the new agent version, each workflow version written, and the deployment outcome.
+The MCP tool `apply_agent_changes` is the same operation (it also reports the flat `updatedWorkflows`
+and `mappingsApplied` counts) and requires `eddi-admin`.
+
 ## Running conversations and new agent versions
 
 A conversation used to run on the agent version it started on for its whole life. It can now

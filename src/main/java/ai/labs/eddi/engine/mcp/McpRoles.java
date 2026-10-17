@@ -74,6 +74,18 @@ final class McpRoles {
 
     /** Published documentation — every EDDI role, as {@code IRestDocs}. */
     static final List<String> DOCS = List.of(ADMIN, EDITOR, USER, APPROVER, VIEWER);
+    /**
+     * Human-in-the-loop decisions and their reads: the REST HITL endpoints
+     * ({@code IRestAgentEngine} resume/cancel/approval-status/pending-approvals and
+     * the {@code IRestGroupConversation} approve/cancel/human-input/pending
+     * counterparts) are all {@code @RolesAllowed({"eddi-admin", "eddi-editor",
+     * "eddi-user", "eddi-approver"})}. The MCP tools used to skip the tier and rely
+     * on {@code HitlAccessGuard} alone, so over MCP an {@code eddi-viewer} — a role
+     * REST refuses at the door — could decide its own gated tool calls (security
+     * review 2026-10-15, finding L5). The per-conversation guard still runs after
+     * this gate; the tier is the same first door REST has.
+     */
+    static final List<String> HITL = List.of(ADMIN, EDITOR, USER, APPROVER);
 
     private McpRoles() {
     }

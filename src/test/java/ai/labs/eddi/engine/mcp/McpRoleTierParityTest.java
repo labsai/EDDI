@@ -76,10 +76,11 @@ class McpRoleTierParityTest {
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class};
 
     /**
-     * The tools whose callers are authorized per conversation by HitlAccessGuard,
-     * not by role.
+     * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
+     * tier at all, so an eddi-viewer could decide its own gated tool calls over
+     * MCP), then HitlAccessGuard per conversation.
      */
-    private static final Set<String> HITL_GUARDED = Set.of("list_pending_approvals", "get_approval_status", "resume_conversation",
+    private static final Set<String> HITL_TOOLS = Set.of("list_pending_approvals", "get_approval_status", "resume_conversation",
             "cancel_conversation", "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status",
             "approve_group_phase", "cancel_group_discussion", "submit_group_human_input");
 
@@ -111,8 +112,8 @@ class McpRoleTierParityTest {
      * configuration.
      */
     private static List<String> expectedTier(String tool) {
-        if (HITL_GUARDED.contains(tool)) {
-            return null;
+        if (HITL_TOOLS.contains(tool)) {
+            return McpRoles.HITL;
         }
         if (ADMIN_ONLY_TOOLS.contains(tool)) {
             return McpRoles.ADMIN_ONLY;
@@ -207,8 +208,7 @@ class McpRoleTierParityTest {
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
-            List<String> tier = expectedTier(entry.getKey());
-            Set<String> expected = tier == null ? new HashSet<>(ALL_ROLES) : new HashSet<>(tier);
+            Set<String> expected = new HashSet<>(expectedTier(entry.getKey()));
             if (!expected.equals(entry.getValue())) {
                 violations.add(entry.getKey() + ": admitted " + new TreeSet<>(entry.getValue()) + ", expected " + new TreeSet<>(expected));
             }
@@ -240,7 +240,7 @@ class McpRoleTierParityTest {
     }
 
     @Test
-    @DisplayName("a caller with no EDDI role passes only the HITL tools' role gate (they are guarded per conversation)")
+    @DisplayName("a caller with no EDDI role passes no tool's role gate — the HITL tools included (L5)")
     void noRoleCaller() throws Exception {
         var admittedTools = new ArrayList<String>();
         for (Class<?> toolClass : TOOL_CLASSES) {
@@ -251,7 +251,18 @@ class McpRoleTierParityTest {
                 }
             }
         }
-        assertEquals(new HashSet<>(HITL_GUARDED), new HashSet<>(admittedTools));
+        assertEquals(Set.of(), new HashSet<>(admittedTools));
+    }
+
+    @Test
+    @DisplayName("eddi-viewer is admitted by no HITL tool — it is an MCP read role, and REST refuses it at every HITL endpoint")
+    void viewerIsRefusedByEveryHitlTool() throws Exception {
+        Object tools = instantiate(McpHitlTools.class, identityWith(Set.of(VIEWER)));
+        for (Method m : McpHitlTools.class.getDeclaredMethods()) {
+            if (m.isAnnotationPresent(Tool.class)) {
+                assertTrue(!admitted(tools, m, new Object[m.getParameterCount()]), "viewer admitted to " + McpToolContractTest.toolName(m));
+            }
+        }
     }
 
     // ------------------------------------------------------------------ parity
@@ -288,6 +299,22 @@ class McpRoleTierParityTest {
         converseWithoutViewer.remove(VIEWER);
         assertEquals(restRoles(IRestAgentEngine.class), converseWithoutViewer);
         assertEquals(restRoles(IRestGroupConversation.class), converseWithoutViewer);
+
+        // The HITL tier is the method-level @RolesAllowed of every REST HITL endpoint
+        // — the 1:1 surface and the group surface alike (L5).
+        Map<Class<?>, List<String>> hitlEndpoints = new LinkedHashMap<>();
+        hitlEndpoints.put(IRestAgentEngine.class, List.of("resumeConversation", "getApprovalStatus", "cancelConversation", "listPendingApprovals"));
+        hitlEndpoints.put(IRestGroupConversation.class, List.of("approveGroupPhase", "cancelDiscussion", "submitHumanInput",
+                "listGroupPendingApprovals", "listAllGroupPendingApprovals"));
+        for (var entry : hitlEndpoints.entrySet()) {
+            for (String methodName : entry.getValue()) {
+                Method rest = Arrays.stream(entry.getKey().getMethods()).filter(x -> x.getName().equals(methodName)).findFirst().orElseThrow();
+                RolesAllowed annotation = rest.getAnnotation(RolesAllowed.class);
+                assertTrue(annotation != null, methodName + " carries no @RolesAllowed of its own");
+                assertEquals(new HashSet<>(Arrays.asList(annotation.value())), new HashSet<>(McpRoles.HITL),
+                        entry.getKey().getSimpleName() + "#" + methodName);
+            }
+        }
 
         // The observer tier is REST's audit/log tier (admin-only) plus eddi-viewer.
         // It must never admit eddi-user or eddi-editor: an audit entry carries the

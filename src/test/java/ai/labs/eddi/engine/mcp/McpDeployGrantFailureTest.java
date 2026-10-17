@@ -4,34 +4,61 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.secrets.VaultGrantGate;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import io.quarkiverse.mcp.server.Tool;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.DisplayName;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.ArgumentCaptor;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.lang.reflect.Method;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.LinkedHashMap;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.Map;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.mock;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.verify;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.when;
 
 /**
@@ -52,7 +79,8 @@ class McpDeployGrantFailureTest {
         var identity = mock(SecurityIdentity.class);
         when(identity.isAnonymous()).thenReturn(true);
         var tools = new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, json, mock(StrictConfigurationParser.class),
-                mock(IScheduleStore.class), mock(ScheduleFireExecutor.class), mock(SchedulePollerService.class), identity, false);
+                mock(IScheduleStore.class), mock(ScheduleFireExecutor.class), mock(SchedulePollerService.class), identity, false,
+                mock(AgentCascadeService.class));
 
         var failure = new VaultGrantGate.GrantCheck(VaultGrantGate.Mode.ENFORCE, List.of("${vault:gemini-api-key}"), true).toFailure(AGENT_ID, 1);
         var body = new LinkedHashMap<String, Object>();

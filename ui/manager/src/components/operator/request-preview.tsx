@@ -6,6 +6,7 @@ import { detectEscalationFlags } from "@/lib/operator/escalation-flags";
 import { resolveConfigWriteTarget, bodyHasRedactions } from "@/lib/operator/config-write-target";
 import { parseJsonPatchBody } from "@/lib/operator/json-patch";
 import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
+import { CascadeSummary } from "@/components/operator/cascade-summary";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { getResource } from "@/lib/api/resources";
 import { useAuth } from "@/hooks/use-auth";
@@ -171,6 +172,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           {t("operator.approval.headers", "Headers")}: {headerEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}
         </p>
       )}
+      <CascadeSummary preview={preview} callId={callId} />
       {escalations.length > 0 && (
         <div
           className="rounded border border-destructive/40 bg-destructive/10 p-2"

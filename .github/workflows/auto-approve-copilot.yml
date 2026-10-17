@@ -1,10 +1,20 @@
 name: Auto-approve (Copilot-reviewed)
 
 # Converts a clean GitHub Copilot code review into an actual PR approval once CI is
-# green, so PRs from trusted authors can satisfy a required-review gate without a
-# human reviewer. This ONLY submits an approval; branch protection (required status
+# green, so PRs from trusted authors carry a second approval without waiting for a
+# second human. This ONLY submits an approval; branch protection (required status
 # checks, up-to-date, linear history, etc.) still governs whether the PR can merge —
 # a bug here cannot merge a red PR, it can at most add a review.
+#
+# ⚠️  This approval is ADDITIONAL to a human review, never a substitute for one.
+# The workflow assumes branch protection on `main` still requires at least one
+# approval from a human reviewer; the bot's approval only ever satisfies a
+# required-approvals count of two or more. That requirement is a repository
+# setting (Settings → Branches → main → "Require approvals"), not something this
+# file can enforce — see docs/code-review-standards.md, "Merge Policy". If an
+# admin lowers the count to one, this workflow turns "Copilot said clean + CI
+# green" into a mergeable PR with no human having read it; keep the count at
+# two, or disable this workflow (unset AUTO_APPROVE_BOT_LOGIN) at the same time.
 #
 # One-time setup by a repo admin (BOTH are required together):
 #   1. A separate "bot" GitHub account with write access to this repo. GitHub forbids
@@ -78,7 +88,11 @@ jobs:
             const SELF_CHECK_NAME = 'auto-approve';
             // Only auto-approve PRs from authors already trusted with the repo — this
             // is a PUBLIC repo, so external contributors must never be auto-approved.
-            const TRUSTED_ASSOCIATION = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            // OWNER and MEMBER only: COLLABORATOR is anyone granted repository access,
+            // which includes outside collaborators invited for one task, and a
+            // compromised or over-granted collaborator account would otherwise get
+            // an approval it did not earn from the organisation.
+            const TRUSTED_ASSOCIATION = new Set(['OWNER', 'MEMBER']);
             // Require Copilot's latest review to have found nothing: no INLINE (line)
             // comments AND a benign body (copilotBodyIsClean below). Copilot folds
             // low-confidence findings into the review BODY ("Comments suppressed due to
@@ -145,6 +159,19 @@ jobs:
               'ui/*/eslint.config.*', 'ui/*/tsconfig*.json', 'ui/*/stryker.config.*',
               // What goes into the image the Dockerfile builds.
               '**/.dockerignore', '**/*.dockerignore',
+              // The security-critical code itself. A change here (the auth and SSRF
+              // guards, the vault and its key handling, the one outbound HTTP client,
+              // the stored connection credentials, the shipped defaults for all of
+              // them) can stay green on every check and still turn a control off —
+              // tests exercise what the code does, not whether it should. Guard
+              // classes by name wherever they live: every `*Guard` is a refusal that
+              // a one-line edit can make permissive.
+              'src/main/java/ai/labs/eddi/engine/security/**',
+              'src/main/java/ai/labs/eddi/secrets/**',
+              'src/main/java/ai/labs/eddi/engine/httpclient/**',
+              'src/main/java/ai/labs/eddi/connections/**',
+              'src/main/resources/application.properties',
+              '**/*Guard*.java',
             ];
             function globToRegExp(glob) {
               let re = '';
