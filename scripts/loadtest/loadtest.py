@@ -482,7 +482,7 @@ class DockerStats(threading.Thread):
                 try:
                     sample[name] = float(value.strip().rstrip("%"))
                 except ValueError:
-                    pass
+                    continue  # a row without a number (a container starting or stopping): skip that container
             if sample:
                 self.samples.append(sample)
 
@@ -537,7 +537,8 @@ def nats_varz():
             v = json.loads(r.stdout)
             out[f"nats-{i}"] = {k: v.get(k, 0) for k in ("in_msgs", "out_msgs", "in_bytes", "out_bytes")}
         except ValueError:
-            pass
+            # A node that did not answer with JSON is left out; the run still reports the others.
+            print(f"nats-{i}: /varz returned no JSON; its message counts are left out", file=sys.stderr)
     return out
 
 
@@ -719,17 +720,17 @@ def cluster_report(results, args):
     base1 = next((r for r in results if r["messaging"] == "nats" and r["nodes"] == 1), None)
     t1 = (base1 or {}).get("turns_per_s") or None
     lines = [f"# Cluster scaling — {today}", "",
-             f"Scenario `steady`, {first['vus_per_node']} conversations per node, {first['turns_per_vu']} turns each (after a "
-             f"{first.get('warmup_turns', 0)}-turn warm-up), mock LLM delay {first['llm_delay_ms']} ms. Per node: "
-             f"`eddi.conversation.max-in-flight-turns={env.get('LOADTEST_MAX_IN_FLIGHT')}`, MongoDB `maxPoolSize={env.get('LOADTEST_MONGO_POOL')}`, "
-             f"`{env.get('LOADTEST_JAVA_OPTS')}`, {env.get('LOADTEST_EDDI_CPUS')} CPUs, {env.get('LOADTEST_EDDI_MEMORY')}. "
-             f"MongoDB {env.get('LOADTEST_MONGO_CPUS')} CPUs, NATS 3 x {env.get('LOADTEST_NATS_CPUS')} CPU (R3). "
-             f"Docker host: {ncpu} CPUs. Image `{first.get('image') or 'labsai/eddi:6.5.0'}`"
-             f"{' with the local build mounted' if first.get('app') else ''}; commit `{git_head()}`.", "",
-             "| Run | Nodes | Messaging | Conv. | OK turns | Turns/s | Efficiency | p50 ms | p95 ms | p99 ms | 409 | 503 | other err. | "
-             "Lease acquire: count · mean ms | Fence rejected | Mongo ops/turn | Mongo ops/s | Mongo CPU % mean/peak | "
-             "NATS CPU % mean/peak (3 nodes) | NATS msgs/turn | EDDI CPU % mean per node | All containers CPU % mean (other stacks) | "
-             "Host CPU % mean · time at >= 95 % |",
+             (f"Scenario `steady`, {first['vus_per_node']} conversations per node, {first['turns_per_vu']} turns each (after a "
+             + f"{first.get('warmup_turns', 0)}-turn warm-up), mock LLM delay {first['llm_delay_ms']} ms. Per node: "
+             + f"`eddi.conversation.max-in-flight-turns={env.get('LOADTEST_MAX_IN_FLIGHT')}`, MongoDB `maxPoolSize={env.get('LOADTEST_MONGO_POOL')}`, "
+             + f"`{env.get('LOADTEST_JAVA_OPTS')}`, {env.get('LOADTEST_EDDI_CPUS')} CPUs, {env.get('LOADTEST_EDDI_MEMORY')}. "
+             + f"MongoDB {env.get('LOADTEST_MONGO_CPUS')} CPUs, NATS 3 x {env.get('LOADTEST_NATS_CPUS')} CPU (R3). "
+             + f"Docker host: {ncpu} CPUs. Image `{first.get('image') or 'labsai/eddi:6.5.0'}`"
+             + f"{' with the local build mounted' if first.get('app') else ''}; commit `{git_head()}`."), "",
+             ("| Run | Nodes | Messaging | Conv. | OK turns | Turns/s | Efficiency | p50 ms | p95 ms | p99 ms | 409 | 503 | other err. | "
+             + "Lease acquire: count · mean ms | Fence rejected | Mongo ops/turn | Mongo ops/s | Mongo CPU % mean/peak | "
+             + "NATS CPU % mean/peak (3 nodes) | NATS msgs/turn | EDDI CPU % mean per node | All containers CPU % mean (other stacks) | "
+             + "Host CPU % mean · time at >= 95 % |"),
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         e, lat = r["errors"], r["latency_ms"]
