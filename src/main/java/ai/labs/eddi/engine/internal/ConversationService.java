@@ -59,6 +59,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
@@ -1211,7 +1212,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly);
+                    turnBuilder, !rerunOnly, notifySkipped, processingTurn, inputData, rerunOnly, agent);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
@@ -2237,11 +2238,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     private IDiscardableTask processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                      Map<String, String> loggingContext, ConversationStepRunner.TurnBuilder turnBuilder,
                                                      boolean rebuildWhenSuperseded, Consumer<IConversationMemory> skipNotifier,
-                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun)
+                                                     ProcessingTurn processingTurn, InputData inputData, boolean rerun, IAgent agent)
             throws Exception {
         return conversationStepRunner.processConversationStep(environment, conversationMemory, conversationId,
                 loggingContext, turnBuilder, rebuildWhenSuperseded, skipNotifier, processingTurn,
-                describeTurn(environment, conversationMemory, conversationId, inputData, rerun));
+                describeTurn(environment, conversationMemory, conversationId, inputData, rerun, agent));
     }
 
     /**
@@ -2249,9 +2250,26 @@ public class ConversationService implements IConversationService, UserErasurePar
      * new turn: the conversation, agent and environment, the user, and — unless
      * {@code eddi.coordinator.dead-letter.capture-input=false} — the input and its
      * context.
+     * <p>
+     * The capture happens <em>before</em> the pipeline runs, so the
+     * {@code scope: secret} scrub a property-setter step would apply cannot have
+     * happened yet. Two measures stand in for it (L6 of the 2026-10-15 security
+     * review): a turn is recorded as {@code secretInput} — without input or context
+     * — not only when the client flagged it so but also whenever the agent's
+     * workflows carry any {@code scope: secret} instruction, because such an agent
+     * expects secrets in its input and the client cannot be relied on to flag each
+     * one; and the input that is kept passes through {@link SecretRedactionFilter},
+     * so a credential-shaped token in an ordinary turn is masked rather than
+     * retained for the dead letter's lifetime.
+     *
+     * @param agent
+     *            the agent the turn runs on, as {@code say} resolved it — no second
+     *            lookup here, this is the hot path. {@code null} is treated as an
+     *            agent that expects secrets: a dead letter that cannot be replayed
+     *            beats one that holds what it should not
      */
     Map<String, Object> describeTurn(Environment environment, IConversationMemory memory, String conversationId, InputData inputData,
-                                     boolean rerun) {
+                                     boolean rerun, IAgent agent) {
         Map<String, Object> turn = new LinkedHashMap<>();
         turn.put("conversationId", conversationId);
         turn.put("agentId", memory.getAgentId());
@@ -2260,16 +2278,17 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
         if (captureDeadLetterInput && inputData != null) {
-            if (isSecretInput(inputData)) {
-                // A turn the client flagged secretInput: its input must not sit in a dead
+            if (isSecretInput(inputData) || agent == null || agent.hasSecretPropertyInstructions()) {
+                // A turn the client flagged secretInput, or one addressed to an agent
+                // with a scope: secret instruction: its input must not sit in a dead
                 // letter for days. Recorded as such, without input or context — so it can
                 // be discarded but not replayed.
                 turn.put("secretInput", true);
                 return turn;
             }
-            turn.put("input", inputData.getInput());
+            turn.put("input", SecretRedactionFilter.redact(inputData.getInput()));
             if (inputData.getContext() != null && !inputData.getContext().isEmpty()) {
-                turn.put("context", inputData.getContext());
+                turn.put("context", redactContext(inputData.getContext()));
             }
         }
         return turn;
@@ -2279,6 +2298,78 @@ public class ConversationService implements IConversationService, UserErasurePar
         var context = inputData.getContext();
         Context flag = context == null ? null : context.get("secretInput");
         return flag != null && "true".equals(String.valueOf(flag.getValue()));
+    }
+
+    /**
+     * The turn's context, fit for a dead letter. An entry the client marked
+     * {@code secret}, or whose key names a credential ({@code password},
+     * {@code token}, …), is dropped outright: the filter sees only the value and an
+     * ordinary password has no shape it can recognise. Every other entry has its
+     * string leaves — including those inside a structured (object) value — run
+     * through {@link SecretRedactionFilter}, with the same credential-key rule
+     * applied inside maps. The live turn is never touched: a changed entry is a
+     * copy.
+     */
+    private static Map<String, Context> redactContext(Map<String, Context> context) {
+        Map<String, Context> redacted = new LinkedHashMap<>();
+        context.forEach((key, value) -> {
+            if (value == null) {
+                redacted.put(key, null);
+                return;
+            }
+            if (Boolean.TRUE.equals(value.getSecret()) || SecretRedactionFilter.isCredentialFieldName(key)) {
+                return;
+            }
+            Object clean = redactValue(value.getValue());
+            if (clean == value.getValue()) {
+                redacted.put(key, value);
+            } else {
+                Context copy = new Context(value.getType(), clean);
+                copy.setServerGenerated(value.isServerGenerated());
+                copy.setSecret(value.getSecret());
+                redacted.put(key, copy);
+            }
+        });
+        return redacted;
+    }
+
+    /**
+     * Redacts the string leaves of a context value, structured or not. Returns the
+     * very same object when nothing changed, so the caller can tell a copy from the
+     * original without comparing contents.
+     */
+    private static Object redactValue(Object value) {
+        if (value instanceof String text) {
+            String clean = SecretRedactionFilter.redact(text);
+            return clean.equals(text) ? value : clean;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            boolean changed = false;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                Object entryValue = entry.getValue();
+                Object clean;
+                if (entry.getKey() instanceof String name && SecretRedactionFilter.isCredentialFieldName(name)) {
+                    clean = SecretRedactionFilter.REDACTED;
+                } else {
+                    clean = redactValue(entryValue);
+                }
+                changed |= clean != entryValue;
+                copy.put(entry.getKey(), clean);
+            }
+            return changed ? copy : value;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            boolean changed = false;
+            for (Object element : list) {
+                Object clean = redactValue(element);
+                changed |= clean != element;
+                copy.add(clean);
+            }
+            return changed ? copy : value;
+        }
+        return value;
     }
 
     /**
@@ -2421,6 +2512,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                                             String cancelledBy)
             throws ResourceStoreException {
         return conversationHitlService.cancelConversation(conversationId, mode, cancelledBy);
+    }
+
+    @Override
+    public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException {
+        return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy);
     }
 
     @Override
