@@ -263,7 +263,15 @@ public class RestSecretStore implements IRestSecretStore {
                 after = expected == null
                         ? secretProvider.updateGrant(ref, grant, body.description())
                         : secretProvider.updateGrant(ref, grant, body.description(), expected);
-                // Deliberately NOT invalidating the SecretResolver cache.
+                if (allowedHosts != null) {
+                    // Invalidated for the host list, unlike the grant below: the list is
+                    // checked when a model, embedding store or MCP client is BUILT, and
+                    // those are cached. Without the eviction their invalidation listeners
+                    // perform, a narrowed list would not reach a client already built.
+                    secretResolver.invalidateCache(ref);
+                }
+                // For the agent grant alone, deliberately NOT invalidating the
+                // SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may
                 // have changed. Here it cannot have: the value is untouched, so every

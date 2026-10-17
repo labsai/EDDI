@@ -15,6 +15,7 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -66,6 +67,14 @@ public class A2AToolProviderManager {
 
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+
+    /**
+     * Enforces a vault apiKey's {@code allowedHosts} against the peer each request
+     * goes to. Field-injected so the constructors keep their shape; null only in
+     * tests that construct the manager directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
 
     /**
      * Built on first use, not in the constructor.
@@ -918,7 +927,14 @@ public class A2AToolProviderManager {
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
-        String resolved = secretResolver.resolveValue(globalVariableResolver.resolveValue(apiKey));
+        String withVariables = globalVariableResolver.resolveValue(apiKey);
+        // Against agentUrl, the request's own target: for a task call that is the
+        // endpoint the peer's agent card announced, which need not be the host the
+        // configuration names.
+        if (vaultHostAllowlist != null) {
+            vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
+        }
+        String resolved = secretResolver.resolveValue(withVariables);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

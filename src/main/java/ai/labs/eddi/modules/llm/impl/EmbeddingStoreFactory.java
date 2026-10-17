@@ -12,6 +12,7 @@ import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
@@ -46,7 +47,9 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -225,6 +228,14 @@ public class EmbeddingStoreFactory {
      * built (and before pgvector would {@code CREATE TABLE} there).
      */
     private final OutboundTargetPolicy targetPolicy;
+
+    /**
+     * Enforces a referenced secret's {@code allowedHosts} against the hosts a store
+     * connects to. Field-injected so the constructor keeps its shape; null only in
+     * tests that construct the factory directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
 
     @Inject
     public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -870,7 +881,51 @@ public class EmbeddingStoreFactory {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
         ConnectionParameterGuard.rejectConnectionReferences(resolved);
-        return SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), "vector store '" + config.getStoreType() + "'");
+        String usedFor = "vector store '" + config.getStoreType() + "'";
+        Set<String> references = VaultHostAllowlist.referencesIn(resolved.values());
+        Map<String, String> params = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), usedFor);
+        if (vaultHostAllowlist != null && !references.isEmpty()) {
+            // After resolution, not before: a MongoDB connection string is commonly the
+            // secret itself, so its hosts are only known once it is decrypted. Nothing
+            // has been opened yet — resolving is local — so the check still runs before
+            // any credential leaves this process.
+            for (String destination : destinationsOf(config.getStoreType(), params)) {
+                vaultHostAllowlist.requireAllowed(references, destination, usedFor);
+            }
+        }
+        return params;
+    }
+
+    /**
+     * Every host the store builder below will connect to for {@code storeType},
+     * with the same defaults it applies. A {@code mongodb-atlas} connection string
+     * can name several hosts, and each is a destination. An unparseable string
+     * yields a destination that matches no list, so a restricted secret is refused
+     * rather than sent to wherever the driver makes of it.
+     */
+    static List<String> destinationsOf(String storeType, Map<String, String> params) {
+        if (storeType == null) {
+            return List.of();
+        }
+        return switch (storeType) {
+            case "pgvector" -> List.of(params.getOrDefault("host", "localhost") + ":" + params.getOrDefault("port", "5432").trim());
+            case "qdrant" -> List.of(params.getOrDefault("host", "localhost") + ":" + params.getOrDefault("port", "6334").trim());
+            case "elasticsearch" -> List.of(params.getOrDefault("serverUrl", "http://localhost:9200"));
+            case "chroma" -> List.of(params.getOrDefault("baseUrl", "http://localhost:8000"));
+            case "mongodb-atlas" -> mongoHosts(params.get("connectionString"));
+            default -> List.of();
+        };
+    }
+
+    private static List<String> mongoHosts(String connectionString) {
+        if (connectionString == null || connectionString.isBlank()) {
+            return List.of();
+        }
+        try {
+            return List.copyOf(new ConnectionString(connectionString).getHosts());
+        } catch (RuntimeException e) {
+            return List.of("");
+        }
     }
 
     private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {

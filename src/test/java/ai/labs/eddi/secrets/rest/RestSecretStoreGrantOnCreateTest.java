@@ -198,6 +198,9 @@ class RestSecretStoreGrantOnCreateTest {
             order.verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne")), isNull());
             verify(secretProvider, never()).store(any(), any(), any(), any(), any());
             assertEquals(List.of("api.openai.com:443"), entityOf(resp).get("allowedHosts"));
+            // Models, embedding stores and MCP clients check the list when they are
+            // built and are cached: the eviction is what makes a narrowed list bite.
+            verify(secretResolver).invalidateCache(new SecretReference("default", "k"));
         }
 
         @Test
@@ -210,6 +213,7 @@ class RestSecretStoreGrantOnCreateTest {
                     new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
             assertEquals(200, resp.getStatus());
             verify(secretProvider, never()).updateAllowedHosts(any(), any());
+            verify(secretResolver, never()).invalidateCache(any());
             assertEquals(List.of("api.openai.com"), entityOf(resp).get("allowedHosts"));
 
             Response dryRun = rest(VaultGrantGate.Mode.ENFORCE).updateGrant("default", "k", true,
