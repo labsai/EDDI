@@ -45,8 +45,9 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 The Langchain task integrates with multiple LLM providers via the langchain4j library:
 
-- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also any other OpenAI-compatible endpoint via `baseUrl`
+- **OpenAI** (ChatGPT, GPT-4, GPT-4o)
 - **OpenAI-compatible providers** with their own type: `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `minimax`, `openrouter`, `groq` ([details](#openai-compatible-providers))
+- **Self-hosted OpenAI-compatible servers** — vLLM, llama.cpp's `llama-server`, TGI, KServe, LiteLLM and the like — with type `openai-compatible` and per-endpoint capability flags ([details](#self-hosted-openai-compatible-servers))
 - **Anthropic** (Claude)
 - **Google Gemini** (`gemini` - AI Studio API, `gemini-vertex` - Vertex AI)
 - **Mistral AI** (Mistral Large, Codestral, Pixtral)
@@ -794,8 +795,10 @@ Groq's `qwen3.8-27b`. Override either per task or per deployment as usual.
 }
 ```
 
-**Any other endpoint.** Cohere, Together, a corporate gateway and the like still work through
-`type: openai` with a `baseUrl`; they simply have no preset.
+**Any other endpoint.** A server you run yourself belongs on
+[`type: openai-compatible`](#self-hosted-openai-compatible-servers). Cohere, Together, a corporate
+gateway and the like still work through `type: openai` with a `baseUrl`; they simply have no
+preset, and are judged by OpenAI's capabilities.
 
 **Known limitation.** A durable tool-approval pause stores the in-flight transcript, including
 each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
@@ -803,6 +806,76 @@ pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcrip
 gating assistant message is replayed with its thinking, unless that single message exceeds its
 64 KB cap: it is then persisted without the thinking, and those two providers can reject the
 resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
+
+#### Self-hosted OpenAI-compatible servers
+
+Production on-prem inference usually runs on vLLM, llama.cpp's `llama-server`, Hugging Face
+TGI, KServe or a LiteLLM gateway. All of them speak the OpenAI chat-completions protocol, but
+none of them is OpenAI: what each supports depends on the server, its version and the model it
+serves. Type `openai-compatible` reaches such a server through the OpenAI client and lets the
+config **declare** what it supports, instead of inheriting OpenAI's answers.
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "granite",
+      "type": "openai-compatible",
+      "parameters": {
+        "baseUrl": "http://vllm.inference.svc.cluster.local:8000/v1",
+        "modelName": "ibm-granite/granite-4.0-h-small",
+        "apiKey": "${vault:vllm-key}",
+        "serverName": "vllm",
+        "jsonMode": "true",
+        "jsonModeWithTools": "false",
+        "vision": "false",
+        "timeout": "120000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `baseUrl` | yes | The server's OpenAI API, usually ending in `/v1`. `http://` is accepted (in-cluster traffic); the cloud-metadata service is refused, as for every model URL |
+| `modelName` | yes | The model id exactly as the server lists it under `/v1/models`. There is no default |
+| `apiKey` | no | Sent as a bearer token when set. Left blank or unset, the request carries **no** `Authorization` header at all, which is what most local servers expect |
+| `jsonMode` | no, default `false` | The server accepts `response_format: {"type": "json_object"}`. With `convertToObject: "true"` a tool-less request then carries it |
+| `jsonModeWithTools` | no, default `false` | It also accepts that format in the same request as tool definitions (llama-server, TGI and older vLLM releases do not always) |
+| `vision` | no, default `false` | The served model accepts images. Image attachments are then sent to it whatever its name: a self-hosted model cannot be recognised by name, so this type has no model table. Images are inlined, never sent by URL |
+| `serverName` | no, default `openai-compatible` | What traces and metrics report as `gen_ai.provider.name` and the `provider` tag, so `vllm` and `llama-server` traffic can be told apart. Lower-cased; anything other than 1–32 characters of `a-z 0-9 . _ -` falls back to the default, because it becomes a metric tag |
+| `customParameters` | no | Extra top-level request-body fields as a JSON object: vLLM's `chat_template_kwargs`, `guided_json`, `top_k` and the like. It must be a JSON object; anything else fails the model build instead of being dropped |
+
+Every other `type: openai` parameter works too (`temperature`, `maxTokens`, `returnThinking`,
+`sendThinking`, `customHeaders`, …), without OpenAI's model-specific rules.
+
+**Conservative by default.** All three capability flags start off, so a server EDDI knows nothing
+about is never sent a request feature it might answer with a 400; turn on what your server
+supports. Each flag must be `"true"` or `"false"`. Any other value (a typo such as `"ture"`)
+fails the deploy with a message naming the parameter instead of reading as `false`, and so does
+a missing `baseUrl` or `modelName`. A flag may also be a template (`{context.x}`) or a global
+variable (`${vars:vllm-json}`); it is then read per request once resolved, and a value that is
+still not a boolean counts as `false` with one WARN per distinct value. It never fails the turn.
+
+**Precedence.** The per-task `jsonResponseFormat` (`on`/`off`) and `multimodal.vision` overrides
+still win over the endpoint's flags; then the flags; then, for vision only, the deployment
+override `eddi.multimodal.openai-compatible.vision`; then the default, which is off. In a
+[model cascade](model-cascade.md) each `openai-compatible` step is judged by its **own**
+parameters (merged over the task's, as every step's are), not by the task's type.
+
+**Not yet.** Native `json_schema` structured output stays off for this type: schemaless JSON is
+sent when `jsonMode` allows it, and the prompt block carries the schema. Model discovery through
+`GET /v1/models` is not wired up either.
+
+**Migrating from `type: openai` + `baseUrl`.** That keeps working exactly as before (nothing is
+rewritten), but EDDI judges such an endpoint as OpenAI: it sends JSON mode alongside tools,
+decides vision by OpenAI model names and reports the traffic as OpenAI. To get the endpoint's
+real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelName` and
+`apiKey`, and add the flags your server supports.
 
 ---
 
@@ -1956,6 +2029,7 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
 | `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
 | `minimax`, `openrouter` | ❌ | ❌ |
+| `openai-compatible` | the endpoint's `jsonMode` (default ❌) | the endpoint's `jsonModeWithTools` (default ❌) |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
 
 #### Native schema enforcement

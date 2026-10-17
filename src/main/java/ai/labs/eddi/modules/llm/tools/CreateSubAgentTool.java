@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.templating.TemplateEscaping;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -186,6 +187,16 @@ public class CreateSubAgentTool {
             final String resolvedProvider = requestedProvider == null || requestedProvider.isBlank()
                     ? AgentSetupService.DEFAULT_PROVIDER
                     : requestedProvider;
+
+            // A self-hosted OpenAI-compatible server needs a base URL, which this tool
+            // has no parameter for and a parent cannot hand down yet. Refused here, with
+            // a message the model can act on, rather than as setup's bare 'requires
+            // baseUrl' after the guardrails have run.
+            if (OpenAiCompatibleEndpoint.isType(resolvedProvider)) {
+                return "⚠️ Dynamic sub-agents cannot target a self-hosted OpenAI-compatible endpoint (provider 'openai-compatible') yet: "
+                        + "it needs a baseUrl, which this tool cannot pass. Pick another provider, or ask an administrator to create "
+                        + "the agent in the Manager and recruit it into the group instead.";
+            }
 
             // Model inheritance is gated on the provider STILL being the parent's.
             // The two are independent inputs, so an anthropic parent creating a

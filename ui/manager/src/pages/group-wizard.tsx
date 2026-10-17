@@ -76,7 +76,7 @@ import {
 } from "@/lib/api/agent-setup";
 import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import { describeUndeployed, reportDeployOutcome } from "@/lib/deploy-outcome";
-import { isProvisionableBySetup } from "@/lib/model-suggestions";
+import { isProvisionableByTeamSetup } from "@/lib/model-suggestions";
 import { providerNeedsKey, providerLabel } from "@/components/workforce/wizard/member-validation";
 import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
 import { DurationField } from "@/components/shared/duration-field";
@@ -1779,7 +1779,7 @@ function BulkLlmDefaults({
               setModel("");
               setApiKey("");
             }}
-            include={isProvisionableBySetup}
+            include={isProvisionableByTeamSetup}
             testId="gw-bulk-provider"
             className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
@@ -2107,7 +2107,7 @@ function MemberCard({
                           ariaLabel={t("groupWizard.provider")}
                           // setup cannot configure every provider (Vertex AI needs a
                           // project and location it has no field for).
-                          include={isProvisionableBySetup}
+                          include={isProvisionableByTeamSetup}
                           className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                         <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
@@ -2319,7 +2319,7 @@ function ModeratorCard({
                   onChange({ provider, model: "", apiKey: "" });
                 }}
                 ariaLabel={t("groupWizard.provider")}
-                include={isProvisionableBySetup}
+                include={isProvisionableByTeamSetup}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />

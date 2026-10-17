@@ -44,7 +44,8 @@ class ModelParameterCatalogDriftTest {
                 builder("bedrock", BedrockLanguageModelBuilder::new),
                 builder("huggingface", HuggingFaceLanguageModelBuilder::new),
                 builder("jlama", JlamaLanguageModelBuilder::new),
-                builder("oracle-genai", OracleGenAiLanguageModelBuilder::new));
+                builder("oracle-genai", OracleGenAiLanguageModelBuilder::new),
+                builder("openai-compatible", () -> new SelfHostedOpenAiLanguageModelBuilder(new OpenAILanguageModelBuilder())));
     }
 
     private static Arguments builder(String type, Supplier<ILanguageModelBuilder> factory) {

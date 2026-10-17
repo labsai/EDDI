@@ -3,6 +3,7 @@ import { Scale } from "lucide-react";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
 import { type CascadeJudgeModel } from "../types";
 import { modelParamSpec } from "../model-params";
 import { LEGACY_MODEL_KEY, modelField, withModel } from "./cascade-utils";
@@ -71,6 +72,8 @@ export function CascadeJudgeModelEditor({
           disabled={readOnly}
           className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           testId="cascade-judge-type"
+          // The judge has no base URL field, so a self-hosted endpoint cannot work here.
+          include={(id) => offeredWithoutBaseUrl(id, judge.type)}
         />
         <input
           type="text"

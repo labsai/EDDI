@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
-import { getProviderRegions } from "@/lib/llm-provider-catalog";
+import { SELF_HOSTED_EXAMPLES, SELF_HOSTED_PROVIDER_ID, getProviderRegions } from "@/lib/llm-provider-catalog";
 import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
 import {
   MODEL_SUGGESTIONS,
+  acceptsOptionalApiKey,
   isBaseUrlRequired,
   isProvisionableBySetup,
   provisionableProviderOr,
@@ -100,6 +101,8 @@ export function OperatorActivation({
 
   const providerConfig = getProviderConfig(provider);
   const needsKey = providerConfig?.needsKey ?? true;
+  // A self-hosted server takes a key only if it checks one: offered, never required.
+  const optionalKey = acceptsOptionalApiKey(provider);
   const baseUrlRequired = isBaseUrlRequired(provider);
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
   const vaultDown = vaultHealth != null && vaultHealth.available === false;
@@ -330,13 +333,25 @@ export function OperatorActivation({
               </Field>
             )}
 
-            <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
+            <Field
+              label={t("operator.activation.model", "Model")}
+              htmlFor="operator-model"
+              hint={
+                provider === SELF_HOSTED_PROVIDER_ID
+                  ? t(
+                      "setupWizard.modelHintSelfHosted",
+                      "The model id exactly as your server serves it (its /v1/models list). There is no default.",
+                    )
+                  : undefined
+              }
+            >
               <input
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 list="operator-model-suggestions"
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 id="operator-model"
+                aria-describedby={provider === SELF_HOSTED_PROVIDER_ID ? "operator-model-hint" : undefined}
                 data-testid="operator-model"
               />
               <datalist id="operator-model-suggestions">
@@ -347,21 +362,37 @@ export function OperatorActivation({
             </Field>
 
             {baseUrlRequired && (
-              <Field label={t("operator.activation.baseUrl", "Base URL")} htmlFor="operator-base-url">
+              <Field
+                label={t("operator.activation.baseUrl", "Base URL")}
+                htmlFor="operator-base-url"
+                hint={
+                  provider === SELF_HOSTED_PROVIDER_ID
+                    ? t(
+                        "setupWizard.baseUrlHintSelfHosted",
+                        "Required — your server's OpenAI API URL, usually ending in /v1. http:// is fine inside your network.",
+                      )
+                    : t("setupWizard.baseUrlHintLocal", "Required — the URL where your local model server is running")
+                }
+              >
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
+                  placeholder={provider === SELF_HOSTED_PROVIDER_ID ? SELF_HOSTED_EXAMPLES.baseUrl : "http://localhost:11434"}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   id="operator-base-url"
+                  aria-describedby="operator-base-url-hint"
                   data-testid="operator-base-url"
                 />
               </Field>
             )}
 
-            {needsKey && (
+            {(needsKey || optionalKey) && (
               <Field
-                label={t("operator.activation.apiKey", "Model API key")}
+                label={
+                  optionalKey
+                    ? t("operator.activation.apiKeyOptional", "Model API key (optional)")
+                    : t("operator.activation.apiKey", "Model API key")
+                }
                 hint={t("operator.activation.apiKeyHint", "The key for your LLM provider. This is not an EDDI credential.")}
                 asGroup
               >

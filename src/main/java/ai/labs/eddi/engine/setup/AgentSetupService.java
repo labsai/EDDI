@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -278,13 +279,14 @@ public class AgentSetupService {
         requireAdminForGrants(request.grantReferencedSecrets());
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         rejectUnprovisionableProvider(request.provider());
+        requireSelfHostedEndpoint(request.provider(), request.model(), request.baseUrl(), "baseUrl");
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // vaultKeyName alone is enough: it names a key the vault already holds, which
         // is the whole point of provisioning a second agent against an existing one.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
             throw new AgentSetupException(
                     "API key is required for cloud LLM providers (anthropic, openai, gemini, xai, deepseek, ...) — pass apiKey, or vaultKeyName to reuse a key "
-                            + "already in the vault");
+                            + "already in the vault. Local and self-hosted providers (ollama, jlama, openai-compatible) need none");
         }
         // Validate the HITL config HERE, before a single resource exists — same
         // reasoning as createApiAgent: AgentStore.create validates it too, but only
@@ -542,6 +544,7 @@ public class AgentSetupService {
             throw new AgentSetupException("OpenAPI spec is required");
         }
         rejectUnprovisionableProvider(request.provider());
+        requireSelfHostedEndpoint(request.provider(), request.model(), request.llmBaseUrl(), "llmBaseUrl");
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // See setupAgent: vaultKeyName alone names a key the vault already holds.
         if (!isLocalLLM && isNullOrBlank(request.apiKey()) && isNullOrBlank(request.vaultKeyName())) {
@@ -1937,6 +1940,38 @@ public class AgentSetupService {
     }
 
     /**
+     * A self-hosted {@code openai-compatible} endpoint has neither a default URL
+     * nor a default model, so both must be named — substituting the SaaS default
+     * model ({@link #DEFAULT_MODEL}) would deploy an agent that asks a vLLM server
+     * for a Claude model. Checked before anything is created. {@code http://} is
+     * accepted (in-cluster inference); the cloud-metadata service is not.
+     *
+     * @param urlField
+     *            the request field the URL came from, for the message
+     */
+    static void requireSelfHostedEndpoint(String provider, String model, String baseUrl, String urlField) throws AgentSetupException {
+        if (!OpenAiCompatibleEndpoint.isType(provider)) {
+            return;
+        }
+        if (isNullOrBlank(model)) {
+            throw new AgentSetupException("Provider '" + OpenAiCompatibleEndpoint.TYPE + "' requires model — the model id your server "
+                    + "serves, e.g. 'ibm-granite/granite-4.0-h-small'; there is no default for a self-hosted endpoint");
+        }
+        if (isNullOrBlank(baseUrl)) {
+            throw new AgentSetupException("Provider '" + OpenAiCompatibleEndpoint.TYPE + "' requires " + urlField
+                    + " — the URL of the server's OpenAI API, e.g. 'http://vllm.inference.svc:8000/v1'");
+        }
+        if (!UrlValidationUtils.isValidHttpUrl(baseUrl.trim())) {
+            throw new AgentSetupException(urlField + " must be a valid http(s) URL");
+        }
+        try {
+            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl.trim());
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException(e.getMessage(), e);
+        }
+    }
+
+    /**
      * Check if the given provider is a local LLM (no API key needed).
      */
     public static boolean isLocalLlmProvider(String provider) {
@@ -1947,7 +1982,10 @@ public class AgentSetupService {
         // - ollama/jlama: local inference
         // - bedrock: AWS credential chain (env vars, IAM roles)
         // - oracle-genai: OCI config file (~/.oci/config)
-        return "ollama".equals(normalized) || "jlama".equals(normalized) || "bedrock".equals(normalized) || "oracle-genai".equals(normalized);
+        // - openai-compatible: a self-hosted server; many need no key, so it is
+        // optional
+        return "ollama".equals(normalized) || "jlama".equals(normalized) || "bedrock".equals(normalized) || "oracle-genai".equals(normalized)
+                || OpenAiCompatibleEndpoint.isType(normalized);
     }
 
     /**

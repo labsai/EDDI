@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
@@ -529,8 +530,10 @@ class CascadingModelExecutor {
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
                 // JSON format the moment it would be paired with tools.
+                // An openai-compatible step is judged by the STEP's own capability flags.
                 var stepJsonPolicy = JsonResponseFormatPolicy.of(jsonMode, modelType, task.getJsonResponseFormat(),
-                        mergedParams.get("responseSchema"));
+                        mergedParams.get("responseSchema"), OpenAiCompatibleEndpoint.withResolvedFlags(modelType, mergedParams,
+                                globalVariableResolver == null ? null : globalVariableResolver::resolveValue));
 
                 // Time this step still has for another attempt: its own timeout, and the
                 // turn's remaining time (R1 feeds turnBudget).

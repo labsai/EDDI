@@ -46,12 +46,15 @@ import {
 } from "@/lib/api/agent-setup";
 import {
   MODEL_SUGGESTIONS,
+  acceptsOptionalApiKey,
   acceptsOptionalToken,
   isBaseUrlRequired,
   isProvisionableBySetup,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
 import {
+  SELF_HOSTED_EXAMPLES,
+  SELF_HOSTED_PROVIDER_ID,
   getApiKeyUrl,
   getDefaultBaseUrl,
   getKeyPlaceholder,
@@ -908,6 +911,8 @@ function LlmStep({
   const inProcess = !baseUrlSupported;
   const defaultBaseUrl = getDefaultBaseUrl(provider);
   const apiKeyUrl = getApiKeyUrl(provider);
+  // A self-hosted OpenAI-compatible server has no default model or URL of its own.
+  const selfHosted = provider === SELF_HOSTED_PROVIDER_ID;
 
   return (
     // A form, so the browser has the credential field in context: it neither
@@ -966,7 +971,7 @@ function LlmStep({
             list={datalistId}
             value={model}
             onChange={(e) => onModelChange(e.target.value)}
-            placeholder={t("setupWizard.modelPlaceholder", "e.g. {{model}} (or any model your provider supports)", { model: prov?.defaultModel ?? "" })}
+            placeholder={t("setupWizard.modelPlaceholder", "e.g. {{model}} (or any model your provider supports)", { model: prov?.defaultModel || (selfHosted ? SELF_HOSTED_EXAMPLES.model : "") })}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="wizard-model"
             autoComplete="off"
@@ -977,7 +982,12 @@ function LlmStep({
             ))}
           </datalist>
           <p className="mt-1 text-xs text-muted-foreground">
-            {inProcess
+            {selfHosted
+              ? t(
+                  "setupWizard.modelHintSelfHosted",
+                  "The model id exactly as your server serves it (its /v1/models list). There is no default."
+                )
+              : inProcess
               ? t(
                   "setupWizard.modelHintJlama",
                   "Must be a Hugging Face repository id in owner/name form, e.g. tjake/Llama-3.2-1B-Instruct-JQ4. A bare model name cannot be resolved and the agent will fail on its first message."
@@ -1050,6 +1060,36 @@ function LlmStep({
           </div>
         )}
 
+        {/* Optional API key (a self-hosted OpenAI-compatible server checks one
+            only if it was started with one). Left blank, no Authorization
+            header is sent at all. */}
+        {acceptsOptionalApiKey(provider) && (
+          <div>
+            <label
+              htmlFor="wizard-apikey"
+              className="mb-1.5 block text-sm font-medium text-foreground"
+            >
+              {t("setupWizard.apiKey", "API Key")}{" "}
+              <span className="text-muted-foreground font-normal">
+                ({t("setupWizard.optional", "optional")})
+              </span>
+            </label>
+            <SecretKeyPicker
+              id="wizard-apikey"
+              value={apiKey}
+              onChange={onApiKeyChange}
+              placeholder={getKeyPlaceholder(provider)}
+              testId="wizard-apikey"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(
+                "setupWizard.selfHostedKeyHint",
+                "Only if your server checks a key (vLLM --api-key, a LiteLLM key). It is stored in the vault like any API key."
+              )}
+            </p>
+          </div>
+        )}
+
         {/* Base URL — omitted entirely for in-process providers, which have no
             endpoint to address. Offering the field there is worse than useless:
             the backend drops the value, so the agent silently ignores it. */}
@@ -1077,7 +1117,9 @@ function LlmStep({
               placeholder={
                 provider === "ollama"
                   ? "http://localhost:11434"
-                  : (defaultBaseUrl ?? t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL"))
+                  : selfHosted
+                    ? SELF_HOSTED_EXAMPLES.baseUrl
+                    : (defaultBaseUrl ?? t("setupWizard.baseUrlPlaceholder", "Custom endpoint URL"))
               }
               className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
               data-testid="wizard-baseurl"
@@ -1092,7 +1134,12 @@ function LlmStep({
               </p>
             )}
             <p className="mt-1 text-xs text-muted-foreground">
-              {baseUrlRequired
+              {selfHosted
+                ? t(
+                    "setupWizard.baseUrlHintSelfHosted",
+                    "Required — your server's OpenAI API URL, usually ending in /v1. http:// is fine inside your network."
+                  )
+                : baseUrlRequired
                 ? t(
                     "setupWizard.baseUrlHintLocal",
                     "Required — the URL where your local model server is running"
@@ -1103,6 +1150,18 @@ function LlmStep({
                   )}
             </p>
           </div>
+        )}
+
+        {selfHosted && (
+          <p
+            className="rounded-lg border border-border bg-muted/40 p-4 text-xs text-muted-foreground"
+            data-testid="wizard-selfhosted-capabilities"
+          >
+            {t(
+              "setupWizard.selfHostedCapabilities",
+              "JSON mode and image input are off by default, so the server is never sent a request feature it may reject. Turn on what it supports later in the LLM editor, under Model settings."
+            )}
+          </p>
         )}
 
         {inProcess && (
