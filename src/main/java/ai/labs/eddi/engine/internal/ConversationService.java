@@ -80,6 +80,7 @@ import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -271,12 +272,27 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Turns this node runs at once, queued or executing; one more is refused with
      * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
      * pool no longer bounds them — this does, and it is what keeps memory per
-     * in-flight turn times the number of turns inside the heap. {@code <= 0}
-     * disables the limit. Field-injected with the default in the initializer for
-     * the same reason as {@link #captureDeadLetterInput}.
+     * in-flight turn times the number of turns inside the heap. {@code auto} (the
+     * default) derives it from the maximum heap, see {@link InFlightTurnLimit}; a
+     * number sets it, {@code <= 0} disables it. Field-injected with the default in
+     * the initializer for the same reason as {@link #captureDeadLetterInput}.
      */
-    @ConfigProperty(name = "eddi.conversation.max-in-flight-turns", defaultValue = "1000")
-    int maxInFlightTurns = 1000;
+    @ConfigProperty(name = "eddi.conversation.max-in-flight-turns", defaultValue = InFlightTurnLimit.AUTO)
+    String maxInFlightTurnsSetting = InFlightTurnLimit.AUTO;
+
+    /** Heap budget per in-flight turn for {@code max-in-flight-turns=auto}. */
+    @ConfigProperty(name = "eddi.conversation.in-flight-turn-memory-mb", defaultValue = "2")
+    int inFlightTurnMemoryMb = 2;
+
+    /** Marks {@link #maxInFlightTurns} as not resolved yet. */
+    static final int LIMIT_UNRESOLVED = Integer.MIN_VALUE;
+
+    /**
+     * The resolved limit. Set once from {@link #maxInFlightTurnsSetting}, by the
+     * {@code @PostConstruct} under CDI or on first use in tests that construct the
+     * service with {@code new}; tests may also set it directly.
+     */
+    volatile int maxInFlightTurns = LIMIT_UNRESOLVED;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -365,6 +381,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.meterRegistry = meterRegistry;
 
         meterRegistry.gauge("eddi_processing_conversation_count", Tags.empty(), processingConversationCount, AtomicInteger::doubleValue);
+        // The limit eddi_processing_conversation_count runs into; with the default
+        // max-in-flight-turns=auto it depends on the heap, so it is exported rather
+        // than left for operators to work out.
+        meterRegistry.gauge("eddi.conversation.max_in_flight_turns", Tags.empty(), this, ConversationService::inFlightTurnLimit);
 
         // Constructed here rather than in a @PostConstruct: ~34 test classes build
         // this service with `new` and never run the CDI lifecycle, so a
@@ -1383,14 +1403,38 @@ public class ConversationService implements IConversationService, UserErasurePar
      * the flood. The counter is the signal.
      */
     ProcessingTurn admitTurn(String conversationId) {
+        int limit = inFlightTurnLimit();
         try {
-            return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, maxInFlightTurns);
+            return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, limit);
         } catch (TurnCapacityExceededException e) {
             meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
             LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
-                    sanitize(conversationId), maxInFlightTurns);
+                    sanitize(conversationId), limit);
             throw e;
         }
+    }
+
+    /**
+     * Resolves the limit at startup, so a setting that is neither {@code auto} nor
+     * a number fails the boot instead of the first turn, and the value the node
+     * actually runs with is in the log.
+     */
+    @PostConstruct
+    void resolveInFlightTurnLimit() {
+        int limit = inFlightTurnLimit();
+        LOGGER.infof("Conversation turns in flight per node: %s (eddi.conversation.max-in-flight-turns=%s, max heap %d MB, %d MB per turn)",
+                limit > 0 ? String.valueOf(limit) : "unlimited", maxInFlightTurnsSetting, Runtime.getRuntime().maxMemory() / (1024 * 1024),
+                inFlightTurnMemoryMb);
+    }
+
+    /** The resolved {@code eddi.conversation.max-in-flight-turns}. */
+    int inFlightTurnLimit() {
+        int limit = maxInFlightTurns;
+        if (limit == LIMIT_UNRESOLVED) {
+            limit = InFlightTurnLimit.resolve(maxInFlightTurnsSetting, Runtime.getRuntime().maxMemory(), inFlightTurnMemoryMb);
+            maxInFlightTurns = limit;
+        }
+        return limit;
     }
 
     /**

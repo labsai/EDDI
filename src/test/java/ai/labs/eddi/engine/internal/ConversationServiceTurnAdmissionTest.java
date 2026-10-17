@@ -235,6 +235,34 @@ class ConversationServiceTurnAdmissionTest {
 
     @Test
     @Timeout(30)
+    @DisplayName("left unset, the limit resolves from the heap (auto) and is exported as a gauge")
+    void unsetLimitResolvesFromTheHeap() {
+        int expected = InFlightTurnLimit.resolve("auto", Runtime.getRuntime().maxMemory(), 2);
+
+        assertEquals(expected, conversationService.inFlightTurnLimit());
+        assertEquals(expected, meterRegistry.get("eddi.conversation.max_in_flight_turns").gauge().value());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("admission uses the configured setting, not only a value set by hand")
+    void admissionResolvesTheSetting() throws Exception {
+        conversationService.maxInFlightTurnsSetting = "1";
+
+        say();
+        assertThrows(TurnCapacityExceededException.class, this::say);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a setting that is neither auto nor a number fails at startup")
+    void invalidSettingFailsAtStartup() {
+        conversationService.maxInFlightTurnsSetting = "lots";
+        assertThrows(IllegalArgumentException.class, conversationService::resolveInFlightTurnLimit);
+    }
+
+    @Test
+    @Timeout(30)
     @DisplayName("a limit of 0 admits everything")
     void zeroDisablesTheLimit() throws Exception {
         conversationService.maxInFlightTurns = 0;

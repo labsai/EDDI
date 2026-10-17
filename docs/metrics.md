@@ -390,6 +390,7 @@ eddi_runtime_executor_active                # Conversation work running; tag: po
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
 eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit)
+eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a

@@ -73,6 +73,19 @@ response, the streaming error event and conversation start. It now answers 503 `
 `OpenAiConversationBridge.rejectionAsApiException`, and a `Retry-After` header from
 `OpenAiExceptionMapper`).
 
+### `max-in-flight-turns=auto` (the default)
+
+A fixed 1000 fitted only one container size. The Helm chart's 1 GiB limit gives a 512 MB heap at the
+image's default 50 %, so a busy node would run out of memory long before 1000 turns. `auto`
+([`InFlightTurnLimit`](../../src/main/java/ai/labs/eddi/engine/internal/InFlightTurnLimit.java)) derives the
+limit from the maximum heap: (max heap − 256 MB) ÷ `eddi.conversation.in-flight-turn-memory-mb`
+(new, default 2 MB per turn, twice the ~1 MB measured). That gives 128 at 512 MB, ~1400 at 3 GB and
+~2900 at 6 GB.
+- A number still sets the limit, and `0` still disables it.
+- An invalid setting fails the boot (`@PostConstruct`), and the node logs the value it resolved.
+- The value is exported as the gauge `eddi_conversation_max_in_flight_turns`, charted next to the
+  in-flight count on the full-metrics dashboard. That panel's legend is now on.
+
 ### Sizing the limit
 
 A later comparison run (the load-test harness, MongoDB and PostgreSQL, two rounds each) found that

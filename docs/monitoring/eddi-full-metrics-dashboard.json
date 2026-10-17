@@ -1208,6 +1208,17 @@
               },
               "editorMode": "code",
               "range": true
+            },
+            {
+              "refId": "C",
+              "expr": "sum(eddi_conversation_max_in_flight_turns{job=~\"$job\"})",
+              "legendFormat": "limit (max-in-flight-turns)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
             }
           ],
           "fieldConfig": {
@@ -1248,13 +1259,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }
