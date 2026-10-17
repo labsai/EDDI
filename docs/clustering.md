@@ -292,8 +292,8 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   its only copy: losing NATS within that window loses the entry. Only when the stream itself
   cannot take the entry does it go to the JSONL file at `eddi.audit.dead-letter-path`, which
   nothing expires. Paginated tool responses expire on their own 15-minute TTL. A2A task
-  mappings are **not** in this group any more: the erasure's `a2aTasks` step sweeps them on
-  every node through the shared index (next bullet), and their 24 h TTL only bounds the one
+  mappings are **not** in this group any more: the erasure's `a2aTasks` step on the erasing node sweeps records written on any
+  node through the shared index (next bullet), and their 24 h TTL only bounds the one
   record that step can miss. An erasure that must also cover the stream and the tool pages
   should wait out their windows or purge the streams, and handle the JSONL file separately (see
   [GDPR](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it)).

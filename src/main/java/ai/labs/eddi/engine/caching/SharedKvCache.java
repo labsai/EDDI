@@ -263,15 +263,26 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
      */
     @Override
     public boolean replace(K key, V oldValue, V newValue) {
+        Optional<ISharedKv.Versioned> versioned;
         try {
-            Optional<ISharedKv.Versioned> versioned = shared.get(key(key));
-            if (versioned.isEmpty()) {
-                return false;
+            versioned = shared.get(key(key));
+        } catch (ClusterUnavailableException e) {
+            // Nothing could be compared against: only a node-local copy can decide.
+            degraded(e);
+            boolean replaced = local.replace(key, oldValue, newValue);
+            if (replaced && localOnly.size() < MAX_LOCAL_ONLY) {
+                localOnly.add(key(key));
             }
-            V current = decode(versioned.get().value());
-            if (current == null || !current.equals(oldValue)) {
-                return false;
-            }
+            return replaced;
+        }
+        if (versioned.isEmpty()) {
+            return false;
+        }
+        V current = decode(versioned.get().value());
+        if (current == null || !current.equals(oldValue)) {
+            return false;
+        }
+        try {
             if (shared.update(key(key), encode(newValue), versioned.get().revision()).isEmpty()) {
                 return false;
             }
@@ -279,12 +290,19 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
             localOnly.remove(key(key));
             return true;
         } catch (ClusterUnavailableException e) {
+            // The comparison succeeded against the bucket's own value and only the
+            // write failed: the replacement is taken node-locally, exactly like a
+            // degraded put — and with the whole value, so a caller that rebuilt
+            // newValue from the bucket's current value keeps it. Falling back to
+            // local.replace here was wrong: a node without a local copy got false, and
+            // a caller retrying from the (now empty) local copy rebuilt the value from
+            // nothing.
             degraded(e);
-            boolean replaced = local.replace(key, oldValue, newValue);
-            if (replaced && localOnly.size() < MAX_LOCAL_ONLY) {
+            local.put(key, newValue);
+            if (localOnly.size() < MAX_LOCAL_ONLY) {
                 localOnly.add(key(key));
             }
-            return replaced;
+            return true;
         }
     }
 

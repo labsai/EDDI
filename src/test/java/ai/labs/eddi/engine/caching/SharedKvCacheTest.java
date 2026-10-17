@@ -30,7 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
@@ -76,6 +78,37 @@ class SharedKvCacheTest {
      * read, another node writes in between, and the update must then be refused
      * because the revision moved — not land and erase the other node's write.
      */
+    /**
+     * A node with no local copy reads the bucket's value, compares, and the bucket
+     * goes away before the update. The replacement must land node-locally with the
+     * whole value — not answer false and leave the caller to retry from an empty
+     * local copy, which rebuilt the A2A principal index without its existing ids.
+     */
+    @Test
+    @DisplayName("when the bucket fails after the comparison, the whole replacement is kept node-locally")
+    void replaceKeepsTheWholeValueWhenTheBucketFailsAfterTheRead() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        new SharedKvCache<String, String>(local("seed"), kv, false).put("k", "ids:1,2,3");
+        ISharedKv failingUpdate = spy(kv);
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).update(any(), any(), anyLong());
+        ICache<String, String> noLocalCopy = new SharedKvCache<>(local("fresh"), failingUpdate, false);
+
+        assertTrue(noLocalCopy.replace("k", "ids:1,2,3", "ids:1,2,3,4"), "the comparison passed; the write is taken node-locally");
+        // The bucket is still unreachable for this node: the node-local copy answers,
+        // and it holds the complete value, not a fragment.
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).get(any());
+        assertEquals("ids:1,2,3,4", noLocalCopy.get("k"));
+    }
+
+    @Test
+    @DisplayName("when the bucket cannot even be read and there is no local copy, replace answers false and changes nothing")
+    void replaceWithoutAnyCopyIsFalse() {
+        ICache<String, String> node = new SharedKvCache<>(local("none"), new DownSharedKv(), false);
+
+        assertFalse(node.replace("k", "old", "new"));
+        assertNull(node.get("k"));
+    }
+
     @Test
     @DisplayName("a write that lands between the read and the update defeats the replace")
     void replaceLosesToAWriteInBetween() {
