@@ -19,9 +19,11 @@ import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.UnauthorizedException;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
@@ -59,6 +61,14 @@ public class RestAgentManagement implements IRestAgentManagement {
     @Inject
     SecurityIdentity identity;
 
+    /**
+     * Binds the {@code {userId}} path segment to the caller. Field-injected, like
+     * {@link #identity}, so the constructor the tests build with stays as it is; a
+     * null validator (older test seams) means the check is skipped.
+     */
+    @Inject
+    OwnershipValidator ownershipValidator;
+
     private static final Logger log = Logger.getLogger(RestAgentManagement.class);
 
     @Inject
@@ -76,6 +86,7 @@ public class RestAgentManagement implements IRestAgentManagement {
                                        List<String> returningFields, AsyncResponse asyncResponse) {
 
         try {
+            requireUserAccess(userId);
             // initUserConversation authorizes the caller before it creates, deletes or
             // replaces anything, so an UnauthorizedException here means nothing changed.
             var userConversationResult = initUserConversation(intent, userId, language);
@@ -112,16 +123,18 @@ public class RestAgentManagement implements IRestAgentManagement {
     public void sayWithinContext(String intent, String userId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                                  InputData inputData, AsyncResponse response) {
         try {
+            requireUserAccess(userId);
             // Authorized inside initUserConversation, before any side effect.
             var userConversation = initUserConversation(intent, userId, extractLanguage(inputData)).getUserConversation();
 
             restAgentEngine.sayWithinContext(userConversation.getConversationId(), returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     response);
 
-        } catch (UnauthorizedException e) {
+        } catch (UnauthorizedException | ForbiddenException e) {
             // Hand the exception to the JAX-RS exception mappers, exactly as a throw from
             // loadConversationMemory is: Quarkus answers 401 with its authentication
-            // challenge. The generic branch below would turn it into an opaque 500.
+            // challenge, or 403 for a userId that is not the caller's. The generic
+            // branch below would turn either into an opaque 500.
             response.resume(e);
         } catch (AgentNotReadyForManagedConversationException e) {
             // Not a server fault: no agent version is deployed yet (startup, rolling
@@ -217,6 +230,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public Response endCurrentConversation(String intent, String userId) {
+        requireUserAccess(userId);
         try {
             var userConversation = userConversationStore.readUserConversation(intent, userId);
             if (userConversation != null) {
@@ -231,6 +245,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public Boolean isUndoAvailable(String intent, String userId) {
+        requireUserAccess(userId);
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
@@ -242,6 +257,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public Response undo(String intent, String userId) {
+        requireUserAccess(userId);
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
@@ -253,6 +269,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public Boolean isRedoAvailable(String intent, String userId) {
+        requireUserAccess(userId);
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
@@ -264,6 +281,7 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     @Override
     public Response redo(String intent, String userId) {
+        requireUserAccess(userId);
         var userConversation = getUserConversation(intent, userId);
         if (userConversation != null) {
             checkUserAuthIfApplicable(userConversation);
@@ -407,6 +425,24 @@ public class RestAgentManagement implements IRestAgentManagement {
 
     private void checkUserAuthIfApplicable(UserConversation userConversation) throws UnauthorizedException {
         checkUserAuthIfApplicable(userConversation.getEnvironment());
+    }
+
+    /**
+     * The {@code {userId}} in the path names whose managed conversation the request
+     * acts on, and until L9 of the 2026-10-15 security review nothing tied it to
+     * the caller: {@link #checkUserAuthIfApplicable} only asks whether the caller
+     * is anonymous, so any authenticated user could load, drive, undo or end
+     * another user's managed conversation by naming them — and
+     * {@link #initUserConversation} deleted the ended-conversation mapping before
+     * the transitive 403 from the engine arrived. Runs first in every method, so
+     * nothing is read, created or deleted for a user the caller is not.
+     * {@link OwnershipValidator#validateUserAccess} is a no-op while
+     * {@code authorization.enabled=false} and for an admin.
+     */
+    private void requireUserAccess(String userId) {
+        if (ownershipValidator != null) {
+            ownershipValidator.validateUserAccess(identity, userId);
+        }
     }
 
     private void checkUserAuthIfApplicable(Deployment.Environment environment) throws UnauthorizedException {

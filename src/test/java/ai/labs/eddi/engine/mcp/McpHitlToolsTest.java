@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
@@ -32,6 +33,7 @@ import java.io.IOException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -51,11 +53,12 @@ class McpHitlToolsTest {
     OwnershipValidator ownershipValidator;
     IJsonSerialization json;
     SecurityIdentity identity;
+    ResourceAccessGuard resourceAccessGuard = mock(ResourceAccessGuard.class);
     McpHitlTools tools;
 
     McpHitlTools build(boolean authEnabled, boolean mutationsEnabled) {
         return new McpHitlTools(conversationService, groupConversationService, guard,
-                ownershipValidator, json, identity, new SimpleMeterRegistry(),
+                ownershipValidator, resourceAccessGuard, json, identity, new SimpleMeterRegistry(),
                 authEnabled, mutationsEnabled);
     }
 
@@ -64,13 +67,82 @@ class McpHitlToolsTest {
         conversationService = mock(IConversationService.class);
         groupConversationService = mock(IGroupConversationService.class);
         guard = mock(HitlAccessGuard.class);
+        // The caller owns the conversations it cancels unless a test says otherwise.
+        when(guard.mayCancelExecuting(any())).thenReturn(true);
         ownershipValidator = mock(OwnershipValidator.class);
         json = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
         Principal p = mock(Principal.class);
         when(p.getName()).thenReturn("alice");
         when(identity.getPrincipal()).thenReturn(p);
+        // L5: the HITL tools carry the REST HITL role tier; the per-conversation
+        // guard (mocked here) decides after it. alice is an approver.
+        when(identity.hasRole("eddi-approver")).thenReturn(true);
         tools = build(true, true);
+    }
+
+    /**
+     * L5: an {@code eddi-viewer} — admitted by no REST HITL endpoint — is refused
+     * at the role tier, before the per-conversation guard is consulted, on every
+     * mutating tool and on the reads alike.
+     */
+    @Test
+    void viewer_isRefusedByTheRoleTier_beforeTheConversationGuard() {
+        SecurityIdentity viewer = mock(SecurityIdentity.class);
+        when(viewer.isAnonymous()).thenReturn(false);
+        when(viewer.hasRole("eddi-viewer")).thenReturn(true);
+        identity = viewer;
+        tools = build(true, true);
+
+        List<Runnable> calls = List.of(
+                () -> tools.resumeConversation("c1", "APPROVED", null, null),
+                () -> tools.cancelConversation("c1"),
+                () -> tools.getApprovalStatus("c1", "summary"),
+                () -> tools.listPendingApprovals("10"),
+                () -> tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null),
+                () -> tools.submitGroupHumanInput("g1", "gc1", "m1", "hello"),
+                () -> tools.cancelGroupDiscussion("g1", "gc1"),
+                () -> tools.getGroupApprovalStatus("g1", "gc1", "summary"),
+                () -> tools.listGroupPendingApprovals("g1", "10"),
+                () -> tools.listAllGroupPendingApprovals("10"));
+        for (Runnable call : calls) {
+            ForbiddenException e = assertThrows(ForbiddenException.class, call::run);
+            assertTrue(e.getMessage().contains("requires one of roles"), e.getMessage());
+        }
+        verifyNoInteractions(guard, conversationService, groupConversationService);
+    }
+
+    /**
+     * The USE gate REST's approve endpoint applies: an owner whose group access was
+     * revoked while the discussion was paused may not resume it; admins and
+     * approvers decide by role.
+     */
+    @Test
+    void approveGroupPhase_requiresGroupUseAccess_unlessAdminOrApprover() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(false);
+        when(ownershipValidator.isApprover(identity)).thenReturn(false);
+        doThrow(new ForbiddenException("revoked")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null);
+
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+        verifyNoInteractions(groupConversationService);
+
+        when(ownershipValidator.isApprover(identity)).thenReturn(true);
+        tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), any(), isNull());
+    }
+
+    /** With authorization off the tier is a no-op, as every other MCP tier is. */
+    @Test
+    void roleTier_isInertWithoutAuthorization() throws Exception {
+        SecurityIdentity nobody = mock(SecurityIdentity.class);
+        when(nobody.isAnonymous()).thenReturn(true);
+        identity = nobody;
+        tools = build(false, true);
+        when(json.serialize(any())).thenReturn("[]");
+        String out = tools.listPendingApprovals("10");
+        assertEquals("[]", out);
     }
 
     @Test

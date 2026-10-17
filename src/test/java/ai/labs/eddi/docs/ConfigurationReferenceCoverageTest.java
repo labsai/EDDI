@@ -251,8 +251,9 @@ class ConfigurationReferenceCoverageTest {
             "EDDI_CLI", "EDDI_REPO_ROOT", "EDDI_ALREADY_RUNNING", "EDDI_URI_PATTERN", "EDDI_AUTH",
             "EDDI_DEMO_LLM_API_KEY", "EDDI_DEMO_LLM_MODEL", "EDDI_DEMO_LLM_TYPE",
             // The host address the compose files publish EDDI's ports on (127.0.0.1 by
-            // default).
-            "EDDI_BIND");
+            // default), and the acknowledgement docker-compose.yml's bind-guard reads
+            // before it lets an unauthenticated EDDI_BIND leave loopback.
+            "EDDI_BIND", "EDDI_I_UNDERSTAND_PUBLIC");
 
     /**
      * Names a document quotes deliberately because they do <em>not</em> work.

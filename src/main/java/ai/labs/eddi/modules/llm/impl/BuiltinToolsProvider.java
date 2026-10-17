@@ -133,9 +133,15 @@ class BuiltinToolsProvider implements ToolSourceProvider {
      */
     List<Object> collect(ToolAssemblyContext ctx) {
         List<Object> tools = new ArrayList<>();
+        String conversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;
         for (CatalogEntry entry : catalog) {
             if (entry.selectedBy(ctx)) {
-                tools.add(entry.bean());
+                // The page tool reads a per-process store, so it is handed to the turn
+                // bound to its conversation (L13): the same class, the same @Tool
+                // method, one more field. Every other bean is stateless and shared.
+                tools.add(conversationId != null && !conversationId.isBlank() && entry.bean() instanceof FetchToolResponsePageTool pageTool
+                        ? pageTool.boundTo(conversationId)
+                        : entry.bean());
             }
         }
         return tools;

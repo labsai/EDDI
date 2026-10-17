@@ -705,3 +705,166 @@ describe("the grant mock mirrors the backend's contract", () => {
   });
 });
 
+
+describe("SecretsPage — allowed destinations (allowedHosts)", () => {
+  /** Records the body of the real (non-dry-run) grant write. */
+  function captureGrantWrites() {
+    const writes: Record<string, unknown>[] = [];
+    server.use(
+      http.put(
+        "*/secretstore/secrets/:tenantId/:keyName/grant",
+        async ({ request, params }) => {
+          const body = (await request.json()) as Record<string, unknown>;
+          if (!new URL(request.url).searchParams.get("dryRun")) {
+            writes.push(body);
+          }
+          return HttpResponse.json({
+            reference: `\${vault:${params.keyName as string}}`,
+            tenantId: params.tenantId,
+            keyName: params.keyName,
+            dryRun: false,
+            allowedAgents: body.allowedAgents,
+            previousAllowedAgents: body.allowedAgents,
+            grantsAllAgents: false,
+            agentsLosingAccess: [],
+          });
+        },
+      ),
+    );
+    return writes;
+  }
+
+  it("shows a restricted secret's hosts in its row, and nothing for an unrestricted one", async () => {
+    renderSecrets();
+
+    const hosts = await screen.findByTestId("allowed-hosts-google-gemini-key");
+    expect(hosts).toHaveTextContent("generativelanguage.googleapis.com");
+    expect(screen.queryByTestId("allowed-hosts-openai-api-key")).not.toBeInTheDocument();
+  });
+
+  it("prefills the stored hosts and leaves them out of the write when untouched", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+
+    expect(
+      screen.getByTestId("grant-hosts-input-item-generativelanguage.googleapis.com"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByTestId("grant-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).not.toHaveProperty("allowedHosts");
+  });
+
+  it("adds a host, lower-cased, and sends the whole list", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "openai-api-key");
+
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "API.openai.com:443{Enter}");
+    // A first host restricts a secret that went anywhere: Save waits for the tick.
+    expect(screen.getByTestId("grant-hosts-tightened")).toBeInTheDocument();
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    await user.click(screen.getByTestId("grant-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.allowedHosts).toEqual(["api.openai.com:443"]);
+  });
+
+  it("folds a host still in the box into the write", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "openai-api-key");
+
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "api.openai.com");
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    await user.click(screen.getByTestId("grant-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.allowedHosts).toEqual(["api.openai.com"]);
+  });
+
+  it("sends [] when the last host is removed, which lifts the restriction", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+
+    await user.click(
+      screen.getByTestId("grant-hosts-input-remove-generativelanguage.googleapis.com"),
+    );
+    expect(screen.getByTestId("grant-hosts-hint")).toBeInTheDocument();
+    await user.click(screen.getByTestId("grant-save"));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.allowedHosts).toEqual([]);
+  });
+
+  it("asks again when the list changes after the tick, and not at all for a widening", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "google-gemini-key");
+
+    // Adding a host to an existing list only widens it.
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "eu.googleapis.com{Enter}");
+    expect(screen.queryByTestId("grant-hosts-tightened")).not.toBeInTheDocument();
+
+    // Dropping the stored host narrows it: warn, and a tick given for one list
+    // does not carry over to another.
+    await user.click(
+      screen.getByTestId("grant-hosts-input-remove-generativelanguage.googleapis.com"),
+    );
+    expect(screen.getByTestId("grant-hosts-tightened")).toBeInTheDocument();
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    expect(screen.getByTestId("grant-save")).toBeEnabled();
+    await user.type(screen.getByTestId("grant-hosts-input-input"), "other.example{Enter}");
+    expect(screen.getByTestId("grant-hosts-acknowledge")).not.toBeChecked();
+    expect(screen.getByTestId("grant-save")).toBeDisabled();
+
+    await user.click(screen.getByTestId("grant-hosts-acknowledge"));
+    await user.click(screen.getByTestId("grant-save"));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.allowedHosts).toEqual(["eu.googleapis.com", "other.example"]);
+  });
+
+  it("refuses a URL as it is typed and does not save it", async () => {
+    const user = userEvent.setup();
+    const writes = captureGrantWrites();
+    renderSecrets();
+    await openEditor(user, "openai-api-key");
+
+    await user.type(
+      screen.getByTestId("grant-hosts-input-input"),
+      "https://api.openai.com/v1{Enter}",
+    );
+    expect(await screen.findByTestId("grant-hosts-error")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("grant-hosts")).queryByTestId(/grant-hosts-input-item-/),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("grant-save"));
+    expect(writes).toHaveLength(0);
+  });
+
+  it("passes allowedHosts through updateSecretGrant only when given", async () => {
+    const writes = captureGrantWrites();
+    await updateSecretGrant({
+      tenantId: "default",
+      keyName: "openai-api-key",
+      allowedAgents: ["*"],
+    });
+    await updateSecretGrant({
+      tenantId: "default",
+      keyName: "openai-api-key",
+      allowedAgents: ["*"],
+      allowedHosts: [],
+    });
+    expect(writes[0]).not.toHaveProperty("allowedHosts");
+    expect(writes[1]!.allowedHosts).toEqual([]);
+  });
+});

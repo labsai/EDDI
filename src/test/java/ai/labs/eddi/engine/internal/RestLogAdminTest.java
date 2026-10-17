@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
+import ai.labs.eddi.utils.PageBounds;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.MediaType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -89,6 +91,20 @@ class RestLogAdminTest {
             assertTrue(result.isEmpty());
             verify(databaseLogs).getLogs(Deployment.Environment.production, "agent-1", 1,
                     null, null, null, 0, 100);
+        }
+
+        @Test
+        @DisplayName("L10: a limit above the page ceiling, or a negative skip, is refused before the store is read")
+        void boundsAreEnforced() {
+            assertThrows(BadRequestException.class, () -> restLogAdmin.getHistoryLogs(
+                    Deployment.Environment.production, null, null, null, null, null, 0, PageBounds.maxLimit() + 1));
+            assertThrows(BadRequestException.class, () -> restLogAdmin.getHistoryLogs(
+                    Deployment.Environment.production, null, null, null, null, null, -1, 10));
+            assertThrows(BadRequestException.class,
+                    () -> restLogAdmin.getRecentLogs(null, null, "INFO", PageBounds.maxLimit() + 1));
+
+            verify(databaseLogs, never()).getLogs(any(), any(), any(), any(), any(), any(), any(), any());
+            verify(boundedLogStore, never()).getEntries(any(), any(), any(), anyInt());
         }
     }
 

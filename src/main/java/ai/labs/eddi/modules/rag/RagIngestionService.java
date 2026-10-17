@@ -151,7 +151,9 @@ public class RagIngestionService {
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
             EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
-            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
+            // For writing: an in-memory store built under another embedding
+            // configuration is replaced rather than mixed with these vectors.
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
 
             EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
                     .build();

@@ -37,7 +37,7 @@ class PostgresIngestionStateStoreTest extends PostgresTestBase implements Ingest
 
     @BeforeEach
     void clean() throws Exception {
-        truncateTables(dataSource, "rag_ingestion_documents", "rag_ingestion_runs");
+        truncateTables(dataSource, "rag_ingestion_documents", "rag_ingestion_runs", "rag_ingestion_sources");
     }
 
     @Override

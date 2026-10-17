@@ -12,9 +12,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -541,5 +543,50 @@ class InMemoryConversationCoordinatorTest {
 
         List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();
         callbacks.get(callbacks.size() - 1).onFailure(new RuntimeException("forced failure"));
+    }
+    /**
+     * The cursor paging over local dead letters skips by id number and assumes the
+     * deque is in id order. The id used to be drawn outside the lock that appends
+     * the entry, so two concurrent failures could draw 2 and 3 and append 3 first —
+     * which is what made ClusterConversationCoordinatorTest.localDeadLettersPage
+     * drop or repeat an entry now and then.
+     */
+    @Test
+    void concurrentDeadLettersAreRecordedInIdOrder() throws Exception {
+        int writers = 8;
+        int perWriter = 500;
+        var start = new CountDownLatch(1);
+        List<Thread> threads = new ArrayList<>();
+        for (int w = 0; w < writers; w++) {
+            Thread t = new Thread(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                for (int i = 0; i < perWriter; i++) {
+                    coordinator.recordLocalDeadLetter("conv", new IllegalStateException("x"), () -> null);
+                }
+            });
+            threads.add(t);
+            t.start();
+        }
+        start.countDown();
+        for (Thread t : threads) {
+            t.join(30_000);
+        }
+
+        List<DeadLetterEntry> entries = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, -1) {
+        }.getDeadLetters();
+        assertTrue(entries.isEmpty(), "sanity: a fresh coordinator holds nothing");
+        entries = coordinator.getDeadLetters();
+        assertEquals(Math.min(writers * perWriter, 1000), entries.size(), "the cap keeps the newest 1000");
+        long previous = -1;
+        for (DeadLetterEntry entry : entries) {
+            long number = Long.parseLong(entry.id());
+            assertTrue(number > previous, "ids must be strictly increasing along the deque: " + previous + " then " + number);
+            previous = number;
+        }
     }
 }

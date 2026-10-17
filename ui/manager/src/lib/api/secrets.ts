@@ -11,6 +11,14 @@ export interface SecretMetadata {
   checksum: string;
   description: string | null;
   allowedAgents: string[]; // ["*"] = all agents
+  /**
+   * The hosts a `${vault:…}` reference to this secret may be sent to — exact
+   * `host` or `host:port`, checked where the reference is resolved for an
+   * outbound request. Absent or empty: anywhere. Omitted rather than null when
+   * unset (EDDI's REST mapper drops null fields), and absent on a backend older
+   * than the field.
+   */
+  allowedHosts?: string[];
 }
 
 export interface SecretStoreRequest {
@@ -23,6 +31,28 @@ export interface SecretStoreResponse {
   reference: string;
   tenantId: string;
   keyName: string;
+}
+
+/** Why an `allowedHosts` entry was refused before it was sent. */
+export type AllowedHostProblem = "scheme" | "shape";
+
+const ALLOWED_HOST =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*\.?|\[[0-9a-f:.]+\])(?::\d{1,5})?$/;
+
+/**
+ * Checks one `allowedHosts` entry the way the backend will (`VaultHostAllowlist`):
+ * an exact host or `host:port`, no scheme, no path, no wildcard. Caught here so a
+ * pasted URL is refused as it is typed rather than by the save.
+ */
+export function validateAllowedHost(candidate: string): AllowedHostProblem | null {
+  const value = candidate.trim().toLowerCase();
+  if (value.includes("://")) return "scheme";
+  if (!ALLOWED_HOST.test(value)) return "shape";
+  const port = value.match(/:(\d{1,5})$/);
+  if (port && !value.endsWith("]") && (Number(port[1]) < 1 || Number(port[1]) > 65535)) {
+    return "shape";
+  }
+  return null;
 }
 
 /** The wildcard that grants a secret to every agent. */
@@ -61,6 +91,8 @@ export interface SecretGrantRequest {
   allowedAgents: string[];
   /** Omitted to leave the existing description alone. */
   description?: string;
+  /** Omitted to leave the hosts alone; `[]` removes the restriction. */
+  allowedHosts?: string[];
 }
 
 export interface SecretGrantResponse {
@@ -77,6 +109,8 @@ export interface SecretGrantResponse {
   createdAt?: string;
   lastRotatedAt?: string;
   agentsLosingAccess: AffectedAgent[];
+  /** The hosts after the edit. Omitted when the secret has no restriction. */
+  allowedHosts?: string[];
   /**
    * False when the backend could not list every environment, so the list above may
    * be short. Absent on an older backend, which is why callers test `=== false`
@@ -262,9 +296,12 @@ export async function updateSecretGrant(args: {
   keyName: string;
   allowedAgents: string[];
   description?: string;
+  /** Undefined keeps the stored list; `[]` removes the restriction. */
+  allowedHosts?: string[];
   dryRun?: boolean;
 }): Promise<SecretGrantResponse> {
   const body: SecretGrantRequest = { allowedAgents: args.allowedAgents };
+  if (args.allowedHosts !== undefined) body.allowedHosts = args.allowedHosts;
   // Undefined means "keep the existing description"; an empty string clears it,
   // so `!== undefined` rather than a truthiness check.
   if (args.description !== undefined) body.description = args.description;

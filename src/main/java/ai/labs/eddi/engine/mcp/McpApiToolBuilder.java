@@ -155,8 +155,20 @@ public final class McpApiToolBuilder {
      */
     public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter, String apiBaseUrl, String apiAuth,
                                                String apiAuthHeader) {
+        return parseAndBuild(openApiSpec, endpointFilter, apiBaseUrl, apiAuth, apiAuthHeader, OpenApiSpecFetcher.permissive());
+    }
+
+    /**
+     * {@link #parseAndBuild(String, String, String, String, String)} fetching a
+     * remote {@code openApiSpec} through {@code specFetcher} — the one every CDI
+     * caller injects, so the fetch honours
+     * {@code eddi.security.ssrf-protection.enabled}. The fetcher-less overloads
+     * fetch with protection off and are for inline specs and tests.
+     */
+    public static ApiBuildResult parseAndBuild(String openApiSpec, String endpointFilter, String apiBaseUrl, String apiAuth,
+                                               String apiAuthHeader, OpenApiSpecFetcher specFetcher) {
         String authHeader = resolveAuthHeader(apiAuthHeader);
-        OpenAPI openAPI = parseSpec(openApiSpec);
+        OpenAPI openAPI = parseSpec(openApiSpec, specFetcher);
         String baseUrl = resolveBaseUrl(openAPI, apiBaseUrl);
         Set<String> allowedEndpoints = parseEndpointFilter(endpointFilter);
 
@@ -261,13 +273,18 @@ public final class McpApiToolBuilder {
      * <p>
      * When the input is a location (not inline content) it must be an
      * {@code http}/{@code https} URL via
-     * {@link UrlValidationUtils#isValidHttpUrl(String)}, and it is additionally run
-     * through {@link UrlValidationUtils#rejectCloudMetadataTarget(String)} before
-     * being fetched — {@code isValidHttpUrl} alone would let
-     * {@code http://169.254.169.254/...} through to the parser's fetcher, bypassing
-     * the always-on metadata guard. Other private/internal hosts are intentionally
-     * still permitted so internal OpenAPI specs remain discoverable (the calling
-     * REST/MCP surface is {@code eddi-admin}/{@code eddi-editor} gated).
+     * {@link UrlValidationUtils#isValidHttpUrl(String)}, and the document is
+     * fetched by {@link OpenApiSpecFetcher} rather than by swagger-parser's own
+     * {@code readLocation}: the location and every redirect hop are checked by the
+     * deployment's {@code OutboundTargetPolicy} (the metadata service refused
+     * always, private hosts refused with
+     * {@code eddi.security.ssrf-protection.enabled}), and the body is size-capped.
+     * swagger-parser's {@code RemoteUrl} followed up to five redirects unchecked.
+     * With protection off, private/internal hosts stay permitted so internal
+     * OpenAPI specs remain discoverable (the calling REST/MCP surface is
+     * {@code eddi-admin}/{@code eddi-editor} gated). The fetched text is parsed
+     * with the URL it was finally read from as its base, so relative {@code $ref}s
+     * resolve beside the fetched document.
      * <p>
      * For inline JSON/YAML content, {@code setSafelyResolveURL(true)} alone is not
      * enough: it guards only URL-format {@code $ref}s, while swagger-parser
@@ -279,6 +296,14 @@ public final class McpApiToolBuilder {
      * fragment ({@code #/…}) nor an {@code http(s)} URL is rejected.
      */
     public static OpenAPI parseSpec(String specInput) {
+        return parseSpec(specInput, OpenApiSpecFetcher.permissive());
+    }
+
+    /**
+     * {@link #parseSpec(String)} fetching a remote location through
+     * {@code specFetcher}.
+     */
+    public static OpenAPI parseSpec(String specInput, OpenApiSpecFetcher specFetcher) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
         // Route every $ref the parser fetches through the blocked-URL resolver:
@@ -295,17 +320,19 @@ public final class McpApiToolBuilder {
             rejectUnsafeInlineRefs(specInput);
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
-            // Remote location. Enforce an http(s) scheme so the parser's fetcher
-            // cannot read local files (file://), classpath/jar resources, or use
-            // other non-http schemes. Internal/private hosts stay allowed, but never
-            // the cloud instance-metadata service (always-on, regardless of the
-            // ssrf-protection toggle).
+            // Remote location. Enforce an http(s) scheme so nothing can read local
+            // files (file://), classpath/jar resources, or use other non-http
+            // schemes; then fetch it ourselves, with every hop held to the
+            // deployment's target policy and the body capped, and hand the text to
+            // the parser with the location as its base.
             String location = specInput.trim();
             if (!UrlValidationUtils.isValidHttpUrl(location)) {
                 throw new IllegalArgumentException("OpenAPI spec location must be an http or https URL");
             }
-            UrlValidationUtils.rejectCloudMetadataTarget(location);
-            result = new OpenAPIV3Parser().readLocation(location, null, parseOptions);
+            // The base for relative $refs is the URL the document was finally read
+            // from: after a redirect that differs from the location the editor gave.
+            OpenApiSpecFetcher.FetchedSpec fetched = specFetcher.fetchSpec(location);
+            result = new OpenAPIV3Parser().readContents(fetched.content(), null, parseOptions, fetched.location());
         }
 
         if (result == null || result.getOpenAPI() == null) {

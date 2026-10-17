@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.mistralai.MistralAiChatModel;
 import dev.langchain4j.model.mistralai.MistralAiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.List;
@@ -39,6 +40,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_MODEL_NAME = "modelName";
     private static final String KEY_TEMPERATURE = "temperature";
@@ -76,12 +85,12 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
             Boolean logResponses, Map<String, String> customHeaders) {
     }
 
-    private static Settings read(Map<String, String> p) {
+    private static Settings read(Map<String, String> p, OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(p, KEY_BASE_URL);
         if (baseUrl != null) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(baseUrl);
         }
         return new Settings(baseUrl, isNullOrEmpty(p.get(KEY_API_KEY)) ? null : p.get(KEY_API_KEY),
                 isNullOrEmpty(p.get(KEY_MODEL_NAME)) ? null : p.get(KEY_MODEL_NAME), doubleValue(p, KEY_TEMPERATURE),
@@ -102,7 +111,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
      * the wire. Production goes through {@link #build(Map)}.
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = MistralAiChatModel.builder().httpClientBuilder(httpClientBuilder);
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
@@ -149,7 +158,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = MistralAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());

@@ -4,228 +4,134 @@
  */
 package ai.labs.eddi.engine.httpclient;
 
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.CallerFrames;
+import ai.labs.eddi.engine.httpclient.outbound.MethodRule;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import jakarta.inject.Inject;
 
+import javax.net.ssl.SSLSession;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.List;
-import java.util.Objects;
-import java.util.OptionalLong;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Centralized, SSRF-safe HTTP client wrapper. All outbound HTTP requests from
- * LLM tools and integrations should go through this client.
+ * The SSRF-safe JDK-typed HTTP API that LLM tools and integrations have used
+ * since 6.0.2, now a thin adapter over {@link OutboundHttp} on the
+ * {@link Profile#DEFAULT} profile. Every guarantee — per-hop SSRF validation,
+ * manual redirects with RFC 9110 method rules, cross-origin credential
+ * stripping, one deadline for the whole exchange, capped and discarded redirect
+ * bodies — is implemented there.
  * <p>
- * Security properties:
- * <ul>
- * <li>Redirects are NEVER followed automatically — manual per-hop
- * validation</li>
- * <li>Each redirect hop is validated against SSRF rules (private IPs, cloud
- * metadata, etc.)</li>
- * <li>Maximum redirect count is capped</li>
- * <li>Connect timeout is enforced per-hop</li>
- * <li>Response timeout is enforced per-hop ({@link #DEFAULT_REQUEST_TIMEOUT}
- * when the caller set none)</li>
- * <li>One wall-clock deadline covers the whole exchange — every hop and, for a
- * buffering body handler, reading the body — see {@link #totalBudget}. A
- * streaming handler ({@code ofInputStream}) completes when the headers arrive,
- * so its later reads are bounded by the caller; the {@code send*Bounded}
- * methods do that with {@link BoundedBodyReader}</li>
- * <li>The bodies of redirect responses are discarded after at most
- * {@link #MAX_REDIRECT_BODY_BYTES}, never handed to the caller's body
- * handler</li>
- * <li>On cross-origin redirects, Authorization/Cookie headers are stripped</li>
- * </ul>
+ * Kept so callers can move to {@link OutboundHttp} one at a time.
  *
  * @since 6.0.2
+ * @deprecated use {@link OutboundHttp} directly
  */
+@Deprecated
 @ApplicationScoped
 public class SafeHttpClient {
 
-    private static final Logger LOGGER = Logger.getLogger(SafeHttpClient.class);
+    /** @see OutboundHttp#SENSITIVE_HEADERS */
+    public static final Set<String> SENSITIVE_HEADERS = OutboundHttp.SENSITIVE_HEADERS;
 
-    /** Maximum number of redirect hops per request. */
-    private static final int MAX_REDIRECTS = 5;
+    private final OutboundHttp outbound;
 
-    /**
-     * Most bytes of a redirect response's body read before it is dropped. A
-     * redirect body is only a courtesy page; nothing reads it.
-     */
-    static final long MAX_REDIRECT_BODY_BYTES = 64 * 1024;
+    @Inject
+    public SafeHttpClient(OutboundHttp outbound) {
+        this.outbound = outbound;
+    }
 
-    /** HTTP status codes considered redirects. */
-    private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
-
-    /** Headers managed by HttpClient — must not be copied to redirect requests. */
-    private static final Set<String> MANAGED_HEADERS = Set.of("host", "content-length", "connection");
-
-    /**
-     * Per-hop response timeout applied when the caller set none. Every in-tree
-     * caller sets its own timeout; this is the backstop for the ones that do not.
-     * It bounds only the wait for the response headers — the JDK stops counting
-     * once they arrive — which is why {@link #totalBudget} exists.
-     */
-    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(15);
-
-    /**
-     * Security-sensitive headers stripped on cross-origin redirects. Beyond the
-     * three RFC-managed ones, this also carries the widely-used custom credential
-     * header names: a redirect from a public host to another origin must not replay
-     * an {@code X-Api-Key} (or the like) any more than it may replay
-     * {@code Authorization}.
-     * <p>
-     * Public and lower-cased so the Vert.x httpcalls client
-     * ({@code HttpClientModule}) strips the same set on its own cross-origin
-     * redirect hops — its default redirect handler copies every request header and
-     * removes only {@code Content-Length}, so without this it replayed credentials
-     * of any name across origins.
-     */
-    public static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization",
-            "x-api-key", "api-key", "apikey", "x-auth-token", "x-access-token", "x-amz-security-token", "authentication");
-
-    private final HttpClient httpClient;
-    private final long connectTimeoutMs;
-
-    /**
-     * Interrupts a body read that stalled after the response headers arrived — see
-     * {@link BoundedBodyReader}. One daemon thread per client instance; cheap, and
-     * the client is {@code @ApplicationScoped} so there is one of it in production.
-     */
-    private final ScheduledExecutorService bodyReadWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "safe-http-body-watchdog");
-        thread.setDaemon(true);
-        return thread;
-    });
-
-    public SafeHttpClient(
-            @ConfigProperty(name = "httpClient.connectTimeoutInMillis", defaultValue = "10000") int connectTimeoutMs) {
-        this.connectTimeoutMs = connectTimeoutMs;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .build();
+    /** A client outside CDI, on its own {@link OutboundHttp#standalone} facade. */
+    public SafeHttpClient(int connectTimeoutMs) {
+        this(OutboundHttp.standalone(Duration.ofMillis(connectTimeoutMs)));
     }
 
     /**
      * Sends an HTTP request with SSRF-safe redirect handling. The initial URL is
      * NOT validated — callers that fetch user-controlled URLs must call
-     * {@link UrlValidationUtils#validateUrl(String)} before building the request.
-     * <p>
-     * For requests to known-safe internal APIs (e.g., weather, search), skipping
-     * initial validation is acceptable since the URL is constructed from config,
-     * not user input.
-     *
-     * @param request
-     *            the HTTP request to send
-     * @param bodyHandler
-     *            the response body handler
-     * @return the HTTP response
-     * @throws IOException
-     *             if the request fails or too many redirects
-     * @throws InterruptedException
-     *             if the thread is interrupted
+     * {@link UrlValidationUtils#validateUrl(String)} first (or use
+     * {@link #sendValidated}). Every redirect hop is validated.
      */
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
-        return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
+        return sendHandled(request, bodyHandler, defaultRedirects());
     }
 
     /**
-     * Sends an HTTP request with SSRF validation on the initial URL. Use this for
-     * user-controlled URLs (LLM tools, web scraping, etc.).
+     * Sends an HTTP request with SSRF validation on the initial URL and every
+     * redirect hop. Use this for user-controlled URLs.
      *
-     * @param request
-     *            the HTTP request to send
-     * @param bodyHandler
-     *            the response body handler
-     * @return the HTTP response
-     * @throws IOException
-     *             if the request fails
      * @throws IllegalArgumentException
      *             if the URL is unsafe
      */
     public <T> HttpResponse<T> sendValidated(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        HttpRequest bounded = withDefaultTimeout(request);
-        return sendWithRedirects(bounded, bodyHandler, 0, deadlineFor(bounded));
+        return send(request, bodyHandler);
     }
 
     /**
-     * A response whose body was read through {@link BoundedBodyReader}: the status
-     * code, the bytes (never more than the requested cap), and whether the body was
-     * cut short at the cap or the read deadline.
+     * A response whose body was read with a hard cap: the status code, the bytes
+     * (never more than the requested cap), and whether the body was cut short at
+     * the cap or the read deadline.
      */
     public record BoundedResponse(int statusCode, byte[] body, boolean truncated) {
     }
 
     /**
-     * Like {@link #sendValidated} but reads the body through
-     * {@link BoundedBodyReader} with a hard {@code maxBytes} cap, so a
-     * user/LLM-chosen URL cannot stream an unbounded body into memory. The size is
-     * checked <em>while</em> reading, not after buffering the whole response.
+     * Like {@link #sendValidated} but reads the body with a hard {@code maxBytes}
+     * cap, checked <em>while</em> reading.
      */
     public BoundedResponse sendValidatedBounded(HttpRequest request, long maxBytes)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        HttpRequest bounded = withDefaultTimeout(request);
-        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
-        return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
+        return sendBounded(request, maxBytes);
     }
 
     /**
-     * Like {@link #send} but reads the body through {@link BoundedBodyReader} with
-     * a hard {@code maxBytes} cap. For config-constructed URLs that still return
-     * caller/LLM-relayed bodies (redirects are still followed and per-hop
-     * validated).
+     * Like {@link #send} but reads the body with a hard {@code maxBytes} cap. For
+     * config-constructed URLs that still return caller/LLM-relayed bodies
+     * (redirects are still followed and per-hop validated).
      */
     public BoundedResponse sendBounded(HttpRequest request, long maxBytes)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
-        HttpResponse<InputStream> response = sendWithRedirects(bounded, HttpResponse.BodyHandlers.ofInputStream(), 0, deadlineFor(bounded));
-        return toBounded(response, maxBytes, bounded.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
-    }
-
-    private BoundedResponse toBounded(HttpResponse<InputStream> response, long maxBytes, Duration timeout) throws IOException {
-        BoundedBodyReader.Bounded bounded = BoundedBodyReader.read(response.body(), maxBytes, timeout, bodyReadWatchdog);
-        return new BoundedResponse(response.statusCode(), bounded.bytes(), bounded.truncated());
+        OutboundResponse<byte[]> response = outbound.send(toOutbound(request, defaultRedirects()),
+                BodyMode.bytes(maxBytes > 0 ? maxBytes : Long.MAX_VALUE, BodyMode.OnOverflow.TRUNCATE));
+        return new BoundedResponse(response.status(), response.body(), response.truncated());
     }
 
     /**
      * Sends an HTTP request with SSRF validation on the initial URL and <em>without
      * following any redirect</em>: a 3xx is returned to the caller as the response,
-     * {@code Location} and all, and no second request is ever made.
-     * <p>
-     * For requests that carry a credential the caller has vouched for one specific
-     * origin — an OAuth token request, whose client secret sits in the
-     * {@code Authorization} header or the form body and whose refresh token or
-     * authorization code is in the body. {@link #sendValidated} would honour a
-     * 307/308 with the method and body preserved and re-send all of that to
-     * whatever host the redirect named, after checking only that the host is not
-     * private; the caller's own allowlist is never consulted for the second hop.
-     * Here the caller decides what a 3xx means, and for a token endpoint the answer
-     * is "refuse".
+     * {@code Location} and all. For requests carrying a credential vouched for one
+     * specific origin, such as an OAuth token request.
      *
      * @throws IllegalArgumentException
      *             if the URL is unsafe
@@ -238,93 +144,164 @@ public class SafeHttpClient {
 
     /**
      * Sends an HTTP request exactly once, following no redirect, and without
-     * validating the URL.
-     * <p>
-     * For callers that have already decided the target is acceptable by a rule
-     * stricter than the SSRF check — an operator-maintained allowlist, for example,
-     * which is allowed to name a host on a private network that the SSRF rules
-     * would refuse. Callers that fetch anything user- or config-controlled without
-     * such a rule must use {@link #sendValidatedNoRedirect} instead.
+     * validating the URL. For callers that already decided the target is acceptable
+     * by a stricter rule (an operator-maintained allowlist).
      */
     public <T> HttpResponse<T> sendNoRedirect(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        HttpRequest bounded = withDefaultTimeout(request);
-        return sendOnce(bounded, bodyHandler, deadlineFor(bounded));
+        return sendHandled(request, bodyHandler, RedirectPolicy.NEVER);
     }
 
     /**
-     * The wall-clock budget for one call, redirects and body included: three times
-     * the connect timeout (30s by default), or the request's own timeout when the
-     * caller asked for longer. The per-request timeout alone is no bound on the
-     * body — the JDK stops timing once the response headers arrive, so a server
-     * that sent headers and then trickled the body a byte at a time held the call
-     * open for as long as it liked.
-     * <p>
-     * Package-private for the test.
+     * Validates the initial request URL against SSRF rules. Package-private so a
+     * test against a loopback server can stub it.
      */
-    Duration totalBudget(HttpRequest request) {
-        Duration floor = Duration.ofMillis(connectTimeoutMs * 3);
-        Duration requested = request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT);
-        return requested.compareTo(floor) > 0 ? requested : floor;
-    }
-
-    private long deadlineFor(HttpRequest request) {
-        return System.nanoTime() + totalBudget(request).toNanos();
+    void validateInitialTarget(String url) {
+        UrlValidationUtils.validateUrl(url);
     }
 
     /**
-     * One exchange, bounded by {@code deadlineNanos} from sending the request to
-     * the body handler's completion. On expiry the exchange is cancelled, which
-     * closes its connection, and the call fails with {@link HttpTimeoutException}.
+     * Validates a redirect target URL against SSRF rules. Package-private so a test
+     * against a loopback server can stub it.
      */
-    private <T> HttpResponse<T> sendOnce(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler, long deadlineNanos)
-            throws IOException, InterruptedException {
-        long remaining = deadlineNanos - System.nanoTime();
-        if (remaining <= 0) {
-            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
-        }
-        CompletableFuture<HttpResponse<T>> exchange = httpClient.sendAsync(request, bodyHandler);
+    void validateRedirectTarget(String url) {
+        UrlValidationUtils.validateUrl(url);
+    }
+
+    private static RedirectPolicy defaultRedirects() {
+        return RedirectPolicy.follow(5, MethodRule.JDK_SAFE);
+    }
+
+    /**
+     * The JDK request as an outbound request: the initial URL is trusted (the
+     * public methods validate it where they promise to) and every redirect hop goes
+     * through {@link #validateRedirectTarget}. The lambda is built per call so a
+     * Mockito spy's stub is the one consulted.
+     */
+    OutboundRequest toOutbound(HttpRequest request, RedirectPolicy redirects) {
+        OutboundRequest.Builder builder = OutboundRequest.builder(Profile.DEFAULT, request.uri())
+                .method(request.method(), request.bodyPublisher()
+                        .map(SafeHttpClient::collect)
+                        .<RequestBody>map(RequestBody::ofBytes)
+                        .orElse(RequestBody.EMPTY))
+                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .hopValidator(this::validateRedirectTarget)
+                .redirects(redirects);
+        request.timeout().ifPresent(builder::timeout);
+        request.headers().map().forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
+        return builder.build();
+    }
+
+    /**
+     * The bytes a body publisher produces. Callers here only publish in-memory
+     * bodies.
+     */
+    private static byte[] collect(HttpRequest.BodyPublisher publisher) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        CompletableFuture<byte[]> done = new CompletableFuture<>();
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(ByteBuffer item) {
+                byte[] bytes = new byte[item.remaining()];
+                item.get(bytes);
+                out.writeBytes(bytes);
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                done.completeExceptionally(throwable);
+            }
+
+            @Override
+            public void onComplete() {
+                done.complete(out.toByteArray());
+            }
+        });
         try {
-            return exchange.get(remaining, TimeUnit.NANOSECONDS);
-        } catch (TimeoutException e) {
-            exchange.cancel(true);
-            throw new HttpTimeoutException("Total request timeout exceeded for: " + withoutQuery(request.uri()));
+            return done.get(30, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
-            exchange.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while reading the request body", e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new IllegalArgumentException("request body could not be read", e);
+        }
+    }
+
+    /**
+     * Sends through the facade with the body streamed, then hands the stream to the
+     * caller's JDK body handler. A buffering handler ({@code ofString}) is bounded
+     * by the exchange's total budget; a streaming one ({@code ofInputStream})
+     * returns at once and its later reads are the caller's to bound.
+     */
+    private <T> HttpResponse<T> sendHandled(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler,
+                                            RedirectPolicy redirects)
+            throws IOException, InterruptedException {
+        OutboundRequest outboundRequest = toOutbound(request, redirects);
+        Duration hopTimeout = request.timeout().orElse(OutboundHttp.DEFAULT_REQUEST_TIMEOUT);
+        long deadlineNanos = System.nanoTime() + outbound.totalBudget(Profile.DEFAULT, hopTimeout).toNanos();
+        OutboundResponse<InputStream> response = outbound.send(outboundRequest, BodyMode.stream(0, null));
+
+        InputStream stream = response.body();
+        HttpHeaders headers = HttpHeaders.of(response.headers(), (name, value) -> true);
+        HttpResponse.ResponseInfo info = new HttpResponse.ResponseInfo() {
+            @Override
+            public int statusCode() {
+                return response.status();
+            }
+
+            @Override
+            public HttpHeaders headers() {
+                return headers;
+            }
+
+            @Override
+            public HttpClient.Version version() {
+                return HttpClient.Version.HTTP_1_1;
+            }
+        };
+        HttpResponse.BodySubscriber<T> subscriber;
+        try {
+            subscriber = bodyHandler.apply(info);
+        } catch (RuntimeException e) {
+            closeQuietly(stream);
+            throw e;
+        }
+        Thread.ofVirtual().name("safe-http-body").start(() -> HttpRequest.BodyPublishers.ofInputStream(() -> stream)
+                .subscribe(new ListBridge(subscriber, stream)));
+
+        CompletableFuture<T> body = subscriber.getBody().toCompletableFuture();
+        long remaining = deadlineNanos - System.nanoTime();
+        T value;
+        try {
+            value = body.get(Math.max(remaining, 0), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            closeQuietly(stream);
+            throw new HttpTimeoutException("Total request timeout exceeded for: " + OutboundHttp.withoutQuery(response.finalUri()));
+        } catch (InterruptedException e) {
+            closeQuietly(stream);
             throw e;
         } catch (ExecutionException e) {
+            closeQuietly(stream);
             throw unwrap(e);
         }
+        return new AdaptedResponse<>(response, headers, request, value);
     }
 
-    /**
-     * {@code uri} without its query or fragment, for an error message. A query
-     * string may carry a credential ({@code key=}, {@code appid=}), and a tool
-     * hands the message of a failed call to the model and the log.
-     */
-    static String withoutQuery(URI uri) {
-        int port = uri.getPort();
-        return uri.getScheme() + "://" + uri.getHost() + (port == -1 ? "" : ":" + port) + (uri.getRawPath() == null ? "" : uri.getRawPath());
-    }
-
-    /**
-     * Rethrows an async failure the way {@link HttpClient#send} would have thrown
-     * it: the {@link IOException} itself (so a caller can still catch
-     * {@link HttpTimeoutException} or its own handler's exception by type), an
-     * unchecked exception or error as is, anything else wrapped.
-     * <p>
-     * The failure was created on the client's executor thread, so its own stack
-     * trace holds only selector and executor frames. Rather than re-create it as
-     * the JDK's synchronous {@code send} does, which would lose the specific type,
-     * the caller's frames are attached as a suppressed {@link CallerFrames}.
-     */
     private static IOException unwrap(ExecutionException e) {
         Throwable cause = e.getCause();
         while ((cause instanceof CompletionException || cause instanceof ExecutionException) && cause.getCause() != null) {
             cause = cause.getCause();
         }
+        if (cause instanceof UncheckedIOException unchecked && unchecked.getCause() != null) {
+            cause = unchecked.getCause();
+        }
         if (cause instanceof IOException || cause instanceof RuntimeException) {
-            cause.addSuppressed(new CallerFrames());
+            CallerFrames.attachTo(cause);
         }
         if (cause instanceof IOException io) {
             return io;
@@ -338,298 +315,91 @@ public class SafeHttpClient {
         return new IOException(cause != null ? cause.getMessage() : e.getMessage(), cause);
     }
 
-    /**
-     * Carries the calling thread's stack trace into an exception thrown on the HTTP
-     * client's executor — see {@link #unwrap}.
-     */
-    static final class CallerFrames extends Exception {
-        CallerFrames() {
-            super("rethrown to the caller of SafeHttpClient");
+    private static void closeQuietly(InputStream stream) {
+        try {
+            stream.close();
+        } catch (IOException e) {
+            // Abandoned anyway.
         }
     }
 
     /**
-     * Hands a 3xx body to a {@link DiscardingSubscriber} and every other body to
-     * the caller's handler. A redirect response is never returned to the caller, so
-     * its body has no reader: given to an {@code ofInputStream} handler it was an
-     * unclosed stream per hop, holding that hop's connection, and given to
-     * {@code ofString} it was buffered whole, however large.
+     * Adapts the {@code ByteBuffer} publisher to a JDK body subscriber, which takes
+     * lists. A cancel closes the stream, releasing the connection; a read failure
+     * surfaces as its original {@link IOException}.
      */
-    private static <T> HttpResponse.BodyHandler<T> discardingRedirectBodies(HttpResponse.BodyHandler<T> bodyHandler) {
-        return info -> REDIRECT_CODES.contains(info.statusCode())
-                ? new DiscardingSubscriber<>(MAX_REDIRECT_BODY_BYTES, info.headers().firstValueAsLong("Content-Length"))
-                : bodyHandler.apply(info);
-    }
+    private static final class ListBridge implements Flow.Subscriber<ByteBuffer> {
+        private final HttpResponse.BodySubscriber<?> downstream;
+        private final InputStream stream;
 
-    /**
-     * Drops a body, reading at most {@code maxBytes} of it, then completes with
-     * {@code null}. It never fails: past the limit — or on a declared
-     * {@code Content-Length} above it — it cancels the subscription, which closes
-     * the connection, and completes normally. An oversized redirect body must
-     * neither be downloaded (bandwidth, and the shared deadline) nor fail a
-     * legitimate redirect over its courtesy page. Package-private so it can be
-     * driven without a server.
-     */
-    static final class DiscardingSubscriber<T> implements HttpResponse.BodySubscriber<T> {
-        private final long maxBytes;
-        private final OptionalLong declaredLength;
-        private final CompletableFuture<T> result = new CompletableFuture<>();
-        private Flow.Subscription subscription;
-        private long total;
-
-        DiscardingSubscriber(long maxBytes, OptionalLong declaredLength) {
-            this.maxBytes = maxBytes;
-            this.declaredLength = declaredLength;
-        }
-
-        @Override
-        public CompletionStage<T> getBody() {
-            return result;
+        ListBridge(HttpResponse.BodySubscriber<?> downstream, InputStream stream) {
+            this.downstream = downstream;
+            this.stream = stream;
         }
 
         @Override
         public void onSubscribe(Flow.Subscription subscription) {
-            this.subscription = subscription;
-            if (declaredLength.isPresent() && declaredLength.getAsLong() > maxBytes) {
-                stop();
-                return;
-            }
-            subscription.request(Long.MAX_VALUE);
+            downstream.onSubscribe(new Flow.Subscription() {
+                @Override
+                public void request(long n) {
+                    subscription.request(n);
+                }
+
+                @Override
+                public void cancel() {
+                    subscription.cancel();
+                    closeQuietly(stream);
+                }
+            });
         }
 
         @Override
-        public void onNext(List<ByteBuffer> items) {
-            if (result.isDone()) {
-                return;
-            }
-            for (ByteBuffer item : items) {
-                total += item.remaining();
-            }
-            if (total > maxBytes) {
-                stop();
-            }
+        public void onNext(ByteBuffer item) {
+            downstream.onNext(List.of(item));
         }
 
         @Override
         public void onError(Throwable throwable) {
-            result.completeExceptionally(throwable);
+            closeQuietly(stream);
+            downstream.onError(throwable instanceof UncheckedIOException unchecked && unchecked.getCause() != null
+                    ? unchecked.getCause()
+                    : throwable);
         }
 
         @Override
         public void onComplete() {
-            result.complete(null);
-        }
-
-        private void stop() {
-            result.complete(null);
-            subscription.cancel();
+            downstream.onComplete();
         }
     }
 
-    /**
-     * Validates the initial request URL against SSRF rules. Package-private for the
-     * same reason as {@link #validateRedirectTarget(String)}: an embedded test
-     * server lives on loopback.
-     */
-    void validateInitialTarget(String url) {
-        UrlValidationUtils.validateUrl(url);
-    }
+    /** The facade's response in the JDK's shape. */
+    private record AdaptedResponse<T>(OutboundResponse<InputStream> response, HttpHeaders headers, HttpRequest request, T body)
+            implements
+                HttpResponse<T> {
 
-    /**
-     * Returns {@code request} unchanged when it already carries a timeout, else a
-     * copy bounded by {@link #DEFAULT_REQUEST_TIMEOUT}. {@link HttpRequest} is
-     * immutable, so the bound can only be applied by rebuilding.
-     * <p>
-     * Package-private so {@code SafeHttpClientTimeoutTest} can pin the rebuild
-     * without an embedded server — the server-backed cases live in
-     * {@code SafeHttpClientTest} and only run where loopback sockets are available.
-     */
-    static HttpRequest withDefaultTimeout(HttpRequest request) {
-        if (request.timeout().isPresent()) {
-            return request;
-        }
-        HttpRequest.Builder builder = HttpRequest.newBuilder(request.uri())
-                .timeout(DEFAULT_REQUEST_TIMEOUT)
-                .method(request.method(), request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
-        request.headers().map().forEach((name, values) -> {
-            // Same exclusion as copyHeaders: HttpClient owns these and rejects
-            // an attempt to set them explicitly.
-            if (!MANAGED_HEADERS.contains(name.toLowerCase())) {
-                for (String value : values) {
-                    builder.header(name, value);
-                }
-            }
-        });
-        request.version().ifPresent(builder::version);
-        if (request.expectContinue()) {
-            builder.expectContinue(true);
-        }
-        return builder.build();
-    }
-
-    private <T> HttpResponse<T> sendWithRedirects(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler,
-                                                  int redirectCount, long deadlineNanos)
-            throws IOException, InterruptedException {
-
-        // One deadline for the whole chain, bodies included (see totalBudget): an
-        // attacker can neither chain slow redirects nor trickle a body to hold the
-        // connection — and the calling tool — open indefinitely.
-        HttpResponse<T> response = sendOnce(request, discardingRedirectBodies(bodyHandler), deadlineNanos);
-        int statusCode = response.statusCode();
-
-        if (!REDIRECT_CODES.contains(statusCode)) {
-            return response;
+        @Override
+        public int statusCode() {
+            return response.status();
         }
 
-        // Handle redirect
-        redirectCount++;
-        if (redirectCount > MAX_REDIRECTS) {
-            throw new IOException("Too many redirects (" + redirectCount + ") for URL: " + request.uri());
+        @Override
+        public Optional<HttpResponse<T>> previousResponse() {
+            return Optional.empty();
         }
 
-        String location = response.headers().firstValue("Location").orElse(null);
-        if (location == null || location.isBlank()) {
-            throw new IOException("Redirect " + statusCode + " without Location header from: " + request.uri());
+        @Override
+        public Optional<SSLSession> sslSession() {
+            return Optional.empty();
         }
 
-        // Resolve relative redirect against the current URI
-        URI resolvedUri = request.uri().resolve(location);
-
-        // Validate the redirect target — prevents SSRF via 302 → internal
-        validateRedirectTarget(resolvedUri.toString());
-
-        LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, request.uri(), resolvedUri);
-
-        // Build the redirect request. RFC 9110 sanctions exactly one method rewrite,
-        // and it is narrower than "everything becomes GET":
-        // • 307/308 (§15.4.8/§15.4.9): method AND body preserved, always.
-        // • 303 See Other (§15.4.4): rewrite to GET — that is what the code means.
-        // • 301/302 (§15.4.2/§15.4.3): only the historical POST→GET rewrite is
-        // permitted. PUT, PATCH and DELETE keep their method and body, or a
-        // redirected write silently becomes a read: the caller is told the write
-        // succeeded (200 from the GET) while nothing was written, and a DELETE
-        // that "worked" leaves the resource in place.
-        // • HEAD survives every one of them (an existence or size probe must not
-        // turn into a full body download).
-        boolean methodPreserved = methodSurvivesRedirect(request.method(), statusCode);
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(resolvedUri)
-                .timeout(request.timeout().orElse(DEFAULT_REQUEST_TIMEOUT));
-
-        // Copy headers from original request, with security-aware filtering
-        boolean sameOrigin = isSameOrigin(request.uri(), resolvedUri);
-        copyHeaders(request, builder, sameOrigin, methodPreserved);
-
-        if (methodPreserved) {
-            builder.method(request.method(),
-                    request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
-        } else if ("HEAD".equals(request.method())) {
-            builder.method("HEAD", HttpRequest.BodyPublishers.noBody());
-        } else {
-            builder.GET();
+        @Override
+        public URI uri() {
+            return response.finalUri();
         }
 
-        HttpRequest redirectRequest = builder.build();
-
-        return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, deadlineNanos);
-    }
-
-    /**
-     * Whether this request's method (and its body) carries across a redirect of
-     * this status code — see the rules quoted at the call site.
-     * <p>
-     * GET and HEAD answer {@code false} because they have no body to carry and are
-     * rebuilt explicitly by the caller; every other method answers whether the
-     * status code leaves it alone.
-     * <p>
-     * Package-private so the rule can be pinned per method/code pair without a
-     * server on every combination.
-     */
-    static boolean methodSurvivesRedirect(String method, int statusCode) {
-        if ("GET".equals(method) || "HEAD".equals(method)) {
-            return false;
+        @Override
+        public HttpClient.Version version() {
+            return HttpClient.Version.HTTP_1_1;
         }
-        if (statusCode == 307 || statusCode == 308) {
-            return true;
-        }
-        if (statusCode == 303) {
-            return false;
-        }
-        // 301/302: POST is the only method the historical rewrite covers.
-        return !"POST".equals(method);
-    }
-
-    /**
-     * Copies headers from the original request to the redirect request.
-     * <p>
-     * Same-origin: all headers are copied (except HttpClient-managed ones).
-     * Cross-origin: Authorization, Cookie, Proxy-Authorization are stripped. Method
-     * downgrade (301/302/303): Content-Type is not copied (no body on GET).
-     */
-    private void copyHeaders(HttpRequest original, HttpRequest.Builder builder,
-                             boolean sameOrigin, boolean methodPreserved) {
-        original.headers().map().forEach((name, values) -> {
-            String lower = name.toLowerCase();
-
-            // Skip headers managed by HttpClient
-            if (MANAGED_HEADERS.contains(lower))
-                return;
-
-            // Skip body-related headers when method downgrades to GET
-            if (!methodPreserved && "content-type".equals(lower))
-                return;
-
-            // Strip sensitive headers on cross-origin redirects
-            if (!sameOrigin && SENSITIVE_HEADERS.contains(lower))
-                return;
-
-            for (String value : values) {
-                builder.header(name, value);
-            }
-        });
-
-        // Ensure User-Agent is always present
-        if (original.headers().firstValue("User-Agent").isEmpty()) {
-            builder.header("User-Agent", "EDDI-Agent/1.0");
-        }
-    }
-
-    /**
-     * Checks if two URIs share the same origin (scheme + host + port).
-     */
-    private static boolean isSameOrigin(URI a, URI b) {
-        if (!Objects.equals(a.getScheme(), b.getScheme()))
-            return false;
-        if (!a.getHost().equalsIgnoreCase(b.getHost()))
-            return false;
-        return effectivePort(a) == effectivePort(b);
-    }
-
-    /**
-     * Returns the effective port for a URI, using default ports for http/https.
-     */
-    private static int effectivePort(URI uri) {
-        int port = uri.getPort();
-        if (port != -1)
-            return port;
-        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
-    }
-
-    /**
-     * Validates a redirect target URL against SSRF rules. Package-private to allow
-     * test overrides for embedded server tests where the redirect target is on
-     * loopback.
-     */
-    void validateRedirectTarget(String url) {
-        UrlValidationUtils.validateUrl(url);
-    }
-
-    /**
-     * Returns the underlying HttpClient for cases where raw access is needed (e.g.,
-     * WebSocket, SSE). Callers using this are responsible for their own SSRF
-     * protection.
-     */
-    public HttpClient unwrap() {
-        return httpClient;
     }
 }

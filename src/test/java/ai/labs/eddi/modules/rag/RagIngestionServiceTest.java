@@ -57,7 +57,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_shouldReturnIngestionId() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -83,7 +83,7 @@ class RagIngestionServiceTest {
     @Test
     void ingest_asksForADocumentModel() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -101,7 +101,7 @@ class RagIngestionServiceTest {
     @Test
     void getStatus_shouldReturnPendingInitially() {
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
 
         var config = createConfig();
         String ingestionId = service.ingest("test-kb", "Content", "doc.txt", config);
@@ -274,7 +274,7 @@ class RagIngestionServiceTest {
 
         awaitCompleted(service.ingest(ALPHA_ID, "text", "doc", config, false));
 
-        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(config));
+        verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config));
     }
 
     private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
@@ -288,7 +288,7 @@ class RagIngestionServiceTest {
             }
         };
         when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(fixed);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(store);
     }
 
     private void awaitCompleted(String ingestionId) {
