@@ -951,7 +951,16 @@ export const LimitsSection = memo(function LimitsSection({
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  onValidityChange,
+}: AgentSectionProps & {
+  /**
+   * Told whether the amount in the box is unusable. An invalid amount is never
+   * written to the draft, so a clear that came just before it would otherwise
+   * stay in the draft and be saved while the field shows an error — the page
+   * refuses to save while this is true.
+   */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
   const { t } = useTranslation();
   const id = useId();
   const hintId = `${id}-hint`;
@@ -964,11 +973,18 @@ export const LimitsSection = memo(function LimitsSection({
   // as "unlimited" while the box still shows the "-" — so it is tracked apart.
   const [badInput, setBadInput] = useState(false);
   const parsed = badInput ? { ok: false as const } : parseCostCeiling(text);
+  const invalid = !parsed.ok;
+  useEffect(() => {
+    onValidityChange?.(invalid);
+    return () => onValidityChange?.(false);
+  }, [invalid, onValidityChange]);
   useEffect(() => {
     // Follow the draft when it changes underneath (Discard, a save, a version switch).
     setText((prev) => {
       const p = parseCostCeiling(prev);
-      return p.ok && p.value === ceiling ? prev : ceiling === undefined ? "" : String(ceiling);
+      if (p.ok && p.value === ceiling) return prev;
+      setBadInput(false);
+      return ceiling === undefined ? "" : String(ceiling);
     });
   }, [ceiling]);
 

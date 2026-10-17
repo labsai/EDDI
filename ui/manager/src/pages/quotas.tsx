@@ -339,8 +339,10 @@ export function QuotasPage() {
                 </div>
               )}
 
-              {usage && form && (
-                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={form.maxMonthlyCostUsd} enforced={form.enabled} />
+              {/* The saved policy, not the form: this says what the backend is doing now,
+                  and an unsaved edit is not applied until it is saved. */}
+              {usage && quota && (
+                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={quota.maxMonthlyCostUsd} enforced={quota.enabled} />
               )}
             </div>
           </div>

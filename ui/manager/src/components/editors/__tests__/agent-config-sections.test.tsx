@@ -746,4 +746,20 @@ describe("LimitsSection", () => {
     await user.click(screen.getByText("Limits"));
     expect(screen.getByText(/Only priced models count/)).toBeInTheDocument();
   });
+
+  it("reports an unusable amount to the page, and clears the report once it is fixed", async () => {
+    const user = userEvent.setup();
+    const onValidityChange = vi.fn();
+    renderWithProviders(
+      <LimitsSection agent={{ ...baseAgent, maxCostPerConversationUsd: 5 }} onChange={mockOnChange} onValidityChange={onValidityChange} />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    const input = screen.getByTestId("max-cost-per-conversation");
+    await user.clear(input);
+    await user.type(input, "-3");
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    await user.clear(input);
+    await user.type(input, "3");
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+  });
 });

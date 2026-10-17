@@ -565,4 +565,13 @@ describe("QuotasPage", () => {
     renderQuotas();
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/never limited/));
   });
+
+  it("describes the saved quota, not an unsaved edit of the form", async () => {
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$2500.00"));
+    fireEvent.change(screen.getByTestId("quota-max-cost"), { target: { value: "100" } });
+    // Saved limit is still 2500; the edit only applies once it is saved.
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$2500.00");
+    expect(screen.getByTestId("cost-budget-state")).not.toHaveTextContent("$100.00");
+  });
 });
