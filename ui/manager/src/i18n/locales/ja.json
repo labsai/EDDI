@@ -2890,6 +2890,7 @@
     "question": "質問",
     "readyToDiscuss": "議論の準備完了",
     "responding": "応答中…",
+    "usingTool": "{{tool}} を使用中…",
     "reviewMemberRoster": "メンバー一覧",
     "reviewMembers": "メンバー",
     "reviewModerator": "モデレーター",

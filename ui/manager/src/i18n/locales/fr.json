@@ -2921,6 +2921,7 @@
     "question": "Question",
     "readyToDiscuss": "Prêt à discuter",
     "responding": "répond…",
+    "usingTool": "Utilisation de {{tool}}…",
     "reviewMemberRoster": "Liste des membres",
     "reviewMembers": "Membres",
     "reviewModerator": "Modérateur",

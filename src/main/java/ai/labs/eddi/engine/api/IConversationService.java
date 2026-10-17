@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Core conversation lifecycle service — extracted from RestAgentEngine. All
@@ -161,6 +162,17 @@ public interface IConversationService {
          */
         default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
             onComplete(snapshot);
+        }
+
+        /**
+         * Optional observer of the tool names this (non-streaming) turn's tool loop is
+         * about to run — name only, never arguments. {@code null} (the default) means
+         * nobody listens. It does NOT make the turn streamed: no event sink is
+         * installed, so tokens and the LLM execution path are unchanged. May be called
+         * from the coordinator thread, possibly after the caller has stopped waiting.
+         */
+        default Consumer<String> toolCallObserver() {
+            return null;
         }
     }
 

@@ -2890,6 +2890,7 @@
     "question": "질문",
     "readyToDiscuss": "토론 준비 완료",
     "responding": "응답 중…",
+    "usingTool": "{{tool}} 사용 중…",
     "reviewMemberRoster": "멤버 명단",
     "reviewMembers": "멤버",
     "reviewModerator": "모더레이터",

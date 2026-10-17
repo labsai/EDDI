@@ -1096,6 +1096,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 // Not terminal — a stance is recomputed at every phase boundary.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
             }
+
+            @Override
+            public void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
+                // Not terminal — liveness signal while a member's tool loop runs.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
+            }
         };
     }
 
