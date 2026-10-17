@@ -509,9 +509,15 @@ AUDIT_FLUSH_S = float(os.environ.get("LOADTEST_AUDIT_FLUSH_S", "3"))
 
 def settle(timeout=60):
     def drained():
-        return all(sum(v for k, v in node.items() if k.startswith("eddi_audit_queue_depth")) == 0 for node in scrape_all())
+        for node in scrape_all():
+            depth = [v for k, v in node.items() if k.startswith("eddi_audit_queue_depth")]
+            # No gauge means the scrape failed (an empty dict), not an empty queue.
+            if not depth or sum(depth) != 0:
+                return False
+        return True
     if not wait_until(drained, timeout, 0.5):
-        print("warning: the audit queue did not drain; database counts may include a late batch", flush=True)
+        # A snapshot now would miss the queued audit inserts and could pass the gate on a low count.
+        raise SystemExit(f"the audit queue did not drain within {timeout} s; database counts would be incomplete")
     time.sleep(AUDIT_FLUSH_S + 0.5)
 
 
@@ -545,10 +551,17 @@ def metric(summary, name, stat):
 
 
 def foreign_load():
-    """Names of load-generator containers of other stacks on this machine."""
-    r = sh("docker", "ps", "--format", "{{.Names}}\t{{.Image}}", check=False, timeout=60)
-    return [line.split("\t")[0] for line in r.stdout.splitlines() if "\t" in line
-            and line.split("\t")[1].startswith(LOAD_IMAGES) and not line.startswith(PROJECT + "-")]
+    """Names of load-generator containers of other stacks on this machine.
+
+    By compose project label, compared exactly: a name prefix would take `eddi-loadtest-bench-k6-run-…`
+    for part of the `eddi-loadtest` stack. A container without the label is foreign too."""
+    r = sh("docker", "ps", "--format", '{{.Names}}\t{{.Image}}\t{{.Label "com.docker.compose.project"}}', check=False, timeout=60)
+    busy = []
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[1].startswith(LOAD_IMAGES) and (parts[2] if len(parts) > 2 else "") != PROJECT:
+            busy.append(parts[0])
+    return busy
 
 
 def wait_for_quiet(args):

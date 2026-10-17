@@ -143,6 +143,9 @@ class Stats:
         self.samples = {"first_byte_ms": [], "ttft_ms": [], "total_ms": [], "spread_ms": [], "tokens": []}
         self.errors = {}
         self.ok = 0
+        # Earliest start and latest end of a successful measured turn: the window turns_per_s divides
+        # by, so that conversation starts and warm-up turns are not counted as measured time.
+        self.window = [None, None]
 
     def error(self, kind):
         self.errors[kind] = self.errors.get(kind, 0) + 1
@@ -220,6 +223,8 @@ async def stream_turn(args, stats, vu, turn, conversation):
         s["spread_ms"].append((last - first) * 1000)
         s["tokens"].append(tokens)
         stats.ok += 1
+        stats.window[0] = t0 if stats.window[0] is None else min(stats.window[0], t0)
+        stats.window[1] = end if stats.window[1] is None else max(stats.window[1], end)
     finally:
         writer.close()
 
@@ -260,8 +265,11 @@ async def main_async(args):
     t0 = time.perf_counter()
     await asyncio.gather(*(vu_loop(args, stats, vu) for vu in range(1, args.vus + 1)))
     elapsed = time.perf_counter() - t0
+    start, end = stats.window
+    measured = end - start if start is not None else 0
     out = {"target": args.target, "vus": args.vus, "turns_per_vu": args.turns, "warmup_turns": args.warmup_turns, "elapsed_s": round(elapsed, 2),
-           "turns_ok": stats.ok, "turns_per_s": stats.ok / elapsed if elapsed else 0, "errors": stats.errors,
+           "turns_ok": stats.ok, "turns_per_s": stats.ok / measured if measured else 0,
+           "measured_s": round(measured, 2), "errors": stats.errors,
            "metrics": {k: percentiles(v) for k, v in stats.samples.items()}}
     with open(os.path.join("/results", args.out), "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2)
