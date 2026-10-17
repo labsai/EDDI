@@ -197,6 +197,17 @@ public final class MemoryKeys {
     public static final String AUDIT_METERED_COST = "audit:metered_cost";
 
     /**
+     * A tenant cost charge ({@code Double}) that could not be recorded because the
+     * quota store was unavailable when the step settled, carried forward until a
+     * later settle records it ({@code 0.0} afterwards). Written by
+     * {@code TurnCostMeter} on the newest step only — say turns are persisted as
+     * appends, so an earlier step would never be rewritten.
+     *
+     * @since 6.6.0
+     */
+    public static final String AUDIT_PENDING_COST = "audit:pending_cost";
+
+    /**
      * Confidence of the accepted cascade step, as a {@code Double}. Written by
      * LlmTask when a model cascade ran; read by LifecycleManager for both the
      * {@code task_complete} SSE summary and {@code llmDetail.confidence}.

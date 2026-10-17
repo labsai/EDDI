@@ -1752,7 +1752,8 @@ tool cost. It is checked
 
 The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
-unlimited. An unpriced model adds nothing and is never bounded. This is unrelated to the task-level
+unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
+refuses every model call, priced or not, since the spend so far already equals it. This is unrelated to the task-level
 `maxBudgetPerConversation` (tool cost only; see `enforceBudget` above), which is unchanged.
 
 

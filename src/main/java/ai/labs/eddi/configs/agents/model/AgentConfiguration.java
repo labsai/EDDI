@@ -604,11 +604,13 @@ public class AgentConfiguration {
      * answer.
      * <p>
      * Unset (the default) means unlimited — existing agents behave exactly as
-     * before. {@code 0} allows no priced spend at all. A negative value is treated
-     * as unlimited. Unpriced models add nothing, so they are never bounded by it.
+     * before. A negative value is treated as unlimited. Unpriced models add $0 to
+     * the spend, so a positive ceiling never stops them by itself — but {@code 0}
+     * refuses every model call, priced or not, since the spend so far ($0) already
+     * equals the ceiling.
      * <p>
      * Unrelated to the task-level {@code maxBudgetPerConversation}, which bounds
-     * tool cost only and is opt-in via {@code enforceBudget}.
+     * tool cost only (see {@code enforceBudget}).
      */
     private Double maxCostPerConversationUsd;
 

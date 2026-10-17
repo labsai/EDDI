@@ -943,13 +943,6 @@ class ToolLoopRunner {
     }
 
     /**
-     * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
-     * honest and actionable rather than apologetic: what stopped, what state the
-     * work is in, and how to go on. The cap itself is configurable per task
-     * ({@code maxToolIterations}) — mentioning it here is deliberate, so an agent
-     * designer seeing this repeatedly knows which knob exists.
-     */
-    /**
      * The answer of a tool loop stopped by the conversation's cost ceiling. Like
      * {@link #iterationBudgetSpentMessage}, it says that what already ran has taken
      * effect.
@@ -959,6 +952,13 @@ class ToolLoopRunner {
                 + "taken effect — completed calls are not rolled back.";
     }
 
+    /**
+     * The turn's answer when the tool loop hits its iteration cap mid-work. Kept
+     * honest and actionable rather than apologetic: what stopped, what state the
+     * work is in, and how to go on. The cap itself is configurable per task
+     * ({@code maxToolIterations}) — mentioning it here is deliberate, so an agent
+     * designer seeing this repeatedly knows which knob exists.
+     */
     static String iterationBudgetSpentMessage(int maxIterations) {
         return "I stopped after reaching the limit of " + maxIterations + " tool-calling rounds for a single turn, "
                 + "before finishing the task. Everything I already did has taken effect — completed calls are not "

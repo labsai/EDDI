@@ -42,6 +42,10 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -166,6 +170,49 @@ class TenantCostMeteringIT extends MongoTestBase {
                 storeName + ": the step total exactly once, not total + the pre-pause part");
         assertEquals(0.007, meteredCostOn(memoryStore.loadConversationMemorySnapshot(conversationId)), 1e-12,
                 storeName + ": the marker follows the step total after the resume");
+    }
+
+    /**
+     * A charge the quota store could not record does not vanish when the next say
+     * turn starts a new step. Say turns are persisted as appends — an earlier step
+     * is never rewritten — so the pending amount must travel on the newest step;
+     * this proves it does, through the real conversation store.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("storePairs")
+    @DisplayName("a charge lost to a quota-store outage is recovered by the next turn, through the real conversation store")
+    void outageChargeIsRecoveredByTheNextTurn(String storeName, Supplier<ITenantQuotaStore> quotaFactory,
+                                              Supplier<IConversationMemoryStore> memoryFactory)
+            throws Exception {
+        String tenant = "metering-" + storeName + "-" + TENANT_SEQ.incrementAndGet();
+        ITenantQuotaStore quotaStore = spy(quotaFactory.get());
+        // The first charge hits an outage; the store answers normally afterwards.
+        doReturn(ITenantQuotaStore.accountingUnavailable()).doCallRealMethod().when(quotaStore).tryAddCost(eq(tenant), anyDouble(),
+                anyDouble());
+        var quotaService = new TenantQuotaService(quotaStore, new SimpleMeterRegistry(), tenant);
+        quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        IConversationMemoryStore memoryStore = memoryFactory.get();
+
+        IConversationMemory first = new ConversationMemory("0123456789abcdef01234567", 1, "user");
+        first.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.004));
+        meter.meterSettledStep(first);
+        assertEquals(0.0, quotaStore.getMonthlyCost(tenant), 1e-12, storeName + ": nothing recorded during the outage");
+        first.setConversationState(ConversationState.READY); // a settled say turn
+        String conversationId = memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(first));
+
+        // Next say turn: reloaded, a new step, its own cost.
+        IConversationMemory second = ConversationMemoryUtilities
+                .convertConversationMemorySnapshot(memoryStore.loadConversationMemorySnapshot(conversationId));
+        // As the service loads a turn: the append is checked against the stored
+        // revision.
+        second.setRevision(memoryStore.getRevision(conversationId));
+        ((ConversationMemory) second).startNextStep();
+        second.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.002));
+        meter.meterSettledStep(second);
+        memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(second));
+
+        assertEquals(0.006, quotaStore.getMonthlyCost(tenant), 1e-9, storeName + ": the lost $0.004 is charged with the next turn");
     }
 
     private static double meteredCostOn(ConversationMemorySnapshot snapshot) {

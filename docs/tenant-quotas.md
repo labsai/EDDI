@@ -43,15 +43,18 @@ start of the month.
   short, so the turn that crosses the limit finishes and the total can end a little above it.
 
 A turn that crosses the limit is never failed over it, and neither is a turn whose cost could not
-be recorded because the quota store was down — the spend already happened. A store outage at the
-*gate* refuses the model call (fail closed), as below.
+be recorded because the quota store was down — the spend already happened. Its cost is not lost:
+the turn's step records it as `audit:pending_cost`, and the conversation's next settle charges it
+together with its own cost (the pending amount carries forward until a charge succeeds). A store
+outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts
 
 There is no built-in provider price table. A model call is metered only when its configuration
 carries `inputPricePer1M` / `outputPricePer1M` (on the LLM task, a cascade step, a cascade judge, or
-the Dream config). An unpriced model meters **$0** and can never reach the budget. Set prices on
-every model you want the budget to bound — see [LLM Configuration](langchain.md).
+the Dream config). An unpriced model meters **$0** in token cost, so its model calls alone never
+reach the budget — but the priced tools a turn calls are charged to the same counter and can.
+Set prices on every model you want the budget to bound — see [LLM Configuration](langchain.md).
 
 These calls are **not** metered today, priced or not:
 

@@ -339,8 +339,9 @@ eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spe
 [Tenant Quotas → The monthly cost budget](tenant-quotas.md#the-monthly-cost-budget).
 An unpriced model meters $0, so a flat line on a busy deployment usually means
 the models carry no `inputPricePer1M` / `outputPricePer1M`. A rising
-`outcome="unavailable"` means turns spent money the counter could not record —
-the quota store was down when they settled.
+`outcome="unavailable"` means turns spent money the counter could not record at
+the time — the quota store was down when they settled. The amount is carried on the
+conversation (`audit:pending_cost`) and charged at its next settle.
 
 Denials carry `tenant` and `type` (`conversation` / `api_call` / `agent` / `cost`);
 aggregate at query time rather than expecting an untagged total:

@@ -18,7 +18,9 @@ stayed at zero and the pre-call gate never tripped. It is now real.
   once in total. Skipped for a turn stopped by lease loss (nothing is stored; the new owner re-runs
   and meters it); a replayed idempotent turn never reaches the callback. A denied or unavailable
   `recordCost` never fails the turn — logged and counted on `eddi.tenant.cost.metering{outcome}`;
-  an outage leaves the marker so a later settle retries.
+  a charge the store could not record is carried forward as `audit:pending_cost` on the newest step
+  and charged by the conversation's next settle (review finding: an ordinary say turn starts a new
+  step, and say turns are persisted as appends, so leaving it on the old step would have lost it).
 - **The marker key is `audit:metered_cost`, not `audit:cost:metered`.** Step lookups are prefix
   matches, so a key starting with `audit:cost` would be read back as the step's cost by
   `getLatestData(AUDIT_COST)` (`LlmTask.accumulateCost`, `LifecycleManager`).

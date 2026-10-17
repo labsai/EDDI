@@ -116,11 +116,47 @@ class TurnCostMeterTest {
         IConversationMemory memory = memoryWithCost(0.30);
 
         assertDoesNotThrow(() -> meter.meterSettledStep(memory));
-        assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_METERED_COST));
+        assertEquals(0.30, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(), 1e-12,
+                "the unrecorded charge is carried, not dropped");
         meter.meterSettledStep(memory);
 
         verify(quotaService, times(2)).recordCost(TENANT, 0.30);
+        assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(), "cleared once recorded");
         assertEquals(1.0, meterRegistry.counter(TurnCostMeter.METRIC, "outcome", "unavailable").count());
+    }
+
+    @Test
+    @DisplayName("a charge lost to an outage is recovered by the NEXT turn's settle, on a new step, together with its own cost")
+    void outageChargeIsCarriedToTheNextTurn() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        ConversationMemory memory = (ConversationMemory) memoryWithCost(0.30);
+        meter.meterSettledStep(memory); // outage
+
+        memory.startNextStep(); // the next say turn
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20));
+        meter.meterSettledStep(memory);
+
+        verify(quotaService).recordCost(eq(TENANT), doubleThat(d -> Math.abs(d - 0.50) < 1e-12));
+        assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult());
+
+        memory.startNextStep(); // an unpriced turn after the recovery owes nothing
+        meter.meterSettledStep(memory);
+        verify(quotaService, times(2)).recordCost(anyString(), anyDouble());
+    }
+
+    @Test
+    @DisplayName("an outage that persists across turns accumulates the pending charge instead of dropping the older part")
+    void pendingAccumulatesAcrossOutages() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());
+        ConversationMemory memory = (ConversationMemory) memoryWithCost(0.30);
+        meter.meterSettledStep(memory);
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20));
+
+        meter.meterSettledStep(memory);
+
+        assertEquals(0.50, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(), 1e-12);
     }
 
     @Test
