@@ -60,7 +60,7 @@ Monitoring guide: `execute_tool` span, propagation rules, and a "Sending traces
 to Langfuse / Arize Phoenix / Jaeger / Tempo" section with endpoints verified
 against each project's docs (Phoenix Cloud left explicitly unverified).
 Configuration reference row; tracing note in `metrics.md`; Platform Operator
-prompt line on tracing a slow tool (revision 16 → 17).
+prompt line on tracing a slow tool (revision 17 → 18).
 
 **Files:** [`TracePropagation.java`](../../src/main/java/ai/labs/eddi/engine/tracing/TracePropagation.java),
 [`ToolExecutionService.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolExecutionService.java),
