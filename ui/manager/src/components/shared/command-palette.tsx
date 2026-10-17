@@ -160,7 +160,7 @@ export function CommandPalette() {
       onOpenChange={(next) => (next ? open() : close())}
       label={placeholder}
       overlayClassName="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
-      contentClassName="fixed inset-x-0 top-[15%] z-[100] mx-auto w-full max-w-[580px] animate-in fade-in slide-in-from-top-2 duration-200"
+      contentClassName="fixed inset-x-0 top-[15%] z-[100] mx-auto w-[calc(100%-2rem)] max-w-[580px] animate-in fade-in slide-in-from-top-2 duration-200"
       className="overflow-hidden rounded-xl border border-border bg-popover shadow-2xl"
     >
       {/* Search input */}

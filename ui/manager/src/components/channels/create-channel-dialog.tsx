@@ -96,19 +96,30 @@ export function CreateChannelDialog({
     }
   };
 
+  /** Close and clear — but not mid-create, or the request's result lands on a reset form. */
+  const dismiss = () => {
+    if (createMutation.isPending) return;
+    reset();
+    onOpenChange(false);
+  };
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      onKeyDown={(e) => { if (e.key === "Escape") { reset(); onOpenChange(false); } }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onKeyDown={(e) => {
+        // A child that handled Escape (the secret picker's list or its
+        // portalled "Add Secret" modal) marks it with preventDefault.
+        if (e.key === "Escape" && !e.defaultPrevented) dismiss();
+      }}
     >
-      <div className="fixed inset-0 bg-black/50" onClick={() => { reset(); onOpenChange(false); }} />
-      <div className="relative z-50 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl mx-4" role="dialog" aria-modal="true">
+      <div className="fixed inset-0 bg-black/50" onClick={dismiss} />
+      <div className="relative z-50 w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="create-channel-title">
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
           <Cable className="h-5 w-5 text-primary" />
-          <h2 className="text-lg font-semibold">
+          <h2 id="create-channel-title" className="text-lg font-semibold">
             {t("channels.createTitle", "Create Channel Integration")}
           </h2>
         </div>
@@ -133,8 +144,9 @@ export function CreateChannelDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">{t("channels.channelType", "Channel Type")}</label>
+                <label className="text-sm font-medium text-foreground" htmlFor="create-channel-type">{t("channels.channelType", "Channel Type")}</label>
                 <select
+                  id="create-channel-type"
                   data-testid="create-channel-type"
                   className="flex h-9 w-full rounded-lg border border-border bg-background px-3 py-1 text-sm text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                   value={channelType}
@@ -195,7 +207,7 @@ export function CreateChannelDialog({
         {/* Footer */}
         <div className="flex justify-between mt-6">
           <Button variant="outline" onClick={handleBack} disabled={isFirst} className={isFirst ? "invisible" : ""}>
-            <ChevronLeft className="h-4 w-4 me-1" /> {t("common.back", "Back")}
+            <ChevronLeft className="h-4 w-4 me-1 rtl:rotate-180" /> {t("common.back", "Back")}
           </Button>
           {isLast ? (
             <Button onClick={handleCreate} disabled={!canProceed() || createMutation.isPending} data-testid="create-channel-submit">
@@ -203,7 +215,7 @@ export function CreateChannelDialog({
             </Button>
           ) : (
             <Button onClick={handleNext} disabled={!canProceed()} data-testid="create-channel-next">
-              {t("common.next", "Next")} <ChevronRight className="h-4 w-4 ms-1" />
+              {t("common.next", "Next")} <ChevronRight className="h-4 w-4 ms-1 rtl:rotate-180" />
             </Button>
           )}
         </div>

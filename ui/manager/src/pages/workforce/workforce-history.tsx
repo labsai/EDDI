@@ -129,7 +129,7 @@ function ConversationItem({
         size="icon"
         className={cn(
           "absolute inset-e-2 top-1/2 -translate-y-1/2 h-7 w-7",
-          "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+          "reveal-on-touch opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
           "text-muted-foreground hover:text-destructive",
           "transition-opacity",
         )}

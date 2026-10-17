@@ -230,7 +230,10 @@ export function OperatorDrawer() {
           // the header instead of needing its own hardcoded offsets. The
           // height is capped against the viewport because the Workforce mobile
           // branch has far less room below the header than the desktop one.
-          className="absolute end-0 top-full z-50 mt-2 flex h-[32rem] max-h-[calc(100vh-6rem)] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+          // Below sm the launcher sits too close to the start edge for a 24rem
+          // popover to fit, so the panel spans the viewport instead (top-16
+          // clears both the 4rem app header and the 3.5rem Workforce one).
+          className="fixed inset-x-2 top-16 z-50 flex h-[32rem] max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl sm:absolute sm:inset-x-auto sm:end-0 sm:top-full sm:mt-2 sm:max-h-[calc(100dvh-6rem)] sm:w-96 sm:max-w-[calc(100vw-2rem)]"
           role="complementary"
           aria-label={t("operator.drawer.title", "Platform Operator")}
           data-testid="operator-drawer-panel"

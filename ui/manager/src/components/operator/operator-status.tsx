@@ -285,7 +285,7 @@ function Row({
     <div className="flex justify-between gap-3">
       <span className="text-muted-foreground">{label}</span>
       <span
-        className={mono ? "break-all text-right font-mono text-xs font-medium" : "font-medium"}
+        className={mono ? "break-all text-end font-mono text-xs font-medium" : "font-medium"}
         data-testid={testId}
       >
         {value}

@@ -48,8 +48,9 @@ function HowItWorksStep({
       )}
       style={{ "--enter-delay": delay } as React.CSSProperties}
     >
-      {/* Step badge */}
-      <div className="absolute -top-3 start-1/2 -translate-x-1/2">
+      {/* Step badge — centred without a physical offset: `start-1/2` plus
+          `-translate-x-1/2` pushed it a full badge-width off centre in RTL. */}
+      <div className="pointer-events-none absolute -top-3 inset-x-0 flex justify-center">
         <span
           className={cn(
             "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
