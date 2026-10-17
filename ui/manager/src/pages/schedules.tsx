@@ -754,6 +754,11 @@ function ScheduleFormDialog({
   // The server's reason for refusing the last save (a 400). Shown in the dialog,
   // next to the fields it is about, rather than in a toast that disappears.
   const [serverError, setServerError] = useState<string | null>(null);
+  // Whether the user has changed anything since the dialog opened. Set from a
+  // capturing change listener on the panel rather than in every setter, so a
+  // new field cannot forget it. While set, a backdrop click or Escape no longer
+  // discards the form — Cancel still does, explicitly.
+  const [touched, setTouched] = useState(false);
 
   const timeZones = useMemo(() => listTimeZones(), []);
 
@@ -810,19 +815,23 @@ function ScheduleFormDialog({
   useEffect(() => {
     if (!open) return;
     setServerError(null);
+    setTouched(false);
     if (editing) prefillFrom(editing);
     else resetToDefaults();
   }, [open, editing, prefillFrom, resetToDefaults]);
 
-  // ESC to close
+  // ESC to close — unless a child (the agent picker's list) already handled
+  // it, or closing would silently throw away the user's edits.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (touched) return;
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, touched]);
 
   // --- Live cron helper state ---
   const cronDesc = useMemo(
@@ -1007,9 +1016,12 @@ function ScheduleFormDialog({
     >
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={touched ? undefined : onClose}
       />
-      <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+      <div
+        onChangeCapture={() => setTouched(true)}
+        className="relative max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
+      >
         <h2
           id="schedule-form-title"
           className="mb-4 text-lg font-bold text-foreground"
@@ -1573,10 +1585,10 @@ export function SchedulesPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Clock className="h-7 w-7 text-primary" />
-          <div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Clock className="h-7 w-7 shrink-0 text-primary" />
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-foreground">
               {t("schedules.title", "Schedules")}
             </h1>
@@ -1970,7 +1982,10 @@ export function SchedulesPage() {
                               {/* Toggle Enable/Disable */}
                               <button
                                 onClick={() => handleToggle(s)}
-                                disabled={toggleMutation.isPending}
+                                // Only the row whose request is in flight; the
+                                // others stay clickable.
+                                disabled={toggleMutation.isPending && toggleMutation.variables?.id === s.id}
+                                aria-pressed={!!s.enabled}
                                 title={
                                   s.enabled
                                     ? t("schedules.disable", "Disable")

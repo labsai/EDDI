@@ -12,6 +12,8 @@ import {
   getFireLogs,
   getFailedFires,
 } from "@/lib/api/schedules";
+import type { ScheduleConfiguration } from "@/lib/api/schedules";
+import { patchQueries, restoreQueries } from "@/lib/optimistic";
 
 // ==================== Query Keys ====================
 
@@ -88,8 +90,14 @@ export function useToggleSchedule() {
   return useMutation({
     mutationFn: ({ id, enable }: { id: string; enable: boolean }) =>
       enable ? enableSchedule(id) : disableSchedule(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: KEYS.all });
+    // Flip the row at once; the request and the refetch follow behind it.
+    onMutate: ({ id, enable }) =>
+      patchQueries<ScheduleConfiguration[]>(qc, ["schedules", "list"], (list) =>
+        list.map((s) => (s.id === id ? { ...s, enabled: enable } : s)),
+      ),
+    onError: (_err, _vars, snapshot) => restoreQueries(qc, snapshot),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: KEYS.all });
     },
   });
 }
