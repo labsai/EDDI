@@ -333,7 +333,38 @@ describe("New conversation", () => {
 });
 
 describe("the ?token= parameter", () => {
-  it("is used for auth and then removed from the address", async () => {
+  afterEach(() => {
+    delete window.__EDDI_CHAT__;
+  });
+
+  it("is ignored, with a console warning naming the flag, unless the operator enabled it", async () => {
+    // Off by default: a crafted link must not sign the widget in as someone
+    // else (login CSRF). The parameter is still stripped from the address.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = mockBackend();
+    renderAt("/chat/production/agent-1?token=abc123&theme=light");
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/start"))).toBe(true));
+    const start = calls.find((c) => c.url.includes("/start"))!;
+    expect(start.headers.get("Authorization")).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("eddi.chat.url-token.enabled"));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat/production/agent-1?theme=light"),
+    );
+  });
+
+  it("is not switched on by a truthy non-boolean", async () => {
+    window.__EDDI_CHAT__ = { urlTokenEnabled: "true" };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = mockBackend();
+    renderAt("/chat/production/agent-1?token=abc123");
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/start"))).toBe(true));
+    expect(calls.find((c) => c.url.includes("/start"))!.headers.get("Authorization")).toBeNull();
+  });
+
+  it("is used for auth and then removed from the address once enabled", async () => {
+    window.__EDDI_CHAT__ = { urlTokenEnabled: true };
     const calls = mockBackend();
     renderAt("/chat/production/agent-1?token=abc123&theme=light");
 

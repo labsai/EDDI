@@ -47,6 +47,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
@@ -183,6 +184,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useSecretScrubber(SecretScrubber secretScrubber) {
         this.remoteSecretScrubber = secretScrubber::scrubJson;
+    }
+
+    /**
+     * Who may write {@code ${caller:token}}. Null when built outside the container,
+     * where the check is skipped. Updates go through the REST stores, which apply
+     * it themselves; the direct creates below bypass them, so they apply it here.
+     */
+    private CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    @Inject
+    void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
+        this.callerTokenAuthorPolicy = policy;
     }
 
     /**
@@ -1271,6 +1284,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         DocumentDescriptor previousDescriptor = null;
         if (tracked == null) {
             previous = readForRollback(storeClass, localId, localVersion);
+            if (callerTokenAuthorPolicy != null) {
+                // The compensation below writes `previous` back through the same store,
+                // which refuses ${caller:token} from a non-author: refuse now instead
+                // of leaving a rollback that cannot run.
+                callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",
@@ -1413,6 +1432,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * failure can delete it again.
      */
     private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
+        if (callerTokenAuthorPolicy != null) {
+            // Outside the try: a 403 must fail the import (and roll it back), not be
+            // reported as a store failure.
+            callerTokenAuthorPolicy.requireMayAuthor(document, "imported");
+        }
         try {
             IResourceStore<T> store = resolveStore(storeClass);
             IResourceId resourceId = store.create(document);

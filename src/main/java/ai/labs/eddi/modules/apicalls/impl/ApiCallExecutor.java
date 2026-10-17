@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -174,6 +175,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final RequestRedactor requestRedactor;
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
+    private final Set<String> ssrfAllowedHosts;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
 
@@ -182,8 +184,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
             CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
+            @ConfigProperty(name = "eddi.security.ssrf-protection.allowed-hosts") Optional<String> ssrfAllowedHosts,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
+        this(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver,
+                callerIdentityContext, requestRedactor, connectionResolver, ssrfProtectionEnabled, defaultTimeoutInMillis,
+                defaultMaxResponseSizeInBytes);
+        this.ssrfAllowedHosts.addAll(parseAllowedHosts(ssrfAllowedHosts.orElse("")));
+    }
+
+    /**
+     * Without an SSRF allow-list: every target is checked when protection is on.
+     */
+    public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
+            boolean ssrfProtectionEnabled, long defaultTimeoutInMillis, int defaultMaxResponseSizeInBytes) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
@@ -195,6 +211,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.requestRedactor = requestRedactor;
         this.connectionResolver = connectionResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
+        this.ssrfAllowedHosts = new HashSet<>();
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
     }
@@ -1142,6 +1159,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        rejectTemplatedAuthority(targetDestination);
         var targetUriStr = templateTargetUri(targetDestination, templateDataObjects);
         // Resolve global variable references, then vault references in URL
         targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
@@ -1160,9 +1178,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
-        // Off by default to preserve calls to internal/private APIs.
+        // Off by default to preserve calls to internal/private APIs. A host on the
+        // operator's allow-list skips the address check (it is an internal API the
+        // operator named on purpose) but never the metadata check.
         if (ssrfProtectionEnabled) {
-            UrlValidationUtils.validateUrl(targetUri.toString());
+            if (isAllowListed(targetUri)) {
+                UrlValidationUtils.validateUrlSyntax(targetUri.toString());
+                UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
+            } else {
+                UrlValidationUtils.validateUrl(targetUri.toString());
+            }
         } else {
             // Opting out of SSRF protection keeps private and loopback targets
             // reachable (configured internal APIs), but never the cloud instance-
@@ -1232,6 +1257,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             boolean callerTokenReferenced = headerValue != null && headerValue.contains(CALLER_TOKEN_REFERENCE);
+            if (callerTokenReferenced && !CallerIdentityResolver.containsTokenReference(headers.get(headerName))) {
+                // Only an author role may save ${caller:token} (CallerTokenAuthorPolicy),
+                // and that check reads the configuration as written. A reference that
+                // arrives through a ${vars:...} or ${vault:...} value bypasses it, and a
+                // variable can be changed after the config was saved — so the token is
+                // released only to a reference written in the header itself.
+                throw new CallerIdentityResolver.CallerIdentityException("Header '" + headerName + "' receives ${caller:token} from a "
+                        + "${vars:...} or ${vault:...} value. Write ${caller:token} in the header itself, where saving it is "
+                        + "restricted to eddi.caller-identity.author-roles.");
+            }
             String beforeCallerResolution = headerValue;
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
             if (callerTokenReferenced) {
@@ -1608,6 +1643,103 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 encodedView(templateDataObjects, HOST_UNRESERVED));
         String rest = prePostUtils.templateValues(targetDestination.substring(authorityEnd), pathSafeView(templateDataObjects));
         return authority + rest;
+    }
+
+    /**
+     * Refuses a target whose host or port is a template while SSRF protection is
+     * off.
+     * <p>
+     * <b>Why:</b> with protection off, loopback and private addresses are
+     * reachable. That is fine for a host the agent author wrote down, and not for
+     * one rendered from conversation data: a property is routinely captured from
+     * user input ({@code PropertySetterTask} slot-filling), so
+     * {@code https://{properties.apiHost}} lets whoever is chatting pick the host,
+     * {@code 127.0.0.1:7070} included, i.e. EDDI's own admin API. Who
+     * <em>authored</em> the template is not who <em>controls</em> the value. With
+     * protection on, the rendered host is validated like any other and the template
+     * is allowed.
+     * <p>
+     * A {@code ${vars:...}} or {@code ${vault:...}} reference is not a template:
+     * its value is set by an operator, not by a conversation.
+     *
+     * @throws IllegalArgumentException
+     *             naming the flag that allows it
+     */
+    @Override
+    public void rejectTemplatedAuthority(String targetDestination) {
+        if (ssrfProtectionEnabled || targetDestination == null || !hasTemplatedAuthority(targetDestination)) {
+            return;
+        }
+        throw new IllegalArgumentException("The host of '" + LogSanitizer.sanitize(targetDestination)
+                + "' is a template. With eddi.security.ssrf-protection.enabled=false a templated host or port could be steered by "
+                + "conversation input to loopback or private addresses, so it is refused. Write the host literally (or as a "
+                + "${vars:...} reference), or set eddi.security.ssrf-protection.enabled=true and list internal hosts in "
+                + "eddi.security.ssrf-protection.allowed-hosts.");
+    }
+
+    /**
+     * Whether the scheme, host or port of {@code url} contains a template
+     * expression ({@code {...}} not preceded by {@code $}). A URL that does not
+     * start with a literal {@code http://} or {@code https://} is checked up to its
+     * first {@code /}, {@code ?} or {@code #} outside braces, so a template
+     * standing in for the scheme counts too.
+     */
+    static boolean hasTemplatedAuthority(String url) {
+        int end = authorityEnd(url);
+        if (end < 0) {
+            end = url.length();
+            int depth = 0;
+            for (int i = 0; i < url.length(); i++) {
+                char c = url.charAt(i);
+                if (c == '{') {
+                    depth++;
+                } else if (c == '}' && depth > 0) {
+                    depth--;
+                } else if (depth == 0 && (c == '/' || c == '?' || c == '#')) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        for (int i = 0; i < end; i++) {
+            if (url.charAt(i) == '{' && (i == 0 || url.charAt(i - 1) != '$')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Parses {@code eddi.security.ssrf-protection.allowed-hosts}: comma-separated
+     * {@code host} or {@code host:port} entries, compared case-insensitively. An
+     * entry without a port matches that host on any port.
+     */
+    static Set<String> parseAllowedHosts(String raw) {
+        var hosts = new HashSet<String>();
+        if (raw == null) {
+            return hosts;
+        }
+        for (String entry : raw.split(",")) {
+            String trimmed = entry.trim().toLowerCase(Locale.ROOT);
+            if (!trimmed.isEmpty()) {
+                hosts.add(trimmed);
+            }
+        }
+        return hosts;
+    }
+
+    /** Whether the target's host, or host:port, is on the SSRF allow-list. */
+    boolean isAllowListed(URI target) {
+        if (ssrfAllowedHosts.isEmpty() || target.getHost() == null) {
+            return false;
+        }
+        String host = target.getHost().toLowerCase(Locale.ROOT);
+        // A URL without a port uses its scheme's default, so "host:443" matches
+        // https://host as well as https://host:443.
+        int port = target.getPort() >= 0
+                ? target.getPort()
+                : "https".equalsIgnoreCase(target.getScheme()) ? 443 : "http".equalsIgnoreCase(target.getScheme()) ? 80 : -1;
+        return ssrfAllowedHosts.contains(host) || (port >= 0 && ssrfAllowedHosts.contains(host + ":" + port));
     }
 
     /**

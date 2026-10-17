@@ -7,11 +7,20 @@
   ╚══════╝╚═════╝ ╚═════╝ ╚═╝
   Multi-Agent AI Orchestration Middleware
 
+{{- if .Values.eddi.existingSecret }}
+  🔑 EDDI reads its secrets from YOUR Secret `{{ .Values.eddi.existingSecret }}`
+     (eddi.existingSecret): the chart rendered none. It must hold the key
+     application-secrets.properties with eddi.vault.master-key=… and the
+     datastore connection line — the pod stays in ContainerCreating until it
+     exists. ⚠️  Keep the vault master key safe: if lost, encrypted secrets
+     are UNRECOVERABLE.
+{{- else }}
   ✅ Vault master key is configured.
      (The chart cannot render without it — see eddi.vaultMasterKey.)
      ⚠️  Save it! If lost, encrypted secrets are UNRECOVERABLE.
      It reaches the pod as a FILE at
      /etc/eddi/secrets/application-secrets.properties, never as an env var.
+{{- end }}
 
   🔏 Verify the image you just deployed
 
@@ -52,9 +61,25 @@
     kubectl port-forward svc/{{ include "eddi.fullname" . }}-keycloak 8080:8080 -n {{ .Release.Namespace }}
     open http://localhost:8080
     Username: {{ .Values.keycloak.adminUsername }}
+{{- if .Values.keycloak.existingSecret }}
+    Password: key `password` of your Secret `{{ .Values.keycloak.existingSecret }}`
+              (keycloak.existingSecret).
+{{- else }}
     Password: the value you passed as keycloak.adminPassword — deliberately not
               echoed here, since install output lands in shell history, CI logs
-              and terminal scrollback.
+              and terminal scrollback. It is stored in the Secret
+              {{ include "eddi.fullname" . }}-keycloak (key `password`) and
+              reaches the pod through secretKeyRef, not as a pod-spec value.
+{{- end }}
+
+  ⚠️  This Keycloak runs `start-dev`: development mode, embedded H2 on one
+     PVC, no HA. It suits the port-forward flow above and a demo cluster;
+     for anything reachable by name run your own Keycloak with `start`
+     (eddi.oidc.authServerUrl, keycloak.enabled=false).
+{{- if .Values.keycloak.devModeAcknowledged }}
+     keycloak.devModeAcknowledged=true: you have published this dev-mode
+     Keycloak behind the Ingress on purpose.
+{{- end }}
 
   👤 Give the EDDI administrator a password — no account ships with one:
 

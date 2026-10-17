@@ -222,7 +222,14 @@ context. Three layers apply, none of which you configure to get:
    (`eddi.mcp.tool-description.max-chars`, default 1024) before they become part of
    the model's tool definitions. Whitelisting operates on tool *names*, so an
    approved tool whose description later turns into an instruction would otherwise
-   be ungoverned.
+   be ungoverned. **Parameter schemas get the same treatment** (since 6.6.0 —
+   security review 2026-10-15, M7): every `description`, `title` and `enum` value
+   in a tool's `inputSchema`, at any depth, is redacted and capped the same way,
+   and the serialised schema is bounded per tool (`eddi.mcp.tool-schema.max-bytes`,
+   default 32 KB — descriptions are stripped first, a schema still over the cap
+   drops its tool) and per server (`eddi.mcp.tool-schema.max-bytes-per-server`,
+   default 512 KB). Each redaction, truncation or drop is counted in
+   `eddi_mcp_tool_schema_governed_total` (tag `outcome`) and named in a WARN.
 2. **Resource content and listings** (`exposeResources`) get the same treatment,
    plus an aggregate cap.
 3. **Tool results** are wrapped in a provenance delimiter naming the tool and its
