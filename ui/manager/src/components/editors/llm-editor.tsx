@@ -1,4 +1,5 @@
 import { useState, useCallback, useId } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
 import { ActionTags } from "./action-tags";
@@ -159,7 +160,7 @@ function SkillsFilterInput({
           </span>
         ))}
         {skills.length === 0 && (
-          <span className="text-[10px] text-muted-foreground italic">All skills</span>
+          <span className="text-[10px] text-muted-foreground italic">{t("llmEditor.allSkills", "All skills")}</span>
         )}
       </div>
       {!readOnly && (
@@ -169,6 +170,7 @@ function SkillsFilterInput({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 addSkill();
@@ -178,6 +180,7 @@ function SkillsFilterInput({
             className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
+            aria-label={t("common.add", "Add")}
             type="button"
             onClick={addSkill}
             className="inline-flex h-6 items-center rounded border border-input px-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
@@ -1017,6 +1020,7 @@ function TaskEditor({
                       />
                       {!readOnly && (
                         <button
+                          aria-label={t("common.remove", "Remove")}
                           type="button"
                           onClick={() =>
                             onChange({
@@ -1380,6 +1384,7 @@ function TaskEditor({
                               />
                               {!readOnly && (
                                 <button
+                                  aria-label={t("common.remove", "Remove")}
                                   type="button"
                                   onClick={() => {
                                     const rules = (
@@ -1513,6 +1518,7 @@ function TaskEditor({
                             />
                             {!readOnly && (
                               <button
+                                aria-label={t("common.remove", "Remove")}
                                 type="button"
                                 onClick={() => {
                                   const rules = (
@@ -1739,6 +1745,7 @@ function TaskEditor({
                             <span className="text-[10px] text-muted-foreground">/min</span>
                             {!readOnly && (
                               <button
+                                aria-label={t("common.remove", "Remove")}
                                 type="button"
                                 onClick={() => {
                                   const entries = Object.entries(task.toolRateLimits ?? {}).filter((_, j) => j !== i);
@@ -1935,6 +1942,7 @@ function TaskEditor({
                         <span className="text-[10px] text-muted-foreground">chars</span>
                         {!readOnly && (
                           <button
+                            aria-label={t("common.remove", "Remove")}
                             type="button"
                             onClick={() => {
                               const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {}).filter((_, j) => j !== i);

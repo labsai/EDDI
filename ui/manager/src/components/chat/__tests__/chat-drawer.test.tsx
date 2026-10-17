@@ -50,6 +50,26 @@ describe("ChatDrawer", () => {
     expect(useChatDrawerStore.getState().isOpen).toBe(false);
   });
 
+  it("closes on Escape, but not when another dialog handled the key", async () => {
+    const user = userEvent.setup();
+    useChatDrawerStore.setState({
+      isOpen: true,
+      agentId: "agent-1",
+      agentName: "Agent One",
+      step: "idle",
+    });
+    renderWithProviders(<ChatDrawer />);
+
+    // A key another handler already claimed (e.g. a modal) is left alone.
+    const handled = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    handled.preventDefault();
+    window.dispatchEvent(handled);
+    expect(useChatDrawerStore.getState().isOpen).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(useChatDrawerStore.getState().isOpen).toBe(false);
+  });
+
   it("displays progress steps during deploy pipeline", () => {
     useChatDrawerStore.setState({
       isOpen: true,
