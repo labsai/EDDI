@@ -36,6 +36,7 @@ import {
 } from "@/hooks/use-secrets";
 import {
   grantsAllAgents,
+  ALL_AGENTS,
   SecretsError,
   SECRET_EXISTS,
   SECRET_NOT_FOUND,
@@ -194,8 +195,12 @@ export function SecretsPage() {
         keyName,
         value: newValue,
         description: newDescription.trim() || undefined,
+        // Always sent. Under eddi.vault.grant-enforcement=enforce (the default)
+        // the backend refuses a create without a grant rather than defaulting
+        // to every agent, so "leave empty for all agents" is spelled out as the
+        // wildcard here — the decision is the operator's, made in this dialog.
         allowedAgents:
-          finalAllowedAgents.length > 0 ? finalAllowedAgents : undefined,
+          finalAllowedAgents.length > 0 ? finalAllowedAgents : [ALL_AGENTS],
         // "Add" never overwrites. Replacing a value is Rotate, which keeps the
         // grant; an upsert from here reset it.
         createOnly: true,

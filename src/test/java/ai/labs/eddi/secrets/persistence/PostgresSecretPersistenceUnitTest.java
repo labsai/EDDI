@@ -482,8 +482,10 @@ class PostgresSecretPersistenceUnitTest {
         persistence.upsertSecret(secret);
 
         // The CASE guards in the ON CONFLICT branch: false keeps the stored column.
-        verify(preparedStatement).setBoolean(12, false);
         verify(preparedStatement).setBoolean(13, false);
+        verify(preparedStatement).setBoolean(14, false);
+        // allowedHosts not supplied either: kept on conflict.
+        verify(preparedStatement).setBoolean(15, false);
     }
 
     @Test
@@ -492,8 +494,20 @@ class PostgresSecretPersistenceUnitTest {
 
         persistence.upsertSecret(createTestSecret());
 
-        verify(preparedStatement).setBoolean(12, true);
         verify(preparedStatement).setBoolean(13, true);
+        verify(preparedStatement).setBoolean(14, true);
+    }
+
+    @Test
+    void upsertSecret_suppliedAllowedHosts_areWritten() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedHosts(List.of("api.openai.com"));
+
+        persistence.upsertSecret(secret);
+
+        verify(preparedStatement).setString(9, "[\"api.openai.com\"]");
+        verify(preparedStatement).setBoolean(15, true);
     }
 
     @Test
