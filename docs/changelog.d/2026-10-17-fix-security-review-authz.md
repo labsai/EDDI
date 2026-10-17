@@ -28,3 +28,7 @@ Docs: [`workspaces.md`](../workspaces.md#finding-people-the-user-directory), [`c
 ### M5 — `platform.*` global variables were editor-writable
 
 [`RestGlobalVariableStore`](../../src/main/java/ai/labs/eddi/configs/variables/rest/RestGlobalVariableStore.java) refuses a non-admin `PUT` or `DELETE` of any key starting with `platform.` (case-insensitive, any tenant) with a JSON `403` — `{"error": …, "reservedPrefix": "platform."}` — and a `[SECURITY]` WARN. `platform.operator` is what the Manager trusts for which agent is the Platform Operator and which prompt an Upgrade re-provisions. Reads are unchanged. No MCP tool writes variables. Every write and delete, refused or not, is already on the audit ledger through `AdminActionAuditFilter` (pinned by a test). Docs: [`global-variables.md`](../global-variables.md#rest-api).
+
+### L2 — non-strict owner check on group-conversation reads and MCP group tools
+
+`McpGroupTools.requireConversationOwner` (follow-up, continue, close, delete) and `read_group_conversation`, and `RestGroupConversation.readGroupConversation`, now use `requireOwnerOrAdminStrict`: a record with no owner is an administrator's alone. The lenient branch of `RestGroupConversation.validateGroupConversationOwnership` had no caller left (every call passed `hitlOperation=true`) and was removed with its parameter.

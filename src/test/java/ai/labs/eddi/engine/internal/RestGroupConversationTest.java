@@ -295,10 +295,19 @@ class RestGroupConversationTest {
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "group conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "group conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.readGroupConversation("group-1", "gc-1"));
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("L2: reading a record with no owner is refused to a non-admin")
+        void readGroupConversation_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+
+            assertThrows(ForbiddenException.class, () -> asNonAdmin("mallory").readGroupConversation("group-1", "gc-1"));
         }
 
         @Test
