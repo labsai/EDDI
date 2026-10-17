@@ -442,8 +442,10 @@ public class MemberTurnExecutor {
 
                     // Wave 0, F5: harvest this member's tracked cost so far.
                     // Attributed under the CONVERSATION key, not the agent id: costs
-                    // are per-conversation (AUDIT_COST is that conversation's running
-                    // total), and GroupCostLedger replaces rather than adds. A turn in
+                    // are per-conversation (the snapshot's conversationCost is that
+                    // conversation's running total, the sum of the per-STEP
+                    // AUDIT_COST over every step), and GroupCostLedger replaces
+                    // rather than adds. A turn in
                     // a separate conversation attributed to the agent's own key would
                     // overwrite that agent's real accumulated cost with this
                     // conversation's smaller one — silently shrinking totalCost and
@@ -567,6 +569,9 @@ public class MemberTurnExecutor {
                     replacedEndedConversation = true;
                     try {
                         String endedConvId = privateConvId;
+                        // Before the fresh conversation's first harvest replaces the
+                        // ended one's total under the same key.
+                        GroupCostLedger.retireConversation(gc, convKey, endedConvId);
                         privateConvId = startMemberConversation(gc, member, convKey);
                         groupConversationService.grantAndInjectAttachments(gc, privateConvId, context);
                         LOGGER.infof("Member %s's conversation %s had ended; continuing in %s", LogSanitizer.sanitize(member.agentId()),

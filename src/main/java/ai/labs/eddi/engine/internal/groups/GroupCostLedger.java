@@ -22,13 +22,14 @@ import java.util.Locale;
  * {@code memberCosts}/{@code totalCost} (Wave 0, F5), and enforces
  * {@code ProtocolConfig#maxCostPerDiscussion} against it (I1).
  * <p>
- * <b>Coverage note:</b> {@link MemoryKeys#AUDIT_COST} — the value this class
- * reads — sums the member conversation's LLM token spend (cascade step pricing,
- * or the task-level {@code inputPricePer1M}/{@code outputPricePer1M} for plain
- * calls) and its tracked tool cost. Pricing is config-driven with no built-in
- * provider price table, so a member whose LLM config carries no prices still
- * contributes {@code $0} of token cost here — for such members
- * {@code totalCost} remains a lower bound.
+ * <b>Coverage note:</b> {@link MemoryKeys#AUDIT_COST} — what this class
+ * harvests, summed over every step of the member's conversation — holds that
+ * step's LLM token spend (cascade step pricing, or the task-level
+ * {@code inputPricePer1M}/{@code outputPricePer1M} for plain calls) and its
+ * tracked tool cost. Pricing is config-driven with no built-in provider price
+ * table, so a member whose LLM config carries no prices still contributes
+ * {@code $0} of token cost here — for such members {@code totalCost} remains a
+ * lower bound.
  * <p>
  * Both {@code memberCosts} and the recomputed {@code totalCost} are set, never
  * incremented by a delta — each call replaces the member's entry with its
@@ -46,11 +47,21 @@ public final class GroupCostLedger {
     }
 
     /**
-     * Reads {@link MemoryKeys#AUDIT_COST} — the member's private conversation's own
-     * cumulative tracked cost as of this turn — off the last step of
-     * {@code snapshot} and records it as that member's attribution. A no-op if the
-     * snapshot has no steps or the key is absent (a normal outcome today, per this
-     * class's own Javadoc — not an error).
+     * Records the member's private conversation's cumulative tracked cost — the sum
+     * of {@link MemoryKeys#AUDIT_COST} over every one of its steps, carried as
+     * {@link SimpleConversationMemorySnapshot#getConversationCost()} — as that
+     * member's attribution. A no-op when the snapshot carries no cost (nothing
+     * priced ran, a normal outcome per this class's own Javadoc — not an error).
+     * <p>
+     * It must be the conversation total, not anything read off the snapshot's
+     * steps. {@code AUDIT_COST} is a per-<em>step</em> value, so recording the last
+     * step's — as this method once did — kept only a member's latest turn and
+     * dropped every earlier one, and the step data no longer carries it at all
+     * ({@code returnDetailed} withholds {@code audit:*}). Because the total covers
+     * the whole conversation, recording it by replacement stays correct however the
+     * turns are harvested: a duplicate harvest of the same turn, a skipped turn's
+     * snapshot of the previous one, or a HITL pause whose resumed spend arrives
+     * with the member's next turn.
      */
     public static void accumulateMemberCost(GroupConversation gc, GroupMember member, SimpleConversationMemorySnapshot snapshot) {
         accumulateMemberCost(gc, member != null ? member.agentId() : null, snapshot);
@@ -66,19 +77,75 @@ public final class GroupCostLedger {
      *            key would overwrite the first's total rather than add to it.
      */
     public static void accumulateMemberCost(GroupConversation gc, String attributionKey, SimpleConversationMemorySnapshot snapshot) {
-        if (attributionKey == null || snapshot == null || snapshot.getConversationSteps() == null
-                || snapshot.getConversationSteps().isEmpty()) {
+        if (attributionKey == null || snapshot == null) {
             return;
         }
-        var lastStep = snapshot.getConversationSteps().get(snapshot.getConversationSteps().size() - 1);
-        if (lastStep == null || lastStep.getConversationStep() == null) {
+        Double cost = snapshot.getConversationCost();
+        // Same NaN/Infinity reasoning as recordSystemCost: one poisoned value
+        // disables every ceiling check that compares against totalCost.
+        if (cost == null || !Double.isFinite(cost) || cost < 0.0) {
             return;
         }
-        for (var stepData : lastStep.getConversationStep()) {
-            if (stepData != null && MemoryKeys.AUDIT_COST.equals(stepData.getKey()) && stepData.getValue() instanceof Number cost) {
-                recordAndReSum(gc, attributionKey, cost.doubleValue());
-                return;
+        // A turn that timed out on a conversation since retired can still complete,
+        // and its callback arrives with the SAME attributionKey. Recorded there it
+        // would overwrite the replacement conversation's total with the ended one's
+        // (or be counted again beside its retired entry). The snapshot names the
+        // conversation it came from, so route it to that conversation's retired key.
+        //
+        // Decided and written under the monitor retireConversation holds, keyed on
+        // the retired ENTRY rather than on memberConversationIds alone: between the
+        // retirement and the replacement's id being published, the map still names
+        // the ended conversation, and a callback judging by the map in that window
+        // wrote back to the plain key, where the replacement's first harvest then
+        // overwrote it.
+        String conversationId = snapshot.getConversationId();
+        synchronized (gc.getMemberCosts()) {
+            String retiredKey = conversationId != null ? attributionKey + ":" + conversationId : null;
+            String activeConversationId = gc.getMemberConversationIds().get(attributionKey);
+            boolean retired = retiredKey != null && (gc.getMemberCosts().containsKey(retiredKey)
+                    || (activeConversationId != null && !activeConversationId.equals(conversationId)));
+            if (retired) {
+                recordRetired(gc, retiredKey, cost);
+            } else {
+                recordAndReSum(gc, attributionKey, cost);
             }
+        }
+    }
+
+    /**
+     * Keeps the spend of a member conversation that is being replaced. Costs are
+     * recorded by replacement under one key per conversation, so when a member's
+     * ended private conversation is swapped for a fresh one under the same key, the
+     * fresh conversation's first total would overwrite the ended one's whole spend.
+     * Moving the ended conversation's entry to
+     * {@code attributionKey:endedConversationId} — the same {@code key:child} shape
+     * {@link #accumulateNestedGroupCost} uses, which per-member consumers already
+     * sum — leaves it in {@code totalCost}.
+     * <p>
+     * The retired entry is written even when nothing was spent yet ($0): its
+     * presence is what tells {@link #accumulateMemberCost} that a late callback
+     * from the ended conversation belongs there, including one that lands before
+     * the replacement's id is published. Consumers already ignore $0 rows.
+     */
+    public static void retireConversation(GroupConversation gc, String attributionKey, String endedConversationId) {
+        if (attributionKey == null || endedConversationId == null) {
+            return;
+        }
+        synchronized (gc.getMemberCosts()) {
+            Double spent = gc.getMemberCosts().remove(attributionKey);
+            recordRetired(gc, attributionKey + ":" + endedConversationId, spent != null ? spent : 0.0);
+        }
+    }
+
+    /**
+     * A retired conversation's entry only ever grows: its running total is
+     * monotonic, so keeping the larger value makes a late callback carrying an
+     * older total harmless, whichever order it and the retirement run in.
+     */
+    private static void recordRetired(GroupConversation gc, String retiredKey, double cost) {
+        synchronized (gc.getMemberCosts()) {
+            gc.getMemberCosts().merge(retiredKey, cost, Math::max);
+            gc.setTotalCost(gc.getMemberCosts().values().stream().mapToDouble(Double::doubleValue).sum());
         }
     }
 

@@ -21,11 +21,8 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
-import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
-import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -343,9 +340,7 @@ class MemberTurnExecutorTest {
 
         var snapshot = new SimpleConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.READY);
-        var step = new SimpleConversationStep();
-        step.getConversationStep().add(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.07, null, null));
-        snapshot.getConversationSteps().add(step);
+        snapshot.setConversationCost(0.07);
 
         doAnswer(inv -> {
             inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
@@ -402,6 +397,46 @@ class MemberTurnExecutorTest {
         assertNotEquals(TranscriptEntryType.SKIPPED, entry.type());
         assertEquals("conv-new", gc.getMemberConversationIds().get(AGENT_A));
         verify(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * The fresh conversation reports its own running total, starting from zero,
+     * under the same ledger key. Without banking the ended conversation's entry
+     * first, that harvest replaced the member's whole earlier spend.
+     */
+    @Test
+    void executeAgentTurn_endedPrivateConversation_keepsItsSpendInTheGroupTotal() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-new", null));
+        doThrow(new IConversationService.ConversationEndedException("ended"))
+                .when(conversationService).say(any(), any(), eq("conv-old"), any(), any(), any(), any(), anyBoolean(), any());
+        var answered = new SimpleConversationMemorySnapshot();
+        answered.setConversationState(ConversationState.READY);
+        answered.setConversationCost(0.05);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(answered);
+            return null;
+        }).when(conversationService).say(any(), any(), eq("conv-new"), any(), any(), any(), any(), anyBoolean(), any());
+        var executor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class), new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.getMemberConversationIds().put(AGENT_A, "conv-old");
+        // What the ended conversation had spent over its earlier turns.
+        gc.getMemberCosts().put(AGENT_A, 0.30);
+        gc.setTotalCost(0.30);
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null,
+                null, null);
+
+        assertEquals(0.30, gc.getMemberCosts().get(AGENT_A + ":conv-old"));
+        assertEquals(0.05, gc.getMemberCosts().get(AGENT_A));
+        assertEquals(0.35, gc.getTotalCost(), 1e-9);
     }
 
     @Test
