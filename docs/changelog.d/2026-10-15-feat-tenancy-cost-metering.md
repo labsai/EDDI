@@ -46,7 +46,7 @@ stayed at zero and the pre-call gate never tripped. It is now real.
   running total is corrected (it is per step).
 - **Docs/Operator.** `tenant-quotas.md`, `langchain.md` (prices drive the budget),
   `metrics.md`, `configuration-reference.md`; the Platform Operator prompt says the cap is enforced
-  and priced-only (operator revision 16 → 17).
+  and priced-only (operator revision bumped; 18 at merge time).
 
 **Tests:** `TurnCostMeterTest` (delta, pause→persist→resume once, prefix trap, outage retry,
 exception swallowed, over-budget marked, in-memory end to end), `ConversationServiceCostMeteringTest`
