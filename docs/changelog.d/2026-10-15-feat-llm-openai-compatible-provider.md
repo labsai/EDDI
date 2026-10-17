@@ -45,7 +45,8 @@ fixed `https://` endpoint and a fixed default model.
   the telemetry wrapper bakes it in.
 - **Parameter catalog.** `model-parameters.json` has an `openai-compatible` row that inherits
   OpenAI's parameters without their model rules and adds `serverName` and the three flags;
-  the Manager mirror and [`docs/llm-parameters.md`](../llm-parameters.md) are regenerated.
+  the Manager mirror and [`docs/llm-parameters.md`](../llm-parameters.md) are regenerated. Its inherited `responseFormat` is overridden with a "do not use" note pointing at
+  `convertToObject` / `jsonResponseFormat` and `jsonMode`, since the OpenAI builder bakes it into the cached model.
 - **Setup.** `AgentSetupService` treats the type as keyless and requires `model` and
   `baseUrl`/`llmBaseUrl` up front instead of injecting the SaaS default model; the MCP
   `setup_agent` / `create_api_agent` descriptions name it.

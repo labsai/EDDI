@@ -3600,6 +3600,18 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
         },
         {
+          "key": "responseFormat",
+          "type": "enum",
+          "group": "output",
+          "label": "Response format",
+          "description": "Do not use: it fixes JSON mode on the cached model, so tool-calling and streaming requests get it too. For JSON answers set convertToObject to true on the task (jsonResponseFormat overrides it per task) and turn jsonMode on if the server supports JSON mode.",
+          "enum": [
+            "text",
+            "json"
+          ],
+          "source": "https://github.com/labsai/EDDI/blob/main/docs/langchain.md"
+        },
+        {
           "key": "sendThinking",
           "type": "boolean",
           "group": "reasoning",

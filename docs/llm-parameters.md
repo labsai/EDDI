@@ -1431,7 +1431,7 @@ OpenAI-compatible: accepts everything the [OpenAI](#openai-openai) builder does,
 | `maxTokens` | int | 1– | Upper limit on the tokens the model may produce (max_tokens). |
 | `maxCompletionTokens` | int | 1– | Upper limit on the tokens the model may produce, including its hidden reasoning. |
 | `stopSequences` | stringList |  | Up to four pieces of text that make the model stop writing when it produces them. |
-| `responseFormat` | enum | `text` / `json` | Set to json to make the model answer with a JSON object. |
+| `responseFormat` | enum | `text` / `json` | Do not use: it fixes JSON mode on the cached model, so tool-calling and streaming requests get it too. For JSON answers set convertToObject to true on the task (jsonResponseFormat overrides it per task) and turn jsonMode on if the server supports JSON mode. |
 | `verbosity` | enum | `low` / `medium` / `high` | How long and detailed the answer should be (GPT-5 and later). |
 | `strictJsonSchema` | boolean |  | Make structured JSON answers follow the requested schema exactly. |
 

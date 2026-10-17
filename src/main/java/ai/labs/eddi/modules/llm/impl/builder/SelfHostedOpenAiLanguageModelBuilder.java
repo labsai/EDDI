@@ -38,22 +38,21 @@ public class SelfHostedOpenAiLanguageModelBuilder implements ILanguageModelBuild
     private static final String KEY_API_KEY = "apiKey";
 
     private final OpenAILanguageModelBuilder delegate;
-    private final ModelParameterCatalog catalog;
 
     public SelfHostedOpenAiLanguageModelBuilder(OpenAILanguageModelBuilder delegate) {
-        this(delegate, ModelParameterCatalog.defaultCatalog());
-    }
-
-    SelfHostedOpenAiLanguageModelBuilder(OpenAILanguageModelBuilder delegate, ModelParameterCatalog catalog) {
         this.delegate = delegate;
-        this.catalog = catalog;
     }
 
+    /**
+     * What this builder actually reads: the OpenAI builder's keys plus this type's
+     * own. Deliberately NOT unioned with the parameter catalog's keys, so
+     * {@code ModelParameterCatalogDriftTest} compares the catalog against what is
+     * read rather than against itself.
+     */
     @Override
     public Set<String> recognisedParameters() {
         Set<String> recognised = new HashSet<>(delegate.recognisedParameters());
         recognised.addAll(OpenAiCompatibleEndpoint.OWN_KEYS);
-        recognised.addAll(catalog.keys(OpenAiCompatibleEndpoint.TYPE));
         return recognised;
     }
 
