@@ -146,6 +146,8 @@ class ClusterConversationCoordinatorTest {
     static final class PoolRuntime implements IRuntime {
         final ExecutorService pool = Executors.newCachedThreadPool();
         volatile boolean reject;
+        /** Submissions whose callback did not mark them as turns (WS2). */
+        final AtomicInteger plainCallbacks = new AtomicInteger();
 
         @Override
         public void init() {
@@ -179,6 +181,9 @@ class ClusterConversationCoordinatorTest {
         public <T> Future<T> submitCallable(Callable<T> callable, IFinishedExecution<T> done, Map<Object, Object> threadBindings) {
             if (reject) {
                 throw new RejectedExecutionException("pool saturated");
+            }
+            if (!(done instanceof ITurnExecution)) {
+                plainCallbacks.incrementAndGet();
             }
             return pool.submit(() -> {
                 try {
@@ -348,6 +353,8 @@ class ClusterConversationCoordinatorTest {
         assertEquals(expected, log);
         assertEquals(20, leases.released.size());
         assertEquals(20, coordinator.getTotalProcessed());
+        assertEquals(0, runtime.plainCallbacks.get(),
+                "every turn, including those scheduled from a completion callback, must be submitted as a turn (virtual thread)");
     }
 
     @Test

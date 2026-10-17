@@ -70,6 +70,29 @@ class InMemoryConversationCoordinatorTest {
 
     // ==================== Task Processing ====================
 
+    /**
+     * WS2 — the coordinator marks its submissions as turns, so BaseRuntime runs
+     * them on virtual threads instead of the bounded worker pool. The follow-up
+     * turn it schedules from a completion callback must carry the marker as well.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void submitsTurnsAndFollowUpTurnsAsTurns() {
+        Callable<Void> first = mock(Callable.class);
+        Callable<Void> second = mock(Callable.class);
+        coordinator.submitInOrder("conv-turn", first);
+        coordinator.submitInOrder("conv-turn", second);
+
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(first), captor.capture(), isNull());
+        assertInstanceOf(IRuntime.ITurnExecution.class, captor.getValue());
+
+        captor.getValue().onComplete(null);
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> followUp = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(second), followUp.capture(), isNull());
+        assertInstanceOf(IRuntime.ITurnExecution.class, followUp.getValue());
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void shouldIncrementProcessedOnComplete() {

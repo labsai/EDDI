@@ -1208,6 +1208,17 @@
               },
               "editorMode": "code",
               "range": true
+            },
+            {
+              "refId": "C",
+              "expr": "sum(eddi_conversation_max_in_flight_turns{job=~\"$job\"})",
+              "legendFormat": "limit (max-in-flight-turns)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
             }
           ],
           "fieldConfig": {
@@ -1248,13 +1259,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }
@@ -1672,7 +1683,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_coordinator_total_processed_total`.",
+          "description": "Rate of `eddi_coordinator_total_processed_total`, and of turns refused because the node already ran `eddi.conversation.max-in-flight-turns` (`eddi_turn_rejected_total`, answered 503 `capacity_exceeded`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1683,6 +1694,18 @@
             {
               "refId": "A",
               "expr": "sum(rate(eddi_coordinator_total_processed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "processed",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_turn_rejected_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "rejected ({{reason}})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -1728,13 +1751,13 @@
           },
           "options": {
             "legend": {
-              "displayMode": "hidden",
+              "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false,
+              "showLegend": true,
               "calcs": []
             },
             "tooltip": {
-              "mode": "single",
+              "mode": "multi",
               "sort": "desc"
             }
           }

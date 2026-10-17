@@ -331,8 +331,10 @@ class BaseRuntimeConcurrencyTest {
 
     /**
      * Guards the marker's lifetime: it is scoped to the work BODY, so a completion
-     * callback that submits follow-up work (the coordinator scheduling the next
-     * turn) is treated as a top-level submission and keeps using the bounded pool.
+     * callback that submits follow-up work is treated as a top-level submission and
+     * routed by its own callback — a plain one keeps using the bounded pool (the
+     * coordinators' follow-up turns carry a turn callback, see
+     * {@link #followUpTurnFromATurnCallbackRunsOnAVirtualThread}).
      */
     @Test
     @Timeout(30)
@@ -400,5 +402,147 @@ class BaseRuntimeConcurrencyTest {
 
         // The runtime's nested executor is unaffected by that saturation.
         release.countDown();
+    }
+
+    // ==================== Turns (ITurnExecution) ====================
+
+    private ExecutorService countingPool(AtomicInteger poolSubmissions) throws Exception {
+        ManagedExecutor countingExecutor = Mockito.mock(ManagedExecutor.class);
+        when(countingExecutor.submit(any(Callable.class))).thenAnswer(inv -> {
+            poolSubmissions.incrementAndGet();
+            return boundedPool.submit((Callable<?>) inv.getArgument(0));
+        });
+        var executorField = BaseRuntime.class.getDeclaredField("executorService");
+        executorField.setAccessible(true);
+        executorField.set(runtime, countingExecutor);
+        return countingExecutor;
+    }
+
+    private static <T> IRuntime.ITurnExecution<T> turnCallback(Runnable onComplete) {
+        return new IRuntime.ITurnExecution<>() {
+            @Override
+            public void onComplete(T result) {
+                onComplete.run();
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                // not expected
+            }
+        };
+    }
+
+    /**
+     * WS2 — the outer task of every in-flight turn used to hold a bounded-pool
+     * thread for the whole pipeline, so the pool size was the node's turn ceiling.
+     * Five times the pool's worth of turns, each blocked until ALL of them are
+     * running and each submitting its pipeline as nested work, must all be in
+     * flight at once — and none may touch the bounded pool.
+     */
+    @Test
+    @Timeout(60)
+    @DisplayName("WS2: turns run on virtual threads — more turns than pool threads are all in flight at once")
+    void turnsAreNotBoundedByThePool() throws Exception {
+        AtomicInteger poolSubmissions = new AtomicInteger();
+        countingPool(poolSubmissions);
+
+        final int turns = POOL_SIZE * 5;
+        CountDownLatch allRunning = new CountDownLatch(turns);
+        List<Future<String>> futures = new ArrayList<>();
+        for (int i = 0; i < turns; i++) {
+            final int index = i;
+            futures.add(runtime.submitCallable(() -> {
+                assertTrue(Thread.currentThread().isVirtual(), "a turn's outer task must run on a virtual thread");
+                allRunning.countDown();
+                assertTrue(allRunning.await(20, TimeUnit.SECONDS), "every turn must be in flight at the same time");
+                // The pipeline is still nested work, on the nested executor.
+                return runtime.submitCallable(() -> "turn-" + index, null).get(20, TimeUnit.SECONDS);
+            }, turnCallback(() -> {
+            }), null));
+        }
+
+        for (int i = 0; i < turns; i++) {
+            assertEquals("turn-" + i, futures.get(i).get(30, TimeUnit.SECONDS));
+        }
+        assertEquals(0, poolSubmissions.get(), "no turn and no pipeline may be submitted to the bounded pool");
+        assertEquals(0, runtime.turnLoad().active.get());
+        assertEquals(0, runtime.turnLoad().queued.get());
+    }
+
+    /**
+     * The coordinators schedule the next queued turn from the previous turn's
+     * completion callback, passing a turn callback again. That follow-up must also
+     * stay off the bounded pool, or every second turn of a busy conversation would
+     * fall back onto it.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("WS2: a follow-up turn submitted from a turn's callback also runs on a virtual thread")
+    void followUpTurnFromATurnCallbackRunsOnAVirtualThread() throws Exception {
+        AtomicInteger poolSubmissions = new AtomicInteger();
+        countingPool(poolSubmissions);
+        CountDownLatch followUpRan = new CountDownLatch(1);
+        AtomicInteger followUpOnVirtualThread = new AtomicInteger();
+
+        runtime.submitCallable(() -> "first", turnCallback(() -> runtime.submitCallable(() -> {
+            if (Thread.currentThread().isVirtual()) {
+                followUpOnVirtualThread.incrementAndGet();
+            }
+            followUpRan.countDown();
+            return null;
+        }, turnCallback(() -> {
+        }), null)), null);
+
+        assertTrue(followUpRan.await(20, TimeUnit.SECONDS));
+        assertEquals(1, followUpOnVirtualThread.get());
+        assertEquals(0, poolSubmissions.get());
+    }
+
+    /**
+     * The abandonment token and one-shot callback hold for turns exactly as on the
+     * pool: a turn the watchdog cancelled reports failure, never completion.
+     */
+    @Test
+    @Timeout(30)
+    @DisplayName("WS2: an abandoned turn never reports completion")
+    void abandonedTurnNeverReportsCompletion() throws Exception {
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch callbackFired = new CountDownLatch(1);
+        AtomicInteger completions = new AtomicInteger();
+        AtomicInteger failures = new AtomicInteger();
+
+        Future<String> turn = runtime.submitCallable(() -> {
+            running.countDown();
+            // Swallows the interrupt, as pipelines routinely do.
+            while (release.getCount() > 0) {
+                try {
+                    release.await();
+                } catch (InterruptedException swallowed) {
+                    // keep going
+                }
+            }
+            return "stale";
+        }, new IRuntime.ITurnExecution<String>() {
+            @Override
+            public void onComplete(String result) {
+                completions.incrementAndGet();
+                callbackFired.countDown();
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                failures.incrementAndGet();
+                callbackFired.countDown();
+            }
+        }, null);
+
+        assertTrue(running.await(10, TimeUnit.SECONDS));
+        turn.cancel(true);
+        release.countDown();
+
+        assertTrue(callbackFired.await(10, TimeUnit.SECONDS));
+        assertEquals(0, completions.get());
+        assertEquals(1, failures.get());
     }
 }
