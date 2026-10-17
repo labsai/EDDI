@@ -111,7 +111,8 @@ public class GroupAttachmentBinder {
                         sanitize(a.getFileName()), gc.getId(), e.getScope());
                 throw e;
             } catch (Exception e) {
-                LOGGER.warnf("Failed to materialize group attachment '%s': %s", sanitize(a.getFileName()), e.getMessage());
+                LOGGER.warnf("Failed to materialize group attachment '%s': %s", sanitize(a.getFileName()),
+                        sanitize(e.getMessage()));
             }
         }
         if (!materialized.isEmpty()) {
@@ -137,8 +138,11 @@ public class GroupAttachmentBinder {
             attachmentStore.grantAccess(storageRef, gc.getId());
             return true;
         } catch (Exception e) {
+            // Both values are sanitized at the call site (LogSanitizer's rule): the
+            // source id is a caller-supplied conversation id and the store's message
+            // may echo the reference it refused.
             LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': its source conversation '%s' "
-                    + "cannot read it (%s)", gc.getId(), trustedSourceConversationId, e.getMessage());
+                    + "cannot read it (%s)", gc.getId(), sanitize(trustedSourceConversationId), sanitize(e.getMessage()));
             return false;
         }
     }
@@ -148,8 +152,8 @@ public class GroupAttachmentBinder {
             try {
                 attachmentStore.delete(ref, ownerConversationId);
             } catch (Exception e) {
-                LOGGER.warnf("Could not remove attachment '%s' of refused group request '%s': %s", ref, ownerConversationId,
-                        e.getMessage());
+                LOGGER.warnf("Could not remove attachment '%s' of refused group request '%s': %s", sanitize(ref),
+                        ownerConversationId, sanitize(e.getMessage()));
             }
         }
     }
