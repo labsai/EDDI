@@ -610,9 +610,12 @@ class ClusterConversationCoordinatorTest {
             public Map<String, Object> describe() {
                 slowEntered.countDown();
                 try {
-                    releaseSlow.await(5, TimeUnit.SECONDS);
+                    // An AssertionError escapes describe(task), which catches only
+                    // RuntimeException, and fails the test through slowId.get().
+                    assertTrue(releaseSlow.await(5, TimeUnit.SECONDS), "the slow failure was not released after the fast one");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    fail("the slow failure was interrupted before it was released");
                 }
                 return super.describe();
             }
