@@ -52,9 +52,11 @@ services:
       # is the whole reason it prefers token.issuer over the auth-server-url above.
       #
       # This stack serves EDDI over plain http on localhost, so the advertised
-      # resource identifier must not be forced to https as it is by default — a
-      # client would be sent to fetch a URL nothing here is listening on. A
-      # deployment behind TLS should leave the default alone.
+      # resource identifier must not be forced to https — a client would be sent
+      # to fetch a URL nothing here is listening on. The scheme follows the
+      # request by default since 6.6.1; this stays explicit so the stack says
+      # what it needs. A deployment behind a TLS-terminating proxy sets it to
+      # true or turns on forwarded-header handling (docs/mcp-server.md).
       QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: "false"
     depends_on:
       keycloak:

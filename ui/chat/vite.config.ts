@@ -38,6 +38,13 @@ export default defineConfig({
     // `npm run dev` answers it with the SPA's index.html. vite-proxy.test.ts
     // checks this list against the code.
     proxy: {
+      // The operator settings chat.html loads before the widget (chat-config.ts).
+      // Unproxied, Vite answers it with the SPA shell and the widget runs on
+      // the safe defaults — with a backend up, it gets the real values.
+      "/chat/__config__.js": {
+        target: "http://localhost:7070",
+        changeOrigin: true,
+      },
       "/agents": {
         target: "http://localhost:7070",
         changeOrigin: true,
