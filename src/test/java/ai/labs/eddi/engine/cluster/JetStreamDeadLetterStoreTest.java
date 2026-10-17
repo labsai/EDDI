@@ -246,6 +246,22 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @Test
+    void aFullStreamKeepsTheDeadLetterLocalWithoutReprovisioning() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        // 10077: the stream is at max-bytes and refuses new messages
+        // (DiscardPolicy.New).
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenThrow(error(10077));
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, js, true));
+
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+
+        verify(js, times(1)).publish(anyString(), any(byte[].class), any(PublishOptions.class));
+        verify(jsm, never()).getStreamInfo(anyString());
+        verify(jsm, never()).updateStream(any());
+    }
+
+    @Test
     void theStreamIsCappedBySizeAndRefusesNewEntriesWhenFull() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
         when(jsm.getStreamInfo("EDDI_DEAD_LETTERS")).thenThrow(error(10059));

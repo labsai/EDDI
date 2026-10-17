@@ -207,8 +207,12 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             try {
                 ack = connections.jetStream().publish(subject, payload, options);
             } catch (IOException | JetStreamApiException noStreamYet) {
-                if (!connections.isConnected()) {
-                    throw noStreamYet; // not a missing stream: NATS is gone; the caller keeps it locally
+                if (!connections.isConnected() || (noStreamYet instanceof JetStreamApiException api && !streamMissing(api))) {
+                    // Not a missing stream: NATS is gone, or the stream answered and refused
+                    // (full under DiscardPolicy.New, among others). Provisioning would not help,
+                    // and re-running it on every refusal of a full stream costs two management
+                    // calls per failed turn. The caller keeps the entry locally.
+                    throw noStreamYet;
                 }
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.

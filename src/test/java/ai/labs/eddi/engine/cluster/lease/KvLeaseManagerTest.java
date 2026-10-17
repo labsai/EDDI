@@ -504,6 +504,9 @@ class KvLeaseManagerTest {
     @Test
     @DisplayName("a heartbeat renews every held lease side by side, so a slow NATS cannot stretch one pass past the TTL")
     void heartbeatRenewsInParallel() throws Exception {
+        // A heartbeat interval longer than one renewal, which heartbeatAll waits for.
+        config = ClusterConfig.defaults().withMessagingType("nats")
+                .withLeaseTimings(Duration.ofSeconds(4), Duration.ofSeconds(1), Duration.ofSeconds(5));
         KvLeaseManager a = manager(slow(kv, 300), "a", "a1");
         List<LeaseHandle> leases = new CopyOnWriteArrayList<>();
         for (int i = 0; i < 6; i++) {
@@ -555,6 +558,29 @@ class KvLeaseManagerTest {
         gate.complete(null);
         first.get(3, TimeUnit.SECONDS);
         assertFalse(lease.isLost(), "the in-flight renewal used the current revision and must not read as a takeover");
+    }
+
+    @Test
+    @DisplayName("a stalled renewal holds the heartbeat thread for at most one interval, so the next tick is not delayed")
+    void stalledRenewalDoesNotDelayTheNextTick() throws Exception {
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        ISharedKv stalled = new FlakyKv(kv, new AtomicBoolean()) {
+            @Override
+            public OptionalLong update(String key, byte[] value, long expectedRevision) {
+                gate.join();
+                return super.update(key, value, expectedRevision);
+            }
+        };
+        KvLeaseManager a = manager(stalled, "a", "a1");
+        get(a.acquire("conv1", Duration.ofSeconds(1)));
+        try {
+            long start = System.nanoTime();
+            a.heartbeatAll(); // test config: heartbeat 100 ms, TTL 400 ms
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue(elapsedMillis < 350, "heartbeatAll waited " + elapsedMillis + " ms, past the 100 ms interval");
+        } finally {
+            gate.complete(null);
+        }
     }
 
     @Test

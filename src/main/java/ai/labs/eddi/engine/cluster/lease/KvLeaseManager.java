@@ -734,8 +734,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
      * and this method waits for them: done one after another, a NATS that answers
      * slowly (each call may take up to the request timeout) would stretch one pass
      * over hundreds of leases past the lease TTL, and the node would lose all of
-     * them at once although it is alive. A lease whose previous renewal is still in
-     * flight is skipped, never renewed twice concurrently.
+     * them at once although it is alive. The wait is bounded by one heartbeat
+     * interval, so a stalled call never delays the next tick; a lease whose
+     * previous renewal is still in flight is skipped, never renewed twice
+     * concurrently.
      */
     void heartbeatAll() {
         List<CompletableFuture<Void>> renewals = new ArrayList<>();
@@ -760,7 +762,11 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 renewal.complete(null);
             }
         }
-        awaitAll(renewals, config.leaseTtl());
+        // At most one heartbeat interval: the scheduler does not overlap runs, so a
+        // longer wait would delay the next tick, and with it every other lease. A
+        // renewal still running then finishes on the I/O executor, and the next tick
+        // skips its lease through `renewing`.
+        awaitAll(renewals, config.leaseHeartbeatInterval());
     }
 
     private void renew(Held h) {

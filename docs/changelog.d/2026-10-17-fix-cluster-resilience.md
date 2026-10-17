@@ -20,8 +20,9 @@ a node under strain, or a NATS that hangs instead of refusing, does worse than t
   `leaseScheduler()` (one thread, nothing else on it) and the on-connect hooks on two
   threads of their own. A heartbeat pass also renews the held leases side by side on the
   virtual-thread I/O executor instead of one after another, so a NATS that answers in
-  2 s per call no longer stretches a pass over hundreds of leases past the TTL; a lease
-  whose renewal is still in flight is skipped, never renewed twice at once.
+  2 s per call no longer stretches a pass over hundreds of leases past the TTL. The pass
+  waits at most one heartbeat interval, so a stalled call never delays the next tick; a
+  lease whose renewal is still in flight is skipped, never renewed twice at once.
 - **A drained node hands its leader lease over** (`KvLeaseManager.setDraining`). It
   stopped running the leader's work (`tryAcquireKey` answers empty while draining) but
   kept the `leader.hitl-recovery` lease alive through its heartbeat, so no node ran HITL
@@ -40,7 +41,9 @@ a node under strain, or a NATS that hangs instead of refusing, does worse than t
   publish ten times; against a NATS that keeps the connection and answers nothing, each
   attempt ran into the 2 s request timeout — about 24 s on the failing turn's thread. The
   retry ([`JetStreamDeadLetterStore`](../../src/main/java/ai/labs/eddi/engine/cluster/JetStreamDeadLetterStore.java))
-  is now bounded by about 2 s and skipped when the client is disconnected; the entry stays
+  is now bounded by about 2 s and skipped when the client is disconnected or the stream
+  answered with a refusal other than "not found" (a full stream is not re-provisioned on
+  every refused publish); the entry stays
   in the node-local ring and is forwarded later. Audit position allocation
   ([`AuditClusterSupport`](../../src/main/java/ai/labs/eddi/engine/cluster/AuditClusterSupport.java))
   stops asking NATS for one request timeout after a failure, so a turn's audit entries cost
@@ -69,7 +72,7 @@ a node under strain, or a NATS that hangs instead of refusing, does worse than t
   node waiting on LLMs runs hundreds of turns at little CPU, so a CPU-only HPA may never
   scale up; the docs show how to scale on in-flight turns
   (`eddi_runtime_executor_active{pool="turn"}`) through a custom-metrics adapter. The chart
-  refuses an HPA with no metric at all.
+  refuses an HPA with no metric at all, which CI's chart-guard step now asserts.
 - **Docs**: [Clustering](../clustering.md) gains database-connection sizing (a stock
   PostgreSQL's `max_connections=100` is exhausted by a third replica at the default pool of
   50; PgBouncer only in session mode, because EDDI takes session-level advisory locks), an

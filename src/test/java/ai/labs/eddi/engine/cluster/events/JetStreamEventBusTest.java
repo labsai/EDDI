@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -220,6 +221,8 @@ class JetStreamEventBusTest {
             Thread.sleep(20);
         }
         assertEquals(0, connectedBus.outboxDepth());
-        verify(jetStream).publish(anyString(), any(byte[].class));
+        // drainOutbox lowers the count before it publishes, so wait for the publish
+        // too.
+        verify(jetStream, timeout(3000)).publish(anyString(), any(byte[].class));
     }
 }
