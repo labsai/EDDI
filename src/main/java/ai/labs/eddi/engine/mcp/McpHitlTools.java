@@ -306,9 +306,21 @@ public class McpHitlTools {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireConversationHitlAccess(conversationId);
-            var outcome = conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, principalWithMcpPrefix());
+            String ownerId = hitlAccessGuard.requireConversationHitlAccess(conversationId);
+            IConversationService.CancelOutcome outcome;
+            if (hitlAccessGuard.mayCancelExecuting(ownerId)) {
+                outcome = conversationService.cancelConversation(conversationId,
+                        ControlSignal.CANCEL_GRACEFUL, principalWithMcpPrefix());
+            } else {
+                // Approver-only caller: the same paused-only compare-and-set the REST
+                // surface uses (L9 of the 2026-10-15 security review), so an approver
+                // cannot stop another user's executing turn over MCP either.
+                outcome = conversationService.cancelPausedConversation(conversationId, principalWithMcpPrefix());
+                if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL) {
+                    return errorJson("Access denied: an approver may only cancel a conversation that is awaiting a human decision",
+                            "FORBIDDEN", null);
+                }
+            }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "regular").increment();
             return switch (outcome) {
                 case CANCELLED -> "{\"status\":\"CANCELLED\"}";

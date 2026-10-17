@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.connections.names.IConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -54,7 +55,7 @@ class RestConnectionStoreReadRedactionTest {
         accessGuard = mock(ResourceAccessGuard.class);
         rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
                 mock(ConnectionRegistry.class), mock(IConnectionGrantStore.class), mock(ISecretProvider.class), true, accessGuard,
-                mock(IConnectionNameClaimStore.class));
+                mock(IConnectionNameClaimStore.class), mock(CredentialReferenceResolver.class));
     }
 
     private ConnectionConfiguration read(ConnectionConfiguration stored, boolean admin) throws Exception {

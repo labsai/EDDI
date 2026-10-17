@@ -19,7 +19,7 @@ import { useHasRole } from "@/hooks/use-auth";
 import { groupAgentsByName } from "@/hooks/use-agents";
 import { getAgentDescriptors } from "@/lib/api/agents";
 import { agentKeys } from "@/lib/query-keys";
-import { SecretsError, SECRET_EXISTS, grantsAllAgents } from "@/lib/api/secrets";
+import { SecretsError, SECRET_EXISTS, grantsAllAgents, ALL_AGENTS } from "@/lib/api/secrets";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
@@ -168,10 +168,13 @@ function toVaultRef(keyName: string): string {
 function CreateSecretModal({
   onClose,
   tenantId,
+  agentId,
   onSuccess,
 }: {
   onClose: () => void;
   tenantId: string;
+  /** The agent the new secret is granted to; absent, it is granted to every agent. */
+  agentId?: string;
   onSuccess: (keyName: string) => void;
 }) {
   const { t } = useTranslation();
@@ -208,10 +211,14 @@ function CreateSecretModal({
         // Sent as typed: trimming changed the credential being stored.
         value: newValue,
         description: newDescription.trim() || undefined,
+        // Granted to the agent this picker edits when it is known, otherwise to
+        // every agent — said explicitly, because under grant-enforcement=enforce
+        // the backend refuses a create that leaves the grant to a default.
+        allowedAgents: agentId ? [agentId] : [ALL_AGENTS],
         // This dialog makes a NEW secret for the field it was opened from. The
-        // store endpoint is an upsert, and this dialog sends no grant, so typing
-        // an existing name here used to replace that secret's value — and, on a
-        // backend before the vault-key-safety fix, open it to every agent.
+        // store endpoint is an upsert, so typing an existing name here used to
+        // replace that secret's value — and, on a backend before the
+        // vault-key-safety fix, open it to every agent.
         createOnly: true,
       },
       {
@@ -1291,6 +1298,7 @@ export function SecretKeyPicker({
       {/* Create secret modal */}
       {showCreateDialog && (
         <CreateSecretModal
+          agentId={agentId}
           onClose={() => {
             setShowCreateDialog(false);
             // "Create new secret" is the fourth way out of the popup, and it

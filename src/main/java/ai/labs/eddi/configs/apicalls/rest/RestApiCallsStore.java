@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.apicalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.apicalls.ApiCallsConfigurationValidator;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
@@ -20,6 +21,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.engine.mcp.OpenApiSpecFetcher;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -55,6 +57,12 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Fetches the spec at a discovery request's specUrl under the deployment's
+    // eddi.security.ssrf-protection.enabled setting (every redirect hop checked,
+    // body capped). Null outside CDI, where the protection-off fetcher is used.
+    @Inject
+    OpenApiSpecFetcher specFetcher;
 
     // Field-injected so the direct constructions in tests keep compiling; null
     // there, which skips the check.
@@ -138,6 +146,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private Response validateBatchLimits(ApiCallsConfiguration configuration) {
         if (configuration == null || configuration.getHttpCalls() == null) {
             return null;
+        }
+        String problem = ApiCallsConfigurationValidator.firstProblem(configuration);
+        if (problem != null) {
+            return badRequest(problem);
         }
         for (ApiCall call : configuration.getHttpCalls()) {
             HttpPreRequest preRequest = call != null ? call.getPreRequest() : null;
@@ -264,7 +276,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef, null,
+                    specFetcher != null ? specFetcher : OpenApiSpecFetcher.permissive());
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();

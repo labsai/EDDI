@@ -1,0 +1,8 @@
+# Mounts a local build over the image's /deployments (loadtest.py adds this file unless --no-app).
+# Read-only, plus the writable scratch directory export/import uses.
+services:
+  eddi:
+    volumes:
+      - "${EDDI_APP:?EDDI_APP must point at a target/quarkus-app directory}:/deployments:ro"
+    tmpfs:
+      - "/deployments/tmp:mode=1777"

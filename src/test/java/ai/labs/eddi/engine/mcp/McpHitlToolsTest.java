@@ -67,6 +67,8 @@ class McpHitlToolsTest {
         conversationService = mock(IConversationService.class);
         groupConversationService = mock(IGroupConversationService.class);
         guard = mock(HitlAccessGuard.class);
+        // The caller owns the conversations it cancels unless a test says otherwise.
+        when(guard.mayCancelExecuting(any())).thenReturn(true);
         ownershipValidator = mock(OwnershipValidator.class);
         json = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);

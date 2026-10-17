@@ -610,7 +610,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveRequired(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
+        return credentialReferenceResolver.resolveVaultBacked(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
     }
 
     private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,

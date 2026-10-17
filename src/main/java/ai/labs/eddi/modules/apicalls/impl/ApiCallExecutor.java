@@ -30,6 +30,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -46,6 +47,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -173,6 +175,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final RequestRedactor requestRedactor;
+
+    /**
+     * Enforces a secret's {@code allowedHosts} against the call's target once every
+     * reference in the request is known. Field-injected to keep the constructor
+     * signature, which another change owns; null only in tests that construct the
+     * executor directly, where there is no vault to consult.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -281,6 +292,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // what survives a cap. See the ordered "headers" insert below.
                 Map<String, Object> result = new LinkedHashMap<>();
 
+                // saveResponse without a responseObjectName stored the body under a null
+                // key, which the memory serializer refuses — so EVERY turn running the
+                // call failed. The store refuses that config at save time now; one stored
+                // before the check skips the save and says so, instead of failing the turn.
+                boolean saveResponse = Boolean.TRUE.equals(call.getSaveResponse());
+                if (saveResponse && (call.getResponseObjectName() == null || call.getResponseObjectName().isBlank())) {
+                    LOGGER.warnf("ApiCall (%s) has saveResponse=true but no responseObjectName; its response is not stored", call.getName());
+                    saveResponse = false;
+                }
+
                 do {
                     // Final attempt wins, entirely: a retried failure populated
                     // "body"/"httpCode" on its pass through the loop, and a
@@ -370,7 +391,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
-                        if (call.getSaveResponse()) {
+                        if (saveResponse) {
                             String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
                                 prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
@@ -391,7 +412,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // NOT put into `result` here — see the ordered insert below.
                     }
 
-                    if (isResponseSuccessful && call.getSaveResponse()) {
+                    if (isResponseSuccessful && saveResponse) {
                         // Success bodies land in conversation memory, which is persisted as a
                         // single document — cap them just like the error bodies above.
                         // A response echoing a credential this request sent must not carry it
@@ -992,6 +1013,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
      */
+    /**
+     * The plaintexts substituted into one request (the set every redaction reads)
+     * plus the references they came from, which the destination check needs after
+     * the target URL is known.
+     */
+    static final class ResolvedSecrets extends HashSet<String> {
+        private final Set<String> vaultReferences = new LinkedHashSet<>();
+
+        Set<String> vaultReferences() {
+            return vaultReferences;
+        }
+    }
+
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
@@ -1012,7 +1046,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException {
-        var resolvedSecrets = new HashSet<String>();
+        var resolvedSecrets = new ResolvedSecrets();
         try {
             BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
             if (ApprovedCallScope.isActive()) {
@@ -1150,7 +1184,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
-                                      Map<String, Property> conversationProperties, Set<String> resolvedSecrets)
+                                      Map<String, Property> conversationProperties, ResolvedSecrets resolvedSecrets)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -1348,6 +1382,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
         }
+        // Last, with every reference the request carries collected and the target
+        // fully resolved: a secret whose allowedHosts does not name this host is
+        // refused here, before anything is sent.
+        if (vaultHostAllowlist != null) {
+            vaultHostAllowlist.requireAllowed(resolvedSecrets.vaultReferences(), targetUri.toString(), "API call '" + call.getName() + "'");
+        }
         return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders), Set.copyOf(resolvedSecrets));
     }
 
@@ -1434,7 +1474,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * @param location
      *            human-readable field name for the error, e.g. "a request body"
      */
-    private String resolveSecrets(String value, Set<String> resolvedSecrets, String location) {
+    private String resolveSecrets(String value, ResolvedSecrets resolvedSecrets, String location) {
         if (value == null) {
             return null;
         }
@@ -1443,6 +1483,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         String unresolved = null;
         while (references.find()) {
             String reference = references.group();
+            resolvedSecrets.vaultReferences().add(reference);
             String plaintext = secretResolver.resolveValue(reference);
             if (plaintext == null || plaintext.equals(reference)) {
                 unresolved = reference;

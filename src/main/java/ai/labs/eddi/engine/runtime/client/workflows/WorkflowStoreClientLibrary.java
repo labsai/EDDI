@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.client.workflows;
 
+import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -71,6 +72,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
 
         final var workflowId = extractResourceId(documentDescriptor.getResource());
         final var lifecycleManager = new LifecycleManager(componentCache, workflowId);
+        boolean secretInstructions = false;
 
         try {
             List<WorkflowConfiguration.WorkflowStep> workflowSteps = workflowConfiguration.getWorkflowSteps();
@@ -107,6 +109,9 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                 var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
                 var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
 
+                if (component instanceof PropertySetterConfiguration propertySetter && propertySetter.hasSecretInstructions()) {
+                    secretInstructions = true;
+                }
                 if (component != null) {
                     if (lifecycleTask.getId() == null) {
                         throw new WorkflowInitializationException(
@@ -121,6 +126,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
             throw new WorkflowInitializationException(e.getMessage(), e);
         }
 
+        final boolean hasSecretInstructions = secretInstructions;
         return new IExecutableWorkflow() {
             @Override
             public String getName() {
@@ -140,6 +146,11 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
             @Override
             public ILifecycleManager getLifecycleManager() {
                 return lifecycleManager;
+            }
+
+            @Override
+            public boolean hasSecretPropertyInstructions() {
+                return hasSecretInstructions;
             }
         };
     }

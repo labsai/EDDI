@@ -83,7 +83,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
 `Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
-`RAG Ingestion` ·
+`RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)`
 
 ---
@@ -560,6 +560,19 @@ eddi_attachment_reinlined_total             # Extracted text stitched back into 
 eddi_attachment_errors_total                # Drops, cap-skips and capability gates
 eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
+
+### Outbound HTTP Metrics
+
+Requests through the outbound HTTP facade. So far its only traffic comes from the `SafeHttpClient` adapter (profile `default`), that is, from that adapter's callers: the built-in tools, the RAG crawler, OAuth token requests and attachment downloads. `httpcalls`, LLM providers, A2A, Slack and remote sync use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
+
+```text
+eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)
+eddi_http_outbound_duration_seconds         # Exchange time, to the end of a buffered body or the headers of a streamed one; tags: profile, outcome
+eddi_http_outbound_blocked_total            # Refused by policy; tags: profile, reason (ssrf|cap|redirect)
+eddi_http_outbound_bytes_total              # Response body bytes read into memory or a file; tag: profile
+```
+
+Target hosts are never a tag: most targets are chosen by a user or a model, and a tag per URL would be unbounded. A rising `reason="ssrf"` rate means something keeps steering tools at internal addresses.
 
 ### HITL Metrics
 

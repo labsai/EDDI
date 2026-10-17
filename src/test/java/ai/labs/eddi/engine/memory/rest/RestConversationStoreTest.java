@@ -49,6 +49,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.utils.PageBounds;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1370,16 +1371,12 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should clamp negative index to 0")
+        @DisplayName("L10: a negative index is refused with 400, not normalised to 0")
         void negativeIndex() throws Exception {
-            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
-                    .thenReturn(List.of());
+            assertThrows(BadRequestException.class, () -> restConversationStore.readConversationDescriptors(
+                    -5, 10, null, null, null, null, null, null));
 
-            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
-                    -5, 10, null, null, null, null, null, null);
-
-            assertNotNull(result);
-            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(10), anyBoolean(), any());
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any());
         }
 
         @Test
@@ -1395,15 +1392,24 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should clamp limit > 100 to 100")
+        @DisplayName("L10: a limit above the deployment-wide page ceiling is refused with 400, not clamped")
         void excessiveLimit() throws Exception {
+            assertThrows(BadRequestException.class, () -> restConversationStore.readConversationDescriptors(
+                    0, PageBounds.maxLimit() + 1, null, null, null, null, null, null));
+
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("L10: a limit at the ceiling passes through unclamped")
+        void limitAtTheCeiling() throws Exception {
             when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
                     .thenReturn(List.of());
 
             restConversationStore.readConversationDescriptors(
-                    0, 500, null, null, null, null, null, null);
+                    0, PageBounds.maxLimit(), null, null, null, null, null, null);
 
-            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(100), anyBoolean(), any());
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(PageBounds.maxLimit()), anyBoolean(), any());
         }
 
         @Test
