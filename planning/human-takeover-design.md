@@ -35,7 +35,7 @@
 | User input while in control | Stored as an input-only step, no pipeline, answered at once; system callers (schedules, group members, sub-agent tools) are **refused**, not parked. |
 | Operator message | A new output-only step per message, item marked `origin: "operator"`; the operator's principal goes to non-public step data and the audit ledger, never into the user-visible output. |
 | Serialization | Every takeover write is a coordinator task (`submitInOrder`), so in cluster mode it runs under the conversation lease with its fencing token. The lease is never held for the duration of a takeover. |
-| Audit | `operator.takeover` / `operator.message` / `operator.release` entries (`OPERATOR_TAKEOVER`/`MESSAGE`/`RELEASE` in `detail.event`), actor set server-side exactly as `hitl.approval`'s `decidedBy`; message text as digest + length only. |
+| Audit | `operator.takeover` / `operator.message` / `operator.release` entries (`OPERATOR_TAKEOVER`/`MESSAGE`/`RELEASE` in `detail.event`), actor set server-side exactly as `hitl.approval`'s `decidedBy`; message text as digest + length only; state committed first, the entry journaled in the same document write and reconciled if the async ledger lost it (§7.1). |
 | History after release | Operator turns become `AiMessage`s, **annotated** by default (configurable prefix), consecutive same-role messages merged so roles alternate. |
 | RBAC | New role (working name `eddi-takeover`), endpoints enumerate `{"eddi-admin", "eddi-takeover"}`. The conversation **owner is never admitted** (unlike HITL). Approver role not reused. |
 | Ship first | Property patch on a HITL `/resume` decision (§10) — independent, small, audited. |
@@ -80,7 +80,7 @@ classes reference it. The pattern that decides the risk of a new value:
 | `RestAgentEngine.cancelConversation` → `ConversationHitlService` cancel CAS (`AWAITING_HUMAN → EXECUTION_INTERRUPTED`) | Cancels a pause or running turn | 409 for `HUMAN_CONTROL` (nothing is running; use release or end). |
 | `RestAgentEngine` say `onSkipped` / `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` | 409 text / SSE `error` with `code: awaiting_approval` | New `code: human_control` for refused system calls; the parked path is a normal answer (§6.1). |
 | `ConversationHitlService` (resume CAS `AWAITING_HUMAN → IN_PROGRESS`, cancel, pending list) | HITL only | Unchanged; takeover is a sibling service (`ConversationTakeoverService`), not more branches in this 1,300-line class. |
-| `HitlCrashRecoveryObserver` (reaps `IN_PROGRESS` at startup) | Crash recovery | No change: `HUMAN_CONTROL` is durable, not a crashed turn. Each takeover write is one atomic store write, so there is nothing to recover. |
+| `HitlCrashRecoveryObserver` (reaps `IN_PROGRESS` at startup) | Crash recovery | No change for *state*: `HUMAN_CONTROL` is durable, not a crashed turn, and each takeover write is one atomic store write. Audit completeness is a separate concern: the ledger write is asynchronous and a crash can lose it after the state committed — see §7.1 (journal + reconciliation). |
 | `HitlTimeoutHandler.regularPauseStillWaiting` | Timeout fires only while paused | Template for the takeover timers (§5.5), not a change. |
 | `ScheduleFireExecutor` (`ROLLOVER_STATES` allow-list; `ConversationAwaitingApprovalException` → `SKIPPED`) | Paused heartbeats are skipped, not failed | **Must** map the new refusal to `SKIPPED` the same way — otherwise a persistent heartbeat on a desk conversation dead-letters (the regression `SKIPPED` was introduced to prevent). |
 | `RestConversationStore` delete / soft-delete / bulk end (`== AWAITING_HUMAN` → `endConversation`) | HITL cleanup before delete | Route `HUMAN_CONTROL` through `endConversation` too, so release is audited before the document goes. |
@@ -142,7 +142,9 @@ Reusing `AWAITING_HUMAN` (with a `pauseType: TAKEOVER`) looks cheaper and is not
    "refuse the user's message without consuming it". Takeover must *accept and store* it.
    Reuse means adding a pause-type sub-branch to each of those ~20 sites; a missed one
    drops customer messages silently. A new value makes every deny-list site visible in a
-   review, and every Java `switch` without `default` a compile error.
+   review. Only `switch` *expressions* without `default` become compile errors; a `switch`
+   *statement* over the enum silently skips the new value, so statements stay in the
+   inventory and get explicit tests like any `if`.
 2. **Resolution semantics are opposite.** A pause resolves by **re-entering the pipeline**
    at a bookmark (`Conversation.resume`, `hitlPausedAbsoluteTaskIndex`); takeover resolves
    by **returning to idle** with no pipeline run. The resume CAS
@@ -289,7 +291,8 @@ open Q6.
 ### 5.3 Operator messages
 
 Coordinator task: verify state + `controlId` + assignee (or admin), dedupe
-`clientMessageId` within the last N steps, append the operator step, reset
+`clientMessageId` (recorded in the current `controlId`'s journal, §7.1, so a retry after a
+restart or a long delay is still recognised — not only within the last N steps), append the operator step, reset
 `pendingUserMessages`, fire `OperatorMessageEvent` (§12), write `operator.message` audit.
 
 ### 5.4 Release
@@ -343,11 +346,51 @@ Written through `AuditLedgerService.submit` exactly like `ConversationHitlServic
   (`decision.setDecidedBy(userId)` — any body value is ignored), `slack:<userId>` from
   Slack, `system:*` for timers/group/admin-delete. Request bodies have no actor field.
 - **Message text is not copied into the ledger** — digest + length only. The text lives in
-  conversation memory, which GDPR erasure can reach; the immutable ledger proves *who said
-  what, when* via the digest without becoming a second, unerasable copy of customer
-  dialogue.
+  conversation memory, which GDPR erasure can reach. The ledger records the actor, the
+  event, the time and a content commitment (the digest); it does **not** preserve what was
+  said. While the conversation exists, the digest proves the stored text is the text that
+  was sent; once the conversation is erased the message is gone, and the ledger shows only
+  that an attributed message of that length existed. That is the intended trade-off — the
+  immutable ledger must not become a second, unerasable copy of customer dialogue. A
+  deployment that must retain message text has to keep it elsewhere under its own
+  retention policy (open Q10).
 - `origin: ACTION/TOOL` entries carry `actor: agent:<agentId>`; the turn's own task
   entries already show which rule or tool requested it.
+
+### 7.1 Ordering and recovery: the audit write is not atomic with the state write
+
+[`AuditLedgerService`](../src/main/java/ai/labs/eddi/engine/audit/AuditLedgerService.java)
+is an asynchronous batch writer: `submit` scrubs, sequences, hashes and signs the entry and
+queues it in memory; a scheduled flush (`eddi.audit.flush-interval-seconds`, default 3 s)
+persists it, and a failed store write dead-letters to `eddi.audit.dead-letter-path`. No
+transaction spans the conversation store and the audit store, and there is no outbox. A
+process death after a takeover write committed and before the next flush therefore loses
+the `operator.*` entry while the message or release stands. HITL has the same window today
+(`auditHitlDecision` runs after the resume CAS commits), but an operator message is
+customer-visible output with no pipeline task entry to corroborate it, so this design
+closes the window rather than inheriting it:
+
+1. **State first, then audit.** The ledger never records a write that did not commit. A
+   takeover write that fails (CAS lost, fenced, store error) submits nothing.
+2. **The conversation write carries its own audit record — the document is the outbox.**
+   Each takeover write appends `{auditId, event, actor, at, controlId, textSha256?,
+   length?}` to `humanControl.journal` in the *same* atomic store write as the state change
+   or operator step. `auditId` is deterministic (`<conversationId>:<controlId>:<seq>`), not
+   a fresh UUID.
+3. **Then submit** the ledger entry under that `auditId`, best-effort as today.
+4. **Reconcile.** A reconciler (a cluster-leader job like the other sweeps, plus once at
+   startup) finds journal records older than flush interval + margin, looks each `auditId`
+   up in the ledger and submits only the missing ones (flagged `reconciled: true`, original
+   `at` kept). It must look before it submits: the ledger is hash-chained per conversation
+   and `/auditstore/verify` grades a duplicate as broken, so blind replay is not
+   idempotent. Records found in the ledger are pruned. The journal is bounded: a release
+   cannot complete while more than N records are unreconciled — it reconciles first.
+5. **Ending or erasing** a conversation reconciles its journal before the document goes
+   (`endConversation`, delete, GDPR erasure), so the last records are not lost with it.
+
+Tests: a ledger stub that drops its queue simulates a kill between commit and flush; the
+reconciler then restores exactly the missing entries, `/auditstore/verify` stays clean, and
+a second pass submits nothing.
 
 ---
 
@@ -403,6 +446,11 @@ and HITL owner-or-admin-or-approver (`HitlAccessGuard`, `OwnershipValidator.isAp
   never `longTerm` user memory wholesale, never `secret` scope. Outside that, 403.
 - Assignment: only the assignee (or an admin) may message/release; `force` reassign is
   admin-only and audited with `previousAssignee`.
+- **Blast radius.** As specified, any takeover-role identity can claim any `HUMAN_CONTROL`
+  conversation on any agent. A deployment serving several customers needs narrower desks:
+  an optional `takeoverConfig.desks` list (role or group names) restricts which
+  takeover-role callers may see and claim that agent's conversations; absent ⇒ any
+  takeover-role caller. Whether v1 needs it is open Q11.
 - Authorization disabled (dev): `OwnershipValidator.isAdmin` already returns true —
   everything works, as for HITL.
 - Name: `eddi-operator` was rejected because the Manager's "Operator" is the Platform
@@ -468,6 +516,9 @@ consumes the pause):
 8. **Ship §10 first** as its own PR (recommended)?
 9. **Outbound events:** is pull (inbox + status polling) plus Slack push enough for v1, or
    should the signed outbound webhook (§12) be in scope?
+10. **Message retention:** is "erased with the conversation; the ledger keeps a digest"
+    (§7) acceptable, or must some deployments retain operator message text separately?
+11. **Desks:** is per-agent desk scoping (§9, blast radius) needed in v1?
 
 ---
 
@@ -500,7 +551,15 @@ consumes the pause):
 - **Outbound helpdesk webhook (phase 5, optional):** a channel-integration type that
   subscribes to the four events and POSTs CloudEvents signed with the same HMAC scheme WS5
   verifies inbound. A helpdesk then replies through `…/takeover/messages`. Kept out of v1
-  so the API settles first.
+  so the API settles first. Transport requirements are fixed now so the phase cannot skip
+  them: delivery only through `SafeHttpClient` (destination validated by
+  `UrlValidationUtils`; the JDK's certificate and hostname verification, never
+  overridden); `https` only, `http` refused at save time unless an explicit development
+  flag is set; **redirects refused** for signed deliveries (a 3xx is a failed delivery and
+  is not followed, so the signature and body never reach a second host); a per-delivery id
+  and timestamp inside the signed payload for receiver-side replay protection; bounded
+  retries with backoff, then a dead letter. The webhook is fed from the store-backed journal
+  (§7.1), not from the best-effort CDI events, so a missed event is redelivered, not lost.
 - **Manager (phase 4):** the Approvals page becomes an inbox with *Approvals* and
   *Handoffs* tabs (same "limit reached" banner behaviour); conversation detail gets
   *Take over*, a composer, *Release* with the property-patch form (shared with §10's
