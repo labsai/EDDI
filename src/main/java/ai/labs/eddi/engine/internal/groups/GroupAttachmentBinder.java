@@ -74,7 +74,11 @@ public class GroupAttachmentBinder {
      * @throws AttachmentQuotaExceededException
      *             when an inline file would exceed a per-conversation or per-user
      *             quota. Blobs this call had already stored are removed first, so a
-     *             refused request leaves nothing behind
+     *             refused request leaves nothing behind. Should one of those
+     *             deletes fail, the blob stays owned by {@code gc} — which the
+     *             caller marks FAILED and keeps, so the discussion's delete and the
+     *             user's erasure both still reach it — and the leftover is logged
+     *             at ERROR
      */
     public void materializeAttachments(GroupConversation gc, List<Attachment> incoming, String trustedSourceConversationId)
             throws AttachmentQuotaExceededException {
@@ -106,9 +110,15 @@ public class GroupAttachmentBinder {
                     materialized.add(a);
                 }
             } catch (AttachmentQuotaExceededException e) {
-                rollBack(storedByThisCall, gc.getId());
+                List<String> leftBehind = rollBack(storedByThisCall, gc.getId());
                 LOGGER.warnf("Group attachment '%s' refused for group conversation '%s': the %s quota is exhausted",
                         sanitize(a.getFileName()), gc.getId(), e.getScope());
+                if (!leftBehind.isEmpty()) {
+                    LOGGER.errorf("Group conversation '%s' was refused but %d of its stored attachment(s) could not be removed "
+                            + "and still count against the user's quota: %s. The failed discussion keeps them reachable; "
+                            + "deleting it (or erasing the user) removes them.", gc.getId(), leftBehind.size(),
+                            sanitize(String.join(", ", leftBehind)));
+                }
                 throw e;
             } catch (Exception e) {
                 LOGGER.warnf("Failed to materialize group attachment '%s': %s", sanitize(a.getFileName()),
@@ -147,15 +157,26 @@ public class GroupAttachmentBinder {
         }
     }
 
-    private void rollBack(List<String> storageRefs, String ownerConversationId) {
+    /**
+     * Removes what this request stored before it was refused.
+     *
+     * @return the references that are still there — a delete that returned false or
+     *         threw
+     */
+    private List<String> rollBack(List<String> storageRefs, String ownerConversationId) {
+        List<String> leftBehind = new ArrayList<>();
         for (String ref : storageRefs) {
             try {
-                attachmentStore.delete(ref, ownerConversationId);
+                if (!attachmentStore.delete(ref, ownerConversationId)) {
+                    leftBehind.add(ref);
+                }
             } catch (Exception e) {
+                leftBehind.add(ref);
                 LOGGER.warnf("Could not remove attachment '%s' of refused group request '%s': %s", sanitize(ref),
                         ownerConversationId, sanitize(e.getMessage()));
             }
         }
+        return leftBehind;
     }
 
     /**

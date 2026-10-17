@@ -126,7 +126,7 @@ class GdprGroupDataTest {
     }
 
     @Test
-    void erasure_groupListingFails_isReportedAndTheRestOfTheCascadeRuns() throws Exception {
+    void erasure_groupListingFails_keepsTheDiscussionsForRetry_andTheRestOfTheCascadeRuns() throws Exception {
         when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
         when(groupConversationStore.listAllForUser(eq(USER_ID), anyInt(), anyInt()))
                 .thenThrow(new IResourceStore.ResourceStoreException("down"));
@@ -134,7 +134,41 @@ class GdprGroupDataTest {
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
         assertTrue(result.failedSteps().contains("groupConversationAttachments"));
+        // The documents are the only record of the ids the blobs are stored under:
+        // deleting them now would leave the retry this result asks for unable to
+        // reach the blobs (the same rule 4c applies to snapshots on a vault failure).
+        assertTrue(result.failedSteps().contains("groupConversations"), () -> "failed steps: " + result.failedSteps());
+        verify(groupConversationStore, never()).deleteAllForUser(USER_ID);
         verify(attachmentStore).deleteByConversation("conv-1");
+        verify(sharedArtifactStore).deleteAllForUser(USER_ID);
+    }
+
+    @Test
+    void erasure_groupBlobDeleteFails_keepsTheDiscussionsForRetry() throws Exception {
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        groupConversations(discussion("gc-1", "member-1"));
+        when(attachmentStore.deleteByConversation("member-1")).thenThrow(new RuntimeException("down"));
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        assertTrue(result.failedSteps().contains("attachments"));
+        assertTrue(result.failedSteps().contains("groupConversations"), () -> "failed steps: " + result.failedSteps());
+        verify(groupConversationStore, never()).deleteAllForUser(USER_ID);
+        verify(attachmentStore).deleteByConversation("gc-1");
+    }
+
+    @Test
+    void erasure_oneToOneBlobDeleteFails_stillDeletesTheDiscussions() throws Exception {
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+        groupConversations(discussion("gc-1", "member-1"));
+        when(attachmentStore.deleteByConversation("conv-1")).thenThrow(new RuntimeException("down"));
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // A 1:1 conversation's id is not recorded by a group document, so a failure
+        // under it is no reason to keep the discussions.
+        assertTrue(result.failedSteps().contains("attachments"));
+        assertFalse(result.failedSteps().contains("groupConversations"), () -> "failed steps: " + result.failedSteps());
         verify(groupConversationStore).deleteAllForUser(USER_ID);
     }
 
@@ -212,6 +246,10 @@ class GdprGroupDataTest {
         assertEquals(GdprComplianceService.SHARED_ARTIFACT_EXPORT_LIMIT, export.sharedArtifacts().size());
         assertTrue(export.sharedArtifactsTruncated());
         assertFalse(export.complete());
+        // The store loads every row of a page in full, so an export asks for one row
+        // past its cap rather than the storage maximum (erasure, uncapped, pages at
+        // MAX_RESULT_LIMIT — see erasure_pagesThroughEveryDiscussion).
+        verify(groupConversationStore).listAllForUser(USER_ID, 0, GdprComplianceService.GROUP_CONVERSATION_EXPORT_LIMIT + 1);
     }
 
     @Test

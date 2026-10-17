@@ -528,14 +528,23 @@ public class GdprComplianceService {
         // returns. Resolved now, while the documents that name them still exist (step
         // 5c deletes them), and erased with the conversations' own blobs in step 2.
         Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
+        // The ids only the group documents record. If listing them fails, or a blob
+        // delete under one of them fails, step 5c keeps the documents (as 4c keeps
+        // the snapshots on an incomplete vault sweep): deleting the one record of an
+        // owner id would leave the retry this result asks for unable to reach the
+        // blobs.
+        Set<String> groupBlobOwnerIds = new LinkedHashSet<>();
+        boolean groupBlobCleanupIncomplete = false;
         try {
             for (GroupConversation gc : groupConversationsOf(userId, Integer.MAX_VALUE).owned()) {
-                blobOwnerIds.add(gc.getId());
+                groupBlobOwnerIds.add(gc.getId());
                 if (gc.getMemberConversationIds() != null) {
-                    blobOwnerIds.addAll(gc.getMemberConversationIds().values());
+                    groupBlobOwnerIds.addAll(gc.getMemberConversationIds().values());
                 }
             }
+            blobOwnerIds.addAll(groupBlobOwnerIds);
         } catch (Exception e) {
+            groupBlobCleanupIncomplete = true;
             recordFailure(failedSteps, "groupConversationAttachments", e, pseudonym);
         }
 
@@ -552,6 +561,9 @@ public class GdprComplianceService {
                     try {
                         attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
                     } catch (Exception e) {
+                        if (groupBlobOwnerIds.contains(convId)) {
+                            groupBlobCleanupIncomplete = true;
+                        }
                         recordFailure(failedSteps, "attachments", e, pseudonym);
                     }
                 }
@@ -561,6 +573,9 @@ public class GdprComplianceService {
                 }
             }
         } catch (Exception e) {
+            if (!groupBlobOwnerIds.isEmpty()) {
+                groupBlobCleanupIncomplete = true;
+            }
             recordFailure(failedSteps, "attachments", e, pseudonym);
         }
 
@@ -721,18 +736,25 @@ public class GdprComplianceService {
         }
 
         // 5c. Delete group conversation transcripts. A GroupConversation stores the
-        // user's id next to the verbatim discussion transcript.
+        // user's id next to the verbatim discussion transcript — unless step 1c/2
+        // left group blobs behind: the documents are the only record of the ids those
+        // blobs are stored under, so they stay until a retry has erased the blobs.
         long groupConversationsDeleted = 0;
-        try {
-            if (groupConversationStoreInstance.isResolvable()) {
-                groupConversationsDeleted = groupConversationStoreInstance.get().deleteAllForUser(userId);
-                if (groupConversationsDeleted > 0) {
-                    LOGGER.infof("[GDPR] Deleted %d group conversations [%s]",
-                            groupConversationsDeleted, pseudonym);
+        if (groupBlobCleanupIncomplete) {
+            recordFailure(failedSteps, "groupConversations",
+                    new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else {
+            try {
+                if (groupConversationStoreInstance.isResolvable()) {
+                    groupConversationsDeleted = groupConversationStoreInstance.get().deleteAllForUser(userId);
+                    if (groupConversationsDeleted > 0) {
+                        LOGGER.infof("[GDPR] Deleted %d group conversations [%s]",
+                                groupConversationsDeleted, pseudonym);
+                    }
                 }
+            } catch (Exception e) {
+                recordFailure(failedSteps, "groupConversations", e, pseudonym);
             }
-        } catch (Exception e) {
-            recordFailure(failedSteps, "groupConversations", e, pseudonym);
         }
 
         // 5c2. Delete shared artifacts (I17). Artifacts carry ownerUserId (the
@@ -1300,7 +1322,11 @@ public class GdprComplianceService {
         }
         var store = groupConversationStoreInstance.get();
         List<GroupConversation> owned = new ArrayList<>();
-        int pageSize = IResourceStorage.MAX_RESULT_LIMIT;
+        // The store reads every row of a page in full before it returns, so an export
+        // (cap 1,000) asks for one row past its cap — enough to tell "exactly the cap"
+        // from "more" — rather than the storage maximum. Erasure (no cap) keeps the
+        // full page.
+        int pageSize = cap >= IResourceStorage.MAX_RESULT_LIMIT ? IResourceStorage.MAX_RESULT_LIMIT : cap + 1;
         int skip = 0;
         for (int pass = 0; pass < MAX_GROUP_LISTING_PASSES; pass++) {
             var page = store.listAllForUser(userId, skip, pageSize);

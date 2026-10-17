@@ -95,13 +95,18 @@ principal, not a user: erasing or exporting it is refused with 400.
    includes the files shared in the user's group discussions (stored under the group
    conversation's id) and the blobs of every member conversation those discussions
    created; the discussions are looked up before step 8 deletes them. A failed lookup
-   is reported as `groupConversationAttachments`
+   is reported as `groupConversationAttachments` — and then, as when a blob delete
+   under one of those ids fails, step 8 **keeps** the discussion documents (reported
+   as `groupConversations`, "kept until their attachments are erased"): they are the
+   only record of the ids the blobs are stored under, so deleting them would leave a
+   re-run unable to reach the blobs. Re-run the erasure once the store is back
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
 6. Conversation snapshots — **permanently deleted**
 7. Managed conversation mappings — **permanently deleted** (and evicted from their cache)
-8. Group conversation transcripts — **permanently deleted**
+8. Group conversation transcripts — **permanently deleted** (kept for a re-run when
+   step 2 could not finish with their blobs, see there)
 9. Shared artifacts owned by the user — **permanently deleted**
 10. Schedules owned by the user — **permanently deleted**
 11. Pending OAuth authorization flows the user started are invalidated first (a

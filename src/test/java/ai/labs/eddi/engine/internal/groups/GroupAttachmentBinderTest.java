@@ -100,6 +100,31 @@ class GroupAttachmentBinderTest {
     }
 
     @Test
+    void materialize_quotaExceeded_rollbackFails_stillRefusesAndBindsNothing() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        when(store.store(any(), any(), eq("first.png"), any(), any(), any()))
+                .thenReturn(new IAttachmentStore.Attachment("ref-1", "first.png", "image/png", 3, "gc-1"));
+        when(store.store(any(), any(), eq("second.png"), any(), any(), any()))
+                .thenThrow(new IAttachmentStore.AttachmentQuotaExceededException(
+                        IAttachmentStore.AttachmentQuotaExceededException.SCOPE_USER, "user quota"));
+        when(store.delete("ref-1", "gc-1")).thenThrow(new IAttachmentStore.AttachmentStoreException("store down"));
+        var gc = gc("gc-1");
+        gc.setUserId("alice");
+
+        // The refusal stands and nothing is bound; the leftover blob stays owned by
+        // the discussion (which the service marks FAILED and keeps), so its delete
+        // and the user's erasure still reach it. A rollback failure must not turn
+        // into a swallowed quota error that lets the discussion run.
+        var thrown = assertThrows(IAttachmentStore.AttachmentQuotaExceededException.class,
+                () -> binder.materializeAttachments(gc, List.of(inline("first.png"), inline("second.png"))));
+
+        assertEquals(IAttachmentStore.AttachmentQuotaExceededException.SCOPE_USER, thrown.getScope());
+        verify(store).delete("ref-1", "gc-1");
+        assertNull(gc.getAttachments());
+    }
+
+    @Test
     void materialize_clientSuppliedStorageRef_isRefused() throws Exception {
         var store = mock(IAttachmentStore.class);
         var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
