@@ -53,6 +53,8 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
 import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.configs.shared.TurnDeadline;
@@ -166,6 +168,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.conversations.max-input-chars", defaultValue = "200000")
     int maxInputChars;
+
+    /**
+     * Bounds for {@code context} entries of type {@code expressions}, applied with
+     * {@link #maxInputChars} on the same entry points. Field-injected for the same
+     * reason as {@link #attachmentStore}; a directly constructed instance falls
+     * back to {@link ExpressionLimits#defaults()}.
+     */
+    @Inject
+    ExpressionLimits expressionLimits;
 
     /**
      * Conversation-ownership gate for the conversationId-only entry points — the
@@ -1557,12 +1568,41 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Override
     public void requireInputWithinLimit(InputData inputData) {
-        if (maxInputChars <= 0 || inputData == null || inputData.getInput() == null) {
+        if (inputData == null) {
             return;
         }
-        int length = inputData.getInput().length();
-        if (length > maxInputChars) {
-            throw new InputTooLargeException(length, maxInputChars);
+        if (maxInputChars > 0 && inputData.getInput() != null) {
+            int length = inputData.getInput().length();
+            if (length > maxInputChars) {
+                throw new InputTooLargeException(length, maxInputChars);
+            }
+        }
+        requireExpressionContextWithinLimits(inputData.getContext());
+    }
+
+    /**
+     * A {@code context} entry of type {@code expressions} is parsed by the
+     * property-setter and by every behavior rule with a {@code contextmatcher}, so
+     * its length and nesting are bounded like the input text — here, before a turn
+     * is paid for, with the same refusal a too-long input gets. The parser enforces
+     * the same {@link ExpressionLimits} again, so a surface that skips this check
+     * only moves the failure into the turn.
+     */
+    private void requireExpressionContextWithinLimits(Map<String, Context> context) {
+        if (context == null || context.isEmpty()) {
+            return;
+        }
+        ExpressionLimits limits = expressionLimits != null ? expressionLimits : ExpressionLimits.defaults();
+        for (var entry : context.entrySet()) {
+            Context value = entry.getValue();
+            if (value == null || value.getType() != Context.ContextType.expressions || value.getValue() == null) {
+                continue;
+            }
+            try {
+                limits.check(value.getValue().toString());
+            } catch (ExpressionLimitExceededException e) {
+                throw new InputTooLargeException("Context '" + entry.getKey() + "': " + e.getMessage(), e.getMeasured(), e.getLimit());
+            }
         }
     }
 

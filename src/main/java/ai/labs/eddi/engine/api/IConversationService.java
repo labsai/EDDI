@@ -430,8 +430,18 @@ public interface IConversationService {
         private final int limit;
 
         public InputTooLargeException(int length, int limit) {
-            super("Input is " + length + " characters long; this deployment accepts at most " + limit
-                    + " per turn (eddi.conversations.max-input-chars).");
+            this("Input is " + length + " characters long; this deployment accepts at most " + limit
+                    + " per turn (eddi.conversations.max-input-chars).", length, limit);
+        }
+
+        /**
+         * A bound other than the text length — a {@code context} entry of type
+         * {@code expressions} that is longer or nests deeper than
+         * {@code eddi.expressions.max-length} / {@code eddi.expressions.max-depth}
+         * allows. Same refusal, same status, with the message naming the bound.
+         */
+        public InputTooLargeException(String message, int length, int limit) {
+            super(message);
             this.length = length;
             this.limit = limit;
         }

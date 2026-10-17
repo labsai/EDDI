@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.apicalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.apicalls.ApiCallsConfigurationValidator;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
@@ -145,6 +146,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private Response validateBatchLimits(ApiCallsConfiguration configuration) {
         if (configuration == null || configuration.getHttpCalls() == null) {
             return null;
+        }
+        String problem = ApiCallsConfigurationValidator.firstProblem(configuration);
+        if (problem != null) {
+            return badRequest(problem);
         }
         for (ApiCall call : configuration.getHttpCalls()) {
             HttpPreRequest preRequest = call != null ? call.getPreRequest() : null;
