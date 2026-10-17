@@ -929,20 +929,27 @@ def cmd_gate(args):
     def room(op):
         return headroom.get(op, headroom.get("default", 0.3))
 
-    def check(label, op, got, ceiling):
+    recorded = spec.get("measured", {})
+
+    def check(label, op, got, ceiling, baseline):
+        # The hint compares with what was measured when the ceiling was recorded, not with the
+        # ceiling: the headroom is deliberate and differs per counter.
+        if baseline is None:
+            baseline = ceiling - room(op)
         verdict = "ok"
         if got > ceiling:
             verdict = "**over**"
             failures.append(f"{label}: {got:g} per turn > ceiling {ceiling:g}")
-        elif ceiling - got > room(op) + spec.get("lower_hint", 1.0):
+        elif baseline - got > spec.get("lower_hint", 1.0):
             verdict = "well below: consider lowering the ceiling"
         lines.append(f"| {label} | {got:g} | {ceiling:g} | {verdict} |")
 
     for op, ceiling in spec.get("max_ops_per_turn", {}).items():
-        check(f"`{op}` (all)", op, measured.get(op, 0.0), ceiling)
+        check(f"`{op}` (all)", op, measured.get(op, 0.0), ceiling, recorded.get("ops_per_turn", {}).get(op))
     for c, ops in spec.get("max_collection_ops_per_turn", {}).items():
         for op, ceiling in ops.items():
-            check(f"`{c}` {op}", op, per_collection.get(c, {}).get(op, 0.0), ceiling)
+            check(f"`{c}` {op}", op, per_collection.get(c, {}).get(op, 0.0), ceiling,
+                  recorded.get("per_collection", {}).get(c, {}).get(op))
     gated = set(spec.get("max_collection_ops_per_turn", {}))
     report_only = [f"`{c}` " + ", ".join(f"{k} {v:g}" for k, v in d.items())
                    for c, d in sorted(per_collection.items()) if c not in gated]

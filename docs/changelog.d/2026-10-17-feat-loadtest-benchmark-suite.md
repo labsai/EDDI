@@ -51,9 +51,9 @@ those numbers can be published reproducibly and regressions caught. Nothing unde
 - **What the gate gates.** Document counts for insert/update/delete and the operations on the
   collections a turn touches itself (conversation memory, descriptors, vault, user memory) are
   identical run to run. Reads of agents, workflows, quotas and the audit ledger follow the clock
-  (cache refresh, batched flushes) and grow on a slower runner, so they are reported and covered only
+  (cache refresh, batched flushes) and grow on a slower runner; the audit batches also make the insert total come in lower on a short run (2.66 vs 3.2 per turn), never higher, so they are reported and covered only
   by a loose total-query ceiling (5 ops of headroom). Measured: 3 runs on this laptop agreed to
-  0.01 per turn on every gated counter.
+  0.01 per turn on every per-collection counter, and the first GitHub-runner run matched them exactly.
 - **Ceilings in git, not the Actions cache**, which evicts entries at its size cap.
 - **One NATS server (R1)** in the scaling topology: it measures throughput, not NATS failover.
 
