@@ -12,6 +12,7 @@ import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
+import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -83,6 +84,8 @@ public class McpToolProviderManager {
     private final CallerIdentityContext callerIdentityContext;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
+    private final int maxSchemaBytes;
+    private final long maxSchemaBytesPerServer;
 
     /**
      * Resolves a {@code ${connection:name}} apiKey per request. Injected as an
@@ -115,6 +118,22 @@ public class McpToolProviderManager {
 
     /** Default cap for a remote tool description before it reaches the model. */
     static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
+
+    /**
+     * Default cap on one tool's serialised parameter schema (M7). Real tool schemas
+     * are a few hundred bytes to a few KB; the largest public MCP servers stay well
+     * under 16 KB per tool, so 32 KB admits every legitimate schema while refusing
+     * one written to fill the context window.
+     */
+    static final int DEFAULT_MAX_SCHEMA_BYTES = 32_768;
+
+    /**
+     * Default cap on the schema bytes one server may put into the prompt across all
+     * of its tools (M7): 512 KB, i.e. a server advertising hundreds of large tools
+     * stops contributing once it has consumed that much, rather than consuming the
+     * context window of every agent that lists it.
+     */
+    static final long DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER = 524_288L;
 
     // ----- Circuit breaker state -----
     /** Maximum failures within the window before the circuit opens. */
@@ -151,6 +170,8 @@ public class McpToolProviderManager {
             CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.mcp.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars,
+            @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes", defaultValue = "32768") int maxSchemaBytes,
+            @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes-per-server", defaultValue = "524288") long maxSchemaBytesPerServer,
             @ConfigProperty(name = "eddi.mcp.tool-cache.ttl-ms", defaultValue = "300000") long toolCacheTtlMillis,
             ConnectionResolver connectionResolver) {
         this.connectionResolver = connectionResolver;
@@ -160,6 +181,8 @@ public class McpToolProviderManager {
         this.callerIdentityContext = callerIdentityContext;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
+        this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
+        this.maxSchemaBytesPerServer = maxSchemaBytesPerServer > 0 ? maxSchemaBytesPerServer : DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER;
         this.toolCacheTtlMillis = toolCacheTtlMillis >= 0 ? toolCacheTtlMillis : DEFAULT_TOOL_CACHE_TTL_MILLIS;
     }
 
@@ -229,7 +252,7 @@ public class McpToolProviderManager {
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled,
             int maxDescriptionChars, long toolCacheTtlMillis) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT,
-                ssrfProtectionEnabled, maxDescriptionChars, toolCacheTtlMillis, null);
+                ssrfProtectionEnabled, maxDescriptionChars, DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, toolCacheTtlMillis, null);
     }
 
     /**
@@ -241,7 +264,7 @@ public class McpToolProviderManager {
             CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext, boolean ssrfProtectionEnabled,
             int maxDescriptionChars, long toolCacheTtlMillis) {
         this(globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, ssrfProtectionEnabled, maxDescriptionChars,
-                toolCacheTtlMillis, null);
+                DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, toolCacheTtlMillis, null);
     }
 
     /**
@@ -251,7 +274,7 @@ public class McpToolProviderManager {
      */
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT, false,
-                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_TOOL_CACHE_TTL_MILLIS, null);
+                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, DEFAULT_TOOL_CACHE_TTL_MILLIS, null);
     }
 
     /**
@@ -406,6 +429,9 @@ public class McpToolProviderManager {
                 List<ToolSpecification> serverSpecs = new ArrayList<>();
                 Map<String, ToolExecutor> serverExecutors = new HashMap<>();
                 if (result != null && result.tools() != null) {
+                    // M7: one byte budget per server per discovery pass, so a server
+                    // cannot fill the prompt with schemas tool by tool.
+                    var schemaBudget = new ToolSchemaGovernor.ServerBudget(maxSchemaBytesPerServer);
                     for (var toolEntry : result.tools().entrySet()) {
                         // F16: the description is authored by the REMOTE server and lands
                         // verbatim in the model's tool definitions — cap and sanitize it
@@ -424,6 +450,15 @@ public class McpToolProviderManager {
                         if (serverExecutors.containsKey(spec.name())) {
                             LOGGER.warnf("MCP server '%s' advertises tool '%s' more than once — keeping the first, dropping the duplicate",
                                     sanitize(serverName), sanitize(spec.name()));
+                            continue;
+                        }
+
+                        // M7: every description, title and enum value in the parameter
+                        // schema is remote text too — govern and bound it. After the two
+                        // drops above, so a tool that is dropped anyway is not charged
+                        // against the per-server budget ahead of the ones that are kept.
+                        spec = governSchema(spec, serverName, schemaBudget);
+                        if (spec == null) {
                             continue;
                         }
 
@@ -1051,6 +1086,59 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Governs a remote tool's parameter schema (security review 2026-10-15, finding
+     * M7): every {@code description}, {@code title} and enum value in it is
+     * redacted and capped like the tool description, the serialised schema is
+     * bounded per tool ({@code eddi.mcp.tool-schema.max-bytes}) and per server
+     * ({@code eddi.mcp.tool-schema.max-bytes-per-server}), and anything that was
+     * redacted, truncated or dropped is counted in
+     * {@code eddi.mcp.tool-schema.governed}.
+     *
+     * @return the governed spec, or {@code null} when the tool must be dropped
+     */
+    ToolSpecification governSchema(ToolSpecification spec, String serverName, ToolSchemaGovernor.ServerBudget budget) {
+        ToolSchemaGovernor.Result result = ToolSchemaGovernor.govern(spec.parameters(), maxDescriptionChars, maxSchemaBytes);
+        if (result.dropped()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: its parameter %s", sanitize(spec.name()), sanitize(serverName),
+                    sanitize(result.dropReason()));
+            countSchema("dropped");
+            return null;
+        }
+        if (!budget.admit(result.bytes())) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: the server's tool schemas already fill %d of the %d bytes allowed per "
+                    + "server (eddi.mcp.tool-schema.max-bytes-per-server) and this one adds %d", sanitize(spec.name()), sanitize(serverName),
+                    budget.used(), budget.maxBytes(), result.bytes());
+            countSchema("dropped_server_cap");
+            return null;
+        }
+        if (result.redacted()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' had directive-shaped content in its parameter schema — redacted before prompting",
+                    sanitize(spec.name()), sanitize(serverName));
+            countSchema("redacted");
+        }
+        if (result.truncated()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' parameter schema was cut to fit: text over %d chars, or descriptions stripped "
+                    + "to stay under %d bytes", sanitize(spec.name()), sanitize(serverName), maxDescriptionChars, maxSchemaBytes);
+            countSchema("truncated");
+        }
+        if (!result.changed()) {
+            return spec;
+        }
+        return ToolSpecification.builder().name(spec.name()).description(spec.description()).parameters(result.schema()).build();
+    }
+
+    /**
+     * {@code eddi.mcp.tool-schema.governed}, tag {@code outcome}: redacted,
+     * truncated, dropped, dropped_server_cap.
+     */
+    private void countSchema(String outcome) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.mcp.tool-schema.governed", "outcome", outcome).increment();
+    }
+
+    /**
      * Create the appropriate MCP transport based on configuration.
      */
     private McpTransport createTransport(McpServerConfig config, Duration timeout) {
@@ -1088,8 +1176,18 @@ public class McpToolProviderManager {
         }
 
         // StreamableHttpMcpTransport (recommended, replaces deprecated
-        // HttpMcpTransport)
-        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout);
+        // HttpMcpTransport).
+        //
+        // followRedirects(false) — pinned, not left to the library default. Only
+        // the configured URL above is validated; a 3xx from it would carry every
+        // POST (the handshake, tools/list, each tool call with its Authorization
+        // header) to a Location nobody checked, an internal host included
+        // (security review 2026-10-15, finding M2). langchain4j-mcp 1.22 happens to
+        // default to Redirect.NEVER, but earlier releases built the client with
+        // Redirect.NORMAL and the builder flag exists precisely so a caller can
+        // decide; McpTransportRedirectTest holds this line to its word against an
+        // embedded redirecting server. The A2A client makes the same choice.
+        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout).followRedirects(false);
 
         if (!isNullOrEmpty(apiKey)) {
             final String configuredKey = apiKey;

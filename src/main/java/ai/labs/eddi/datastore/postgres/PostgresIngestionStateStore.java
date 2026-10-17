@@ -87,6 +87,15 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             )
             """;
 
+    /** One row per source, for what concerns the source as a whole. */
+    private static final String CREATE_SOURCES_TABLE = """
+            CREATE TABLE IF NOT EXISTS rag_ingestion_sources (
+                source_id TEXT PRIMARY KEY,
+                store_fingerprint TEXT,
+                updated_at TIMESTAMP
+            )
+            """;
+
     private static final String CREATE_RUNS_SOURCE_INDEX = "CREATE INDEX IF NOT EXISTS idx_ingestion_runs_source ON rag_ingestion_runs (source_id, started_at DESC)";
 
     /** One in-flight run per source — see the class comment. */
@@ -131,6 +140,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 Statement statement = connection.createStatement()) {
             statement.execute(CREATE_DOCUMENTS_TABLE);
             statement.execute(CREATE_RUNS_TABLE);
+            statement.execute(CREATE_SOURCES_TABLE);
             for (String alter : ADD_FENCING_COLUMNS) {
                 statement.execute(alter);
             }
@@ -347,6 +357,38 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     }
 
     @Override
+    public Optional<String> storeFingerprint(String sourceId) {
+        String sql = "SELECT store_fingerprint FROM rag_ingestion_sources WHERE source_id = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? Optional.ofNullable(resultSet.getString(1)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to read a source's store fingerprint", e);
+        }
+    }
+
+    @Override
+    public void recordStoreFingerprint(String sourceId, String fingerprint) {
+        String sql = """
+                INSERT INTO rag_ingestion_sources (source_id, store_fingerprint, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT (source_id) DO UPDATE SET
+                    store_fingerprint = EXCLUDED.store_fingerprint,
+                    updated_at = EXCLUDED.updated_at
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.setString(2, fingerprint);
+            statement.setTimestamp(3, Timestamp.from(Instant.now()));
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a source's store fingerprint", e);
+        }
+    }
+
+    @Override
     public List<DocumentState> listDocuments(String sourceId, int limit) {
         List<DocumentState> states = new ArrayList<>();
         String sql = "SELECT * FROM rag_ingestion_documents WHERE source_id = ? LIMIT ?";
@@ -369,7 +411,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         try (Connection connection = connection()) {
             for (String sql : new String[]{
                     "DELETE FROM rag_ingestion_documents WHERE source_id = ?",
-                    "DELETE FROM rag_ingestion_runs WHERE source_id = ?"}) {
+                    "DELETE FROM rag_ingestion_runs WHERE source_id = ?",
+                    "DELETE FROM rag_ingestion_sources WHERE source_id = ?"}) {
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     statement.setString(1, sourceId);
                     statement.executeUpdate();

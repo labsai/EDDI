@@ -167,6 +167,7 @@ public class ApiCallsTask implements ILifecycleTask {
                     targetServerUrl = targetServerUrl.substring(0, targetServerUrl.length() - 1);
                 }
                 httpCallsConfig.setTargetServerUrl(targetServerUrl);
+                rejectTemplatedHosts(httpCallsConfig, uriObj);
                 return httpCallsConfig;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -175,6 +176,27 @@ public class ApiCallsTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [ApiCallsConfiguration]");
+    }
+
+    /**
+     * Fails the deployment when a target host is a template the deployment would
+     * not validate (see {@link IApiCallExecutor#rejectTemplatedAuthority}), instead
+     * of letting every turn that reaches the call fail.
+     */
+    private void rejectTemplatedHosts(ApiCallsConfiguration httpCallsConfig, Object uriObj) throws WorkflowConfigurationException {
+        try {
+            httpCallExecutor.rejectTemplatedAuthority(httpCallsConfig.getTargetServerUrl());
+            if (httpCallsConfig.getHttpCalls() != null) {
+                for (ApiCall call : httpCallsConfig.getHttpCalls()) {
+                    String path = call.getRequest() != null ? call.getRequest().getPath() : null;
+                    if (path != null && path.trim().startsWith("http")) {
+                        httpCallExecutor.rejectTemplatedAuthority(path.trim());
+                    }
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw new WorkflowConfigurationException(e.getMessage() + " (uri:" + uriObj + ")", e);
+        }
     }
 
     @Override
