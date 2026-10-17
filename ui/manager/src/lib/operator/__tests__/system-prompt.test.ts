@@ -461,6 +461,62 @@ describe("buildOperatorPromptBody", () => {
   });
 });
 
+describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
+  // Admins ask the operator why turns are refused; nothing it can read states
+  // the limit, so the knowledge has to be in the prompt itself.
+  const bodies = [
+    ["read-only", buildOperatorPromptBody(READ_ENDPOINTS)],
+    ["write-capable", buildOperatorPromptBody(WITH_A_WRITE)],
+  ] as const;
+
+  it.each(bodies)("%s: explains the refusal as retryable backpressure", (_label, body) => {
+    expect(body).toContain("Turn capacity");
+    expect(body).toContain("capacity_exceeded");
+    expect(body).toContain("Retry-After");
+  });
+
+  it.each(bodies)("%s: names all three limits that answer capacity_exceeded", (_label, body) => {
+    // Each RejectedExecutionException source in the backend maps to the same
+    // 503; telling them apart is reading the message.
+    expect(body).toContain("eddi.conversation.max-in-flight-turns");
+    expect(body).toContain("eddi.coordinator.max-active-conversations");
+    expect(body).toContain("This node is shutting down");
+  });
+
+  it.each(bodies)("%s: states the heap-derived auto formula and the per-turn budget", (_label, body) => {
+    // InFlightTurnLimit: (max heap - RESERVE_MB 256) / per-turn MB, floor 32.
+    expect(body).toMatch(/\(max heap − 256 MB\) ÷\s+`eddi\.conversation\.in-flight-turn-memory-mb`/);
+    expect(body).toContain("below 32");
+  });
+
+  it.each(bodies)("%s: names the meters and the alert, and says it cannot read them", (_label, body) => {
+    expect(body).toContain("eddi_conversation_max_in_flight_turns");
+    expect(body).toContain('eddi_turn_rejected_total{reason="in_flight_limit"}');
+    expect(body).toContain("EddiTurnCapacityReached");
+    expect(body).toContain("which you CANNOT read");
+  });
+
+  it.each(bodies)("%s: sizes by memory and keeps the database pool in step", (_label, body) => {
+    expect(body).toContain("database\n  is usually the first bottleneck");
+    expect(body).toContain("maxPoolSize");
+    expect(body).toContain("quarkus.datasource.jdbc.max-size");
+    expect(body).toContain('"clustering"');
+  });
+
+  it("adds the coordinator and log lines only when those reads are granted", () => {
+    const withTools = buildOperatorPromptBody(READ_ENDPOINTS);
+    expect(withTools).toContain("The coordinator status tool shows");
+    expect(withTools).toContain("The platform logs may still hold the startup line");
+
+    const without = buildOperatorPromptBody(
+      READ_ENDPOINTS.filter((e) => e !== "GET /administration/coordinator/status" && e !== "GET /administration/logs"),
+    );
+    expect(without).toContain("Turn capacity");
+    expect(without).not.toContain("The coordinator status tool shows");
+    expect(without).not.toContain("The platform logs may still hold");
+  });
+});
+
 describe("the app-context section — what screen the admin is on", () => {
   it("is present regardless of scope — knowing where the admin is does not depend on what is granted", () => {
     for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
