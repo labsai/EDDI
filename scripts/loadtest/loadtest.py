@@ -662,11 +662,11 @@ def ops_cell(o):
 def matrix_report(results, path, args):
     lines = [f"# Load test — {args.label} — {datetime.date.today().isoformat()}", "",
              f"Scenario `{args.scenario}`, {args.turns} turns per conversation, mock LLM delay {args.delay_ms} ms, "
-             f"think time {args.think_ms} ms. Image `{load_state().get('image') or DEFAULT_IMAGE}`"
-             f"{' with the local build mounted' if load_state().get('app') else ''}; commit `{git_head()}`.", "",
+             + f"think time {args.think_ms} ms. Image `{load_state().get('image') or DEFAULT_IMAGE}`"
+             + f"{' with the local build mounted' if load_state().get('app') else ''}; commit `{git_head()}`.", "",
              "| Concurrent conv. | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | Overhead p50/p95/p99 ms | 503 | 408 | 5xx other | "
-             "no response | 200 with TurnError | Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | "
-             "DB ops/turn |",
+             + "no response | 200 with TurnError | Peak managed active | Peak managed queued | Peak in-flight turns | Peak JVM threads | "
+             + "DB ops/turn |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         e, lat, ovh = r["errors"], r["latency_ms"], r["overhead_ms"]
@@ -956,13 +956,13 @@ def cmd_gate(args):
     head = "FAIL" if failures else "PASS"
     summary = [f"## Database operations per turn: {head}", "",
                f"Scenario: steady, {sc['vus']} conversations x {sc['turns']} turns after {sc.get('warmup_turns', 0)} warm-up turns each, "
-               f"mock LLM delay {sc['delay_ms']} ms, {r['db_kind']}. Ceilings: `{os.path.relpath(args.thresholds, REPO).replace(os.sep, '/')}`.", "",
+               + f"mock LLM delay {sc['delay_ms']} ms, {r['db_kind']}. Ceilings: `{os.path.relpath(args.thresholds, REPO).replace(os.sep, '/')}`.", "",
                *lines, "",
                "Not gated (clock-driven): " + ("; ".join(report_only) or "none") + ".", "",
                f"All counters per turn: {ops_cell(measured)}.", "",
                f"Not gated (shared-runner wall clock): {r['turns_per_s'] or 0:.1f} turns/s, p50 {fmt(r['latency_ms']['med'])} ms, "
-               f"p95 {fmt(r['latency_ms']['p(95)'])} ms, EDDI overhead p50 {fmt(r['overhead_ms']['med'])} ms, "
-               f"p95 {fmt(r['overhead_ms']['p(95)'])} ms, run {r['elapsed_s']} s.", ""]
+               + f"p95 {fmt(r['latency_ms']['p(95)'])} ms, EDDI overhead p50 {fmt(r['overhead_ms']['med'])} ms, "
+               + f"p95 {fmt(r['overhead_ms']['p(95)'])} ms, run {r['elapsed_s']} s.", ""]
     if failures:
         summary += ["Failures:", ""] + [f"- {f}" for f in failures] + [""]
     text = "\n".join(summary)
@@ -1034,7 +1034,7 @@ def cmd_report(args):
           f"| CPU | {env.get('cpu_model', '?')} — {d.get('cpus', '?')} logical CPUs visible to Docker |",
           f"| Memory | {d.get('memory_gib', '?')} GiB visible to Docker |",
           f"| Host | {env.get('host', {}).get('os', '?')} · Docker {d.get('server', '?')} on {d.get('os', '?')} "
-          f"(kernel {d.get('kernel', '?')}) |",
+          + f"(kernel {d.get('kernel', '?')}) |",
           f"| EDDI | `{e.get('image', '?')}`" + (f" with the local build of `{b.get('branch')}` @ `{(b.get('commit') or '?')[:12]}`"
                                                f"{' (uncommitted changes)' if b.get('dirty') else ''} mounted" if e.get("local_build") else "") + " |",
           f"| JVM | {env.get('java', '?')} |"]
@@ -1055,23 +1055,23 @@ def cmd_report(args):
         L += ["Images (digests as pulled):", ""] + [f"- `{img}` `{dig}`" for img, dig in sorted(images.items())] + [""]
     L += ["## Method", "",
           "- **The LLM is a mock** (WireMock, OpenAI wire format) with a fixed, configured latency, so every millisecond above it is "
-          "EDDI's: HTTP, the lifecycle pipeline, conversation load and save, audit. No model time is hidden in the numbers.",
+          + "EDDI's: HTTP, the lifecycle pipeline, conversation load and save, audit. No model time is hidden in the numbers.",
           "- **Load generators run inside the Docker network** next to EDDI: k6 for turns and group discussions, a standard-library "
-          "asyncio SSE client (`scripts/loadtest/drivers/stream_driver.py`) for streaming, because k6 has no SSE client.",
+          + "asyncio SSE client (`scripts/loadtest/drivers/stream_driver.py`) for streaming, because k6 has no SSE client.",
           "- **Stateful conversations:** every virtual user owns one conversation and sends its turns back to back, so the "
-          "conversation's memory is loaded and stored on every turn, as in production.",
+          + "conversation's memory is loaded and stored on every turn, as in production.",
           "- **EDDI overhead** = turn latency minus the mock's configured delay (one LLM call per turn). For streaming, overhead = "
-          "EDDI's time to first token minus the mock's own time to first token, measured by the same client at the same concurrency.",
+          + "EDDI's time to first token minus the mock's own time to first token, measured by the same client at the same concurrency.",
           "- **Database operations per turn** are MongoDB `serverStatus().opcounters` (or PostgreSQL `pg_stat_statements` calls) over "
-          "the measured phase, divided by successful turns. They include conversation starts and background work; they do not "
-          "depend on hardware.", ""]
+          + "the measured phase, divided by successful turns. They include conversation starts and background work; they do not "
+          + "depend on hardware.", ""]
     for kind in ("turns", "gate"):
         rows = by.get(kind, [])
         if not rows:
             continue
         L += ["## Turns — stateful conversations" if kind == "turns" else "## Regression gate scenario", "",
               "| Scenario | Nodes | DB | Concurrent conv. | Mock delay ms | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | "
-              "EDDI overhead p50 / p95 / p99 ms | Errors | DB ops per turn |",
+              + "EDDI overhead p50 / p95 / p99 ms | Errors | DB ops per turn |",
               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in sorted(rows, key=lambda r: (r["scenario"], r["llm_delay_ms"], r["vus"])):
             errs = ", ".join(f"{k}={int(v)}" for k, v in r["errors"].items() if v) or "none"
@@ -1083,10 +1083,10 @@ def cmd_report(args):
         retried = [r for r in rows if r.get("retry_503")]
         if retried:
             L += ["Runs with a client that honours 503 + Retry-After (`--retry-503 N`): a refused turn waits Retry-After "
-                  "(capped, ±20 % jitter) and is resent, at most N attempts. Latency above is the accepted attempt; "
-                  "the user waited the total below. `turns_503` counts refused attempts, not lost turns.", "",
+                  + "(capped, ±20 % jitter) and is resent, at most N attempts. Latency above is the accepted attempt; "
+                  + "the user waited the total below. `turns_503` counts refused attempts, not lost turns.", "",
                   "| Scenario | Concurrent conv. | Max attempts | Retry-After cap ms | OK turns | Total p50 ms | Total p95 ms | "
-                  "Total p99 ms | Attempts avg / p99 / max | Abandoned |",
+                  + "Total p99 ms | Attempts avg / p99 / max | Abandoned |",
                   "|---|---|---|---|---|---|---|---|---|---|"]
             for r in sorted(retried, key=lambda r: (r["scenario"], r["vus"])):
                 t, a = r["total_latency_ms"] or {}, r["attempts"] or {}
@@ -1098,13 +1098,13 @@ def cmd_report(args):
         m = r["mock"]["metrics"]
         L += [f"## Streaming — time to first token ({r['vus']} concurrent streams)", "",
               f"Mock: first token after {r['first_chunk_ms']} ms, then {r['tokens']} tokens {r['chunk_ms']} ms apart. "
-              f"{r['turns_per_vu']} measured turns per stream after {r['warmup_turns']} warm-up turn(s).", "",
+              + f"{r['turns_per_vu']} measured turns per stream after {r['warmup_turns']} warm-up turn(s).", "",
               "| Path | OK turns | TTFT p50 ms | TTFT p95 ms | TTFT p99 ms | Overhead p50 / p95 / p99 ms | Last token p50 ms | "
-              "Token spread p50 ms | Tokens p50 | Errors |",
+              + "Token spread p50 ms | Tokens p50 | Errors |",
               "|---|---|---|---|---|---|---|---|---|---|",
               f"| mock alone (calibration) | {r['mock']['turns_ok']} | {ms(m['ttft_ms'], 'med')} | {ms(m['ttft_ms'], 'p(95)')} | "
-              f"{ms(m['ttft_ms'], 'p(99)')} | — | {ms(m['total_ms'], 'med')} | {ms(m['spread_ms'], 'med')} | "
-              f"{ms(m['tokens'], 'med')} | {r['mock']['errors'] or 'none'} |"]
+              + f"{ms(m['ttft_ms'], 'p(99)')} | — | {ms(m['total_ms'], 'med')} | {ms(m['spread_ms'], 'med')} | "
+              + f"{ms(m['tokens'], 'med')} | {r['mock']['errors'] or 'none'} |"]
         names = {"native": "EDDI SSE `POST /agents/{id}/stream`", "openai": "EDDI `POST /v1/chat/completions` stream=true"}
         for ep, res in r["endpoints"].items():
             x, o = res["metrics"], res["overhead_vs_mock_ms"]
@@ -1113,11 +1113,11 @@ def cmd_report(args):
                      f"{ms(x.get('total_ms'), 'med')} | {ms(x.get('spread_ms'), 'med')} | {ms(x.get('tokens'), 'med')} | "
                      f"{res['errors'] or 'none'} |")
         L += ["", "A token spread close to the mock's means EDDI forwards tokens as they arrive; near 0 would mean it buffered "
-              "the answer.", ""]
+              + "the answer.", ""]
     for r in by.get("scaling", []):
         L += [f"## Cluster scaling — {r['vus']} conversations, mock delay {r['llm_delay_ms']} ms", "",
               f"Nodes on NATS behind nginx round robin (no affinity), CPUs per node: {r.get('cpus_per_node') or 'unlimited'}. "
-              "Efficiency = turns/s ÷ (nodes × single-node turns/s).", "",
+              + "Efficiency = turns/s ÷ (nodes × single-node turns/s).", "",
               "| Nodes | Turns/s | Speedup | Efficiency | p50 ms | p95 ms | EDDI overhead p95 ms | Errors | DB ops per turn |",
               "|---|---|---|---|---|---|---|---|---|"]
         steps = {s["name"]: s for s in by.get("scaling-step", [])}
@@ -1134,9 +1134,9 @@ def cmd_report(args):
     if rows:
         L += ["## Multi-agent group discussions", "",
               "Each discussion: every member speaks once per round, then the moderator synthesises "
-              "(docs/group-conversations.md). A member turn is one full pipeline run of that member's agent.", "",
+              + "(docs/group-conversations.md). A member turn is one full pipeline run of that member's agent.", "",
               "| Style | Members | Rounds | Concurrent discussions | Mock delay ms | Discussions OK | Member turns | Member turns/s | "
-              "Turns per discussion | Discussion p50 ms | Discussion p95 ms | Failed | DB ops per member turn |",
+              + "Turns per discussion | Discussion p50 ms | Discussion p95 ms | Failed | DB ops per member turn |",
               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in sorted(rows, key=lambda r: (r["members"], r["vus"])):
             L.append(f"| {r['style']}{flag(r)} | {r['members']} | {r['rounds']} | {r['vus']} | {r['llm_delay_ms']} | {r['discussions_ok']:.0f} | "
@@ -1148,7 +1148,7 @@ def cmd_report(args):
         [res for r in by.get("stream", []) for res in r["endpoints"].values() if res.get("contended_by")]
     if contended:
         L += ["⚠ Measured while another load test ran on the same machine "
-              f"({', '.join(sorted({c for r in contended for c in r['contended_by']}))}): those rows share the CPU with it.", ""]
+              + f"({', '.join(sorted({c for r in contended for c in r['contended_by']}))}): those rows share the CPU with it.", ""]
     L += ["## Reproduce", "", "From the repository root, with Docker and Python 3.10+:", "", "```bash"]
     overrides = next((r.get("env_overrides") for r in results if r.get("env_overrides")), {})
     for k, v in overrides.items():
@@ -1173,7 +1173,7 @@ def cmd_report(args):
             seen.append(line)
     L += seen + ["python scripts/loadtest/loadtest.py down", "```", "",
                  f"Raw results: `scripts/loadtest/results/{args.label}-*.json` (not committed). "
-                 f"Report: `{command_line()}`.", ""]
+                 + f"Report: `{command_line()}`.", ""]
     out = args.out or os.path.join(RESULTS, f"{args.label}-report.md")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(L))
