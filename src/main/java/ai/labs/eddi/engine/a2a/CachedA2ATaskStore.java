@@ -46,9 +46,16 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * Writes hold the read side, erasure the write side: a write that has passed
      * the erasure check finishes before a sweep collects its keys, and a write that
      * starts after the marker is set sees it. Without this, a write paused between
-     * the check and the {@code put} landed after the sweep and survived it. The
-     * caches are node-local, so the lock is too; a shared store implementation
-     * coordinates its own writes.
+     * the check and the {@code put} landed after the sweep and survived it.
+     * <p>
+     * In cluster mode ({@code eddi.messaging.type=nats}) the task, context and
+     * erasing caches are shared KV buckets, so the marker set by the erasing node
+     * is what every other node's write check reads — but this lock is node-local. A
+     * write on another node that read the marker as absent an instant before it was
+     * set, and whose {@code put} then reaches the bucket only after the erasing
+     * node's sweep, survives; that write would have to stall for the whole cascade
+     * (the stop phase sets the marker, the sweep runs several steps later). The
+     * residual is documented in {@code clustering.md}.
      */
     private final ReadWriteLock erasureLock = new ReentrantReadWriteLock();
 

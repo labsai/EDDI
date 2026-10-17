@@ -24,7 +24,10 @@ name the finding so a later reader can find this entry.
   `A2ATaskGdprParticipant` registers both with `GdprComplianceService` as step
   `a2aTasks`. It also joins the cascade's stop phase: `beginErasure` closes the store
   to the principal's writes for five minutes, so a peer request admitted while the
-  cascade runs cannot leave a task behind the sweep. [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
+  cascade runs cannot leave a task behind the sweep; on one node the check and the
+  write are serialised against the sweep by a read/write lock, and in cluster mode the
+  marker lives in a shared `A2A_ERASING` bucket so every node refuses the writes (the
+  cross-node residual is in [`clustering.md`](../clustering.md#residual-limitations)). [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
   section naming what erasure does **not** reach — RAG knowledge bases, application
   log files, telemetry exports and LLM-provider retention — with why, and what bounds
   each.
