@@ -302,16 +302,19 @@ class InstallerReleaseRefTest {
         String getCompose = ps.substring(ps.indexOf("function Get-ComposeFiles {"),
                 ps.indexOf("\n}\n", ps.indexOf("function Get-ComposeFiles {")));
         assertTrue(getCompose.contains("Initialize-ReleaseChecksums"), "install.ps1 must load the checksums before downloading");
-        var psDownloads = Pattern.compile(
-                "Invoke-WebRequest -Uri \\$\\w+ -OutFile \\$(\\w+) [^\\n]*\\n\\s+Confirm-DownloadChecksum -RelativePath \\$\\w+ -Path \\$(\\w+)")
-                .matcher(getCompose);
-        int psVerified = 0;
-        while (psDownloads.find()) {
-            assertEquals(psDownloads.group(1), psDownloads.group(2), "Confirm-DownloadChecksum must check the file just written");
-            psVerified++;
-        }
-        assertEquals(getCompose.split("Invoke-WebRequest", -1).length - 1, psVerified,
-                "install.ps1: every Invoke-WebRequest in Get-ComposeFiles must be followed by Confirm-DownloadChecksum");
+        // Every download in Get-ComposeFiles goes through Save-VerifiedDownload, which
+        // writes to a temporary path, verifies it and only then moves it into place —
+        // a mismatch never replaces a file that is already installed.
+        assertFalse(getCompose.contains("Invoke-WebRequest"),
+                "install.ps1: Get-ComposeFiles must download through Save-VerifiedDownload, never Invoke-WebRequest directly");
+        int psVerified = getCompose.split("Save-VerifiedDownload -Uri ", -1).length - 1;
+        assertTrue(psVerified >= 3, "expected the compose, monitoring and Keycloak downloads, found " + psVerified);
+        String saveVerified = ps.substring(ps.indexOf("function Save-VerifiedDownload {"),
+                ps.indexOf("\n}\n", ps.indexOf("function Save-VerifiedDownload {")));
+        assertTrue(Pattern.compile("Invoke-WebRequest -Uri \\$Uri -OutFile \\$temporary [^\\n]*\\n\\s+"
+                + "Confirm-DownloadChecksum -RelativePath \\$RelativePath -Path \\$temporary\\n\\s+"
+                + "Move-Item -Path \\$temporary -Destination \\$Target").matcher(saveVerified).find(),
+                "Save-VerifiedDownload must download to the temporary path, verify that path, then move it to the target");
 
         String ci = Files.readString(Path.of(".github", "workflows", "ci.yml"), StandardCharsets.UTF_8);
         assertTrue(ci.contains("> SHA256SUMS") && ci.contains("files: SHA256SUMS"),

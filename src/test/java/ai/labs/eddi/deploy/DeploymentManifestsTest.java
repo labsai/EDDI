@@ -2398,11 +2398,22 @@ class DeploymentManifestsTest {
         List<Path> workloads = List.of(HELM_TEMPLATES.resolve("mongodb.yaml"), HELM_TEMPLATES.resolve("postgres.yaml"),
                 HELM_KEYCLOAK, K8S.resolve("overlays/mongodb/mongodb-statefulset.yaml"),
                 K8S.resolve("overlays/postgres/postgres-statefulset.yaml"), KUSTOMIZE_KEYCLOAK, K8S.resolve("quickstart.yaml"));
+        List<String> required = List.of("allowPrivilegeEscalation: false", "drop: [\"ALL\"]", "type: RuntimeDefault",
+                "runAsNonRoot: true");
         for (Path workload : workloads) {
-            String text = read(workload);
-            for (String required : List.of("allowPrivilegeEscalation: false", "drop: [\"ALL\"]", "type: RuntimeDefault",
-                    "runAsNonRoot: true")) {
-                assertTrue(text.contains(required), workload + " lacks `" + required + "`");
+            String text = read(workload).replace("\r\n", "\n");
+            // Checked per workload document, not per file: k8s/quickstart.yaml holds the
+            // EDDI deployment too, and a setting dropped from MongoDB would otherwise
+            // still be "found" in the EDDI block. A Helm template is one workload with
+            // templated image lines, so there the file is the document.
+            List<String> documents = workload.startsWith(HELM_TEMPLATES)
+                    ? List.of(text)
+                    : hardenedWorkloadDocuments(text);
+            assertFalse(documents.isEmpty(), workload + " holds no MongoDB/PostgreSQL/Keycloak workload document to check");
+            for (String document : documents) {
+                for (String setting : required) {
+                    assertTrue(document.contains(setting), workload + " lacks `" + setting + "` in a workload document");
+                }
             }
         }
         String policy = read(K8S.resolve("overlays/production/network-policy.yaml")).replace("\r\n", "\n");
@@ -2413,6 +2424,23 @@ class DeploymentManifestsTest {
         String configMap = read(HELM_TEMPLATES.resolve("configmap.yaml")).replace("\r\n", "\n");
         assertTrue(configMap.contains("{{- if and .Values.ingress.enabled .Values.ingress.tls }}\n  EDDI_SECURITY_HSTS_ENABLED: \"true\""),
                 "the chart must turn HSTS on when the ingress terminates TLS");
+    }
+
+    /**
+     * The YAML documents of {@code text} that are a Deployment or StatefulSet
+     * running a MongoDB, PostgreSQL or Keycloak image.
+     */
+    private static List<String> hardenedWorkloadDocuments(String text) {
+        List<String> found = new ArrayList<>();
+        for (String document : text.split("(?m)^---[ \t]*$")) {
+            boolean workload = document.contains("kind: StatefulSet") || document.contains("kind: Deployment");
+            boolean datastoreOrIdp = Pattern.compile("(?m)^\\s*image:\\s*\\S*(mongo|postgres|keycloak)", Pattern.CASE_INSENSITIVE)
+                    .matcher(document).find();
+            if (workload && datastoreOrIdp) {
+                found.add(document);
+            }
+        }
+        return found;
     }
 
     // ─────────────────────────────────────────────────────────────

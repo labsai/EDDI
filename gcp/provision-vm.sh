@@ -1056,10 +1056,23 @@ print_config_summary() {
 # given, else the tag of a pinned --eddi-version, else the newest stable release,
 # else main (with a warning). Release tags are immutable in practice and match the
 # image `latest` points at; `main` is whatever was merged last.
+# The VM's startup script downloads install.sh from EDDI_BRANCH on first boot,
+# so a ref that does not exist would surface only as a failed install minutes
+# after `create` reported success. Check it here, while the operator is still
+# watching: an image tag that was never pushed as a git tag fails fast.
+require_eddi_ref_exists() {
+  local ref="$1"
+  curl -fsSL --max-time 15 -o /dev/null "https://raw.githubusercontent.com/labsai/EDDI/${ref}/install.sh"     || fail "No git ref '${ref}' in labsai/EDDI (install.sh could not be fetched from it). Pass --eddi-branch=<existing tag or branch>, or --eddi-version=latest."
+}
+
 resolve_eddi_branch() {
-  [[ -n "$EDDI_BRANCH" ]] && return 0
+  if [[ -n "$EDDI_BRANCH" ]]; then
+    require_eddi_ref_exists "$EDDI_BRANCH"
+    return 0
+  fi
   if [[ "$EDDI_VERSION" != "latest" ]]; then
     EDDI_BRANCH="$EDDI_VERSION"
+    require_eddi_ref_exists "$EDDI_BRANCH"
     return 0
   fi
   local body tag

@@ -843,10 +843,18 @@ function Initialize-ReleaseChecksums {
         return
     }
     # A missing asset (404) and a network error end the same way: no checksums,
-    # TLS only. The error is captured rather than caught, so a failed fetch is
-    # reported in the warning below without a try/catch.
+    # TLS only. Windows PowerShell 5.1 raises an HTTP error status as a terminating
+    # error that -ErrorAction SilentlyContinue does not swallow, so the fetch is
+    # caught, its reason kept for the warning below, and the install continues.
     $fetchErrors = @()
-    $response = Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS" -UseBasicParsing -TimeoutSec 20 -ErrorAction SilentlyContinue -ErrorVariable fetchErrors
+    $response = $null
+    try {
+        $response = Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+    }
+    catch {
+        $fetchErrors = @($_)
+        Write-Verbose "SHA256SUMS for release $EddiBranch could not be fetched: $($_.Exception.Message)"
+    }
     if ($response -and $response.Content) {
         $content = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
         $table = @{}
@@ -864,6 +872,22 @@ function Initialize-ReleaseChecksums {
         Write-Warn "Release $EddiBranch publishes no SHA256SUMS ($reason) -- downloaded files are verified by TLS only."
     } else {
         Write-Warn "Release $EddiBranch publishes no SHA256SUMS -- downloaded files are verified by TLS only."
+    }
+}
+
+# Downloads a release file to a temporary path beside its target, verifies it
+# against the release checksums, and only then moves it into place: a mismatch
+# never replaces a file that is already installed.
+function Save-VerifiedDownload {
+    param([string]$Uri, [string]$RelativePath, [string]$Target)
+    $temporary = "$Target.download"
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $temporary -UseBasicParsing -ErrorAction Stop
+        Confirm-DownloadChecksum -RelativePath $RelativePath -Path $temporary
+        Move-Item -Path $temporary -Destination $Target -Force
+    }
+    finally {
+        if (Test-Path $temporary) { Remove-Item -Path $temporary -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -936,8 +960,7 @@ function Get-ComposeFiles {
             $downloadUrl = "$ComposeBaseUrl/$f"
             Write-Information -MessageData "  Downloading $f... "
             try {
-                Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
-                Confirm-DownloadChecksum -RelativePath $f -Path $target
+                Save-VerifiedDownload -Uri $downloadUrl -RelativePath $f -Target $target
                 Write-Information -MessageData "✅"
             }
             catch {
@@ -965,8 +988,7 @@ function Get-ComposeFiles {
                 $mfUrl = "$ComposeBaseUrl/$mf"
                 Write-Information -MessageData "  Downloading $mf... "
                 try {
-                    Invoke-WebRequest -Uri $mfUrl -OutFile $mfTarget -UseBasicParsing -ErrorAction Stop
-                    Confirm-DownloadChecksum -RelativePath $mf -Path $mfTarget
+                    Save-VerifiedDownload -Uri $mfUrl -RelativePath $mf -Target $mfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {
@@ -1009,8 +1031,7 @@ function Get-ComposeFiles {
                 $kfUrl = "$ComposeBaseUrl/$kf"
                 Write-Information -MessageData "  Downloading $kf... "
                 try {
-                    Invoke-WebRequest -Uri $kfUrl -OutFile $kfTarget -UseBasicParsing -ErrorAction Stop
-                    Confirm-DownloadChecksum -RelativePath $kf -Path $kfTarget
+                    Save-VerifiedDownload -Uri $kfUrl -RelativePath $kf -Target $kfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {

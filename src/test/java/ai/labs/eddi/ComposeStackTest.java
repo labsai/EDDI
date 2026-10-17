@@ -775,13 +775,21 @@ class ComposeStackTest {
             command.addAll(List.of("config", "-q"));
             ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
             builder.environment().putAll(REQUIRED_VARIABLES);
-            Process process = builder.start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (!process.waitFor(60, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                failures.add(combination + ": timed out");
-            } else if (process.exitValue() != 0) {
-                failures.add(combination + ": " + output.strip());
+            // The output goes to a file, not a pipe read before waitFor: readAllBytes()
+            // blocks until the CLI exits, so a hung `docker compose` would hang the test
+            // and the timeout below could never fire.
+            Path output = Files.createTempFile("compose-config", ".log");
+            try {
+                builder.redirectOutput(output.toFile());
+                Process process = builder.start();
+                if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    failures.add(combination + ": timed out");
+                } else if (process.exitValue() != 0) {
+                    failures.add(combination + ": " + Files.readString(output, StandardCharsets.UTF_8).strip());
+                }
+            } finally {
+                Files.deleteIfExists(output);
             }
         }
         assertEquals(List.of(), failures, "a documented compose combination does not render");
@@ -789,9 +797,13 @@ class ComposeStackTest {
 
     private static boolean dockerComposeAvailable() {
         try {
-            Process process = new ProcessBuilder("docker", "compose", "version").redirectErrorStream(true).start();
-            process.getInputStream().readAllBytes();
-            return process.waitFor(30, TimeUnit.SECONDS) && process.exitValue() == 0;
+            Process process = new ProcessBuilder("docker", "compose", "version").redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
         } catch (IOException e) {
             return false;
         } catch (InterruptedException e) {
