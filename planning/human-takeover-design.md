@@ -37,7 +37,7 @@
 | Serialization | Every takeover write is a coordinator task (`submitInOrder`), so in cluster mode it runs under the conversation lease with its fencing token. The lease is never held for the duration of a takeover. |
 | Audit | `operator.takeover` / `operator.message` / `operator.release` entries (`OPERATOR_TAKEOVER`/`MESSAGE`/`RELEASE` in `detail.event`), actor set server-side exactly as `hitl.approval`'s `decidedBy`; message text as digest + length only; state committed first, the entry journaled in the same document write and reconciled if the async ledger lost it (§7.1). |
 | History after release | Operator turns become `AiMessage`s, **annotated** by default (configurable prefix), consecutive same-role messages merged so roles alternate. |
-| RBAC | New role (working name `eddi-takeover`), endpoints enumerate `{"eddi-admin", "eddi-takeover"}`. The conversation **owner is never admitted** (unlike HITL). Approver role not reused. |
+| RBAC | New role (working name `eddi-takeover`), endpoints enumerate `{"eddi-admin", "eddi-takeover"}`. The conversation **owner is never admitted** (unlike HITL). Approver role not reused. Desk scoping on by default: a takeover-role caller reaches only agents whose `takeoverConfig.desks` it belongs to (list, read, claim, message, release); unrestricted only via the explicit `single-desk` opt-in. |
 | Ship first | Property patch on a HITL `/resume` decision (§10) — independent, small, audited. |
 | Size | Design S (this doc); implementation L, five PRs (§13). |
 
@@ -291,9 +291,16 @@ open Q6.
 ### 5.3 Operator messages
 
 Coordinator task: verify state + `controlId` + assignee (or admin), dedupe
-`clientMessageId` (recorded in the current `controlId`'s journal, §7.1, so a retry after a
-restart or a long delay is still recognised — not only within the last N steps), append the operator step, reset
+by `(controlId, clientMessageId)`, append the operator step, reset
 `pendingUserMessages`, fire `OperatorMessageEvent` (§12), write `operator.message` audit.
+
+The dedupe key is durable, not a window: `clientMessageId` is stored on the operator step
+itself (private step data `operator:clientMessageId`, beside `operator:sender`) and in the
+journal record (§7.1). The check looks it up among the operator steps of the current
+`controlId`. Those steps are part of the conversation and are never pruned, so a retry after
+a restart, a long delay or journal reconciliation still finds the original and answers
+`200` with the original step index instead of appending a second copy. A message without a
+`clientMessageId` is not deduplicated.
 
 ### 5.4 Release
 
@@ -373,9 +380,11 @@ closes the window rather than inheriting it:
 1. **State first, then audit.** The ledger never records a write that did not commit. A
    takeover write that fails (CAS lost, fenced, store error) submits nothing.
 2. **The conversation write carries its own audit record — the document is the outbox.**
-   Each takeover write appends `{auditId, event, actor, at, controlId, textSha256?,
-   length?}` to `humanControl.journal` in the *same* atomic store write as the state change
-   or operator step. `auditId` is deterministic (`<conversationId>:<controlId>:<seq>`), not
+   Each takeover write appends `{auditId, event, actor, at, controlId, clientMessageId?,
+   textSha256?, length?}` to a document-level `takeoverJournal` in the *same* atomic store
+   write as the state change or operator step. The journal deliberately lives **outside**
+   `humanControl`: release clears `humanControl` but never the journal, so the release's own
+   `operator.release` record and any earlier unreconciled ones survive it. `auditId` is deterministic (`<conversationId>:<controlId>:<seq>`), not
    a fresh UUID.
 3. **Then submit** the ledger entry under that `auditId`, best-effort as today.
 4. **Reconcile.** A reconciler (a cluster-leader job like the other sweeps, plus once at
@@ -383,14 +392,26 @@ closes the window rather than inheriting it:
    up in the ledger and submits only the missing ones (flagged `reconciled: true`, original
    `at` kept). It must look before it submits: the ledger is hash-chained per conversation
    and `/auditstore/verify` grades a duplicate as broken, so blind replay is not
-   idempotent. Records found in the ledger are pruned. The journal is bounded: a release
-   cannot complete while more than N records are unreconciled — it reconciles first.
-5. **Ending or erasing** a conversation reconciles its journal before the document goes
-   (`endConversation`, delete, GDPR erasure), so the last records are not lost with it.
+   idempotent. A record is pruned **only** after its `auditId` has been read back from the
+   ledger store — never on submit, never on release. Release does not wait for the
+   asynchronous flush (that would put the 3 s flush interval, or a ledger outage, into the
+   desk's critical path); it does not have to, because nothing it clears holds an
+   unreconciled record. The journal is still bounded: a takeover write that would push it past
+   N unreconciled records (default 500) is refused with `503` until the reconciler catches
+   up, so a long ledger outage degrades into refused desk writes, never into lost audit.
+5. **Ending** a conversation keeps the document and therefore the journal; the reconciler
+   drains it as usual. **Deleting or erasing** the document (delete, GDPR erasure) first
+   submits the missing records, forces a flush (`AuditLedgerService.flush`) and reads every
+   `auditId` back; only an empty journal lets the document go. If the ledger cannot confirm,
+   the delete fails closed and is retried — the same answer the delete gives today when the
+   store is unavailable.
 
 Tests: a ledger stub that drops its queue simulates a kill between commit and flush; the
 reconciler then restores exactly the missing entries, `/auditstore/verify` stays clean, and
-a second pass submits nothing.
+a second pass submits nothing. The same kill straddling a **release** leaves the
+`operator.release` record in `takeoverJournal` after `humanControl` is cleared, and the
+reconciler restores it. A delete with an unreachable ledger is refused and the journal is
+intact.
 
 ---
 
@@ -446,11 +467,25 @@ and HITL owner-or-admin-or-approver (`HitlAccessGuard`, `OwnershipValidator.isAp
   never `longTerm` user memory wholesale, never `secret` scope. Outside that, 403.
 - Assignment: only the assignee (or an admin) may message/release; `force` reassign is
   admin-only and audited with `previousAssignee`.
-- **Blast radius.** As specified, any takeover-role identity can claim any `HUMAN_CONTROL`
-  conversation on any agent. A deployment serving several customers needs narrower desks:
-  an optional `takeoverConfig.desks` list (role or group names) restricts which
-  takeover-role callers may see and claim that agent's conversations; absent ⇒ any
-  takeover-role caller. Whether v1 needs it is open Q11.
+- **Desk scoping is on by default (blast radius).** The takeover role alone is not
+  enough to reach a conversation. `TakeoverAccessGuard` also requires the caller to belong
+  to one of the agent's desks: `takeoverConfig.desks` lists role or group names, and a
+  caller holding none of them gets `404` — not `403`, so the conversation's existence does
+  not leak, the same choice `HitlAccessGuard` makes for a wrong-group path. The check
+  applies to **every** operation: the inbox listing (filtered inside the query, before the
+  limit, as `listScopedPendingApprovals` does for owners), the status read, the dialogue
+  read, claim, message and release — and to every later entry point (the phase-5 MCP tools,
+  a Slack "Take over" button, webhook-driven replies), which go through the same guard.
+  Timer- and system-driven releases (`system:*`) are not caller actions and bypass it. Fail
+  closed: an agent with no `desks` is reachable only
+  by admins. Deployment switch `eddi.takeover.desk-scoping`:
+  - `required` (**default**) — as above.
+  - `single-desk` — an **explicit opt-in** for a deployment with one support team: any
+    takeover-role caller may reach any agent's handoffs, and the startup log says so once.
+
+  Admins are unaffected (they already see every conversation). `force` reassignment cannot
+  move a conversation to an assignee outside its desks. Open Q11 asks the maintainer to
+  confirm this default, not to choose whether to have scoping.
 - Authorization disabled (dev): `OwnershipValidator.isAdmin` already returns true —
   everything works, as for HITL.
 - Name: `eddi-operator` was rejected because the Manager's "Operator" is the Platform
@@ -518,7 +553,11 @@ consumes the pause):
    should the signed outbound webhook (§12) be in scope?
 10. **Message retention:** is "erased with the conversation; the ledger keeps a digest"
     (§7) acceptable, or must some deployments retain operator message text separately?
-11. **Desks:** is per-agent desk scoping (§9, blast radius) needed in v1?
+11. **Desks:** confirm the secure default of §9 — desk scoping `required` out of the box,
+    agents without `desks` admin-only, unrestricted access only via the explicit
+    `single-desk` opt-in. (Recommended; the alternative of opt-in scoping is rejected because
+    a shared deployment would let any takeover-role user claim another customer's
+    conversation.)
 
 ---
 
@@ -558,7 +597,7 @@ consumes the pause):
   flag is set; **redirects refused** for signed deliveries (a 3xx is a failed delivery and
   is not followed, so the signature and body never reach a second host); a per-delivery id
   and timestamp inside the signed payload for receiver-side replay protection; bounded
-  retries with backoff, then a dead letter. The webhook is fed from the store-backed journal
+  retries with backoff, then a dead letter. The webhook is fed from the store-backed `takeoverJournal`
   (§7.1), not from the best-effort CDI events, so a missed event is redelivered, not lost.
 - **Manager (phase 4):** the Approvals page becomes an inbox with *Approvals* and
   *Handoffs* tabs (same "limit reached" banner behaviour); conversation detail gets
@@ -609,7 +648,7 @@ them is the failure mode this inventory exists to prevent.
 - **Security:** owner gets 403 on every takeover endpoint; `eddi-user`/`eddi-editor`/
   `eddi-approver` 403; admin 200; takeover role 403 on a non-`HUMAN_CONTROL` conversation
   read; actor in audit ignores any body value; property patch refuses `longTerm`/`secret`/
-  reserved/non-allow-listed names without consuming the pause.
+  reserved/non-allow-listed names without consuming the pause; a takeover-role caller outside the agent's desks gets 404 on list (entry absent), status, read, claim, message and release, and an agent without `desks` is admin-only unless `single-desk` is set.
 - **Mutation-check** each behavioural test (revert the fix, confirm red), per the repo's
   practice.
 
