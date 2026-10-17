@@ -1259,7 +1259,8 @@ start_eddi() {
   # remote install (e.g. the GCP provisioner) sets EDDI_BIND=0.0.0.0 so the VM's
   # own IP is reachable; it is persisted to .env below so `eddi restart` keeps it.
   export EDDI_BIND
-  # docker-compose.yml's bind-guard refuses a non-loopback EDDI_BIND while
+  # The base stack's bind-guard (docker-compose.yml and
+  # docker-compose.postgres-only.yml both carry it) refuses a non-loopback EDDI_BIND while
   # authentication is off. Say so here, before pulling images, with the same
   # ways out the guard prints — unless the operator acknowledged it
   # (EDDI_I_UNDERSTAND_PUBLIC=true, which --i-understand-public on the GCP

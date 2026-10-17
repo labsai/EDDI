@@ -14,11 +14,13 @@ This starts EDDI on port `7070` and MongoDB, both published on `127.0.0.1` only.
 
 `EDDI_BIND` is the host interface EDDI is published on (`127.0.0.1` by default,
 so a laptop install is never reachable from the LAN by accident). Setting it to
-`0.0.0.0` or a LAN address is allowed only once authentication is on:
-`docker-compose.yml` carries a one-shot `bind-guard` service that `eddi`
-depends on, and it exits 1 — so EDDI never starts — when `EDDI_BIND` is not a
-loopback address while `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` is still `true`.
-The message it prints names the way out:
+`0.0.0.0` or a LAN address is allowed only once authentication is on: every
+whole stack that publishes on `EDDI_BIND` — `docker-compose.yml`,
+`docker-compose.postgres-only.yml` and `docker-compose.cluster.yml` — carries
+the same one-shot `bind-guard` service that the published service depends on,
+and it exits 1 — so EDDI never starts — when `EDDI_BIND` is not a loopback
+address while `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` is still `true`. The
+message it prints names the way out:
 
 ```bash
 # in .env — then bring the Keycloak overlay up
@@ -28,11 +30,25 @@ QUARKUS_OIDC_TENANT_ENABLED=true
 docker compose -f docker-compose.yml -f docker-compose.auth.yml up
 ```
 
-The guard runs on the `mongo` image the stack pulls anyway, so it costs no
-extra image, works offline and works with `docker-compose.local.yml`. It
-checks the two variables as compose resolves them, so a value set in `.env`,
-in the shell or by an overlay all count. `install.sh` performs the same check
-before it pulls images.
+The guard runs on a database image the stack pulls anyway (`mongo`, or
+`postgres` in the PostgreSQL stack), so it costs no extra image, works offline
+and works with `docker-compose.local.yml`. It checks the two variables as
+compose resolves them, so a value set in `.env`, in the shell or by an overlay
+all count. `install.sh` performs the same check before it pulls images.
+`docker-compose.auth.yml` tells the guard that authentication is on, so it
+layers onto either base stack.
+
+`ComposeStackTest` keeps the copies identical and renders every combination
+the installers assemble and the documentation prints with
+`docker compose config` (where Docker is installed; otherwise it checks that
+every service an overlay overrides exists in each base it is layered on):
+
+| Base stack | Overlays that layer on it |
+| --- | --- |
+| `docker-compose.yml` | `docker-compose.auth.yml`, `docker-compose.monitoring.yml` (alone or together), `docker-compose.local.yml`, `docker-compose.nats.yml`, `docker-compose.ollama.yml` (+ `docker-compose.ollama-nvidia.yml`), `docker-compose.chroma.yml`, `docker-compose.mcp-sidecar.yml` |
+| `docker-compose.postgres-only.yml` | `docker-compose.auth.yml`, `docker-compose.monitoring.yml` (alone or together), `docker-compose.local.yml` |
+| `docker-compose.cluster.yml` | none — a whole stack on its own |
+| `docker-compose.openwebui.yml` | none — a whole stack on its own |
 
 To expose an **unauthenticated** instance on purpose — an isolated network
 only you can reach — set `EDDI_I_UNDERSTAND_PUBLIC=true` as well; the GCP

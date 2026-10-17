@@ -51,6 +51,45 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      bind-guard:
+        condition: service_completed_successfully
+
+  # Refuses to publish an UNAUTHENTICATED EDDI beyond loopback — the same
+  # one-shot guard as docker-compose.yml's, which this whole stack used to lack:
+  # EDDI_BIND=0.0.0.0 here published an open EDDI, MCP server and secrets vault.
+  # ComposeStackTest keeps the three copies (docker-compose.yml, this file,
+  # docker-compose.cluster.yml) identical apart from the image, and
+  # docker-compose.auth.yml overrides it, so it must exist in every stack that
+  # overlay is layered on. Runs on the postgres image this stack pulls anyway.
+  bind-guard:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - "EDDI_BIND=${EDDI_BIND:-127.0.0.1}"
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}"
+      - "EDDI_I_UNDERSTAND_PUBLIC=${EDDI_I_UNDERSTAND_PUBLIC:-false}"
+    command:
+      - |
+        case "$$EDDI_BIND" in
+          ""|127.0.0.1|localhost|::1|"[::1]") exit 0 ;;
+        esac
+        if [ "$$EDDI_SECURITY_ALLOW_UNAUTHENTICATED" != "true" ] || [ "$$EDDI_I_UNDERSTAND_PUBLIC" = "true" ]; then
+          exit 0
+        fi
+        echo "" >&2
+        echo "[SECURITY] Refusing to start: EDDI_BIND=$$EDDI_BIND would publish EDDI on a" >&2
+        echo "  non-loopback interface while EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true," >&2
+        echo "  so every API endpoint — agents, conversations, the secrets vault, MCP —" >&2
+        echo "  would be reachable from the network with no token at all." >&2
+        echo "" >&2
+        echo "  Turn authentication on first:" >&2
+        echo "    EDDI_SECURITY_ALLOW_UNAUTHENTICATED=false   (in .env)" >&2
+        echo "    QUARKUS_OIDC_TENANT_ENABLED=true" >&2
+        echo "    docker compose -f docker-compose.yml -f docker-compose.auth.yml up" >&2
+        echo "  or keep EDDI on loopback (EDDI_BIND=127.0.0.1, the default)." >&2
+        echo "  To expose an UNAUTHENTICATED instance on purpose — an isolated network" >&2
+        echo "  you alone can reach — set EDDI_I_UNDERSTAND_PUBLIC=true." >&2
+        exit 1
 
   postgres:
     image: postgres:16-alpine
