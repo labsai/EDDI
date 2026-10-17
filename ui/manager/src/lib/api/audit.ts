@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { parseInstant } from "./schedules";
+import { seg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -113,7 +114,7 @@ export async function getAuditTrail(
   limit = 100,
 ): Promise<AuditEntry[]> {
   return api.get<AuditEntry[]>(
-    `${BASE}/${conversationId}?skip=${skip}&limit=${limit}`,
+    `${BASE}/${seg(conversationId)}?skip=${skip}&limit=${limit}`,
   );
 }
 
@@ -128,7 +129,7 @@ export async function getAuditTrailByAgent(
   if (agentVersion != null) {
     params.set("agentVersion", String(agentVersion));
   }
-  return api.get<AuditEntry[]>(`${BASE}/agent/${agentId}?${params.toString()}`);
+  return api.get<AuditEntry[]>(`${BASE}/agent/${seg(agentId)}?${params.toString()}`);
 }
 
 /* ─── Administrative actions (EDDI 6.6+) ─── */

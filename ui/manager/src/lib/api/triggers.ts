@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 // ─── Types ───
 
@@ -32,9 +33,9 @@ export async function updateTrigger(
   intent: string,
   config: AgentTriggerConfiguration,
 ): Promise<void> {
-  return api.put(`${BASE}/${encodeURIComponent(intent)}`, config);
+  return api.put(`${BASE}/${nameSeg(intent)}`, config);
 }
 
 export async function deleteTrigger(intent: string): Promise<void> {
-  return api.delete(`${BASE}/${encodeURIComponent(intent)}`);
+  return api.delete(`${BASE}/${nameSeg(intent)}`);
 }
