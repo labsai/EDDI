@@ -203,6 +203,19 @@ All execution metrics support a `tool` label for per-tool breakdown:
 rate(eddi_tool_execution_success_total{tool="weather"}[5m])
 ```
 
+**Which call was slow — tracing.** The duration timer says a tool is slow on
+average; a trace says which call, in which turn, and where the time went. With
+tracing on (`QUARKUS_OTEL_SDK_DISABLED=false` plus an OTLP endpoint) every tool
+call is an `execute_tool <tool>` span with `gen_ai.tool.name`,
+`gen_ai.tool.call.id`, `eddi.tool.source` and, when it never reached the tool,
+`eddi.tool.cache_hit=true` or `error.type=rate_limited`/`timeout`. While it runs,
+EDDI sends that span's W3C `traceparent` to the httpcall, MCP (header and
+`params._meta`), A2A or built-in-tool endpoint it calls, so a traced downstream
+service shows up as its child. Switch the propagation off with
+`eddi.tracing.propagate-outbound=false`. Backends (Jaeger, Tempo, Langfuse, Phoenix)
+and the propagation rules are in the
+[monitoring guide](monitoring/monitoring-guide.md#sending-traces-to-langfuse--arize-phoenix--jaeger--tempo).
+
 ### Tool Cache Metrics
 
 ```text

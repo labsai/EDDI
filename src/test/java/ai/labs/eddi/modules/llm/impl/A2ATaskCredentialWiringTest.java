@@ -11,9 +11,14 @@ import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -125,6 +130,46 @@ class A2ATaskCredentialWiringTest {
     private static String header(Hop hop, String name) {
         List<String> values = hop.headers().get(name);
         return values == null || values.isEmpty() ? null : values.getFirst();
+    }
+
+    @Nested
+    @DisplayName("W3C trace context")
+    class TraceContext {
+
+        @Test
+        @DisplayName("the card fetch and the task call carry the current span's traceparent, and never baggage")
+        void bothRequestsCarryTraceparent() {
+            SdkTracerProvider tracerProvider = SdkTracerProvider.builder().build();
+            Span span = tracerProvider.get("test").spanBuilder("execute_tool peer_lookup").startSpan();
+            var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                    A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                    A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver,
+                    TestOutbound.facade(engine, new TracePropagation(true)));
+            try (Scope ignored = span.makeCurrent()) {
+                var executor = manager.discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+                executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+            } finally {
+                span.end();
+                tracerProvider.close();
+            }
+
+            SpanContext sc = span.getSpanContext();
+            String expected = "00-" + sc.getTraceId() + "-" + sc.getSpanId() + "-" + sc.getTraceFlags().asHex();
+            assertEquals(2, sent.size());
+            assertEquals(expected, header(sent.get(0), "traceparent"));
+            assertEquals(expected, header(sent.get(1), "traceparent"));
+            assertNull(header(sent.get(1), "baggage"));
+            assertEquals("Bearer sk-static", header(sent.get(1), "Authorization"), "the trace header is added, not substituted");
+        }
+
+        @Test
+        @DisplayName("a facade without propagation adds nothing")
+        void nothingWithoutPropagator() {
+            var executor = manager().discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+            executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+
+            assertNull(header(sent.get(1), "traceparent"));
+        }
     }
 
     @Nested
