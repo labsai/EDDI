@@ -27,6 +27,9 @@ class OpenAiCompatibleConfigValidatorTest {
         Map<String, String> p = new HashMap<>();
         p.put("baseUrl", "http://vllm:8000/v1");
         p.put("modelName", "granite");
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + kv.length + " values");
+        }
         for (int i = 0; i < kv.length; i += 2) {
             if (kv[i + 1] == null) {
                 p.remove(kv[i]);

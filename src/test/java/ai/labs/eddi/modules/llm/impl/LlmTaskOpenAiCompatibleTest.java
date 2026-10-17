@@ -148,6 +148,9 @@ class LlmTaskOpenAiCompatibleTest {
         params.put("modelName", "granite");
         params.put("systemMessage", "You are helpful.");
         params.put("convertToObject", "true");
+        if (flags.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + flags.length + " values");
+        }
         for (int i = 0; i < flags.length; i += 2) {
             params.put(flags[i], flags[i + 1]);
         }

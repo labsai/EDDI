@@ -48,6 +48,9 @@ class SelfHostedOpenAiLanguageModelBuilderTest {
         Map<String, String> p = new HashMap<>();
         p.put("baseUrl", URL);
         p.put("modelName", MODEL);
+        if (extra.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + extra.length + " values");
+        }
         for (int i = 0; i < extra.length; i += 2) {
             p.put(extra[i], extra[i + 1]);
         }

@@ -42,6 +42,9 @@ class OpenAiCompatibleEndpointCapabilitiesTest {
         Map<String, String> p = new HashMap<>();
         p.put("baseUrl", "http://vllm:8000/v1");
         p.put("modelName", "some/model");
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + kv.length + " values");
+        }
         for (int i = 0; i < kv.length; i += 2) {
             p.put(kv[i], kv[i + 1]);
         }
