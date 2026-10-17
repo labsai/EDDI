@@ -68,7 +68,7 @@ class ToolLoopRunnerCostCeilingTest {
                         nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, new ToolApprovalGate(), null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
 
