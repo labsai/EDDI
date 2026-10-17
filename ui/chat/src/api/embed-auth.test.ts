@@ -85,6 +85,22 @@ describe("parseAllowedTokenOrigins", () => {
   it("keeps exact origins", () => {
     expect(parse(`${HOST}, http://localhost:5173`)).toEqual([HOST, "http://localhost:5173"]);
   });
+
+  it("keeps a plain-http origin but warns unless it is loopback", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parse("http://localhost:5173, http://127.0.0.1:3000, http://[::1]:3000, http://app.localhost")).toEqual([
+      "http://localhost:5173",
+      "http://127.0.0.1:3000",
+      "http://[::1]:3000",
+      "http://app.localhost",
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+
+    expect(parse("http://portal.example")).toEqual(["http://portal.example"]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("http://portal.example"));
+    warn.mockRestore();
+  });
 });
 
 describe("handshake", () => {

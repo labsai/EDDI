@@ -38,6 +38,19 @@ public interface IRestHtmlChatResource {
     @Operation(hidden = true)
     Response viewDefault();
 
+    /**
+     * The operator settings the widget needs before its first request, as a script
+     * that sets {@code window.__EDDI_CHAT__} — the way the Manager reads
+     * {@code /manage/__auth_config__.js}. A literal path, so it wins over the SPA
+     * catch-all below.
+     */
+    @GET
+    @Cache(noCache = true, mustRevalidate = true)
+    @Path("__config__.js")
+    @Produces("application/javascript")
+    @Operation(hidden = true)
+    Response fetchChatConfig();
+
     @GET
     @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")

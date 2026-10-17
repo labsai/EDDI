@@ -678,6 +678,7 @@ eddi_vault_store_duration_seconds           # Write latency (timer)
 
 ```text
 eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outcome
+eddi_mcp_tool_schema_governed_total         # Remote tool parameter schemas changed before prompting; tag: outcome (redacted|truncated|dropped|dropped_server_cap)
 eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
 eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
@@ -685,6 +686,7 @@ eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
 eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
+eddi_a2a_tool_schema_governed_total         # Peer tool parameter schemas changed before prompting; tag: outcome (as the MCP counter)
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)

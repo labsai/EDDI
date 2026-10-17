@@ -102,6 +102,19 @@ public class ToolResponseTruncator {
      */
     public String truncateIfNeeded(String toolName, String result, ToolResponseLimits limits,
                                    String taskType, Map<String, String> taskParameters) {
+        return truncateIfNeeded(null, toolName, result, limits, taskType, taskParameters);
+    }
+
+    /**
+     * As
+     * {@link #truncateIfNeeded(String, String, ToolResponseLimits, String, Map)},
+     * for a result produced inside {@code conversationId}. The {@code paginate}
+     * strategy stores its pages under that conversation and the pages can be
+     * fetched from it alone (L13); without a conversation it cannot scope the pages
+     * and falls back to truncation.
+     */
+    public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
+                                   String taskType, Map<String, String> taskParameters) {
         if (limits == null || result == null) {
             return result;
         }
@@ -115,7 +128,7 @@ public class ToolResponseTruncator {
         String strategy = limits.getTruncationStrategy() != null ? limits.getTruncationStrategy() : "truncate";
 
         return switch (strategy.toLowerCase()) {
-            case "paginate" -> paginateResponse(toolName, result, maxChars);
+            case "paginate" -> paginateResponse(conversationId, toolName, result, maxChars);
             case "summarize" -> summarizeResponse(toolName, result, maxChars, limits, taskType, taskParameters);
             default -> truncateResponse(toolName, result, maxChars);
         };
@@ -144,8 +157,13 @@ public class ToolResponseTruncator {
      */
     static final int PAGINATE_MAX_STORABLE_CHARS = 500_000;
 
-    private String paginateResponse(String toolName, String result, int maxChars) {
+    private String paginateResponse(String conversationId, String toolName, String result, int maxChars) {
         int originalLength = result.length();
+
+        if (conversationId == null || conversationId.isBlank()) {
+            LOGGER.warnf("No conversation to scope paginated pages to, falling back to truncation for tool '%s'", sanitize(toolName));
+            return truncateResponse(toolName, result, maxChars);
+        }
 
         // Memory guard — refuse to materialize very large responses as pages
         if (originalLength > PAGINATE_MAX_STORABLE_CHARS) {
@@ -160,12 +178,12 @@ public class ToolResponseTruncator {
             return truncateResponse(toolName, result, maxChars);
         }
 
-        String responseId = paginatedResponseStore.store(toolName, result, maxChars);
+        String responseId = paginatedResponseStore.store(conversationId, toolName, result, maxChars);
         if (responseId == null) {
             return truncateResponse(toolName, result, maxChars);
         }
 
-        int pageCount = paginatedResponseStore.getPageCount(responseId);
+        int pageCount = paginatedResponseStore.getPageCount(conversationId, responseId);
         String firstPage = result.substring(0, Math.min(maxChars, originalLength));
         String paginated = firstPage + PAGINATION_SUFFIX.formatted(originalLength, pageCount, responseId);
 

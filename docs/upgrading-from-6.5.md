@@ -30,6 +30,23 @@ refused:
 - **Custom JAX-RS resources** deployed as extensions must carry a security annotation
   (`@RolesAllowed`, `@PermitAll`, …). Unannotated endpoints are now denied
   (`quarkus.security.jaxrs.deny-unannotated-endpoints=true`).
+- **`${caller:token}` needs an administrator to save it.** Creating, updating, patching,
+  duplicating or importing an httpcalls, mcpcalls or LLM configuration that contains
+  `${caller:token}` now needs `eddi-admin` (`eddi.caller-identity.author-roles`); an editor gets
+  **403**. Stored configs keep working. See
+  [Who may write `${caller:token}`](httpcalls.md#who-may-write-callertoken).
+
+---
+
+## Outbound HTTP calls
+
+- **A templated host is refused while SSRF protection is off.** An httpCall whose scheme, host or
+  port contains a template expression (`https://{properties.apiHost}`) now fails to deploy unless
+  `eddi.security.ssrf-protection.enabled=true`. Write the host literally or as a `${vars:…}`
+  reference, or turn protection on and list the internal hosts you need in
+  `eddi.security.ssrf-protection.allowed-hosts`. Production also logs a `[SECURITY]` WARN at
+  startup while protection is off. See
+  [SSRF protection](security.md#ssrf-protection--urlvalidationutils).
 
 ---
 

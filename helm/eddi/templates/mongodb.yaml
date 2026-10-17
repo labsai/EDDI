@@ -10,10 +10,11 @@
   `lookup` is empty under `helm template` and client-side dry runs, so this never
   fires there — it is a best-effort brake on the one path that loses data.
 */}}
+{{- $mongoSecretName := .Values.mongodb.existingSecret | default (printf "%s-mongodb" (include "eddi.fullname" .)) }}
 {{- if and .Release.IsUpgrade (not .Values.mongodb.authMigrated) }}
 {{- $mongoName := printf "%s-mongodb" (include "eddi.fullname" .) }}
 {{- $existingSts := lookup "apps/v1" "StatefulSet" .Release.Namespace $mongoName }}
-{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $mongoName }}
+{{- $existingSecret := lookup "v1" "Secret" .Release.Namespace $mongoSecretName }}
 {{- if and $existingSts (not $existingSecret) }}
 {{- fail (printf `This upgrade turns on MongoDB authentication for an existing in-chart MongoDB (%[1]s) whose data was initialised WITHOUT it. The mongo image creates the root user only on an empty volume, so after this upgrade MongoDB would require a user that does not exist and EDDI would lose database access. Create the user first, in the still-unauthenticated database (the password prompt keeps it out of shell history):
 
@@ -22,6 +23,11 @@
 enter the SAME value you pass as mongodb.rootPassword, then re-run the upgrade with --set mongodb.authMigrated=true. Existing data is untouched. See docs/kubernetes.md, "Upgrading to an authenticated MongoDB".` $mongoName .Release.Namespace .Values.mongodb.rootUsername) }}
 {{- end }}
 {{- end }}
+{{- /*
+  Skipped when mongodb.existingSecret names an operator-managed Secret carrying
+  the same two keys; the StatefulSet below then reads that one.
+*/}}
+{{- if not .Values.mongodb.existingSecret }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -37,6 +43,7 @@ stringData:
   {{- $mongoPassword := required "mongodb.rootPassword is required when mongodb.enabled=true — the chart no longer ships an unauthenticated MongoDB. Generate one: openssl rand -base64 24" .Values.mongodb.rootPassword }}
   MONGO_INITDB_ROOT_PASSWORD: {{ $mongoPassword | quote }}
 ---
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -74,12 +81,12 @@ spec:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "eddi.fullname" . }}-mongodb
+                  name: {{ $mongoSecretName }}
                   key: MONGO_INITDB_ROOT_USERNAME
             - name: MONGO_INITDB_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "eddi.fullname" . }}-mongodb
+                  name: {{ $mongoSecretName }}
                   key: MONGO_INITDB_ROOT_PASSWORD
           ports:
             - containerPort: 27017

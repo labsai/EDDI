@@ -126,11 +126,13 @@ spec:
           projected:
             defaultMode: 0400
             sources:
+              # eddi.existingSecret / postgres.existingSecret: an operator-managed
+              # Secret of the same shape, mounted in place of the chart's own.
               - secret:
-                  name: {{ include "eddi.fullname" . }}-secrets
+                  name: {{ .Values.eddi.existingSecret | default (printf "%s-secrets" (include "eddi.fullname" .)) }}
               {{- if .Values.postgres.enabled }}
               - secret:
-                  name: {{ include "eddi.fullname" . }}-postgres
+                  name: {{ .Values.postgres.existingSecret | default (printf "%s-postgres" (include "eddi.fullname" .)) }}
                   items:
                     - key: postgres-secrets.properties
                       path: postgres-secrets.properties
