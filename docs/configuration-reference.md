@@ -428,7 +428,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
-| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document |
+| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document — for a page range (`readAttachment`, `PdfReaderTool`) too, counted from its first page. Every PDF read for an attachment or a tool also runs under the ingestion path's decode budgets: one compressed stream may expand to at most 64 MB and the whole document to 128 MB |
 
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
