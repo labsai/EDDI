@@ -154,7 +154,14 @@ class ObservableStreamingChatModelTest {
     @DisplayName("a credential straddling the request-line cutoff is redacted, and the line is DEBUG")
     void requestLineIsDebugAndRedactedBeforeTruncation() {
         String secret = "sk-abcdefghijklmnopqrstuvwxyz0123456789";
-        var request = ChatRequest.builder().messages(UserMessage.from("x".repeat(190) + " api_key=" + secret)).build();
+        // The logged form is UserMessage.toString(), 61 characters of wrapper plus the
+        // text, so 15 of the key sit before the 200-character cutoff,
+        // more than the 8 asserted on and fewer than the filter needs to recognise it.
+        String straddling = "x".repeat(124) + " " + secret;
+        String unredactedPrefix = UserMessage.from(straddling).toString().substring(0, 200);
+        assertTrue(unredactedPrefix.contains(secret.substring(0, 8)) && !unredactedPrefix.contains(secret),
+                "the fixture must put the cutoff inside the key: " + unredactedPrefix);
+        var request = ChatRequest.builder().messages(UserMessage.from(straddling)).build();
         var wrapped = ObservableStreamingChatModel.wrap(emitting("a"), "openai", "true", "false", null);
         List<LogRecord> records = new ArrayList<>();
         var handler = new Handler() {

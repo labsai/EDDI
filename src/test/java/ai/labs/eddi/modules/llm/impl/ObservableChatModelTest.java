@@ -133,7 +133,17 @@ class ObservableChatModelTest {
         @Test
         void credentialStraddlingTheRequestCutoffIsRedacted() {
             ChatModel delegate = providerLikeMock();
-            String straddling = "x".repeat(190) + " api_key=" + SECRET;
+            // The logged form is UserMessage.toString(), 61 characters of wrapper plus the
+            // text, so 15 of the key sit before the 200-character
+            // cutoff — more than the 8 the assertion checks for, fewer than the filter
+            // needs to recognise the key, so truncating first would leave them in the log.
+            // No
+            // credential-named key precedes it: the name-bound rule would mask the value
+            // whatever its shape and hide exactly the cut this test is about.
+            String straddling = "x".repeat(124) + " " + SECRET;
+            String unredactedPrefix = UserMessage.from(straddling).toString().substring(0, 200);
+            assertTrue(unredactedPrefix.contains(SECRET.substring(0, 8)) && !unredactedPrefix.contains(SECRET),
+                    "the fixture must put the cutoff inside the key: " + unredactedPrefix);
             var request = ChatRequest.builder().messages(List.of(UserMessage.from(straddling))).build();
             ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
 
@@ -146,8 +156,13 @@ class ObservableChatModelTest {
         @Test
         void credentialStraddlingTheResponseCutoffIsRedacted() {
             ChatModel delegate = providerLikeMock();
+            // 485 characters of prefix: 15 of the key sit before the 500-character cutoff.
+            String response = "y".repeat(484) + " " + SECRET;
+            String unredactedPrefix = response.substring(0, 500);
+            assertTrue(unredactedPrefix.contains(SECRET.substring(0, 8)) && !unredactedPrefix.contains(SECRET),
+                    "the fixture must put the cutoff inside the key: " + unredactedPrefix);
             when(delegate.chat(any(ChatRequest.class)))
-                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("y".repeat(490) + " token=" + SECRET)).build());
+                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(response)).build());
             var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
             ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
 
