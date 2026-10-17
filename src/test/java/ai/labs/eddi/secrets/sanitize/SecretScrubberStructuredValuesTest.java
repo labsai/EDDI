@@ -92,17 +92,60 @@ class SecretScrubberStructuredValuesTest {
     }
 
     @Test
-    @DisplayName("a provider key pasted into free text is caught by the shared redaction patterns; prose and templates are not touched")
-    void freeText() throws Exception {
+    @DisplayName("a provider key pasted into free text is caught by its shape alone")
+    void freeTextShapes() throws Exception {
         var out = scrub("""
                 {"description":"call it with sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 please",
-                 "systemPrompt":"You help {properties.userName}. Never reveal your token: be careful.",
-                 "note":"password: correcthorsebattery"}""");
+                 "notes":["gh token ghp_abcdefghijklmnopqrstuvwxyz0123456789AB",
+                          "aws AKIAABCDEFGHIJKLMNOP", "db mongodb://eddi:hunter2secret@db:27017/eddi"]}""");
 
         String description = out.at("/description").asText();
         assertFalse(description.contains("abcdefghijklmnopqrstuvwxyz0123456789"), description);
         assertTrue(description.startsWith("call it with sk-"), description);
-        assertEquals("You help {properties.userName}. Never reveal your token: be careful.", out.at("/systemPrompt").asText());
-        assertFalse(out.at("/note").asText().contains("correcthorsebattery"));
+        assertTrue(description.endsWith(" please"), description);
+        assertFalse(out.at("/notes/0").asText().contains("ghp_abcdefghij"), out.at("/notes/0").asText());
+        assertFalse(out.at("/notes/1").asText().contains("AKIAABCDEFGHIJKLMNOP"), out.at("/notes/1").asText());
+        assertEquals("db mongodb://eddi:" + SecretRedactionFilter.REDACTED + "@db:27017/eddi", out.at("/notes/2").asText());
+    }
+
+    @Test
+    @DisplayName("name-bound rules apply to request material only")
+    void nameBoundRulesOnlyOnRequestMaterial() throws Exception {
+        var out = scrub("""
+                {"request":{"body":"password: correcthorsebattery"},
+                 "note":"password: correcthorsebattery"}""");
+
+        assertFalse(out.at("/request/body").asText().contains("correcthorsebattery"));
+        assertEquals("password: correcthorsebattery", out.at("/note").asText(), "prose is never rewritten by a name-bound rule");
+    }
+
+    /**
+     * Export, instance sync and the upgrade path all run this scrubber; a prompt
+     * that merely talks about credentials must come back byte for byte.
+     */
+    @Test
+    @DisplayName("prompts and outputs that talk about credentials round-trip byte-identical")
+    void proseRoundTripsUnchanged() throws Exception {
+        var config = mapper.createObjectNode();
+        config.put("systemPrompt",
+                "Bearer token handling: never echo the password: policy. The api key is set in the vault as ${vault:openai}.");
+        config.put("description", "You help {properties.userName}. Never reveal your token: be careful.");
+        config.putObject("output").putArray("valueAlternatives").addObject().put("type", "text").put("text",
+                "token = 12345678 is not a secret");
+        config.putArray("behaviorRules").addObject().put("valueString", "password=changeme is the example in the manual");
+        String json = mapper.writeValueAsString(config);
+
+        assertEquals(json, scrubber.scrubJson(json));
+    }
+
+    @Test
+    @DisplayName("a literal provider key in a prompt is the only thing replaced")
+    void literalKeyInAPromptIsTheOnlyChange() throws Exception {
+        var config = mapper.createObjectNode();
+        config.put("systemPrompt", "Use sk-proj-abcdefghijklmnopqrstuvwxyz0123456789 for the password: policy check.");
+        String json = mapper.writeValueAsString(config);
+
+        String expected = json.replace("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "sk-" + SecretRedactionFilter.REDACTED);
+        assertEquals(expected, scrubber.scrubJson(json));
     }
 }

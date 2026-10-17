@@ -563,6 +563,24 @@ public final class SecretRedactionFilter {
      *            the raw log message
      * @return the message with secrets replaced by {@code <REDACTED>}
      */
+    /**
+     * Only the rules that recognise a credential by its SHAPE alone (an {@code sk-}
+     * key, a long bearer token, ...), never the name-bound rules
+     * ({@code password: ...}, {@code token=...}). For text that is prose rather
+     * than request material — a system prompt, an output text — where the
+     * name-bound rules would rewrite ordinary sentences.
+     */
+    public static String redactCredentialShapes(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        String result = text;
+        for (RedactionRule rule : SHAPE_RULES) {
+            result = rule.pattern.matcher(result).replaceAll(rule.replacement);
+        }
+        return result;
+    }
+
     public static String redact(String message) {
         if (message == null || message.isEmpty()) {
             return message;

@@ -189,6 +189,40 @@ public class SecretScrubber {
     /** One {@code name=value} pair of a form-encoded body or query string. */
     private static final Pattern FORM_PAIR = Pattern.compile("[A-Za-z0-9_.\\-\\[\\]%]++=[^&\\s]*+");
 
+    /**
+     * Field names whose value is request material — what an outbound call sends (a
+     * path, a body, a URL or endpoint). Only these, values inside a header or
+     * query-parameter map, and documents embedded in a string get the full
+     * {@link SecretRedactionFilter} pass with its name-bound rules
+     * ({@code password: ...}, {@code token=...}); any other text — a prompt, a
+     * description, an output — only loses tokens that are credentials by their
+     * shape, so export never rewrites prose.
+     */
+    private static final Set<String> REQUEST_MATERIAL_FIELD_NAMES = Set.of("path", "body", "requestbody", "url", "baseurl", "endpoint",
+            "targetserverurl", "serverurl", "apiurl", "query", "querystring");
+
+    /** Containers whose string values are request material. */
+    private static final Set<String> REQUEST_MATERIAL_CONTAINERS = Set.of("queryparams", "queryparameters", "params", "cookies");
+
+    /**
+     * Credential shapes the export pass recognises in prose on top of
+     * {@link SecretRedactionFilter#redactCredentialShapes}: provider keys and
+     * tokens that are secrets by their form alone. Each is anchored so it does not
+     * start inside a word, and possessive so the scan stays linear.
+     */
+    private static final List<Pattern> EXPORT_CREDENTIAL_SHAPES = List.of(
+            Pattern.compile("(?<![A-Za-z0-9_])AIza[0-9A-Za-z_\\-]{35}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{36,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{22,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])xox[abprs]-[A-Za-z0-9\\-]{10,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])(?:AKIA|ASIA)[0-9A-Z]{16}+(?![0-9A-Z])"),
+            Pattern.compile("(?<![A-Za-z0-9_])gsk_[A-Za-z0-9]{20,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])xai-[A-Za-z0-9]{20,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_\\-]{8,}+\\.eyJ[A-Za-z0-9_\\-]{8,}+\\.[A-Za-z0-9_\\-]{8,}+"));
+
+    /** The password of a {@code mongodb(+srv)://user:password@} string in prose. */
+    private static final Pattern MONGODB_USERINFO = Pattern.compile("(mongodb(?:\\+srv)?+://[^\\s:/@]++):[^\\s/@]++@");
+
     /** Brackets a masked template expression in {@link #redactFreeText}. */
     private static final char MASK_OPEN = (char) 0xE000;
     private static final char MASK_CLOSE = (char) 0xE001;
@@ -331,8 +365,12 @@ public class SecretScrubber {
         if (embedded && WHOLE_POINTER.matcher(textValue).matches()) {
             return null;
         }
-        // A credential-named field is redacted whole below, whatever its shape.
-        if (!isSecretFieldName(fieldName, parentFieldName)) {
+        boolean requestMaterial = embedded || isRequestMaterial(fieldName, parentFieldName);
+        // A credential-named field is redacted whole below, whatever its shape. Only
+        // request material, and a field that names itself a JSON document
+        // (serviceAccountJson), is taken apart: a prompt that happens to look like
+        // a query string or a JSON example stays prose.
+        if (!isSecretFieldName(fieldName, parentFieldName) && (requestMaterial || isEmbeddedDocumentName(fieldName))) {
             String structured = scrubStructuredText(textValue);
             if (structured != null && !structured.equals(textValue)) {
                 return structured;
@@ -342,7 +380,42 @@ public class SecretScrubber {
         if (decided != null || isStructuralFieldName(fieldName) || looksLikeUrl(textValue)) {
             return decided;
         }
-        return redactFreeText(textValue);
+        return requestMaterial ? redactFreeText(textValue) : redactCredentialShapes(textValue);
+    }
+
+    /**
+     * Whether the value is something an outbound call sends — see
+     * {@link #REQUEST_MATERIAL_FIELD_NAMES}.
+     */
+    private static boolean isRequestMaterial(String fieldName, String parentFieldName) {
+        if (fieldName != null && REQUEST_MATERIAL_FIELD_NAMES.contains(normalizeFieldName(fieldName))) {
+            return true;
+        }
+        return isHeaderContainer(parentFieldName)
+                || (parentFieldName != null && REQUEST_MATERIAL_CONTAINERS.contains(normalizeFieldName(parentFieldName)));
+    }
+
+    /**
+     * A field that says it holds a JSON document, e.g. {@code serviceAccountJson}.
+     */
+    private static boolean isEmbeddedDocumentName(String fieldName) {
+        return fieldName != null && normalizeFieldName(fieldName).endsWith("json");
+    }
+
+    /**
+     * Only the tokens that are credentials by their shape (see
+     * {@link #EXPORT_CREDENTIAL_SHAPES}); {@code null} when nothing matched.
+     */
+    static String redactCredentialShapes(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        String redacted = SecretRedactionFilter.redactCredentialShapes(text);
+        for (Pattern shape : EXPORT_CREDENTIAL_SHAPES) {
+            redacted = shape.matcher(redacted).replaceAll(Matcher.quoteReplacement(SecretRedactionFilter.REDACTED));
+        }
+        redacted = MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
+        return redacted.equals(text) ? null : redacted;
     }
 
     /**
