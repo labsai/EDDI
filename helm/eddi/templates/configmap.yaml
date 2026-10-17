@@ -248,6 +248,24 @@ data:
   */}}
   EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowMcp) $allowMcp }}{{ $allowMcp | quote }}{{ else }}{{ "false" | quote }}{{ end }}
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowSecretStore) $allowSecretStore }}{{ $allowSecretStore | quote }}{{ else }}{{ "false" | quote }}{{ end }}
+  {{- if $oidcOff }}
+  {{- /*
+    With authentication off, UnauthenticatedRequestGuard answers only requests
+    addressed to localhost, an IP address (kubelet probes, Prometheus,
+    port-forward) or a listed host, and refuses cross-site writes — the
+    DNS-rebinding defence (docs/security.md, "Running without authentication").
+    List the Service's in-cluster names and, when an Ingress is acknowledged
+    unauthenticated, its hosts; otherwise every request through them is a 421.
+  */}}
+  {{- $fullname := include "eddi.fullname" . }}
+  {{- $allowedHosts := list $fullname (printf "%s.%s" $fullname .Release.Namespace) (printf "%s.%s.svc" $fullname .Release.Namespace) (printf "%s.%s.svc.cluster.local" $fullname .Release.Namespace) }}
+  {{- if .Values.ingress.enabled }}
+  {{- range .Values.ingress.hosts }}
+  {{- $allowedHosts = append $allowedHosts .host }}
+  {{- end }}
+  {{- end }}
+  EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: {{ join "," $allowedHosts | quote }}
+  {{- end }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"

@@ -10,6 +10,15 @@ docker compose up
 
 This starts EDDI on port `7070` and MongoDB, both published on `127.0.0.1` only. No login required: `docker-compose.yml` sets the three authentication opt-outs described below, which is why it does not publish EDDI on other interfaces unless you set `EDDI_BIND` — and refuses to do even that while authentication is off, see [Publishing EDDI on the network](#publishing-eddi-on-the-network).
 
+Loopback keeps the network out, not a web page in your own browser. So while
+authentication is off EDDI answers only requests addressed to `localhost`, an IP
+address or a host in `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` (default
+`eddi`, the service name other containers use) — anything else gets `421` — and
+refuses cross-site `POST`/`PUT`/`PATCH`/`DELETE` from origins not in
+`QUARKUS_HTTP_CORS_ORIGINS` with `403`. Browsing to `http://localhost:7070` works
+as before; if you reach EDDI under another name, add it to the list. See
+[Running without authentication](security.md#running-without-authentication).
+
 ### Publishing EDDI on the network
 
 `EDDI_BIND` is the host interface EDDI is published on (`127.0.0.1` by default,
@@ -138,6 +147,7 @@ docker run --name eddi \
 | `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` | `false`                      | Opt out of the production auth requirement. Required to boot with OIDC disabled |
 | `EDDI_MCP_ALLOW_UNAUTHENTICATED` | `false`                           | Knowingly expose `/mcp` without authentication. Required to boot with OIDC disabled |
 | `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED` | `false`                   | Knowingly expose `/secretstore` without authentication. Required to boot with OIDC disabled |
+| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost` and IP addresses EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 

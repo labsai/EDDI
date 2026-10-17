@@ -23,6 +23,13 @@ services:
       # HighValueSurfaceGuard refuses to boot without these while OIDC is off.
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
+      # While authentication is off EDDI answers only requests addressed to
+      # localhost, an IP address or a host listed here (UnauthenticatedRequestGuard
+      # — a DNS-rebinding page arrives with its own name), and refuses cross-site
+      # POST/PUT/PATCH/DELETE. `eddi` is this service's name on the compose
+      # network, which Prometheus (docker-compose.monitoring.yml) and other
+      # containers use. Add the name you browse to when it is not localhost.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
       - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
       # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"

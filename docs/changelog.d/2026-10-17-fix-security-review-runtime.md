@@ -33,3 +33,30 @@ L7, L8 and the small L12/L13 items. One commit per finding.
 [`docker-compose.auth.yml`](../../docker-compose.auth.yml),
 [`ComposeStackTest.java`](../../src/test/java/ai/labs/eddi/ComposeStackTest.java),
 [`docker.md`](../docker.md), [`mcp-server.md`](../mcp-server.md)
+
+- **M7 — the unauthenticated quick start had no `Host`/`Origin` check.** Loopback binding
+  stops the network, not the browser: a DNS-rebinding page (`Host: evil.example` resolved to
+  `127.0.0.1`) was same-origin with the whole API, MCP and `/secretstore`, and without
+  rebinding a page could still send blind CORS "simple" `POST`s. The new
+  `UnauthenticatedRequestGuard` (a Vert.x route filter registered like `HttpMethodGuard`,
+  and only while `authorization.enabled=false`) answers **421** to a `Host` that is not
+  `localhost`/`*.localhost`, an IP literal or an entry of the new
+  `eddi.security.unauthenticated.allowed-hosts`, and **403** to a
+  `POST`/`PUT`/`PATCH`/`DELETE` whose `Origin` is neither the request's own nor in
+  `quarkus.http.cors.origins` (`null` included) or, without an `Origin`, whose
+  `Sec-Fetch-Site` is `cross-site`/`same-site`. `/q/health` is exempt; one `[SECURITY]` WARN
+  at boot states the policy. Design decision, deviating from the review's "loopback only":
+  **IP literals are always answered**. Rebinding needs a DNS name the attacker controls, so an
+  address cannot be its product, and kubelet probes, Prometheus scrapes (pod IPs) and
+  `eddi.self.base-url` (`http://127.0.0.1:…` or a pod IP) address EDDI that way; the
+  cross-site check still covers a page that posts to an address. The raw `Host` header is
+  read, never a forwarded one — a rebound page is same-origin and may set
+  `X-Forwarded-Host`. The compose stacks default the allow-list to `eddi` (Prometheus and
+  Open WebUI reach EDDI by service name), the kustomize base and quickstart to the Service's
+  in-cluster names, and the Helm chart (when OIDC is off) to the Service names plus any
+  acknowledged ingress host. Chart `2.8.0` → `2.9.0`.
+
+**Files:** [`UnauthenticatedRequestGuard.java`](../../src/main/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuard.java),
+[`UnauthenticatedRequestGuardTest.java`](../../src/test/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuardTest.java),
+[`security.md`](../security.md#running-without-authentication),
+[`configuration-reference.md`](../configuration-reference.md)
