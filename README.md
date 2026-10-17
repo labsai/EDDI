@@ -710,7 +710,7 @@ EDDI ships with security-by-default for production deployments:
 - **Authentication enforced** — `AuthStartupGuard` fails startup if OIDC is disabled in production without explicit opt-out; tokens must carry the `eddi-backend` audience and name a user
 - **Secrets encrypted at rest** — Envelope encryption (PBKDF2 → AES-256-GCM) with per-deployment salt. Never plaintext in DB. A weak vault master key stops a production boot
 - **Credentials only where configured** — A `${vault:…}`, `${connection:…}` or `${caller:…}` reference resolves only where the configuration wrote it, not when it arrives through conversation data (a value EDDI auto-vaulted itself is the one exception)
-- **SSRF protection** — All LLM tool HTTP calls go through `SafeHttpClient` with private IP blocking, redirect validation, and scheme enforcement
+- **SSRF protection** — EDDI's own outbound HTTP (LLM tools, the crawler, OAuth, A2A, remote sync) goes through one facade, `OutboundHttp`, with private IP blocking, per-hop redirect validation, scheme enforcement and in-flight body caps
 - **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy` configured out of the box
 - **Loopback by default** — The Docker Compose files publish EDDI, Keycloak and the datastores on `127.0.0.1`, and the Helm chart and Kustomize overlays ship no default credentials
 - **CI/CD security gates** — Every push/PR is scanned by:

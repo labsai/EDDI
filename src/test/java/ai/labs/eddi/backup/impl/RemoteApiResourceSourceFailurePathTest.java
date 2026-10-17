@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.BodyTooLargeException;
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
 import ai.labs.eddi.backup.IResourceSource.WorkflowSourceData;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -81,8 +83,8 @@ class RemoteApiResourceSourceFailurePathTest {
                     : "?" + request.uri().getQuery());
             requestedPaths.add(path);
             if (tooLargePaths.stream().anyMatch(path::contains)) {
-                // What HttpClient.send throws when CappedStringBodyHandler refuses the body.
-                throw new IOException("body refused", new CappedStringBodyHandler.ResponseTooLargeException(16));
+                // A size refusal, with the facade's cap exception in its cause chain.
+                throw new IOException("body refused", new BodyTooLargeException(16));
             }
             HttpResponse<String> response = mock(HttpResponse.class);
             int status = statusByPath.entrySet().stream()
@@ -110,7 +112,7 @@ class RemoteApiResourceSourceFailurePathTest {
     void unresolvableAgentVersionFails() {
         statusByPath.put("/agentstore/agents/descriptors", 503);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, null, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var thrown = assertThrows(RuntimeException.class, source::readAgent);
 
@@ -132,7 +134,7 @@ class RemoteApiResourceSourceFailurePathTest {
         agentConfig.setWorkflows(List.of());
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class))).thenReturn(agentConfig);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 3, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 3, null, jsonSerialization, JdkClientEngine.facade(httpClient));
         var agent = source.readAgent();
 
         assertEquals(AGENT_ID, agent.sourceId());
@@ -148,7 +150,7 @@ class RemoteApiResourceSourceFailurePathTest {
     void unreadableSnippetListingYieldsNoSnippets() {
         statusByPath.put("/snippetstore/snippets/descriptors", 502);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         assertTrue(source.readSnippets().isEmpty());
     }
@@ -174,7 +176,7 @@ class RemoteApiResourceSourceFailurePathTest {
         when(jsonSerialization.deserialize(anyString(), eq(DocumentDescriptor[].class)))
                 .thenReturn(new DocumentDescriptor[0]);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
         List<WorkflowSourceData> workflows = source.readWorkflows();
 
         assertEquals(1, workflows.size(), "the workflow itself must survive an unreadable extension");
@@ -205,7 +207,7 @@ class RemoteApiResourceSourceFailurePathTest {
         when(jsonSerialization.deserialize(anyString(), eq(DocumentDescriptor[].class)))
                 .thenReturn(new DocumentDescriptor[0]);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var thrown = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readWorkflows);
         assertTrue(RemoteApiResourceSource.isTooLarge(thrown), String.valueOf(thrown));
@@ -219,7 +221,7 @@ class RemoteApiResourceSourceFailurePathTest {
         agentConfig.setWorkflows(List.of());
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class))).thenReturn(agentConfig);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 3, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 3, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var thrown = assertThrows(RemoteApiResourceSource.RemoteReadException.class, source::readAgent);
         assertTrue(RemoteApiResourceSource.isTooLarge(thrown), String.valueOf(thrown));
@@ -242,7 +244,7 @@ class RemoteApiResourceSourceFailurePathTest {
         when(jsonSerialization.deserialize(anyString(), eq(DocumentDescriptor[].class)))
                 .thenReturn(new DocumentDescriptor[0]);
 
-        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient);
+        var source = new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
         List<WorkflowSourceData> workflows = source.readWorkflows();
 
         assertEquals(2, workflows.getFirst().extensions().size(), "both extensions were read");

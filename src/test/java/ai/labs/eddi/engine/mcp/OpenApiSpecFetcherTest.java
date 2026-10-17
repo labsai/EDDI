@@ -5,7 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.engine.security.SelfUrlResolver;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -90,7 +90,7 @@ class OpenApiSpecFetcherTest {
     }
 
     private static OpenApiSpecFetcher fetcher(OutboundTargetPolicy policy) {
-        return new OpenApiSpecFetcher(new SafeHttpClient(5_000), policy);
+        return new OpenApiSpecFetcher(TestOutbound.standalone(), policy);
     }
 
     private OutboundTargetPolicy protectionOnExemptingThisServer() {
@@ -153,7 +153,7 @@ class OpenApiSpecFetcherTest {
     @Test
     @DisplayName("a body over the cap is refused while streaming")
     void bodyCapEnforced() {
-        var small = new OpenApiSpecFetcher(new SafeHttpClient(5_000), OutboundTargetPolicy.permissive(), 1024);
+        var small = new OpenApiSpecFetcher(TestOutbound.standalone(), OutboundTargetPolicy.permissive(), 1024);
         var e = assertThrows(IllegalArgumentException.class, () -> small.fetch(origin + "/huge"));
         assertTrue(e.getMessage().contains("larger than the 1024 byte limit"), e.getMessage());
     }

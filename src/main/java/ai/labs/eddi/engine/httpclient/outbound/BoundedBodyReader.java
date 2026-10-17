@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.engine.httpclient;
+package ai.labs.eddi.engine.httpclient.outbound;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -18,15 +18,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * and a wall-clock deadline, so an end-user- or LLM-chosen URL cannot exhaust
  * the heap or hold a worker thread indefinitely.
  * <p>
- * The same shape as {@code SafeHttpPageFetcher.readBounded}, lifted here so
- * every outbound path that hands bytes back to the model
- * ({@code AttachmentForwarder}, {@code WebScraperTool}, {@code PdfReaderTool},
- * {@code A2AToolProviderManager}) reads through one bounded, deadline-guarded
- * implementation rather than buffering the whole body with
- * {@code BodyHandlers.ofByteArray()} / {@code ofString()} and checking the size
- * only afterwards.
+ * Used by {@link OutboundHttp} for its buffered body modes; every caller reads
+ * through the facade rather than here.
  */
-public final class BoundedBodyReader {
+final class BoundedBodyReader {
 
     /** The multiple of the request timeout a body read is allowed to take. */
     private static final int BODY_READ_TIMEOUT_FACTOR = 4;
@@ -42,7 +37,7 @@ public final class BoundedBodyReader {
      * and whether the body was cut short — because it hit the byte cap or the
      * deadline.
      */
-    public record Bounded(byte[] bytes, boolean truncated) {
+    record Bounded(byte[] bytes, boolean truncated) {
     }
 
     /**
@@ -64,7 +59,7 @@ public final class BoundedBodyReader {
      *            the in-loop deadline check applies (a read that blocks forever is
      *            not interrupted, so pass a scheduler for hostile inputs)
      */
-    public static Bounded read(InputStream stream, long maxBytes, Duration requestTimeout, ScheduledExecutorService scheduler)
+    static Bounded read(InputStream stream, long maxBytes, Duration requestTimeout, ScheduledExecutorService scheduler)
             throws IOException {
         long cap = maxBytes > 0 ? maxBytes : Long.MAX_VALUE;
         Duration budget = readBudget(requestTimeout);

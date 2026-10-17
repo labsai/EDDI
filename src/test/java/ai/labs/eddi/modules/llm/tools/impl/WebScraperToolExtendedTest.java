@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,14 +14,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -28,18 +28,18 @@ import static org.mockito.Mockito.*;
  */
 class WebScraperToolExtendedTest {
 
-    private SafeHttpClient mockHttpClient;
+    private OutboundHttp mockHttpClient;
     private WebScraperTool webScraperTool;
 
     @BeforeEach
     void setUp() {
-        mockHttpClient = mock(SafeHttpClient.class);
+        mockHttpClient = mock(OutboundHttp.class);
         webScraperTool = new WebScraperTool(mockHttpClient, new HtmlToMarkdownConverter());
     }
 
     private void mockResponse(int statusCode, String body) throws IOException, InterruptedException {
-        when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
-                .thenReturn(new SafeHttpClient.BoundedResponse(statusCode, body.getBytes(StandardCharsets.UTF_8), false));
+        when(mockHttpClient.send(any(OutboundRequest.class), any()))
+                .thenReturn(TestOutbound.response(statusCode, body.getBytes(StandardCharsets.UTF_8), false));
     }
 
     // ==================== extractWebPageText ====================
@@ -179,7 +179,7 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException from HTTP client")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+            when(mockHttpClient.send(any(OutboundRequest.class), any()))
                     .thenThrow(new IOException("Connection refused"));
 
             String result = textOf(() -> webScraperTool.extractWebPageText("https://example.com"));
@@ -424,7 +424,7 @@ class WebScraperToolExtendedTest {
         @Test
         @DisplayName("should handle IOException during metadata fetch")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+            when(mockHttpClient.send(any(OutboundRequest.class), any()))
                     .thenThrow(new IOException("Network error"));
 
             String result = textOf(() -> webScraperTool.extractMetadata("https://example.com"));
@@ -443,8 +443,8 @@ class WebScraperToolExtendedTest {
         private static final char REPLACEMENT_CHAR = (char) 0xFFFD;
 
         private void mockTruncated(byte[] body) throws IOException, InterruptedException {
-            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
-                    .thenReturn(new SafeHttpClient.BoundedResponse(200, body, true));
+            when(mockHttpClient.send(any(OutboundRequest.class), any()))
+                    .thenReturn(TestOutbound.response(200, body, true));
         }
 
         @Test

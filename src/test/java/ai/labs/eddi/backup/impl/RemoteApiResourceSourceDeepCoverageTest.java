@@ -1,6 +1,11 @@
 /* Copyright (C) 2012-2026 EDDI contributors */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -17,6 +22,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +68,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
                     "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", 1,
-                    "Bearer secret-token", jsonSerialization, httpClient);
+                    "Bearer secret-token", jsonSerialization, JdkClientEngine.facade(httpClient));
 
             // The remote instance is user-supplied, so a compromised or hostile one
             // could answer a read with a redirect to an internal address. The client
@@ -78,16 +84,14 @@ class RemoteApiResourceSourceDeepCoverageTest {
                     .noneMatch(request -> "169.254.169.254".equals(request.uri().getHost())),
                     "the redirect target must never be requested, requests were: " + sent.getAllValues());
 
-            // Everything above runs on a client this test handed in, and a mock
-            // follows nothing whatever the production code asks for — so on its own it
-            // pins the non-200 handling and says nothing about redirects. The actual
-            // guarantee is the policy the clients this class OWNS are built with, and
-            // that is what the assertion below reads. It cannot build one to look at:
-            // HttpClient.build() opens a selector, and a sandboxed build has no
-            // loopback socket for it.
-            HttpClient.Builder ownBuilder = mock(HttpClient.Builder.class, RETURNS_SELF);
-            RemoteApiResourceSource.configure(ownBuilder);
-            verify(ownBuilder).followRedirects(HttpClient.Redirect.NEVER);
+            // Redirects are followed by the facade, never the engine, so the run above
+            // went through the real redirect decision. The decision itself is the
+            // policy every request this class builds carries, pinned here directly.
+            OutboundRequest request = RemoteApiResourceSource
+                    .peerRequest(URI.create("https://source.example.com/agentstore/agents"), Duration.ofSeconds(30), "Bearer t")
+                    .build();
+            assertEquals(RedirectPolicy.NEVER, request.redirectOverride());
+            assertEquals(SsrfPolicy.NONE, request.ssrfOverride(), "SourceUrlValidator is the gate, not the facade");
         }
     }
 
@@ -102,28 +106,29 @@ class RemoteApiResourceSourceDeepCoverageTest {
         void nullUrl() {
             // null URL results in empty baseUrl, but httpGet will fail later
             // The constructor should not throw for null
-            assertDoesNotThrow(() -> new RemoteApiResourceSource(null, "agent1", 1, null, jsonSerialization, httpClient));
+            assertDoesNotThrow(() -> new RemoteApiResourceSource(null, "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient)));
         }
 
         @Test
         @DisplayName("trailing slash is stripped")
         void trailingSlash() {
             // Should not throw
-            assertDoesNotThrow(() -> new RemoteApiResourceSource("http://127.0.0.1:1/", "agent1", 1, null, jsonSerialization, httpClient));
+            assertDoesNotThrow(() -> new RemoteApiResourceSource("http://127.0.0.1:1/", "agent1", 1, null, jsonSerialization,
+                    JdkClientEngine.facade(httpClient)));
         }
 
         @Test
         @DisplayName("non-http scheme → IllegalArgumentException")
         void nonHttpScheme() {
             assertThrows(IllegalArgumentException.class,
-                    () -> new RemoteApiResourceSource("ftp://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient));
+                    () -> new RemoteApiResourceSource("ftp://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient)));
         }
 
         @Test
         @DisplayName("blank host → IllegalArgumentException")
         void blankHost() {
             assertThrows(IllegalArgumentException.class,
-                    () -> new RemoteApiResourceSource("http://", "agent1", 1, null, jsonSerialization, httpClient));
+                    () -> new RemoteApiResourceSource("http://", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient)));
         }
     }
 
@@ -140,7 +145,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(mockResponse).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             assertThrows(RuntimeException.class, source::readAgent);
         }
@@ -164,7 +169,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var first = source.readAgent();
             var second = source.readAgent();
@@ -184,7 +189,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var snippets = source.readSnippets();
             assertTrue(snippets.isEmpty());
@@ -207,7 +212,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(snippetNoName).when(jsonSerialization).deserialize(eq("{}"), eq(PromptSnippet.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var snippets = source.readSnippets();
             assertTrue(snippets.isEmpty());
@@ -219,7 +224,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var first = source.readSnippets();
             var second = source.readSnippets();
@@ -242,7 +247,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var first = source.readWorkflows();
             var second = source.readWorkflows();
@@ -259,7 +264,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var workflows = source.readWorkflows();
             assertTrue(workflows.isEmpty());
@@ -291,7 +296,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
         RemoteApiResourceSource source = new RemoteApiResourceSource(
-                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var workflows = source.readWorkflows();
         assertEquals(1, workflows.size());
@@ -320,7 +325,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(config).when(jsonSerialization).deserialize(anyString(), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "agent1", null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var ex = assertThrows(RuntimeException.class, source::readAgent);
             assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
@@ -342,7 +347,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", "aaaaaaaaaaaaaaaaaaaaaaaa", null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             var ex = assertThrows(RuntimeException.class, source::readAgent);
             assertTrue(ex.getMessage().contains("latest version"), ex.getMessage());
@@ -364,7 +369,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
             doReturn(config).when(jsonSerialization).deserialize(eq("{}"), eq(AgentConfiguration.class));
 
             RemoteApiResourceSource source = new RemoteApiResourceSource(
-                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, httpClient);
+                    "http://127.0.0.1:1", agentId, null, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
             assertNotNull(source.readAgent());
 
@@ -402,7 +407,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
         doReturn(null).when(jsonSerialization).deserialize(anyString(), eq(DocumentDescriptor[].class));
 
         RemoteApiResourceSource source = new RemoteApiResourceSource(
-                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, httpClient);
+                "http://127.0.0.1:1", "agent1", 1, null, jsonSerialization, JdkClientEngine.facade(httpClient));
 
         var workflows = source.readWorkflows();
         // Should succeed without errors (the trailing slash is handled)
@@ -414,7 +419,7 @@ class RemoteApiResourceSourceDeepCoverageTest {
     @Test
     @DisplayName("listRemoteAgentDescriptors — connection to 127.0.0.1:1 throws RuntimeException")
     void listRemoteAgentsConnectionFailure() {
-        assertThrows(RuntimeException.class, () -> RemoteApiResourceSource.listRemoteAgentDescriptors(
-                "http://127.0.0.1:1", null, jsonSerialization));
+        assertThrows(RuntimeException.class,
+                () -> RemoteApiResourceSource.listRemoteAgentDescriptors(TestOutbound.standalone(), "http://127.0.0.1:1", null, jsonSerialization));
     }
 }

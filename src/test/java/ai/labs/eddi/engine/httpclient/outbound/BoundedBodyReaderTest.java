@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.engine.httpclient;
+package ai.labs.eddi.engine.httpclient.outbound;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
