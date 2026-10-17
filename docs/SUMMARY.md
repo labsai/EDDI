@@ -64,6 +64,7 @@
 ## Security & Compliance
 
 - [Security](security.md)
+- [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
