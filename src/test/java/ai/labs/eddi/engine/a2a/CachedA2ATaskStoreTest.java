@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -115,6 +117,56 @@ class CachedA2ATaskStoreTest {
 
         store.saveTask("bob", record("t1", "unaffected"));
         assertTrue(store.findTask("bob", "t1").isPresent(), "another principal's writes are unaffected");
+    }
+
+    /**
+     * The interleaving a marker alone cannot stop: a write passes the erasure
+     * check, pauses, the sweep runs, the write lands. The write is held inside the
+     * cache's {@code put}, the sweep is started meanwhile, and the write is then
+     * released; the sweep must not have run in between.
+     */
+    @Test
+    @DisplayName("a write that passed the erasure check finishes before the sweep, so it cannot land after it")
+    void writePausedBetweenCheckAndPutCannotSurviveTheSweep() throws Exception {
+        CountDownLatch writerInsidePut = new CountDownLatch(1);
+        CountDownLatch releaseWriter = new CountDownLatch(1);
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.<String, Object>getCache(anyString())).thenAnswer(invocation -> {
+            if (CachedA2ATaskStore.TASK_CACHE.equals(invocation.getArgument(0))) {
+                return new MapCache<String, Object>() {
+                    @Override
+                    public Object put(String key, Object value) {
+                        writerInsidePut.countDown();
+                        try {
+                            assertTrue(releaseWriter.await(5, TimeUnit.SECONDS), "the test releases the writer");
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        return super.put(key, value);
+                    }
+                };
+            }
+            return new MapCache<>();
+        });
+        CachedA2ATaskStore paused = new CachedA2ATaskStore(cacheFactory);
+
+        Thread writer = new Thread(() -> paused.saveTask("alice", record("t1", "admitted before the cascade")));
+        writer.start();
+        assertTrue(writerInsidePut.await(5, TimeUnit.SECONDS), "the writer must be past the erasure check");
+
+        var removed = new AtomicLong(-1);
+        Thread eraser = new Thread(() -> removed.set(paused.eraseForPrincipal("alice")));
+        eraser.start();
+        // Give the sweep the chance to run ahead of the paused write — which is the
+        // bug: without the lock it collects nothing, and the write lands after it.
+        Thread.sleep(200);
+        releaseWriter.countDown();
+        writer.join(5000);
+        eraser.join(5000);
+
+        assertEquals(1, removed.get(), "the sweep must have waited for the admitted write and removed it");
+        assertTrue(paused.tasksOf("alice").isEmpty(), "nothing of the principal may survive the sweep");
+        assertTrue(paused.findTask("alice", "t1").isEmpty());
     }
 
     @Test

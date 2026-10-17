@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * The default {@link IA2ATaskStore}: two {@code ICacheFactory} caches, bounded
@@ -40,6 +42,15 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     private final ICache<String, A2ATaskRecord> tasks;
     private final ICache<String, String> contexts;
     private final ICache<String, Boolean> erasing;
+    /**
+     * Writes hold the read side, erasure the write side: a write that has passed
+     * the erasure check finishes before a sweep collects its keys, and a write that
+     * starts after the marker is set sees it. Without this, a write paused between
+     * the check and the {@code put} landed after the sweep and survived it. The
+     * caches are node-local, so the lock is too; a shared store implementation
+     * coordinates its own writes.
+     */
+    private final ReadWriteLock erasureLock = new ReentrantReadWriteLock();
 
     @Inject
     public CachedA2ATaskStore(ICacheFactory cacheFactory) {
@@ -55,10 +66,15 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public void saveTask(String principal, A2ATaskRecord record) {
-        if (erasing.containsKey(principal)) {
-            return;
+        erasureLock.readLock().lock();
+        try {
+            if (erasing.containsKey(principal)) {
+                return;
+            }
+            tasks.put(scopedKey(principal, record.taskId()), record);
+        } finally {
+            erasureLock.readLock().unlock();
         }
-        tasks.put(scopedKey(principal, record.taskId()), record);
     }
 
     @Override
@@ -68,15 +84,25 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public void bindContext(String principal, String contextId, String conversationId) {
-        if (erasing.containsKey(principal)) {
-            return;
+        erasureLock.readLock().lock();
+        try {
+            if (erasing.containsKey(principal)) {
+                return;
+            }
+            contexts.put(scopedKey(principal, contextId), conversationId);
+        } finally {
+            erasureLock.readLock().unlock();
         }
-        contexts.put(scopedKey(principal, contextId), conversationId);
     }
 
     @Override
     public void beginErasure(String principal) {
-        erasing.put(principal, Boolean.TRUE, ERASURE_WINDOW_MINUTES, TimeUnit.MINUTES);
+        erasureLock.writeLock().lock();
+        try {
+            erasing.put(principal, Boolean.TRUE, ERASURE_WINDOW_MINUTES, TimeUnit.MINUTES);
+        } finally {
+            erasureLock.writeLock().unlock();
+        }
     }
 
     @Override
@@ -90,24 +116,29 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public long eraseForPrincipal(String principal) {
-        // Refuse new writes first, then collect: a task written after the key
-        // collection would otherwise survive the sweep.
-        beginErasure(principal);
-        String prefix = principalPrefix(principal);
-        long removed = 0;
-        // Both maps are ConcurrentMaps: collect first, then remove, so the removal
-        // never races the iteration it is driven by.
-        for (String key : tasks.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
-            if (tasks.remove(key) != null) {
-                removed++;
+        // Under the write lock from marker to sweep: no write is between its erasure
+        // check and its put while this runs, and none can start until it is done.
+        erasureLock.writeLock().lock();
+        try {
+            erasing.put(principal, Boolean.TRUE, ERASURE_WINDOW_MINUTES, TimeUnit.MINUTES);
+            String prefix = principalPrefix(principal);
+            long removed = 0;
+            // Both maps are ConcurrentMaps: collect first, then remove, so the removal
+            // never races the iteration it is driven by.
+            for (String key : tasks.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+                if (tasks.remove(key) != null) {
+                    removed++;
+                }
             }
-        }
-        for (String key : contexts.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
-            if (contexts.remove(key) != null) {
-                removed++;
+            for (String key : contexts.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+                if (contexts.remove(key) != null) {
+                    removed++;
+                }
             }
+            return removed;
+        } finally {
+            erasureLock.writeLock().unlock();
         }
-        return removed;
     }
 
     /**
