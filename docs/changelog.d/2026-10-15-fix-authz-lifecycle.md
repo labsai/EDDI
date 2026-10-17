@@ -28,8 +28,11 @@ name the finding so a later reader can find this entry.
   write are serialised against the sweep by a read/write lock, and in cluster mode the
   marker lives in a shared `A2A_ERASING` bucket so every node refuses the writes, while a
   shared per-principal `A2A_INDEX` lets a sweep or export on one node reach the records
-  other nodes wrote (bucket keys are hashed, so nothing else can enumerate them; the two
-  narrow cross-node residuals are in [`clustering.md`](../clustering.md#residual-limitations)). [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
+  other nodes wrote (bucket keys are hashed, so nothing else can enumerate them). The index
+  is kept with a compare-and-set loop — `SharedKvCache.replace(key, expected, next)` is now
+  a revision-checked update on the bucket, not get-then-put — and caps a principal at
+  10,000 tasks: an id that falls off the end takes its record with it. The one narrow
+  cross-node residual is in [`clustering.md`](../clustering.md#residual-limitations). [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
   section naming what erasure does **not** reach — RAG knowledge bases, application
   log files, telemetry exports and LLM-provider retention — with why, and what bounds
   each.

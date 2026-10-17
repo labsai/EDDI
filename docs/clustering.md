@@ -291,23 +291,24 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   `eddi.coordinator.dead-letter.max-age` (7 days by default) expires it. That stream is then
   its only copy: losing NATS within that window loses the entry. Only when the stream itself
   cannot take the entry does it go to the JSONL file at `eddi.audit.dead-letter-path`, which
-  nothing expires. Paginated tool responses (15 min) and A2A task mappings (24 h) expire on
-  their own TTL. An erasure that must also cover these should wait out the stream windows or
-  purge the streams, and handle the JSONL file separately (see
+  nothing expires. Paginated tool responses expire on their own 15-minute TTL. A2A task
+  mappings are **not** in this group any more: the erasure's `a2aTasks` step sweeps them on
+  every node through the shared index (next bullet), and their 24 h TTL only bounds the one
+  record that step can miss. An erasure that must also cover the stream and the tool pages
+  should wait out their windows or purge the streams, and handle the JSONL file separately (see
   [GDPR](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it)).
 - **An A2A task write on another node can, in theory, outlive the erasure of its
   principal.** The erasure cascade's stop phase sets a marker in `A2A_ERASING` that every
   node's A2A task store reads before it writes, and the erasing node sweeps `A2A_TASKS` and
   `A2A_CONTEXTS` several steps later, through the per-principal `A2A_INDEX` so records other
-  nodes wrote are reached. Two gaps remain, both narrow. On the erasing node the check and
-  the write are serialised against the sweep; on another node they are not, so a write that
-  read the marker as absent an instant before it was set and whose `put` reaches the bucket
-  only after the sweep survives. And the index is written through without a cross-node
-  compare-and-set, so two nodes saving the same principal's tasks in the same instant can each
-  miss the other's id in it — the missed record is then found only by a sweep on the node that
-  wrote it. Either survivor expires with the 24 h task TTL, and the conversation it points at
-  is deleted by the cascade regardless, so it holds the peer's own message and the reply, not
-  a live conversation.
+  nodes wrote are reached (the index is kept with a revision-checked compare-and-set on the
+  bucket, so concurrent writers on any nodes all land their ids). One gap remains, and it is
+  narrow: on the erasing node the check and the write are serialised against the sweep; on
+  another node they are not, so a write that read the marker as absent an instant before it
+  was set and whose `put` reaches the bucket only after the sweep survives, until the 24 h
+  task TTL expires it. The write would have to stall for the whole cascade. The conversation
+  such a record points at is deleted by the cascade regardless, so it holds the peer's own
+  message and the reply, not a live conversation.
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's

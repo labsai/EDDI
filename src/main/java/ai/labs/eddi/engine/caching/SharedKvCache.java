@@ -253,14 +253,39 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
         return false;
     }
 
+    /**
+     * A real compare-and-set on the bucket: the value is read with its revision and
+     * replaced only while the key is still at that revision, so two nodes (or two
+     * threads) racing on one key cannot both win. Was get-then-put, which lost one
+     * of two concurrent read-modify-write updates — the A2A principal index relies
+     * on this being atomic. While the bucket is unreachable the node-local copy is
+     * updated instead and the key remembered as node-local, like a degraded put.
+     */
     @Override
     public boolean replace(K key, V oldValue, V newValue) {
-        V current = get(key);
-        if (current != null && current.equals(oldValue)) {
-            put(key, newValue);
+        try {
+            Optional<ISharedKv.Versioned> versioned = shared.get(key(key));
+            if (versioned.isEmpty()) {
+                return false;
+            }
+            V current = decode(versioned.get().value());
+            if (current == null || !current.equals(oldValue)) {
+                return false;
+            }
+            if (shared.update(key(key), encode(newValue), versioned.get().revision()).isEmpty()) {
+                return false;
+            }
+            local.put(key, newValue);
+            localOnly.remove(key(key));
             return true;
+        } catch (ClusterUnavailableException e) {
+            degraded(e);
+            boolean replaced = local.replace(key, oldValue, newValue);
+            if (replaced && localOnly.size() < MAX_LOCAL_ONLY) {
+                localOnly.add(key(key));
+            }
+            return replaced;
         }
-        return false;
     }
 
     @Override

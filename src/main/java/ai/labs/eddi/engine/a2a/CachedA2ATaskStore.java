@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.UnaryOperator;
 
 /**
  * The default {@link IA2ATaskStore}: two {@code ICacheFactory} caches, bounded
@@ -37,8 +38,12 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     static final String CONTEXT_CACHE = "a2aTaskMapping:context";
     static final String ERASING_CACHE = "a2aTaskMapping:erasing";
     static final String INDEX_CACHE = "a2aTaskMapping:index";
-    /** Ids remembered per principal; beyond it the oldest are forgotten. */
+    /**
+     * Ids remembered per principal — and so tasks (and bindings) a principal may
+     * hold at once: the records of ids that fall off the end are removed with them.
+     */
     static final int MAX_INDEXED_IDS = 10_000;
+
     /**
      * How long writes for a principal stay refused after its erasure began — long
      * enough for the cascade, and for a request admitted just before it, to finish;
@@ -55,10 +60,13 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
      * caches are shared KV buckets whose keys are hashed: a node can read a record
      * by its key but cannot enumerate another node's records by principal, and the
      * local mirror only holds what this node wrote. The index is the enumeration.
-     * It is written through on every save (read, add, write back under the
-     * node-local lock), so two nodes writing the same principal in the same instant
-     * can each miss the other's id — that record is then still found by the local
-     * scan on the node that wrote it, and nowhere else; see {@code clustering.md}.
+     * Every save adds its id with a compare-and-set loop ({@code putIfAbsent} /
+     * {@code replace(key, expected, next)}), which the shared cache implements as a
+     * revision-checked update on the bucket, so concurrent writers on any nodes all
+     * land their ids. The index holds at most {@link #MAX_INDEXED_IDS} ids per
+     * principal; an id that falls off the end takes its record with it, so every
+     * live record stays discoverable and a principal cannot hold more than that
+     * many tasks or bindings at once.
      */
     private final ICache<String, PrincipalIndex> index;
     /**
@@ -110,6 +118,14 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
             copy.add(id);
             return List.copyOf(copy);
         }
+
+        /** The ids this index holds that {@code other} no longer does. */
+        PrincipalIndex minus(PrincipalIndex other) {
+            Set<String> otherTasks = new LinkedHashSet<>(other.taskIds());
+            Set<String> otherContexts = new LinkedHashSet<>(other.contextIds());
+            return new PrincipalIndex(taskIds.stream().filter(id -> !otherTasks.contains(id)).toList(),
+                    contextIds.stream().filter(id -> !otherContexts.contains(id)).toList());
+        }
     }
 
     @Override
@@ -125,7 +141,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             tasks.put(scopedKey(principal, record.taskId()), record);
-            index.put(principal, indexOf(principal).withTask(record.taskId()));
+            for (String evicted : updateIndex(principal, current -> current.withTask(record.taskId())).taskIds()) {
+                tasks.remove(scopedKey(principal, evicted));
+            }
         } finally {
             erasureLock.readLock().unlock();
         }
@@ -144,7 +162,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             contexts.put(scopedKey(principal, contextId), conversationId);
-            index.put(principal, indexOf(principal).withContext(contextId));
+            for (String evicted : updateIndex(principal, current -> current.withContext(contextId)).contextIds()) {
+                contexts.remove(scopedKey(principal, evicted));
+            }
         } finally {
             erasureLock.readLock().unlock();
         }
@@ -180,6 +200,31 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     private PrincipalIndex indexOf(String principal) {
         PrincipalIndex current = index.get(principal);
         return current == null ? PrincipalIndex.empty() : current;
+    }
+
+    /**
+     * Applies {@code change} to the principal's index with a compare-and-set loop,
+     * so concurrent writers — on this node or another — each land their id. The
+     * loop has no attempt cap: every lost round means another writer landed, so it
+     * cannot spin without progress, and giving up to overwrite (as a first cut did)
+     * is exactly the lost update it exists to prevent — eight writers lost 78 of
+     * 1600 ids to a ten-attempt cap.
+     *
+     * @return the ids the cap pushed out, whose records the caller removes
+     */
+    private PrincipalIndex updateIndex(String principal, UnaryOperator<PrincipalIndex> change) {
+        while (true) {
+            PrincipalIndex current = index.get(principal);
+            PrincipalIndex next = change.apply(current == null ? PrincipalIndex.empty() : current);
+            if (next.equals(current)) {
+                return PrincipalIndex.empty();
+            }
+            boolean landed = current == null ? index.putIfAbsent(principal, next) == null : index.replace(principal, current, next);
+            if (landed) {
+                return (current == null ? PrincipalIndex.empty() : current).minus(next);
+            }
+            Thread.onSpinWait();
+        }
     }
 
     /**

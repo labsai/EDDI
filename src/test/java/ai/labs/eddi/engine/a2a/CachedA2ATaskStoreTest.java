@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -201,15 +202,65 @@ class CachedA2ATaskStoreTest {
     }
 
     @Test
-    @DisplayName("the index forgets the oldest ids beyond its cap")
-    void indexIsBounded() {
-        var idx = CachedA2ATaskStore.PrincipalIndex.empty();
+    @DisplayName("an id that falls off the end of the index takes its record with it, so every live record stays discoverable")
+    void capEvictsTheRecordWithTheId() {
         for (int i = 0; i < CachedA2ATaskStore.MAX_INDEXED_IDS + 5; i++) {
-            idx = idx.withTask("t" + i);
+            store.saveTask("alice", record("t" + i, "task " + i));
         }
-        assertEquals(CachedA2ATaskStore.MAX_INDEXED_IDS, idx.taskIds().size());
-        assertEquals("t5", idx.taskIds().get(0));
-        assertTrue(idx.taskIds().contains("t" + (CachedA2ATaskStore.MAX_INDEXED_IDS + 4)));
+
+        assertEquals(CachedA2ATaskStore.MAX_INDEXED_IDS, store.tasksOf("alice").size());
+        for (int i = 0; i < 5; i++) {
+            assertTrue(store.findTask("alice", "t" + i).isEmpty(), "t" + i + " fell off the index and must be gone");
+        }
+        assertTrue(store.findTask("alice", "t5").isPresent());
+        assertTrue(store.findTask("alice", "t" + (CachedA2ATaskStore.MAX_INDEXED_IDS + 4)).isPresent());
+        assertEquals(CachedA2ATaskStore.MAX_INDEXED_IDS, store.eraseForPrincipal("alice"), "the sweep reaches every live record");
+    }
+
+    /**
+     * Concurrent writers on one principal: with a read-modify-write the later
+     * {@code put} dropped the other writer's id; the compare-and-set loop lands
+     * them all, so the index names every record and a sweep removes every one.
+     */
+    @Test
+    @DisplayName("concurrent writers all land their ids in the index")
+    void concurrentWritersAllLandInTheIndex() throws Exception {
+        // The index is what another node sweeps by; this node's local scan would find
+        // every record regardless, so the assertion reads the index entry itself.
+        Map<String, ICache<String, Object>> caches = new HashMap<>();
+        ICacheFactory factory = mock(ICacheFactory.class);
+        when(factory.<String, Object>getCache(anyString()))
+                .thenAnswer(invocation -> caches.computeIfAbsent(invocation.getArgument(0), name -> new MapCache<>()));
+        CachedA2ATaskStore store = new CachedA2ATaskStore(factory);
+        int writers = 8;
+        int perWriter = 200;
+        var start = new CountDownLatch(1);
+        List<Thread> threads = new ArrayList<>();
+        for (int w = 0; w < writers; w++) {
+            final int writer = w;
+            Thread t = new Thread(() -> {
+                try {
+                    start.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                for (int i = 0; i < perWriter; i++) {
+                    store.saveTask("alice", record("w" + writer + "-" + i, "x"));
+                }
+            });
+            threads.add(t);
+            t.start();
+        }
+        start.countDown();
+        for (Thread t : threads) {
+            t.join(30_000);
+        }
+
+        var index = (CachedA2ATaskStore.PrincipalIndex) caches.get(CachedA2ATaskStore.INDEX_CACHE).get("alice");
+        assertEquals(writers * perWriter, index.taskIds().size(), "every concurrently written id is in the index");
+        assertEquals(writers * perWriter, store.eraseForPrincipal("alice"));
+        assertTrue(store.tasksOf("alice").isEmpty());
     }
 
     @Test
