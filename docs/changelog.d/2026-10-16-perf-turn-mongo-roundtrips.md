@@ -12,6 +12,22 @@ A JProfiler profile of the virtual-thread build (labsai/EDDI#1045) counted about
 - **Pinned agent configuration from memory.** `ConversationHitlService.lookupAgentConfigPinned` read the agent document at the conversation's pinned version on every turn, only to learn its tool-approval policy. New `AgentConfigurationCache` (`@ApplicationScoped`, Caffeine, 1 000 entries, 30 min after last access) keeps `(agentId, version)` configurations: a stored version never changes (edits write a new version; the only in-place writers are the descriptor stores and the startup migrations). Absence and store failures are not cached, so the HITL gate still fails closed on a read error and still falls back to the latest version when the pinned one is gone. `AgentFactory` drops an agent's entries on every deploy and undeploy. `WorkflowTraversal`'s own short-lived traversal cache is left as it is; WS1 should hang its invalidation off the same deployment hooks.
 - **One full conversation load per turn (WS3a).** The conversation-id entry points (`say` / `sayStreaming` without an environment — REST, SSE, MCP, Slack, `/v1`) load the snapshot to find the agent and run the pre-turn checks, then called the environment-qualified overload, whose admission (`admitTurn`) loaded the same document again. That load is now handed down (`preloaded`) and converted instead of re-read. The idempotency admission (`admitOrServe`) still runs between the load and the turn, as before; a deferred duplicate re-enters the whole entry point and loads afresh. The environment-qualified overloads (A2A, group members, tests) still load on their own. Staleness is unchanged: the second load used to happen a moment after the first, and the step runner's `reloadIfSuperseded` revision check still guards the turn either way.
 
+### Measured
+
+Load-test harness from labsai/EDDI#1044 (`steady`, 50 conversations × 20 turns, mock LLM delay 0 ms, everything in Docker), `origin/main` (`aa8806c68`) against this branch, 1 000 turns each. MongoDB operations per successful turn (`serverStatus().opcounters`, per-collection from `top`):
+
+| | Before | After |
+|---|---|---|
+| **Queries per turn** | **16.67** | **6.65** |
+| `descriptors` queries | 6.05 | 1.05 |
+| `conversationmemories` queries | 5.04 | 4.08 |
+| `secretvault_secrets` queries | 3.05 | 0.06 |
+| `agents` queries | 1.09 | 0.09 |
+| Updates / inserts per turn | 2.05 / 3.11 | 2.05 / 3.11 |
+| Turns/s (single run, indicative) | 117 | 146 |
+
+The descriptor write stays one per turn, now a `$set` instead of a replace. Left on the turn path: one descriptor read (the ownership check), the full conversation load, the state and revision projections, and the GDPR restriction check on `usermemories`.
+
 ### Design decisions
 
 - **A request-scoped memo, not new parameters.** The checks sit behind `IConversationService.say` / `sayStreaming`, which Slack, MCP, `/v1` and A2A also call; threading a resolved descriptor through all of them would have changed every signature for a saving that only the REST path needs twice.
