@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -544,6 +545,35 @@ class InMemoryConversationCoordinatorTest {
         List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();
         callbacks.get(callbacks.size() - 1).onFailure(new RuntimeException("forced failure"));
     }
+
+    @Test
+    void localDeadLettersAreHeldInIdOrderUnderConcurrentFailures() throws Exception {
+        // The first failure is numbered, then stalls until the second one is in the
+        // ring (or 500 ms pass). Numbering outside the ring's lock lets the second
+        // entry land first, so the ring would read [2, 1] and paging by id skips one.
+        CountDownLatch firstNumbered = new CountDownLatch(1);
+        var ordered = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, 1000) {
+            @Override
+            protected String nextLocalDeadLetterId(long counter) {
+                if (counter == 1) {
+                    firstNumbered.countDown();
+                    long deadline = System.currentTimeMillis() + 500;
+                    while (localDeadLetterCount() == 0 && System.currentTimeMillis() < deadline) {
+                        Thread.onSpinWait();
+                    }
+                }
+                return super.nextLocalDeadLetterId(counter);
+            }
+        };
+        Thread first = new Thread(() -> ordered.recordLocalDeadLetter("conv-a", new IllegalStateException("a"), () -> null));
+        first.start();
+        assertTrue(firstNumbered.await(5, TimeUnit.SECONDS));
+        ordered.recordLocalDeadLetter("conv-b", new IllegalStateException("b"), () -> null);
+        first.join();
+
+        assertEquals(List.of("1", "2"), ordered.getDeadLetters().stream().map(DeadLetterEntry::id).toList());
+    }
+
     /**
      * The cursor paging over local dead letters skips by id number and assumes the
      * deque is in id order. The id used to be drawn outside the lock that appends
