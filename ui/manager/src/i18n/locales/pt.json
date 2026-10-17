@@ -6375,5 +6375,14 @@
     "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
     "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
     "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
+  },
+  "modelCombobox": {
+    "toggle": "Mostrar sugestões de modelos",
+    "listLabel": "Sugestões de modelos",
+    "matching": "Correspondentes a “{{query}}”",
+    "otherModels": "Outros modelos",
+    "default": "padrão",
+    "noMatch": "Nenhuma sugestão corresponde a “{{query}}” — será usado como digitado.",
+    "customHint": "Não está na lista? Digite qualquer ID de modelo suportado pelo seu provedor."
   }
 }

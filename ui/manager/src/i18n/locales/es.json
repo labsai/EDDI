@@ -6375,5 +6375,14 @@
     "cancelled": "No desplegados: no se concedió la clave del almacén. Los agentes se crearon; vuelva a intentarlo para concederla y desplegarlos, o despliéguelos desde sus páginas de agente.",
     "failed": "Creados pero no desplegados: {{names}}. {{reason}} Vuelva a intentarlo o despliéguelos desde sus páginas de agente.",
     "memberCancelled": "No desplegado: no se concedió la clave del almacén"
+  },
+  "modelCombobox": {
+    "toggle": "Mostrar sugerencias de modelos",
+    "listLabel": "Sugerencias de modelos",
+    "matching": "Coincidencias con «{{query}}»",
+    "otherModels": "Otros modelos",
+    "default": "predeterminado",
+    "noMatch": "Ninguna sugerencia coincide con «{{query}}»; se usará tal como está escrito.",
+    "customHint": "¿No aparece? Escribe cualquier ID de modelo que admita tu proveedor."
   }
 }

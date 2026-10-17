@@ -6305,5 +6305,14 @@
     "cancelled": "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
     "failed": "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
     "memberCancelled": "Not deployed: the vault key was not granted"
+  },
+  "modelCombobox": {
+    "toggle": "Show model suggestions",
+    "listLabel": "Model suggestions",
+    "matching": "Matching “{{query}}”",
+    "otherModels": "Other models",
+    "default": "default",
+    "noMatch": "No suggestion matches “{{query}}” — it will be used as typed.",
+    "customHint": "Not listed? Type any model id your provider supports."
   }
 }

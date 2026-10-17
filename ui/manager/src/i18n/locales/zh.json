@@ -6305,5 +6305,14 @@
     "cancelled": "未部署：保管库密钥尚未授权。智能体已创建——请重试以授权并部署它们，或从各自的智能体页面部署。",
     "failed": "已创建但未部署：{{names}}。{{reason}} 请重试，或从各自的智能体页面部署。",
     "memberCancelled": "未部署：保管库密钥尚未授权"
+  },
+  "modelCombobox": {
+    "toggle": "显示模型建议",
+    "listLabel": "模型建议",
+    "matching": "匹配“{{query}}”",
+    "otherModels": "其他模型",
+    "default": "默认",
+    "noMatch": "没有与“{{query}}”匹配的建议——将按输入内容使用。",
+    "customHint": "列表中没有？可输入提供商支持的任意模型 ID。"
   }
 }
