@@ -10,6 +10,7 @@ import type { AgentDescriptor } from "@/lib/api/agents";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { accessFor } from "@/lib/access";
+import { getResourceType } from "@/lib/api/resources";
 import { getResourceTypeIcon } from "@/lib/resource-type-icons";
 
 interface ResourceCardProps {
@@ -65,7 +66,7 @@ export function ResourceCard({
                   onClick={() => setMenuOpen(false)}
                 />
                 <div className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg">
-                  {access.canView && (
+                  {access.canView && getResourceType(typeSlug)?.duplicable !== false && (
                     <button
                       onClick={() => {
                         onDuplicate(item.id, item.version);

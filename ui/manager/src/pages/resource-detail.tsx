@@ -679,14 +679,16 @@ export function ResourceDetailPage() {
           )}
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={handleDuplicate}
-            disabled={duplicateMutation.isPending}
-          >
-            <Copy className="h-4 w-4" />
-            {t("common.duplicate")}
-          </Button>
+          {rt?.duplicable !== false && (
+            <Button
+              variant="outline"
+              onClick={handleDuplicate}
+              disabled={duplicateMutation.isPending}
+            >
+              <Copy className="h-4 w-4" />
+              {t("common.duplicate")}
+            </Button>
+          )}
           {access.canOwn && (
             <Button
               variant="destructive"

@@ -83,9 +83,10 @@ export function CreateResourceDialog({
         // For snippets, embed the name directly in the POST body so the
         // backend receives a valid PromptSnippet (name is required by
         // the [a-z0-9_]+ validation on the store).
-        const body = isSnippet
-          ? { name: name.trim(), description: description.trim() || undefined }
-          : {};
+        const body =
+          isSnippet || typeSlug === "testsuite"
+            ? { name: name.trim(), description: description.trim() || undefined }
+            : {};
 
         const result = await createMutation.mutateAsync({
           body,
