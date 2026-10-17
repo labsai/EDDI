@@ -70,6 +70,26 @@ describe("ChatDrawer", () => {
     expect(useChatDrawerStore.getState().isOpen).toBe(false);
   });
 
+  it("leaves an Escape pressed inside the operator panel to the operator", () => {
+    useChatDrawerStore.setState({
+      isOpen: true,
+      agentId: "agent-1",
+      agentName: "Agent One",
+      step: "idle",
+    });
+    renderWithProviders(<ChatDrawer />);
+    const panel = document.createElement("div");
+    panel.id = "operator-drawer-panel";
+    panel.setAttribute("role", "complementary");
+    const input = document.createElement("input");
+    panel.appendChild(input);
+    document.body.appendChild(panel);
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(useChatDrawerStore.getState().isOpen).toBe(true);
+    panel.remove();
+  });
+
   it("displays progress steps during deploy pipeline", () => {
     useChatDrawerStore.setState({
       isOpen: true,

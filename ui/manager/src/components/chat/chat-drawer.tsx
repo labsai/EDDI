@@ -85,12 +85,13 @@ export function ChatDrawer() {
 
   // Escape closes the drawer — on a phone it covers the whole screen, so it
   // needs the same dismissal a dialog has. A key another dialog already
-  // handled (or one pressed inside a dialog) is left alone.
+  // handled, or one pressed inside a dialog or the operator panel (which has
+  // its own Escape and is role="complementary", not a dialog), is left alone.
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (e.target instanceof Element && e.target.closest('[role="dialog"]')) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], #operator-drawer-panel')) return;
       close();
     };
     window.addEventListener("keydown", onKeyDown);
