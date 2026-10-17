@@ -71,3 +71,45 @@ the store argument or the probe check fails these tests (mutation-checked).
 - The review's defence-in-depth items: requiring `eddi-admin` to save a
   non-default `baseUrl` next to a vault reference the caller did not create, and
   a Manager warning badge for "unrestricted destination".
+
+## 🔒 fix(ssrf): the metadata guard refuses a host java.net.URI cannot read (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-2026-10-17-high`) — security review 2026-10-17, finding **H2**
+
+### What changed and why
+
+`UrlValidationUtils.rejectCloudMetadataTarget` is the only check on the
+httpCalls path while `eddi.security.ssrf-protection.enabled=false` (the
+default). It read the host with `java.net.URI` and returned quietly when that
+host was null. `URI` gives a null host for any registry-style authority: an
+underscore (`x_y.attacker.com`), a percent-encoded host, or an IP literal with a
+trailing dot. The Vert.x client (`HttpClientWrapper`) parses the same string
+with `java.net.URL`, gets a host, resolves it and connects. An editor-written
+`targetServerUrl` naming such a host, with an A record of `169.254.169.254`,
+therefore reached the cloud metadata service.
+
+- **`rejectCloudMetadataTarget`** now throws for an unparseable URL, and for an
+  `http(s)` URL whose `URI` host is null or blank. When `java.net.URL` reads a
+  different host, that host is checked as well. A URL with another scheme is
+  still left to the caller.
+- **`HttpClientModule.requireNotMetadataHop`** refuses a redirect hop with no
+  host instead of following it. A hop with an unreadable host is refused through
+  the same check.
+- Docs: `docs/security.md`.
+
+### Behaviour change
+
+An httpCall, MCP server or A2A peer whose host contains an underscore (for
+example a Docker service name such as `my_api`) is now refused even with SSRF
+protection off. Give it a hyphenated alias. The JDK `HttpClient` used by every
+other path already refused such URLs.
+
+### Tests
+
+`UrlValidationUtilsTest.unreadableHostIsRefused` covers `x_y.example`,
+`169.254.169.254.`, `169%2e254%2e169%2e254`, a single-slash `http:/` and an
+unparseable URL. Its resolver answers "public" for everything, so only the new
+rule can refuse them. `HttpClientModuleTest` covers the same hosts as redirect
+hops, plus a hop with no host. The old assertion that an unparseable URL "is
+left to the caller" was inverted. Reverting the null-host throw fails both
+classes (mutation-checked).
