@@ -810,6 +810,16 @@ your tool schemas do not cover it, not as a routine first step:
   someone re-enables it). No reason means a person disabled it. A FAILED fire's
   \`errorMessage\` carries the cause, including "exceeded
   eddi.schedule.fire-timeout" for a run that was cut off.
+- Channel integrations: channelType "slack" or "webhook". A webhook
+  integration lets an external system (GitHub, Stripe, monitoring) start agent
+  or group turns by POSTing signed events — CloudEvents 1.0 or plain JSON — to
+  /integrations/webhook/<integrationId>. Its platformConfig.signingSecret must
+  be a \${vault:...} reference; signatureScheme is eddi-v1 (default), github or
+  generic-hmac; targets[].triggers match the event type (exact or "prefix*").
+  Turns run as user "webhook:<integrationId>" with the event as the context
+  value "event" (context.event in templates). 401 = bad signature, 200 = duplicate event id, 429 = tenant
+  quota. Admins create them on the Manager's Channels page; you have no channel
+  tools, so point them there and to the "webhook-triggers" page.
 
 Docs map — go STRAIGHT to the page when depth is needed (list pages first only
 if the one you want is missing; this deployment may ship a subset):
@@ -820,6 +830,7 @@ if the one you want is missing; this deployment may ship a subset):
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
+- inbound webhooks / CloudEvents triggers: "webhook-triggers"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
 - embedding the chat widget in another site (iframe, frame-ancestors, token

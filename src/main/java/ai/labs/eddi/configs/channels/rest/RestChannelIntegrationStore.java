@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
+import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -46,8 +47,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     /**
      * Currently registered channel type adapters. Future: make this discoverable
      * via CDI so forks can register custom adapters.
+     * <p>
+     * {@code webhook} is the signed inbound webhook channel ({@code POST
+     * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
+     * {@link WebhookChannelSettings#validate}.
      */
-    private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack");
+    private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE);
 
     /**
      * Trigger keywords that are reserved by the router and must not be configured.
@@ -263,6 +268,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             throw new BadRequestException("At least one target is required.");
         }
 
+        boolean webhook = WebhookChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(channelType);
+        if (webhook) {
+            List<String> webhookErrors = WebhookChannelSettings.validate(config.getPlatformConfig());
+            if (!webhookErrors.isEmpty()) {
+                throw new BadRequestException(String.join(" ", webhookErrors));
+            }
+        }
+
         // Default target must reference an existing target
         String defaultName = config.getDefaultTargetName();
         if (defaultName == null || defaultName.isBlank()) {
@@ -292,6 +305,13 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (target.getTargetId() == null || target.getTargetId().isBlank()) {
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
+            }
+            if (webhook && target.isObserveMode()) {
+                // An observer watches chat traffic it was not addressed in. A webhook
+                // has no such traffic — every event is addressed to the integration —
+                // so the flag could only ever be a mistake.
+                throw new BadRequestException(
+                        "Target '" + target.getName() + "': observeMode is not supported for webhook integrations.");
             }
             if (target.isObserveMode()) {
                 // An observer answers channel traffic it was never addressed in, and

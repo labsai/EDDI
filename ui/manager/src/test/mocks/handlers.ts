@@ -5385,12 +5385,47 @@ export const backupSyncHandlers = [
         createdOn: Date.now() - 2 * 86400000,
         lastModifiedOn: Date.now() - 1800000,
       },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch4?version=1",
+        name: "Billing Webhook",
+        description: "Signed inbound events from the billing system",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now() - 900000,
+      },
     ]);
   }),
 
   http.get("*/channelstore/channels/:id", ({ params }) => {
     const channelId = params.id as string;
     const configs: Record<string, object> = {
+      ch4: {
+        name: "Billing Webhook",
+        channelType: "webhook",
+        platformConfig: {
+          signingSecret: "${vault:billing-webhook-secret}",
+          signatureScheme: "eddi-v1",
+          conversationStrategy: "new",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "invoices",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["com.billing.invoice.*"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
       ch1: {
         name: "Engineering Slack",
         channelType: "slack",
