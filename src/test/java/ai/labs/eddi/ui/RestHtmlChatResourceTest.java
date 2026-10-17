@@ -103,6 +103,26 @@ class RestHtmlChatResourceTest {
     }
 
     /**
+     * The widget reads {@code ?token=} only when the operator opted in, and it
+     * learns that from this script before its first request. A missing or malformed
+     * value has to read as "off" on the widget side, so the script carries a bare
+     * boolean and nothing the widget would have to parse.
+     */
+    @Test
+    @DisplayName("__config__.js tells the widget whether ?token= is enabled, off by default")
+    void chatConfigCarriesTheUrlTokenFlag() {
+        Response off = resource.fetchChatConfig();
+        assertEquals(200, off.getStatus());
+        assertEquals("application/javascript", off.getMediaType().toString());
+        assertEquals("no-cache, must-revalidate", off.getHeaderString("Cache-Control"),
+                "a cached copy would outlive the operator's change");
+        assertEquals("window.__EDDI_CHAT__={urlTokenEnabled:false};", off.getEntity());
+
+        resource.urlTokenEnabled = true;
+        assertEquals("window.__EDDI_CHAT__={urlTokenEnabled:true};", resource.fetchChatConfig().getEntity());
+    }
+
+    /**
      * {@code /chat} is an SPA shell, not an API operation — the same as the
      * manager, workforce and welcome shells, all three of which are hidden. It
      * alone showed up as a documented endpoint in the generated OpenAPI document.

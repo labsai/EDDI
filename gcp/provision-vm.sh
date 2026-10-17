@@ -416,6 +416,7 @@ build_startup_script() {
   local p_setup_https="${SETUP_HTTPS}"
   local p_le_email="${LETSENCRYPT_EMAIL:-admin@example.com}"
   local p_with_auth="${WITH_AUTH}"
+  local p_i_understand_public="${I_UNDERSTAND_PUBLIC}"
   local p_kc_admin_file="${KC_ADMIN_FILE}"
 
   cat <<STARTUP_SCRIPT
@@ -541,6 +542,12 @@ export EDDI_HTTPS_PORT="${p_https_port}"
 # 0.0.0.0. Off-box exposure is controlled by the now IP-scoped firewall and the
 # require_auth_or_public_ack gate, not by the bind address, so this is safe here.
 export EDDI_BIND="0.0.0.0"
+# docker-compose.yml refuses that bind address while authentication is off
+# (its bind-guard service), and install.sh checks the same thing before pulling
+# images. The require_auth_or_public_ack gate above already made the operator
+# choose --with-auth or --i-understand-public, so this carries that choice to
+# the VM: "true" only when --i-understand-public was passed.
+export EDDI_I_UNDERSTAND_PUBLIC="${p_i_understand_public}"
 # Keycloak master-realm admin password (--with-auth only). Generated HERE, on the
 # VM, and kept in a root-only file — never on the provisioning machine and never
 # in this script: the startup script is instance metadata, which every process
@@ -675,6 +682,13 @@ services:
       EDDI_KEYCLOAK_PUBLIC_URL: "https://\${KC_DOMAIN}"
       QUARKUS_OIDC_TOKEN_ISSUER: "https://\${KC_DOMAIN}/realms/eddi"
       QUARKUS_HTTP_CORS_ORIGINS: "https://\${EDDI_DOMAIN},http://localhost:${p_port}"
+      # nginx terminates TLS on this VM and proxies to EDDI over plain http, so
+      # the request EDDI sees is http and so would be the OAuth resource
+      # identifier it advertises for /mcp (the scheme follows the request since
+      # 6.6.1; MCP clients bind their token to that identifier). Name the public
+      # endpoint outright, which also pins the host - what docs/mcp-server.md
+      # asks of every production deployment.
+      QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: "https://\${EDDI_DOMAIN}/mcp"
   keycloak:
     environment:
       KC_HOSTNAME: "https://\${KC_DOMAIN}"

@@ -268,6 +268,8 @@ $KeycloakAdminUser = $env:KC_BOOTSTRAP_ADMIN_USERNAME
 $KeycloakAdminSecret = $env:KC_BOOTSTRAP_ADMIN_PASSWORD
 $GrafanaAdminUser = $env:GRAFANA_ADMIN_USER
 $GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
+# The PostgreSQL password docker-compose.postgres-only.yml requires (no default).
+$PostgresSecret = $env:POSTGRES_PASSWORD
 # One entry per realm account this run looked at: Account, and Secret (empty
 # when the account already had a password and was left alone).
 $FirstLogins = @()
@@ -664,10 +666,17 @@ function Resolve-StackCredential {
         $script:GrafanaAdminSecret = Get-StackPassword
         $script:GrafanaPasswordGenerated = $true
     }
+    # The PostgreSQL password: docker-compose.postgres-only.yml requires it (no
+    # eddi/eddi default any more), and the postgres image reads it at initdb
+    # only, so a stored value is carried forward like the Keycloak one.
+    if (-not $script:PostgresSecret) { $script:PostgresSecret = Get-EnvFileValue "POSTGRES_PASSWORD" }
+    if ($Database -eq "postgres" -and -not $script:PostgresSecret) {
+        $script:PostgresSecret = Get-StackPassword
+    }
     # Written single-quoted into .env, where compose reads the value literally.
-    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret)) {
+    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
         if ($value -and $value.Contains("'")) {
-            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
         }
     }
 }
@@ -994,6 +1003,11 @@ EDDI_VERSION=$EddiVersion
         $publishedPorts["GRAFANA_ADMIN_USER"] = "'$(if ($GrafanaAdminUser) { $GrafanaAdminUser } else { 'admin' })'"
         $publishedPorts["GRAFANA_ADMIN_PASSWORD"] = "'$GrafanaAdminSecret'"
     }
+    # Required by docker-compose.postgres-only.yml; written whenever one is known
+    # so a later switch back to PostgreSQL finds the volume's password.
+    if ($script:PostgresSecret) {
+        $publishedPorts["POSTGRES_PASSWORD"] = "'$($script:PostgresSecret)'"
+    }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort
         $publishedPorts["PROMETHEUS_PORT"] = $PrometheusPort
@@ -1042,7 +1056,19 @@ function Protect-SensitiveFile([string]$SecurePath) {
         Set-Acl $SecurePath $acl
     }
     catch {
-        Write-Warn "Could not restrict permissions on $(Split-Path $SecurePath -Leaf)"
+        # A hard stop, not a warning. The file holds the vault master key and the
+        # admin passwords; a warning scrolled past and the installer went on to
+        # start the stack with those readable by every account on the machine.
+        $leaf = Split-Path $SecurePath -Leaf
+        Write-Fail ("Could not restrict permissions on $leaf ($($_.Exception.Message)).`n" +
+            "     This file holds the vault master key and admin passwords, so the installer`n" +
+            "     will not continue while other accounts on this machine can read it.`n" +
+            "     Fix it, then re-run the installer:`n" +
+            "       icacls `"$SecurePath`" /inheritance:r /grant:r `"$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name):F`" /grant:r `"SYSTEM:F`" /grant:r `"Administrators:F`"`n" +
+            "     (or, in Explorer: Properties > Security > Advanced > Disable inheritance,`n" +
+            "     then remove Users / Everyone / Authenticated Users). If the file lives on`n" +
+            "     a filesystem without ACLs (FAT, exFAT, some network shares), move the`n" +
+            "     install directory to an NTFS volume (-InstallDir).")
     }
 }
 

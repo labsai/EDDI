@@ -1802,11 +1802,13 @@ jobs:
 
           echo "### 🐳 Docker Tags" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
+          # :latest, like the major/minor aliases, moves only for a STABLE
+          # release. It used to follow IS_RELEASE, so a 6.4.0-RC1 tag pointed
+          # every `docker pull labsai/eddi` (the compose default) at a release
+          # candidate until the next stable tag overwrote it.
           if [[ "${IS_STABLE:-false}" == "true" ]]; then
             echo "- \`${DOCKER_IMAGE}:${MINOR}\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- \`${DOCKER_IMAGE}:${MAJOR}\`" >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "$IS_RELEASE" == "true" ]]; then
             echo "- \`${DOCKER_IMAGE}:latest\`" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -2407,11 +2409,11 @@ jobs:
           gunzip -c eddi-ci.tar.gz | docker load
           rm eddi-ci.tar.gz
           docker tag "${DOCKER_IMAGE}:ci" "${DOCKER_IMAGE}:${PRIMARY_TAG}"
+          # :latest only for a STABLE tag (see the Docker Tags summary above):
+          # a pre-release must not become what an untagged `docker pull` gets.
           if [[ "$IS_STABLE" == "true" ]]; then
             docker tag "${DOCKER_IMAGE}:ci" "${DOCKER_IMAGE}:${MINOR_TAG}"
             docker tag "${DOCKER_IMAGE}:ci" "${DOCKER_IMAGE}:${MAJOR_TAG}"
-          fi
-          if [[ "$IS_RELEASE" == "true" ]]; then
             docker tag "${DOCKER_IMAGE}:ci" "${DOCKER_IMAGE}:latest"
           fi
           docker image inspect "${DOCKER_IMAGE}:${PRIMARY_TAG}" --format 'Publishing image {{.Id}} as {{.RepoTags}}'
@@ -2536,15 +2538,16 @@ jobs:
         env:
           PRIMARY_TAG: ${{ needs.build-image.outputs.primary-tag }}
         run: |
-          IS_RELEASE="${{ needs.build-image.outputs.is-release }}"
           IS_STABLE="${{ needs.build-image.outputs.is-stable }}"
 
           docker push "${DOCKER_IMAGE}:${PRIMARY_TAG}"
+          # The mutable aliases — major, minor AND latest — move only for a
+          # stable release. A pre-release tag (6.4.0-RC1) publishes its own
+          # tag and nothing else, so `docker pull labsai/eddi` keeps serving
+          # the last stable release rather than a candidate.
           if [[ "$IS_STABLE" == "true" ]]; then
             docker push ${DOCKER_IMAGE}:${{ needs.build-image.outputs.minor-tag }}
             docker push ${DOCKER_IMAGE}:${{ needs.build-image.outputs.major-tag }}
-          fi
-          if [[ "$IS_RELEASE" == "true" ]]; then
             docker push ${DOCKER_IMAGE}:latest
           fi
 
@@ -2600,7 +2603,14 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           generate_release_notes: true
-          make_latest: true
+          # A tag with a pre-release suffix (6.4.0-RC1) is published as a GitHub
+          # pre-release and does NOT become the repository's "Latest" release;
+          # only a stable MAJOR.MINOR.PATCH tag does — the same rule the Docker
+          # :latest alias follows above. It used to be make_latest: true
+          # unconditionally, so a release candidate was what the Releases page,
+          # the /releases/latest redirect and `gh release view` all pointed at.
+          make_latest: ${{ needs.docker.outputs.is-stable == 'true' }}
+          prerelease: ${{ needs.docker.outputs.is-stable != 'true' }}
           body: |
             ## 🐳 Docker Image
 
