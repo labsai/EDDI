@@ -4952,6 +4952,7 @@
       "action": "Aktivieren"
     },
     "activation": {
+      "storedPromptConfirm": "Diese Anweisungen stammen aus der gespeicherten Konfiguration, die jeder ändern konnte, der Plattformeinstellungen bearbeiten darf. Ich habe sie oben gelesen und möchte sie installieren.",
       "title": "Plattform-Operator aktivieren",
       "subtitle": "Wählen Sie das Modell für den Operator, prüfen Sie seine Anweisungen und starten Sie das Deployment.",
       "modelStep": "Modell",
@@ -5183,7 +5184,22 @@
     "superseded": {
       "title": "Der vorherige Operator-Agent ist weiterhin deployed."
     },
+    "trust": {
+      "checking": "Der Operator wird geprüft, bevor der Chat geöffnet wird …",
+      "title": "Der Plattform-Operator konnte nicht verifiziert werden",
+      "body": "Der Chat ist deaktiviert, weil der als Operator registrierte Agent ({{agentId}}) nicht nachweislich der ist, den dieser Manager eingerichtet hat. Wer Plattformeinstellungen bearbeiten darf, kann ändern, welcher Agent das ist.",
+      "reasonMarker": "Er trägt die Plattform-Operator-Markierung nicht und ist daher möglicherweise nicht der vom Manager bereitgestellte Agent.",
+      "reasonGate": "Sein Freigabe-Gate konnte nicht verifiziert werden: {{detail}}",
+      "reasonUnreadable": "Die Prüfungen konnten nicht abgeschlossen werden: {{detail}}",
+      "recheck": "Erneut prüfen",
+      "manage": "Operator-Bildschirm öffnen"
+    },
     "upgrade": {
+      "reviewTitle": "Gespeicherte Anweisungen prüfen",
+      "reviewBody": "Diese Anweisungen wurden zuvor gespeichert und werden auf dem neuen Operator installiert. Wer Plattformeinstellungen bearbeiten darf, könnte sie geändert haben – lesen Sie daher, was vom Standard abweicht, bevor Sie fortfahren.",
+      "reviewSummary": "{{added}} Zeilen hinzugefügt, {{removed}} Standardzeilen entfernt",
+      "reviewFull": "Gesamten gespeicherten Text anzeigen",
+      "reviewConfirm": "Ich habe diese Anweisungen gelesen und möchte sie installieren",
       "hint": "Für den Platform Operator ist ein Update verfügbar.",
       "blockerBaseUrl": "Die Adresse seines Modellservers wurde nicht gespeichert — gib sie für das Update erneut ein.",
       "addedTools_other": "{{count}} neue Werkzeuge",

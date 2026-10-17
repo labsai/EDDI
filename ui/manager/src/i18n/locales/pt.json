@@ -5006,6 +5006,7 @@
       "action": "Ativar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instruções vieram da configuração salva, que qualquer pessoa que possa editar as configurações da plataforma pode ter alterado. Eu as li acima e quero instalá-las.",
       "title": "Ativar o operador da plataforma",
       "subtitle": "Escolha o modelo que executará o operador, reveja as suas instruções e implante.",
       "modelStep": "Modelo",
@@ -5239,7 +5240,22 @@
     "superseded": {
       "title": "O agente operador anterior continua implantado."
     },
+    "trust": {
+      "checking": "Verificando o operador antes de abrir o chat…",
+      "title": "Não foi possível verificar o operador da plataforma",
+      "body": "O chat está desativado porque o agente registrado como operador ({{agentId}}) não é comprovadamente o que este Manager configurou. Quem pode editar as configurações da plataforma pode mudar qual é esse agente.",
+      "reasonMarker": "Ele não possui a marca de operador da plataforma, então pode não ser o agente provisionado pelo Manager.",
+      "reasonGate": "Não foi possível verificar o portão de aprovação dele: {{detail}}",
+      "reasonUnreadable": "Não foi possível concluir as verificações: {{detail}}",
+      "recheck": "Verificar novamente",
+      "manage": "Abrir a tela do operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar as instruções armazenadas",
+      "reviewBody": "Estas instruções foram salvas antes e serão instaladas no novo operador. Quem pode editar as configurações da plataforma pode tê-las alterado, então leia o que difere do padrão antes de continuar.",
+      "reviewSummary": "{{added}} linhas adicionadas, {{removed}} linhas padrão removidas",
+      "reviewFull": "Mostrar o texto armazenado completo",
+      "reviewConfirm": "Li estas instruções e quero instalá-las",
       "hint": "Há uma atualização disponível para o Platform Operator.",
       "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
       "addedTools_other": "{{count}} ferramentas novas",

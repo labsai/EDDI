@@ -4952,6 +4952,7 @@
       "action": "Activate"
     },
     "activation": {
+      "storedPromptConfirm": "These instructions were carried over from the saved configuration, which anyone who can edit platform settings may have changed. I have read them above and want to install them.",
       "title": "Activate the Platform Operator",
       "subtitle": "Choose the model that will run the operator, review its instructions, and deploy.",
       "modelStep": "Model",
@@ -5183,7 +5184,22 @@
     "superseded": {
       "title": "The previous operator agent is still deployed."
     },
+    "trust": {
+      "checking": "Verifying the operator before opening chat…",
+      "title": "The Platform Operator could not be verified",
+      "body": "Chat is switched off because the agent registered as the operator ({{agentId}}) is not provably the one this Manager set up. Anyone who can edit platform settings can change which agent that is.",
+      "reasonMarker": "It does not carry the Platform Operator marker, so it may not be the agent the Manager provisioned.",
+      "reasonGate": "Its approval gate could not be verified: {{detail}}",
+      "reasonUnreadable": "The checks could not be completed: {{detail}}",
+      "recheck": "Check again",
+      "manage": "Open the operator screen"
+    },
     "upgrade": {
+      "reviewTitle": "Review the stored instructions",
+      "reviewBody": "These instructions were saved earlier and will be installed on the new operator. Anyone who can edit platform settings could have changed them, so read what differs from the default before you continue.",
+      "reviewSummary": "{{added}} lines added, {{removed}} default lines removed",
+      "reviewFull": "Show the full stored text",
+      "reviewConfirm": "I have read these instructions and want to install them",
       "hint": "An update for the Platform Operator is available.",
       "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
       "addedTools_other": "{{count}} new tools",

@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { OperatorActivation } from "@/components/operator/operator-activation";
 import { OperatorChat } from "@/components/operator/operator-chat";
+import { OperatorUntrusted } from "@/components/operator/operator-untrusted";
 import { OperatorHistory } from "@/components/operator/operator-history";
 import { OperatorStatusPanel } from "@/components/operator/operator-status";
 import {
@@ -25,6 +26,7 @@ import {
   useResetOperator,
   useOperatorCanary,
   useVerifyOperatorGate,
+  useOperatorTrust,
   useOperatorUpgradeAssessment,
   seedConfig,
   runPostActivationProbes,
@@ -44,6 +46,7 @@ import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { RequestPreview } from "@/components/operator/request-preview";
 import { OperatorUpgradeNotice } from "@/components/operator/operator-upgrade";
 import { buildUpgradeRequest, type InstructionsChoice } from "@/lib/operator/operator-revision";
+import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
 import type { PendingToolCallView } from "@/lib/api/hitl";
 
 export function OperatorPage() {
@@ -101,6 +104,11 @@ export function OperatorPage() {
   const queryClient = useQueryClient();
   const status = useOperatorStatus(config);
   const gate = useVerifyOperatorGate(config);
+  // `platform.operator` is editor-writable: chat, history and the conversation
+  // restore stay off until the agent it names carries the operator marker and a
+  // verified approval gate (see operator-trust.ts). Shares the gate query above.
+  const trust = useOperatorTrust(config);
+  const trusted = trust.state === "trusted";
   const chat = useOperatorChat(config);
   const upgrade = useOperatorUpgradeAssessment(config);
   const presence = useOperatorAgentPresence(config);
@@ -132,9 +140,9 @@ export function OperatorPage() {
   const isActiveOperator = Boolean(config?.enabled && config?.agentId);
   const hydrate = chat.hydrate;
   useEffect(() => {
-    if (!isActiveOperator) return;
+    if (!isActiveOperator || !trusted) return;
     void hydrate();
-  }, [isActiveOperator, hydrate]);
+  }, [isActiveOperator, trusted, hydrate]);
 
   /**
    * True only while an explicit History pick is loading.
@@ -554,6 +562,8 @@ export function OperatorPage() {
           busy={activate.isPending}
           stageLabel={activate.isPending ? t(`operator.stage.${stage}`) : undefined}
           error={upgradeError}
+          storedPromptBody={config?.promptBody}
+          defaultPromptBody={config ? defaultOperatorPromptBody(config.scope) : undefined}
         />
       )}
 
@@ -619,6 +629,7 @@ export function OperatorPage() {
           establishes. Declaring role="tab" without them looks correct to a
           checker and leaves keyboard and screen-reader users with two buttons
           that announce as tabs and behave as neither. */}
+      {trusted && (
       <div
         role="tablist"
         aria-label={t("operator.tabs.label", "Operator views")}
@@ -656,6 +667,7 @@ export function OperatorPage() {
           </button>
         ))}
       </div>
+      )}
 
       {/* The status panel stays put across both tabs — deployment state and the
           gate verdict are exactly the context someone reviewing past
@@ -667,7 +679,10 @@ export function OperatorPage() {
             every operator page load for a tab nobody had opened (measured: 17
             requests). Unlike the chat below there is nothing here worth keeping
             alive: react-query caches the data, so coming back is free. */}
-        {tab === "history" && (
+        {!trusted && (
+          <OperatorUntrusted trust={trust} agentId={config!.agentId!} onRecheck={trust.recheck} />
+        )}
+        {trusted && tab === "history" && (
           <div
             id="operator-tabpanel-history"
             role="tabpanel"
@@ -693,6 +708,7 @@ export function OperatorPage() {
             unbreakable line inside (an approval card's one-line JSON args) and
             pushes the page into horizontal scroll — the child's own min-w-0 is a
             floor, not a ceiling, so it no longer constrains the track. */}
+        {trusted && (
         <div
           id="operator-tabpanel-chat"
           role="tabpanel"
@@ -738,6 +754,7 @@ export function OperatorPage() {
           isReadOnly={chat.isReadOnly}
         />
         </div>
+        )}
         <OperatorStatusPanel
           config={config!}
           status={status.data}

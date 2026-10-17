@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { getWorkspaceInfo } from "@/lib/api/workspaces";
 import { setResourceVisibility } from "@/lib/api/sharing";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +33,8 @@ import {
   type FetchedSpec,
 } from "@/lib/api/operator";
 import { getAgentCurrentVersion } from "@/lib/api/agents";
+import { getDescriptor } from "@/lib/api/descriptors";
+import { hasOperatorMarker } from "@/lib/api/operator-marker";
 import { ApiClientError, getErrorMessage } from "@/lib/api-client";
 import {
   adoptOperatorAgent,
@@ -46,6 +48,7 @@ import {
   type DeployWithGrantsOutcome,
 } from "@/hooks/use-deploy-with-grants";
 import { endpointsForScope } from "@/lib/operator/tool-scopes";
+import { assessOperatorTrust, type OperatorTrust } from "@/lib/operator/operator-trust";
 import { defaultOperatorPromptBody } from "@/lib/operator/system-prompt";
 import {
   OPERATOR_REVISION,
@@ -67,6 +70,7 @@ export const operatorKeys = {
   status: (agentId: string, version: number) =>
     ["operator", "status", agentId, version] as const,
   gate: (agentId: string) => ["operator", "gate", agentId] as const,
+  marker: (agentId: string, version: number) => ["operator", "marker", agentId, version] as const,
   selfUrl: ["operator", "self-url"] as const,
   unregistered: (registeredAgentId: string | null) => ["operator", "unregistered", registeredAgentId] as const,
   presence: (agentId: string) => ["operator", "presence", agentId] as const,
@@ -841,6 +845,67 @@ export function useVerifyOperatorGate(config: OperatorConfig | null | undefined)
     enabled: ready,
     staleTime: 0,
   });
+}
+
+/* ─── Trust ─── */
+
+/**
+ * Whether the agent `platform.operator` names may be chatted with.
+ *
+ * The variable is editor-writable, so the Manager checks two things it can read
+ * back from the agent store itself — the descriptor marker provisioning stamps,
+ * and the verified approval gate — before any surface opens a conversation. See
+ * `operator-trust.ts` for the reasoning, and for why a check that cannot finish
+ * counts against the operator.
+ *
+ * `enabled` lets an always-mounted surface (the header drawer) defer the checks
+ * until the admin actually opens it, instead of re-reading every version of the
+ * agent document on each page load. The gate query is the one the operator page
+ * already runs, so the two share a cache entry rather than asking twice.
+ */
+export function useOperatorTrust(config: OperatorConfig | null | undefined, enabled = true): OperatorTrust & {
+  /** Run both checks again, e.g. after a transient failure. */
+  recheck: () => void;
+} {
+  const agentId = config?.agentId ?? "";
+  const live = Boolean(enabled && config?.enabled && agentId);
+  const gate = useVerifyOperatorGate(live ? config : null);
+  const marker = useQuery({
+    queryKey: operatorKeys.marker(agentId, config?.version ?? 0),
+    queryFn: async () => {
+      const version = config?.version ?? (await getAgentCurrentVersion(agentId));
+      const descriptor = await getDescriptor(agentId, version);
+      return hasOperatorMarker(descriptor.description);
+    },
+    enabled: live,
+    staleTime: 30_000,
+    retry: false,
+  });
+  const { refetch: refetchGate } = gate;
+  const { refetch: refetchMarker } = marker;
+
+  const trust = useMemo(
+    () =>
+      assessOperatorTrust({
+        live,
+        marker: marker.isError
+          ? { status: "error", error: marker.error }
+          : marker.data === undefined
+            ? { status: "pending" }
+            : { status: "success", value: marker.data },
+        gate: gate.isError
+          ? { status: "error", error: gate.error }
+          : gate.data === undefined
+            ? { status: "pending" }
+            : { status: "success", value: gate.data },
+      }),
+    [live, marker.isError, marker.error, marker.data, gate.isError, gate.error, gate.data],
+  );
+  const recheck = useCallback(() => {
+    void refetchMarker();
+    void refetchGate();
+  }, [refetchMarker, refetchGate]);
+  return { ...trust, recheck };
 }
 
 /* ─── Operators the config does not point at ─── */

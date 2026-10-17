@@ -5006,6 +5006,7 @@
       "action": "Activar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instrucciones proceden de la configuración guardada, que pudo haber cambiado cualquiera que pueda editar los ajustes de la plataforma. Las he leído arriba y quiero instalarlas.",
       "title": "Activar el operador de plataforma",
       "subtitle": "Elige el modelo que ejecutará el operador, revisa sus instrucciones y despliégalo.",
       "modelStep": "Modelo",
@@ -5239,7 +5240,22 @@
     "superseded": {
       "title": "El agente operador anterior sigue desplegado."
     },
+    "trust": {
+      "checking": "Verificando el operador antes de abrir el chat…",
+      "title": "No se pudo verificar el operador de plataforma",
+      "body": "El chat está desactivado porque el agente registrado como operador ({{agentId}}) no es demostrablemente el que configuró este Manager. Quien pueda editar los ajustes de la plataforma puede cambiar de qué agente se trata.",
+      "reasonMarker": "No lleva la marca de operador de plataforma, por lo que puede no ser el agente que aprovisionó el Manager.",
+      "reasonGate": "No se pudo verificar su puerta de aprobación: {{detail}}",
+      "reasonUnreadable": "No se pudieron completar las comprobaciones: {{detail}}",
+      "recheck": "Comprobar de nuevo",
+      "manage": "Abrir la pantalla del operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar las instrucciones almacenadas",
+      "reviewBody": "Estas instrucciones se guardaron antes y se instalarán en el nuevo operador. Quien pueda editar los ajustes de la plataforma pudo haberlas cambiado, así que lea lo que difiere del valor predeterminado antes de continuar.",
+      "reviewSummary": "{{added}} líneas añadidas, {{removed}} líneas predeterminadas eliminadas",
+      "reviewFull": "Mostrar el texto almacenado completo",
+      "reviewConfirm": "He leído estas instrucciones y quiero instalarlas",
       "hint": "Hay una actualización disponible para el Platform Operator.",
       "blockerBaseUrl": "La dirección de su servidor de modelos no se guardó: vuelve a introducirla para actualizar.",
       "addedTools_other": "{{count}} herramientas nuevas",

@@ -8,6 +8,7 @@ import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator
 import type { OperatorConfig } from "@/lib/api/operator";
 import type { ActivationOutcome } from "@/hooks/use-operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 /**
  * The superseded-operator banner, on the page.
@@ -79,6 +80,8 @@ async function reconfigure() {
   renderWithProviders(<OperatorPage />);
   await userEvent.click(await screen.findByRole("button", { name: /reconfigure/i }));
   await userEvent.click(await screen.findByTestId("operator-next"));
+  // The stored instructions are carried over unchanged, so the form wants a yes.
+  await userEvent.click(await screen.findByTestId("operator-stored-prompt-confirm-checkbox"));
   await userEvent.click(await screen.findByTestId("operator-activate"));
 }
 
@@ -87,6 +90,8 @@ describe("OperatorPage — superseded operator banner", () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     useOperatorChatStore.getState().reset();
     server.resetHandlers();
+    serveTrustedOperator("op-old");
+    serveTrustedOperator("op-new");
     server.use(
       http.get(VAR_URL, () =>
         HttpResponse.json({ key: OPERATOR_VARIABLE_KEY, value: JSON.stringify(activeConfig()) }),

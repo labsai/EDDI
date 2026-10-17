@@ -5006,6 +5006,7 @@
       "action": "Activer"
     },
     "activation": {
+      "storedPromptConfirm": "Ces instructions proviennent de la configuration enregistrée, que toute personne pouvant modifier les paramètres de la plateforme a pu changer. Je les ai lues ci-dessus et je souhaite les installer.",
       "title": "Activer l'opérateur de plateforme",
       "subtitle": "Choisissez le modèle qui fera fonctionner l'opérateur, vérifiez ses instructions et déployez.",
       "modelStep": "Modèle",
@@ -5239,7 +5240,22 @@
     "superseded": {
       "title": "L'agent opérateur précédent est toujours déployé."
     },
+    "trust": {
+      "checking": "Vérification de l'opérateur avant d'ouvrir le chat…",
+      "title": "L'opérateur de plateforme n'a pas pu être vérifié",
+      "body": "Le chat est désactivé car l'agent enregistré comme opérateur ({{agentId}}) n'est pas démontrablement celui que ce Manager a configuré. Toute personne pouvant modifier les paramètres de la plateforme peut changer de quel agent il s'agit.",
+      "reasonMarker": "Il ne porte pas le marqueur d'opérateur de plateforme ; ce n'est donc peut-être pas l'agent provisionné par le Manager.",
+      "reasonGate": "Sa porte d'approbation n'a pas pu être vérifiée : {{detail}}",
+      "reasonUnreadable": "Les vérifications n'ont pas pu aboutir : {{detail}}",
+      "recheck": "Vérifier à nouveau",
+      "manage": "Ouvrir l'écran de l'opérateur"
+    },
     "upgrade": {
+      "reviewTitle": "Vérifier les instructions enregistrées",
+      "reviewBody": "Ces instructions ont été enregistrées plus tôt et seront installées sur le nouvel opérateur. Toute personne pouvant modifier les paramètres de la plateforme a pu les changer : lisez ce qui diffère de la valeur par défaut avant de continuer.",
+      "reviewSummary": "{{added}} lignes ajoutées, {{removed}} lignes par défaut supprimées",
+      "reviewFull": "Afficher le texte enregistré complet",
+      "reviewConfirm": "J'ai lu ces instructions et je souhaite les installer",
       "hint": "Une mise à jour du Platform Operator est disponible.",
       "blockerBaseUrl": "L'adresse de son serveur de modèles n'a pas été enregistrée — saisissez-la à nouveau pour mettre à jour.",
       "addedTools_other": "{{count}} nouveaux outils",
