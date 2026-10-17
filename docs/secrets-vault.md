@@ -1064,6 +1064,10 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
+| Google (`AIza…`), xAI (`xai-…`), Groq (`gsk_…`), GitHub (`ghp_…`, `github_pat_…`), Slack (`xoxb-…` and siblings), AWS access key ids (`AKIA…`/`ASIA…`), bare JWTs (`eyJ….eyJ….…`) | `<REDACTED>` | `xoxb-1234-…` → `<REDACTED>` |
+| `Authorization: Basic\|Token\|Digest …` | `Authorization: Basic <REDACTED>` | the credential after the scheme word, which the name rule (stopping at the space) used to leave |
+| `Ocp-Apim-Subscription-Key: …` (`api-key:` / `x-api-key:` are matched by the API key rule) | `Ocp-Apim-Subscription-Key: <REDACTED>` | |
+| Database connection-string password (`mongodb(+srv)://`, `postgres(ql)://`, `mysql://`, `redis(s)://`, `amqp(s)://`) | `mongodb://user:<REDACTED>@host` | the host stays legible |
 
 > A bare `${vault:...}` reference is deliberately **not** redacted — it is a pointer, not a secret, and hiding it removes exactly the information an approver needs to judge a request. A reference followed by extra value material (`${vault:k}SECRET-TAIL`) **is** redacted as a whole.
 

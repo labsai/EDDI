@@ -100,3 +100,27 @@ old configuration versions that are still deployed. No Manager warning state yet
 [`SecretListing.java`](../../src/main/java/ai/labs/eddi/secrets/rest/SecretListing.java),
 [`RestSecretStore.java`](../../src/main/java/ai/labs/eddi/secrets/rest/RestSecretStore.java),
 [`secrets-vault.md`](../secrets-vault.md#destination-allow-list-allowedhosts)
+
+## 🔒 fix(security): the free-text redaction filter knows more provider key shapes (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-secrets-redaction`)
+
+L6 of the 2026-10-17 security review. `SecretRedactionFilter` — which backs logs, dead
+letters, the audit scrub, HITL approval cards and now the config read-redaction —
+recognised only `sk-`, `sk-ant-`, `Bearer` and named fields. Patterns **added** (no
+existing rule changed): Google `AIza…`, xAI `xai-…`, Groq `gsk_…`, GitHub `gh[pousr]_…`
+and `github_pat_…`, Slack `xox[baprse]-…`, AWS `AKIA…`/`ASIA…` (exactly 16, not inside
+a longer run), bare JWTs, the credential after `Authorization: Basic|Token|Digest`,
+`…Subscription-Key:` headers, and the userinfo password of `mongodb(+srv)`, `postgres(ql)`,
+`mysql`, `redis(s)` and `amqp(s)` connection strings. (`api-key:`/`x-api-key:` were
+already matched by the API-key name rule.)
+
+Every pattern is a literal prefix plus one possessive or bounded character class that
+admits no quote, backslash or brace, so a match cannot cross a JSON string or eat a
+`${vault:…}` reference. The JWT rule is the one that can fail after consuming a long run,
+so a lookbehind admits a start only where a token run begins — without it `eyJ` repeated
+60,000 times is quadratic (the mutation check timed out at 30 s).
+
+**Files:** [`SecretRedactionFilter.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilter.java),
+[`SecretRedactionFilterProviderShapesTest.java`](../../src/test/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilterProviderShapesTest.java),
+[`secrets-vault.md`](../secrets-vault.md#log-redaction)

@@ -106,7 +106,50 @@ public final class SecretRedactionFilter {
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
             // dotted JWTs; min length 20 avoids redacting short benign words.
             new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
-                    "Bearer " + REDACTED));
+                    "Bearer " + REDACTED),
+
+            // Provider key shapes the rules above did not know (L6 of the 2026-10-17
+            // security review). Each is a fixed prefix followed by ONE possessive,
+            // bounded-below character class, so each scans linearly; none of the
+            // classes admits a quote, a backslash or a brace, so a match can never
+            // run across a JSON string boundary or into a ${vault:…} reference. The
+            // replacement is the bare marker: the shape-specific hints above are
+            // what notAlreadyRedacted() recognises, and a new hint would need it to.
+            //
+            // Google API keys (Gemini, Maps): AIza + 35.
+            new RedactionRule(Pattern.compile("AIza[0-9A-Za-z_\\-]{35,}+"), REDACTED),
+            // xAI.
+            new RedactionRule(Pattern.compile("xai-[A-Za-z0-9_\\-]{20,}+"), REDACTED),
+            // Groq.
+            new RedactionRule(Pattern.compile("gsk_[A-Za-z0-9]{20,}+"), REDACTED),
+            // GitHub classic and fine-grained tokens.
+            new RedactionRule(Pattern.compile("gh[pousr]_[A-Za-z0-9]{30,}+"), REDACTED),
+            new RedactionRule(Pattern.compile("github_pat_[A-Za-z0-9_]{20,}+"), REDACTED),
+            // Slack bot, user, app, refresh and config tokens.
+            new RedactionRule(Pattern.compile("xox[baprse]-[A-Za-z0-9\\-]{10,}+"), REDACTED),
+            // AWS access key ids: exactly 16 after the prefix, not inside a longer run.
+            new RedactionRule(Pattern.compile("(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])"), REDACTED),
+            // A bare JWT (header.payload.signature) outside a Bearer header. Unlike the
+            // rules above, this one can FAIL after consuming a long run (no second
+            // dot), so the lookbehind admits a start only where a run begins: without
+            // it "eyJ" repeated would be rescanned from every occurrence, which is
+            // quadratic.
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_\\-])eyJ[A-Za-z0-9_\\-]{8,}+\\.eyJ[A-Za-z0-9_\\-]{8,}+\\.[A-Za-z0-9_\\-]*+"),
+                    REDACTED),
+            // Authorization: Basic|Token|Digest <credential>. The name-bound rules
+            // below stop the value at the space after the scheme, which left the
+            // credential itself legible.
+            new RedactionRule(Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|token|digest)\\s++[A-Za-z0-9+/=._~\\-]{6,}+"),
+                    "$1$2 " + REDACTED),
+            // Azure API Management's subscription key header (api-key and x-api-key
+            // are already matched by the name-bound rules below).
+            new RedactionRule(Pattern.compile("(?i)(subscription-key[\"']?+\\s*+[:=]\\s*+[\"']?+)[^\\s,;\"'\\\\{}\\[\\]]{8,}+"),
+                    "$1" + REDACTED),
+            // The password in a database connection string's userinfo.
+            new RedactionRule(Pattern.compile(
+                    "(?i)((?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]{1,256}+:)"
+                            + "[^@/\\s\"'\\\\,{}\\[\\]]{1,256}+@"),
+                    "$1" + REDACTED + "@"));
 
     /**
      * A whole vault reference, as an OPTIONAL, possessive prefix on an unquoted
