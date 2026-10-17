@@ -93,6 +93,15 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
 
     private static final Logger log = Logger.getLogger(AbstractQueuedConversationCoordinator.class);
 
+    /**
+     * Overrides {@code eddi.conversation.max-queued-turns-per-conversation} for a
+     * coordinator built outside CDI (tests that construct it with {@code new} and
+     * deliberately queue more turns on one conversation than a client would).
+     */
+    public void setMaxQueuedTurnsPerConversation(int maxQueuedTurnsPerConversation) {
+        this.maxQueuedTurnsPerConversation = maxQueuedTurnsPerConversation;
+    }
+
     protected AbstractQueuedConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry, int maxActiveConversations,
             int maxDeadLetters) {
         if (maxDeadLetters < -1) {
