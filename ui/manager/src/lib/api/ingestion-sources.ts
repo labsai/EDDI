@@ -73,6 +73,12 @@ export interface IngestionRun {
   segmentsStored: number;
   costUsd: number;
   error?: string | null;
+  /** Documents with no text worth embedding. Absent from servers older than this field. */
+  documentsSkipped?: number;
+  /** The crawler's stop reason (`COMPLETED`, `PAGE_LIMIT`, `TIME_LIMIT`, …), once the run ended. */
+  stopReason?: string | null;
+  /** What started the run; absent on runs recorded before it was. */
+  trigger?: "MANUAL" | "SCHEDULED" | null;
 }
 
 /** What a preview says a run would do. */
@@ -121,8 +127,9 @@ const base = (kbId: string, sourceId: string) =>
 
 /** Starts a run. The backend answers 202; progress is followed through the run history. */
 export function runSource(kbId: string, sourceId: string, version: number) {
-  // A 202 carries no body the client can read, so typing one invites a caller to
-  // use a value that is always undefined.
+  // The server's 202 names the run id, but ApiClient discards every 202 body, so
+  // typing one invites a caller to use a value that is always undefined. The
+  // RUNNING row in the history is how the Manager finds the run.
   return api.post<void>(`${base(kbId, sourceId)}/run?version=${version}`);
 }
 
@@ -144,6 +151,134 @@ export function purgeSource(kbId: string, sourceId: string, version: number) {
 }
 
 // ── Uploaded files ───────────────────────────────────────────────────────────
+
+// ── Schedule ─────────────────────────────────────────────────────────────────
+
+/** One past fire of a source's schedule, from the scheduler's fire log. */
+export interface ScheduleFire {
+  fireTime?: string | null;
+  completedAt?: string | null;
+  /** `COMPLETED`, `FAILED`, `SKIPPED`, `DEAD_LETTERED`, … */
+  status?: string | null;
+  errorMessage?: string | null;
+  attemptNumber?: number;
+}
+
+/**
+ * What the scheduler holds for a source. `scheduled` is false when the source
+ * has no cron, is disabled, or its cron was refused — the other fields are then
+ * absent.
+ */
+export interface SourceSchedule {
+  scheduled: boolean;
+  scheduleId?: string;
+  cron?: string;
+  timeZone?: string | null;
+  enabled?: boolean;
+  disabledReason?: string | null;
+  nextFire?: string | null;
+  lastFired?: string | null;
+  fireStatus?: string | null;
+  failCount?: number;
+  nextRetryAt?: string | null;
+  recentFires: ScheduleFire[];
+}
+
+export function getSourceSchedule(kbId: string, sourceId: string, version: number) {
+  return api.get<SourceSchedule>(`${base(kbId, sourceId)}/schedule?version=${version}`);
+}
+
+/** Whether a cron would be accepted on save, and when it would fire (UTC). */
+export interface CronPreview {
+  cron: string;
+  valid: boolean;
+  error?: string | null;
+  timeZone: string;
+  nextFires: string[];
+}
+
+export function previewCron(cron: string, count = 3) {
+  const params = new URLSearchParams({ cron, count: String(count) });
+  return api.get<CronPreview>(`/ragstore/rags/cron/preview?${params.toString()}`);
+}
+
+// ── What the knowledge base holds ────────────────────────────────────────────
+
+/** One document a source has ingested, as its ingestion state records it. */
+export interface IngestedDocument {
+  documentId: string;
+  /** The file name for an uploaded file, the URL for a crawled page. */
+  label: string;
+  url?: string | null;
+  firstIngestedAt?: string | null;
+  lastIngestedAt?: string | null;
+  /** Consecutive runs that did not see it; it is removed past the source's threshold. */
+  missedRuns: number;
+  /** Gone from the source, and its chunks removed. */
+  tombstoned: boolean;
+}
+
+export interface IngestedDocumentPage {
+  total: number;
+  /** The source holds more documents than the server reads at once; `total` is a floor. */
+  truncated: boolean;
+  documents: IngestedDocument[];
+}
+
+export function getSourceDocuments(
+  kbId: string,
+  sourceId: string,
+  version: number,
+  options: { query?: string; offset?: number; limit?: number } = {},
+) {
+  const params = new URLSearchParams({ version: String(version) });
+  if (options.query) params.set("q", options.query);
+  if (options.offset) params.set("offset", String(options.offset));
+  if (options.limit) params.set("limit", String(options.limit));
+  return api.get<IngestedDocumentPage>(`${base(kbId, sourceId)}/documents?${params.toString()}`);
+}
+
+/** A chunk of text as the vector store holds it. `score` is set on search results only. */
+export interface KnowledgeChunk {
+  index?: number | null;
+  score?: number | null;
+  text: string;
+  metadata: Record<string, unknown>;
+}
+
+export function getDocumentChunks(
+  kbId: string,
+  sourceId: string,
+  version: number,
+  documentId: string,
+  limit = 100,
+) {
+  const params = new URLSearchParams({ version: String(version), documentId, limit: String(limit) });
+  return api.get<{ documentId: string; chunks: KnowledgeChunk[] }>(
+    `${base(kbId, sourceId)}/chunks?${params.toString()}`,
+  );
+}
+
+export interface KnowledgeSearchRequest {
+  query: string;
+  maxResults?: number;
+  minScore?: number;
+  sourceId?: string;
+}
+
+export interface KnowledgeSearchResult {
+  maxResults: number;
+  minScore: number;
+  results: KnowledgeChunk[];
+}
+
+/** Retrieves exactly as an agent would — one embedding call, nothing stored. */
+export function searchKnowledgeBase(kbId: string, version: number, request: KnowledgeSearchRequest) {
+  return api.post<KnowledgeSearchResult>(
+    `/ragstore/rags/${encodeURIComponent(kbId)}/search?version=${version}`,
+    request,
+  );
+}
 
 /** The files an upload source holds, oldest first. */
 export function getSourceFiles(kbId: string, sourceId: string, version: number) {
