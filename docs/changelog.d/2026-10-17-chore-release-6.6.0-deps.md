@@ -45,8 +45,12 @@ version, only libraries and the Node toolchain.
 ### Verification
 
 `./mvnw clean compile`; Chat UI lint, typecheck, all tests and build; Manager
-typecheck, lint, `i18n:check`, build and the full vitest run; `BuildQualityGatesTest`
-and the repo-wide guard tests.
+typecheck, lint, `i18n:check`, build and the full vitest run (592 files, 8551
+tests); `BuildQualityGatesTest` and the repo-wide guard tests (243 tests, three
+failures in `DeploymentManifestsTest`'s PowerShell `create-secrets.ps1` stub
+tests, which fail the same way on an untouched `origin/main` checkout on the
+Windows machine used, so they are environmental). The full backend unit suite,
+the integration tests and the E2E jobs were left to CI.
 
 **Files:** [`pom.xml`](../../pom.xml), [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml),
 [`mise.toml`](../../mise.toml), [`ui/manager/package.json`](../../ui/manager/package.json),
