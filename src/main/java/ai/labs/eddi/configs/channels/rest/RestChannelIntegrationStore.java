@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.channels.rest;
 
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
@@ -104,7 +105,16 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     @Override
     public ChannelIntegrationConfiguration readChannel(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        ChannelIntegrationConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        // A Slack signingSecret matters most here: its holder can forge
+        // /integrations/slack/* events.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, ChannelIntegrationConfiguration.class);
     }
 
     @Override

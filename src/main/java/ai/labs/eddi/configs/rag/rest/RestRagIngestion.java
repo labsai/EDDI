@@ -62,6 +62,22 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     /**
+     * The knowledge base's configuration as the engine needs it. Every use here
+     * builds an embedding model or store from it, so it must carry the real
+     * credentials: {@link RestRagStore#readRag} redacts plaintext literals for a
+     * non-administrator, and an editor ingesting into a knowledge base whose
+     * {@code apiKey} is a literal would otherwise send the redaction marker to the
+     * provider. {@link RestRagStore#readRagForIngestion} applies the same access
+     * check without the redaction; the document never leaves the server. Anything
+     * other than the real store (a test double) is read through the interface.
+     */
+    private RagConfiguration readEngineConfig(String ragConfigId, Integer version) {
+        return restRagStore instanceof RestRagStore store
+                ? store.readRagForIngestion(ragConfigId, version)
+                : restRagStore.readRag(ragConfigId, version);
+    }
+
+    /**
      * The name {@code documentName} defaults to — see {@link IRestRagIngestion}.
      */
     static final String UNNAMED_DOCUMENT = "unnamed";
@@ -99,7 +115,7 @@ public class RestRagIngestion implements IRestRagIngestion {
 
         RagConfiguration ragConfig;
         try {
-            ragConfig = restRagStore.readRag(ragConfigId, version);
+            ragConfig = readEngineConfig(ragConfigId, version);
         } catch (Exception e) {
             LOGGER.warnf("Failed to load RAG config %s v%d: %s", sanitize(ragConfigId), version, e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version))
@@ -618,7 +634,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         }
         RagConfiguration ragConfig;
         try {
-            ragConfig = restRagStore.readRag(ragConfigId, version);
+            ragConfig = readEngineConfig(ragConfigId, version);
         } catch (IllegalArgumentException e) {
             // A version that cannot be used at all — negative, say — is a bad request.
             // Answering "not found" sends the caller looking for a knowledge base

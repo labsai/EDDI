@@ -203,6 +203,15 @@ Conversation descriptors share the `descriptors` collection with configuration d
 - `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
 - **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
 
+### Editors never read a plaintext credential back
+
+Vault values belong to the administrator, so a configuration store does not hand a literal credential to anyone else. `GET` on an LLM, MCP-calls, httpcalls, RAG or channel configuration — including `?version=` reads of old versions, and MCP `read_resource` / `read_channel_integration`, which go through the same REST stores — returns the document as stored to `eddi-admin` and a redacted copy to every other caller (`ConfigSecretRedactor`):
+
+- a string under a credential-named field (`apiKey`, `botToken`, `signingSecret`, `password`, `clientSecret`, `connectionString`, …) anywhere in the document — LLM task parameters, `a2aAgents[].apiKey`, `mcpServers[].apiKey`, `modelCascade` step and judge parameters, `platformConfig`, `embeddingParameters`, `storeParameters` — is replaced by a `<redacted: …>` marker;
+- an httpcall's credential headers (`Authorization`, `X-Api-Key`, `*-Key`, `Cookie`) are replaced whole; credential-named query values in `request.path`, a userinfo password in any URL, and credential-shaped values in `request.body` are replaced in place with `<REDACTED>`.
+
+A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`. A document an editor saves back carries the marker, which then fails at the provider: the store deliberately does not merge the stored literal back in, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault. RAG ingestion still reads the unredacted document server-side, so an editor can ingest into a knowledge base whose key is a literal.
+
 ### RestAgentManagement Gate
 
 `RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):

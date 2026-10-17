@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -48,6 +49,7 @@ public class RestRagStore implements IRestRagStore {
     private final IRagStore ragStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RagSourceIngestionService sourceIngestionService;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final KnowledgeBaseStorageGuard storageGuard;
@@ -58,6 +60,7 @@ public class RestRagStore implements IRestRagStore {
             EmbeddingStoreFactory embeddingStoreFactory) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, ragStore, documentDescriptorStore, resourceAccessGuard);
         this.ragStore = ragStore;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.sourceIngestionService = sourceIngestionService;
         this.embeddingStoreFactory = embeddingStoreFactory;
@@ -82,6 +85,21 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public RagConfiguration readRag(String id, Integer version) {
+        RagConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin() ? stored : ConfigSecretRedactor.redact(stored, RagConfiguration.class);
+    }
+
+    /**
+     * {@link #readRag} without the redaction, for the engine work an editor's
+     * request starts: ingestion builds the embedding model and store from this
+     * document, and a redacted {@code apiKey} would fail it. The same access check
+     * applies, and the document never leaves the server.
+     */
+    public RagConfiguration readRagForIngestion(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 

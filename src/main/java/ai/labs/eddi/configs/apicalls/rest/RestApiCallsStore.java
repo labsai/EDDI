@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.apicalls.rest;
 
+import java.util.Set;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.ApiCallsConfigurationValidator;
@@ -52,6 +54,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final IApiCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     // Field-injected, like the other optional collaborators, so the direct
     // constructions in tests keep compiling.
@@ -82,6 +85,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -100,8 +104,25 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     @Override
     public ApiCallsConfiguration readApiCalls(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        ApiCallsConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        // Literal Authorization/X-Api-Key headers, credential-named query values in
+        // request.path and credential-shaped values in request.body are what this
+        // catches here; httpCalls[].parameters are the tool's parameter
+        // DESCRIPTIONS, keyed by names like "token", and are left alone.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, ApiCallsConfiguration.class, NOT_CONFIGURATION);
     }
+
+    /**
+     * Containers in an httpcalls document that hold descriptions rather than
+     * configuration.
+     */
+    static final Set<String> NOT_CONFIGURATION = Set.of("httpCalls[].parameters");
 
     @Override
     public Response updateApiCalls(String id, Integer version, ApiCallsConfiguration httpCallsConfiguration) {

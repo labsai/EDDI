@@ -1070,6 +1070,10 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 
 `SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
 
+### Configuration Read Redaction
+
+`ConfigSecretRedactor` is applied by the LLM, MCP-calls, httpcalls, RAG and channel stores whenever a caller who is not `eddi-admin` reads a document (including `?version=` reads and MCP `read_resource`). A plaintext credential — by field name anywhere in the document, by header name in a header map, as a userinfo password or credential-named query value in a URL, or by shape in an httpcall body — is replaced; a `${vault:…}`, `${vars:…}`, `${connection:…}` or `${caller:…}` reference is returned as it is. Details in [Security → Editors never read a plaintext credential back](security.md#editors-never-read-a-plaintext-credential-back).
+
 ### Memory Protection
 
 - **HTTP headers**: Sensitive headers (`Authorization`, `X-Api-Key`, etc.) are scrubbed before storing HTTP request details in conversation memory

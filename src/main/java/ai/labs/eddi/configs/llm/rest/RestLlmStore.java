@@ -15,8 +15,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -24,12 +23,8 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * @author ginccc
@@ -39,14 +34,16 @@ public class RestLlmStore implements IRestLlmStore {
     private static final Logger LOGGER = Logger.getLogger(RestLlmStore.class);
 
     /**
-     * What a non-administrator reads in place of a plaintext credential. Carries no
-     * {@code {}, so it can never be read as a template or a reference — and it is
-     * not a key, so a document echoed back with it fails at the provider rather
-     * than quietly keeping the literal.
+     * What a non-administrator reads in place of a plaintext credential — the
+     * shared {@link ConfigSecretRedactor#REDACTED} marker.
      */
-    static final String REDACTED = "<redacted: a plaintext credential - an eddi-admin must move it into the vault and reference it as ${vault:...}>";
+    static final String REDACTED = ConfigSecretRedactor.REDACTED;
 
-    private static final ObjectMapper MAPPER = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    /**
+     * Maps keyed by tool names rather than parameter names: a tool called
+     * {@code get_token} is not a credential field.
+     */
+    static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes");
 
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -102,32 +99,16 @@ public class RestLlmStore implements IRestLlmStore {
     }
 
     /**
-     * A copy of {@code stored} with every plaintext credential parameter (as
-     * {@link #plaintextSecretParameters} finds them) replaced by {@link #REDACTED}.
-     * The stored object is never touched, because the store may hand out a cached
-     * instance.
+     * A copy of {@code stored} with every plaintext credential redacted by the
+     * shared {@link ConfigSecretRedactor} — task parameters, but also
+     * {@code a2aAgents[].apiKey}, {@code mcpServers[].apiKey},
+     * {@code modelCascade.steps[].parameters} and
+     * {@code modelCascade.judgeModel.parameters}, which the first version of this
+     * redaction did not reach (M1 of the 2026-10-17 review). The stored object is
+     * never touched, because the store may hand out a cached instance.
      */
     static LlmConfiguration redactPlaintextSecrets(LlmConfiguration stored) {
-        if (stored == null || plaintextSecretParameters(stored).isEmpty()) {
-            return stored;
-        }
-        LlmConfiguration copy;
-        try {
-            copy = MAPPER.readValue(MAPPER.writeValueAsBytes(stored), LlmConfiguration.class);
-        } catch (IOException e) {
-            throw sneakyThrow(e);
-        }
-        for (var task : copy.tasks()) {
-            if (task == null || task.getParameters() == null) {
-                continue;
-            }
-            for (var parameter : task.getParameters().entrySet()) {
-                if (isPlaintextSecret(parameter.getKey(), parameter.getValue())) {
-                    parameter.setValue(REDACTED);
-                }
-            }
-        }
-        return copy;
+        return ConfigSecretRedactor.redact(stored, LlmConfiguration.class, NOT_CONFIGURATION);
     }
 
     @Override
@@ -155,15 +136,6 @@ public class RestLlmStore implements IRestLlmStore {
     }
 
     /**
-     * Task parameter names that carry a provider credential, compared
-     * case-insensitively. Beyond the generic names: {@code accessToken} is the
-     * Hugging Face key and {@code nonAzureApiKey} the OpenAI key the Azure OpenAI
-     * builder accepts.
-     */
-    static final Set<String> SECRET_PARAMETER_NAMES = Set.of("apikey", "nonazureapikey", "accesstoken", "authtoken", "secretkey",
-            "secretaccesskey", "privatekey", "password", "clientsecret", "token");
-
-    /**
      * Warns — rather than rejects — when an LLM task stores a credential in
      * plaintext. Same reasoning as {@code RestChannelIntegrationStore}: a plaintext
      * key is returned verbatim by {@code GET /llmstore/llms/{id}} and lands in
@@ -174,51 +146,23 @@ public class RestLlmStore implements IRestLlmStore {
     private static void warnOnPlaintextSecrets(LlmConfiguration config) {
         List<String> plaintext = plaintextSecretParameters(config);
         if (!plaintext.isEmpty()) {
-            LOGGER.warnf("LLM configuration stores %s in plaintext — it is returned verbatim by GET /llmstore/llms/{id} and "
-                    + "included in exports. Store the key in the secrets vault and reference it as ${vault:<key>} instead.",
+            LOGGER.warnf("LLM configuration stores %s in plaintext — GET /llmstore/llms/{id} returns it to administrators "
+                    + "(redacted for everyone else) and it is scrubbed from exports. Store the key in the secrets vault and "
+                    + "reference it as ${vault:<key>} instead.",
                     String.join(", ", plaintext));
         }
     }
 
     /**
-     * The credential parameters of {@code config} whose value is a literal rather
-     * than a reference ({@code ${vault:…}}, {@code ${vars:…}},
-     * {@code ${connection:…}}) or a template ({@code {properties.x}}).
+     * Where {@code config} stores a credential as a literal rather than a reference
+     * ({@code ${vault:…}}, {@code ${vars:…}}, {@code ${connection:…}}) or a
+     * template ({@code {properties.x}}), as paths such as
+     * {@code tasks[0].parameters.apiKey}. The same rules the read redaction
+     * applies, so what is warned about on write is exactly what an editor cannot
+     * read back.
      */
     static List<String> plaintextSecretParameters(LlmConfiguration config) {
-        List<String> found = new ArrayList<>();
-        if (config == null || config.tasks() == null) {
-            return found;
-        }
-        for (int i = 0; i < config.tasks().size(); i++) {
-            var task = config.tasks().get(i);
-            if (task == null || task.getParameters() == null) {
-                continue;
-            }
-            for (var parameter : task.getParameters().entrySet()) {
-                if (isPlaintextSecret(parameter.getKey(), parameter.getValue())) {
-                    found.add("tasks[" + i + "].parameters." + parameter.getKey());
-                }
-            }
-        }
-        return found;
-    }
-
-    /**
-     * A reference ({@code ${vault:…}}, {@code ${vars:…}}, {@code ${connection:…}},
-     * …) or a Qute template ({@code {properties.key}}). Anchored to those shapes
-     * rather than to a brace: a literal such as {@code hunter{two} is a credential
-     * with a brace in it, not a template.
-     */
-    private static final Pattern REFERENCE_OR_TEMPLATE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}|\\{[A-Za-z_][^{}]*}");
-
-    /**
-     * Whether one parameter is a credential by name holding a literal rather than a
-     * reference or template.
-     */
-    private static boolean isPlaintextSecret(String name, String value) {
-        return name != null && SECRET_PARAMETER_NAMES.contains(name.toLowerCase(Locale.ROOT)) && value != null && !value.isBlank()
-                && !REFERENCE_OR_TEMPLATE.matcher(value).find();
+        return ConfigSecretRedactor.plaintextSecretPaths(config, NOT_CONFIGURATION);
     }
 
     @Override

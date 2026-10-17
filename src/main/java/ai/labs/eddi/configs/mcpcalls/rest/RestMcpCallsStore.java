@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.mcpcalls.rest;
 
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -48,6 +49,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final McpToolProviderManager mcpToolProviderManager;
     private final RestVersionInfo<McpCallsConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     // Field-injected, like the other optional collaborators, so the direct
     // constructions in tests keep compiling.
@@ -69,6 +71,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         this.mcpCallsStore = mcpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.mcpToolProviderManager = mcpToolProviderManager;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -87,7 +90,14 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Override
     public McpCallsConfiguration readMcpCalls(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        McpCallsConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, McpCallsConfiguration.class);
     }
 
     @Override
