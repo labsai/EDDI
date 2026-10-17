@@ -224,6 +224,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
+        conversationService.refuseIfAtCapacity(conversationId);
         validateConversationOwnership(conversationId);
 
         // language is optional, as it is on say(). Requiring it here 400'd every
@@ -252,6 +253,9 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
+        // Before the ownership check: under overload a turn that is going to be
+        // refused should not first spend database reads on its descriptor.
+        conversationService.refuseIfAtCapacity(conversationId);
         validateConversationOwnership(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,

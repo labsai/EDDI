@@ -1419,11 +1419,32 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, limit);
         } catch (TurnCapacityExceededException e) {
-            meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
-            LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
-                    sanitize(conversationId), limit);
+            countRefusal(conversationId, limit);
             throw e;
         }
+    }
+
+    /**
+     * Refuses a turn before anything is read for it when the node is already at
+     * {@code eddi.conversation.max-in-flight-turns}. {@link #admitTurn} stays the
+     * authoritative check (this one is not atomic); this exists so that, at the
+     * limit, a turn that will be refused does not first spend the database round
+     * trips of checking ownership and loading its conversation.
+     */
+    @Override
+    public void refuseIfAtCapacity(String conversationId) {
+        int limit = inFlightTurnLimit();
+        if (limit > 0 && inFlightTurnPermits.get() >= limit) {
+            countRefusal(conversationId, limit);
+            throw new TurnCapacityExceededException("This node is already running " + limit
+                    + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+        }
+    }
+
+    private void countRefusal(String conversationId, int limit) {
+        meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
+        LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
+                sanitize(conversationId), limit);
     }
 
     /**
