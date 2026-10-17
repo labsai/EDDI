@@ -168,8 +168,17 @@ def load_state():
         return {}
 
 
-def save_state(state):
+def ensure_results():
+    """results/ is bind-mounted into the k6 container, which runs as a non-root user (12345). On a
+    Linux host that user cannot write into a directory the caller created with mode 0755; Docker
+    Desktop hides this. World-writable it is: the directory only ever holds load-test output."""
     os.makedirs(RESULTS, exist_ok=True)
+    if os.name == "posix":
+        os.chmod(RESULTS, 0o777)  # nosec B103 - scratch output directory shared with a container user
+
+
+def save_state(state):
+    ensure_results()
     with open(STATE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
@@ -249,7 +258,7 @@ def bring_up(nodes):
 
 def write_cluster_files(nodes):
     """nginx config for N nodes, and nodes 2..N as copies of the fully merged `eddi` service."""
-    os.makedirs(RESULTS, exist_ok=True)
+    ensure_results()
     servers = "\n".join(f"        server {'eddi' if i == 1 else f'eddi-{i}'}:7070 resolve max_fails=0;" for i in range(1, nodes + 1))
     with open(NGINX_CONF, "w", encoding="utf-8", newline="\n") as f:
         f.write(f"""# Written by loadtest.py up --nodes {nodes}: round robin over the nodes, no affinity (after
@@ -596,7 +605,7 @@ def cmd_run(args, label=None, name=None, kind="turns"):
     set_mock_delay(args.delay_ms)
     retry = getattr(args, "retry_503", 0)
     name = name or f"{label}-{args.scenario}{topology_suffix(state)}{f'-retry{retry}' if retry else ''}-{args.vus}vu-{args.delay_ms}ms"
-    os.makedirs(RESULTS, exist_ok=True)
+    ensure_results()
     if getattr(args, "warmup_turns", 0):
         # Not recorded: JIT, connection pools and configuration caches warm up here.
         k6(args, "turns.js", turns_k6_env(agent, args, args.warmup_turns), f"{name}.warmup.k6.json")
