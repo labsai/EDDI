@@ -153,6 +153,34 @@ describe("useActivateOperator — retiring the superseded operator", () => {
   });
 
   /**
+   * The operator page passes `retirePredecessor: false` when the registered
+   * agent failed the trust checks: `platform.operator` is editor-writable, so the
+   * id may name an agent nobody provisioned as an operator, and retiring it here
+   * would permanently delete that agent on the editor's say-so. Left alone, and
+   * reported — the admin decides on the Agents screen.
+   */
+  it("leaves the predecessor untouched when told not to retire it, and says so", async () => {
+    const spy = freshSpy();
+    serveReconfigure(spy);
+
+    const { result } = renderHook(() => useActivateOperator(), { wrapper });
+    result.current.mutate({
+      agentName: "EDDI Platform Operator",
+      config: existingOperator(),
+      apiKey: "sk-test",
+      retirePredecessor: false,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(spy.undeploys.map((entry) => entry.agentId)).not.toContain(OLD_AGENT);
+    expect(spy.deletes).not.toContain(OLD_AGENT);
+    expect(result.current.data?.config.agentId).toBe(NEW_AGENT);
+    const warning = result.current.data?.supersededWarning ?? "";
+    expect(warning).toContain(OLD_AGENT);
+    expect(warning).toContain("could not be verified");
+  });
+
+  /**
    * THE regression test for defect 2's silence. A failed retirement must reach the
    * caller — two deployed operators with nothing said about it is the state that
    * wasted a debugging session.

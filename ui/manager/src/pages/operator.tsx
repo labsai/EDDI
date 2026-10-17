@@ -24,6 +24,7 @@ import {
   useReactivateOperator,
   useDeactivateOperator,
   useResetOperator,
+  useUnregisterOperator,
   useOperatorCanary,
   useVerifyOperatorGate,
   useOperatorTrust,
@@ -99,6 +100,7 @@ export function OperatorPage() {
   const reactivate = useReactivateOperator();
   const deactivate = useDeactivateOperator();
   const reset = useResetOperator();
+  const unregister = useUnregisterOperator();
   const canary = useOperatorCanary();
 
   const queryClient = useQueryClient();
@@ -107,7 +109,9 @@ export function OperatorPage() {
   // `platform.operator` is editor-writable: chat, history and the conversation
   // restore stay off until the agent it names carries the operator marker and a
   // verified approval gate (see operator-trust.ts). Shares the gate query above.
-  const trust = useOperatorTrust(config);
+  // Checked for a paused operator too: the paused view can redeploy, replace or
+  // delete the agent, and none of that may happen to one that is not verified.
+  const trust = useOperatorTrust(config, true, { includePaused: true });
   const trusted = trust.state === "trusted";
   const chat = useOperatorChat(config);
   const upgrade = useOperatorUpgradeAssessment(config);
@@ -251,6 +255,10 @@ export function OperatorPage() {
           baseUrl,
           onStage: setStage,
           reuseAgent: keptAgent,
+          // An agent the trust checks did not pass is left exactly as it is: it
+          // may not be an operator at all, and the replacement must not become
+          // the way to delete it. The outcome's supersededWarning says so.
+          retirePredecessor: trusted,
         },
         {
           onSuccess: (outcome) => {
@@ -411,17 +419,33 @@ export function OperatorPage() {
 
   const handleReset = useCallback(() => {
     if (!config) return;
+    const cleared = () => {
+      chat.reset();
+      setCanaryWarning(null);
+      setShowActivation(false);
+    };
+    if (!trusted) {
+      // Not verified as an operator this Manager set up: drop the registration
+      // and leave the agent alone. Deleting it here would destroy whatever
+      // agent an editor pointed `platform.operator` at, on their say-so.
+      unregister.mutate(undefined, {
+        onSuccess: () => {
+          cleared();
+          toast.success(t("operator.toast.unregistered", "Platform Operator unregistered"));
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      });
+      return;
+    }
     reset.mutate(config, {
       onSuccess: () => {
-        chat.reset();
-        setCanaryWarning(null);
-        setShowActivation(false);
+        cleared();
         toast.success(t("operator.toast.reset", "Platform Operator deleted"));
       },
       onError: (err) => toast.error(getErrorMessage(err)),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, reset, chat.reset, t]);
+  }, [config, trusted, reset, unregister, chat.reset, t]);
 
   if (isLoading) {
     return (
@@ -483,34 +507,56 @@ export function OperatorPage() {
         <PauseCircle className="mx-auto h-10 w-10 text-muted-foreground/60" />
         <p className="text-lg font-medium">{t("operator.paused.title", "The Platform Operator is paused")}</p>
         <p className="text-sm text-muted-foreground">{t("operator.paused.description", "It is still configured — turning it back on redeploys the same agent. Nothing has been deleted.")}</p>
+        {/* A paused agent that fails the checks is not redeployed from here —
+            that would put an unverified agent live on an editor's say-so — and
+            Delete becomes Unregister, which drops the config and leaves it be. */}
+        {trust.state === "untrusted" && (
+          <OperatorUntrusted trust={trust} agentId={config!.agentId!} onRecheck={trust.recheck} compact />
+        )}
         <div className="flex justify-center gap-2 pt-2">
-          <Button
-            onClick={handleReactivate}
-            disabled={reactivate.isPending}
-            data-testid="operator-reactivate"
-          >
-            {reactivate.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
-            {t("operator.paused.action", "Turn back on")}
-          </Button>
+          {trust.state !== "untrusted" && (
+            <Button
+              onClick={handleReactivate}
+              disabled={reactivate.isPending || !trusted}
+              data-testid="operator-reactivate"
+            >
+              {reactivate.isPending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+              {t("operator.paused.action", "Turn back on")}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setShowActivation(true)}>
             {t("operator.status.reconfigure", "Reconfigure")}
           </Button>
           <Button
             variant="ghost"
             onClick={() => setConfirmPausedReset(true)}
-            disabled={reset.isPending}
-            data-testid="operator-reset"
+            disabled={reset.isPending || unregister.isPending}
+            data-testid={trusted ? "operator-reset" : "operator-unregister"}
           >
-            {t("operator.status.reset", "Delete operator")}
+            {trusted
+              ? t("operator.status.reset", "Delete operator")
+              : t("operator.status.unregister", "Unregister operator")}
           </Button>
         </div>
 
         <AlertDialog
           open={confirmPausedReset}
           onOpenChange={setConfirmPausedReset}
-          title={t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")}
-          description={t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")}
-          confirmLabel={t("operator.status.reset", "Delete operator")}
+          title={
+            trusted
+              ? t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")
+              : t("operator.status.unregisterConfirmTitle", "Unregister the Platform Operator?")
+          }
+          description={
+            trusted
+              ? t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")
+              : t("operator.status.unregisterConfirmBody", "Only the saved operator configuration is removed. The registered agent could not be verified as one this Manager set up, so it is not deployed, undeployed or deleted — review it on the Agents screen.")
+          }
+          confirmLabel={
+            trusted
+              ? t("operator.status.reset", "Delete operator")
+              : t("operator.status.unregister", "Unregister operator")
+          }
           cancelLabel={t("common.cancel", "Cancel")}
           variant="destructive"
           onConfirm={() => {
@@ -554,7 +600,10 @@ export function OperatorPage() {
       <RegisteredOperatorHealth config={config!} status={status.data} />
       <UnregisteredOperators config={config} registeredHealthy={registeredHealthy} />
 
-      {upgrade?.needed && (
+      {/* No upgrade of an unverified agent: the upgrade is a replacement that
+          would carry its stored instructions over and retire it. Reconfigure in
+          the status panel is the way forward, and it leaves the agent in place. */}
+      {trusted && upgrade?.needed && (
         <OperatorUpgradeNotice
           assessment={upgrade}
           onUpgrade={handleUpgrade}
@@ -766,7 +815,8 @@ export function OperatorPage() {
           onReset={handleReset}
           onRecheck={handleRecheck}
           recheckPending={canary.isPending}
-          busy={deactivate.isPending || reset.isPending}
+          busy={deactivate.isPending || reset.isPending || unregister.isPending}
+          verified={trusted}
         />
       </div>
     </div>

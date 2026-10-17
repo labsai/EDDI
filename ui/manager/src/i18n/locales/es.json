@@ -5109,7 +5109,11 @@
       "gateUnverifiedHelp": "No se pudo verificar la puerta de aprobación en el documento de este agente.",
       "agentId": "Agente",
       "platformBaseUrl": "Llama a la plataforma en",
-      "platformBaseUrlUnknown": "no registrada"
+      "platformBaseUrlUnknown": "no registrada",
+      "unregister": "Anular registro del operador",
+      "unregisterConfirmTitle": "¿Anular el registro del operador de plataforma?",
+      "unregisterConfirmBody": "Solo se elimina la configuración guardada del operador. No se pudo verificar que el agente registrado sea un operador configurado por este Manager, así que no se despliega, retira ni elimina: revísalo en la pantalla Agentes.",
+      "unverifiedActions": "No se pudo verificar que este agente sea un operador configurado por el Manager, así que esta pantalla no lo sondeará, retirará ni eliminará. «Reconfigurar» aprovisiona un operador nuevo y deja este agente intacto."
     },
     "chat": {
       "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
@@ -5199,7 +5203,8 @@
       "activatedChecking": "Operador de plataforma activado. Las comprobaciones de conexión se ejecutan en segundo plano.",
       "writeProbeVerified": "Acceso de escritura verificado — una escritura real protegida se pausó para aprobación.",
       "writeProbeFailed": "La puerta de aprobación no resistió — el operador fue eliminado.",
-      "writeProbeInconclusive": "La prueba de escritura en vivo no fue concluyente."
+      "writeProbeInconclusive": "La prueba de escritura en vivo no fue concluyente.",
+      "unregistered": "Registro del operador de plataforma anulado"
     },
     "canary": {
       "genericFailure": "La comprobación de conexión no se completó correctamente.",

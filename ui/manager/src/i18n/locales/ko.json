@@ -5055,7 +5055,11 @@
       "gateUnverifiedHelp": "이 에이전트 문서에서 승인 게이트를 확인할 수 없습니다.",
       "agentId": "에이전트",
       "platformBaseUrl": "플랫폼 호출 주소",
-      "platformBaseUrlUnknown": "기록되지 않음"
+      "platformBaseUrlUnknown": "기록되지 않음",
+      "unregister": "오퍼레이터 등록 해제",
+      "unregisterConfirmTitle": "플랫폼 오퍼레이터의 등록을 해제할까요?",
+      "unregisterConfirmBody": "저장된 오퍼레이터 설정만 제거됩니다. 등록된 에이전트가 이 Manager가 설정한 오퍼레이터인지 확인할 수 없어 배포, 배포 해제, 삭제는 하지 않습니다. 에이전트 화면에서 확인하세요.",
+      "unverifiedActions": "이 에이전트가 Manager가 설정한 오퍼레이터인지 확인할 수 없어 이 화면에서는 연결 확인, 배포 해제, 삭제를 하지 않습니다. '다시 설정'은 새 오퍼레이터를 만들고 이 에이전트는 그대로 둡니다."
     },
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
@@ -5145,7 +5149,8 @@
       "activatedChecking": "플랫폼 오퍼레이터 활성화됨. 연결 확인이 백그라운드에서 실행 중입니다.",
       "writeProbeVerified": "쓰기 액세스 검증됨 — 실제 게이트 적용 쓰기가 승인을 위해 일시 중지되었습니다.",
       "writeProbeFailed": "승인 게이트가 작동하지 않았습니다 — 오퍼레이터가 제거되었습니다.",
-      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다."
+      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다.",
+      "unregistered": "플랫폼 오퍼레이터 등록을 해제했습니다"
     },
     "canary": {
       "genericFailure": "연결 확인에 실패했습니다.",

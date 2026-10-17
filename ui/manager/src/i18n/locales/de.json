@@ -5055,7 +5055,11 @@
       "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden.",
       "agentId": "Agent",
       "platformBaseUrl": "Ruft Plattform auf unter",
-      "platformBaseUrlUnknown": "nicht erfasst"
+      "platformBaseUrlUnknown": "nicht erfasst",
+      "unregister": "Operator abmelden",
+      "unregisterConfirmTitle": "Plattform-Operator abmelden?",
+      "unregisterConfirmBody": "Nur die gespeicherte Operator-Konfiguration wird entfernt. Der registrierte Agent konnte nicht als ein von diesem Manager eingerichteter Operator verifiziert werden, daher wird er weder bereitgestellt noch zurückgezogen oder gelöscht – prüfen Sie ihn auf der Agenten-Seite.",
+      "unverifiedActions": "Dieser Agent konnte nicht als ein vom Manager eingerichteter Operator verifiziert werden. Diese Seite prüft, zieht zurück oder löscht ihn daher nicht. „Neu konfigurieren“ richtet einen neuen Operator ein und lässt diesen Agenten unverändert."
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
@@ -5145,7 +5149,8 @@
       "activatedChecking": "Platform Operator aktiviert. Verbindungsprüfungen laufen im Hintergrund.",
       "writeProbeVerified": "Schreibzugriff verifiziert — ein echter, geschützter Schreibvorgang wurde zur Freigabe angehalten.",
       "writeProbeFailed": "Das Freigabe-Gate hat nicht gehalten — der Operator wurde entfernt.",
-      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos."
+      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos.",
+      "unregistered": "Plattform-Operator abgemeldet"
     },
     "canary": {
       "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",

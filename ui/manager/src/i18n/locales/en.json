@@ -5055,7 +5055,11 @@
       "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
       "agentId": "Agent",
       "platformBaseUrl": "Calls platform at",
-      "platformBaseUrlUnknown": "not recorded"
+      "platformBaseUrlUnknown": "not recorded",
+      "unregister": "Unregister operator",
+      "unregisterConfirmTitle": "Unregister the Platform Operator?",
+      "unregisterConfirmBody": "Only the saved operator configuration is removed. The registered agent could not be verified as one this Manager set up, so it is not deployed, undeployed or deleted — review it on the Agents screen.",
+      "unverifiedActions": "This agent could not be verified as an operator the Manager set up, so this screen will not probe, undeploy or delete it. Reconfigure provisions a new operator and leaves this agent in place."
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -5145,7 +5149,8 @@
       "activatedChecking": "Platform Operator activated. Connection checks are running in the background.",
       "writeProbeVerified": "Write access verified — a real gated write paused for approval.",
       "writeProbeFailed": "The approval gate did not hold — the operator was removed.",
-      "writeProbeInconclusive": "The live write probe was inconclusive."
+      "writeProbeInconclusive": "The live write probe was inconclusive.",
+      "unregistered": "Platform Operator unregistered"
     },
     "canary": {
       "genericFailure": "The connection check did not succeed.",

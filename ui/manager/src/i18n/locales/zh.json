@@ -5055,7 +5055,11 @@
       "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。",
       "agentId": "智能体",
       "platformBaseUrl": "调用平台地址",
-      "platformBaseUrlUnknown": "未记录"
+      "platformBaseUrlUnknown": "未记录",
+      "unregister": "取消注册操作员",
+      "unregisterConfirmTitle": "取消注册平台操作员？",
+      "unregisterConfirmBody": "仅移除已保存的操作员配置。无法验证已注册的智能体是由此管理器设置的操作员，因此不会部署、取消部署或删除它——请在“智能体”页面查看。",
+      "unverifiedActions": "无法验证此智能体是由管理器设置的操作员，因此本页面不会探测、取消部署或删除它。“重新配置”会创建一个新的操作员，并保留此智能体不动。"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
@@ -5145,7 +5149,8 @@
       "activatedChecking": "平台操作员已激活。连接检查正在后台运行。",
       "writeProbeVerified": "写入权限已验证 — 一次受审批门保护的真实写入已暂停等待审批。",
       "writeProbeFailed": "审批门未能拦截 — 操作员已被移除。",
-      "writeProbeInconclusive": "实时写入探测未得出结论。"
+      "writeProbeInconclusive": "实时写入探测未得出结论。",
+      "unregistered": "平台操作员已取消注册"
     },
     "canary": {
       "genericFailure": "连接检查未通过。",

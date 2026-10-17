@@ -12,6 +12,7 @@ import {
   readOperatorStatus,
   deactivateOperator,
   resetOperator,
+  clearOperatorConfig,
   retireOperatorAgent,
   provisionOperator,
   resolveAgentVersion,
@@ -70,7 +71,7 @@ export const operatorKeys = {
   status: (agentId: string, version: number) =>
     ["operator", "status", agentId, version] as const,
   gate: (agentId: string) => ["operator", "gate", agentId] as const,
-  marker: (agentId: string, version: number) => ["operator", "marker", agentId, version] as const,
+  marker: (agentId: string) => ["operator", "marker", agentId] as const,
   selfUrl: ["operator", "self-url"] as const,
   unregistered: (registeredAgentId: string | null) => ["operator", "unregistered", registeredAgentId] as const,
   presence: (agentId: string) => ["operator", "presence", agentId] as const,
@@ -200,6 +201,16 @@ export interface ActivateParams {
    * provisioned from the same settings, so a retry never creates a second one.
    */
   reuseAgent?: KeptOperatorAgent | null;
+  /**
+   * Whether the agent this activation replaces may be retired — undeployed and
+   * permanently deleted — once the replacement has passed every check. `true`
+   * unless the caller says otherwise. The operator page passes `false` when the
+   * registered agent did not pass the trust checks (`useOperatorTrust`):
+   * `platform.operator` is editor-writable, so the id in it may name an agent
+   * nobody provisioned as an operator, and the Manager then leaves it exactly as
+   * it found it and says so in `supersededWarning` rather than destroying it.
+   */
+  retirePredecessor?: boolean;
 }
 
 /** An operator agent a failed activation kept on purpose, for the retry to reuse. */
@@ -312,7 +323,7 @@ export function useActivateOperator() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: ActivateParams) => {
-      const { agentName, config, apiKey, baseUrl, onStage } = params;
+      const { agentName, config, apiKey, baseUrl, onStage, retirePredecessor = true } = params;
 
       // Everything up to the reuse decision touches no agent. A failure here is
       // wrapped so the page keeps any agent a previous attempt kept — see
@@ -566,7 +577,18 @@ export function useActivateOperator() {
       // a hypothetical — it happened on a reconfigure that changed only the model,
       // and the ensuing debugging session repaired the abandoned agent.
       let supersededWarning: string | null = null;
-      if (config.agentId && config.agentId !== agentId && config.version == null) {
+      if (config.agentId && config.agentId !== agentId && !retirePredecessor) {
+        // The registered agent failed the trust checks, so it may not be an
+        // operator at all — an editor can point `platform.operator` at any agent.
+        // Retiring it here would permanently delete that agent and its resources
+        // on the editor's say-so. Leave it, and say so: the admin decides on the
+        // Agents screen, where the agent is shown for what it is.
+        supersededWarning =
+          `The new operator agent (${agentId}) is live. The agent registered before it (${config.agentId}) ` +
+          "could not be verified as an operator this Manager set up, so it was left exactly as it was — " +
+          "it may still be deployed and answering. Review it on the Agents screen, and note that this screen " +
+          "now talks to the NEW agent.";
+      } else if (config.agentId && config.agentId !== agentId && config.version == null) {
         // A config that recorded the agent but not its version (written before
         // version tracking) cannot be undeployed or deleted — both endpoints need
         // the version. removeSupersededAgent would return silently and leave two
@@ -828,9 +850,19 @@ export function useOperatorCanary() {
  * longer gates offering write scope, which activation itself enforces via the
  * gate read-back and the write canary's rollback.
  */
-export function useVerifyOperatorGate(config: OperatorConfig | null | undefined) {
+export function useVerifyOperatorGate(
+  config: OperatorConfig | null | undefined,
+  options: {
+    /**
+     * Check a paused operator too (`enabled: false`). The operator page needs the
+     * verdict for its paused view, because the buttons there redeploy, retire or
+     * delete the agent and must not act on one the checks would refuse.
+     */
+    evenIfDisabled?: boolean;
+  } = {},
+) {
   const agentId = config?.agentId ?? "";
-  const ready = Boolean(config?.enabled && agentId);
+  const ready = Boolean(agentId && (config?.enabled || options.evenIfDisabled));
   return useQuery({
     queryKey: operatorKeys.gate(agentId),
     queryFn: async () => {
@@ -862,18 +894,34 @@ export function useVerifyOperatorGate(config: OperatorConfig | null | undefined)
  * until the admin actually opens it, instead of re-reading every version of the
  * agent document on each page load. The gate query is the one the operator page
  * already runs, so the two share a cache entry rather than asking twice.
+ *
+ * `includePaused` runs the checks for a paused operator as well (chat is off
+ * there anyway). The operator page needs that, because its paused view offers
+ * to redeploy, replace or delete the registered agent, and none of those may
+ * act on an agent the checks would refuse.
  */
-export function useOperatorTrust(config: OperatorConfig | null | undefined, enabled = true): OperatorTrust & {
+export function useOperatorTrust(
+  config: OperatorConfig | null | undefined,
+  enabled = true,
+  options: { includePaused?: boolean } = {},
+): OperatorTrust & {
   /** Run both checks again, e.g. after a transient failure. */
   recheck: () => void;
 } {
   const agentId = config?.agentId ?? "";
-  const live = Boolean(enabled && config?.enabled && agentId);
-  const gate = useVerifyOperatorGate(live ? config : null);
+  const live = Boolean(enabled && agentId && (config?.enabled || options.includePaused));
+  const gate = useVerifyOperatorGate(live ? config : null, { evenIfDisabled: options.includePaused });
   const marker = useQuery({
-    queryKey: operatorKeys.marker(agentId, config?.version ?? 0),
+    queryKey: operatorKeys.marker(agentId),
     queryFn: async () => {
-      const version = config?.version ?? (await getAgentCurrentVersion(agentId));
+      // At the version the store reports, never at `config.version`: that number
+      // lives in the same editor-writable variable as the agent id, so whoever
+      // wrote the id also chose which version's descriptor would be inspected.
+      // The current version is the one a new conversation is served by, and the
+      // backend carries the descriptor forward on every edit of the agent
+      // (DocumentDescriptorFilter), so the marker stamped at activation is on it.
+      const version = await getAgentCurrentVersion(agentId);
+      if (version == null) throw new Error("the agent has no current version");
       const descriptor = await getDescriptor(agentId, version);
       return hasOperatorMarker(descriptor.description);
     },
@@ -982,6 +1030,25 @@ export function useResetOperator() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (config: OperatorConfig) => resetOperator(config),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: operatorKeys.all });
+    },
+  });
+}
+
+/**
+ * Drop the operator config and nothing else.
+ *
+ * For an agent the trust checks did not pass (`useOperatorTrust`). The id in
+ * `platform.operator` may then name an agent nobody provisioned as an operator,
+ * and undeploying or deleting it from here would act on somebody else's agent
+ * on an editor's say-so. The agent is left exactly as it is; the Agents screen
+ * is where to look at it.
+ */
+export function useUnregisterOperator() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => clearOperatorConfig(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: operatorKeys.all });
     },

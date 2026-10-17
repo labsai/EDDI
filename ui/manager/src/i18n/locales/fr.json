@@ -5109,7 +5109,11 @@
       "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent.",
       "agentId": "Agent",
       "platformBaseUrl": "Appelle la plateforme à",
-      "platformBaseUrlUnknown": "non enregistrée"
+      "platformBaseUrlUnknown": "non enregistrée",
+      "unregister": "Désinscrire l'opérateur",
+      "unregisterConfirmTitle": "Désinscrire l'opérateur de plateforme ?",
+      "unregisterConfirmBody": "Seule la configuration enregistrée de l'opérateur est supprimée. L'agent enregistré n'a pas pu être vérifié comme un opérateur mis en place par ce Manager : il n'est donc ni déployé, ni retiré, ni supprimé — vérifiez-le sur l'écran Agents.",
+      "unverifiedActions": "Cet agent n'a pas pu être vérifié comme un opérateur mis en place par le Manager ; cet écran ne le sondera, ne le retirera ni ne le supprimera donc pas. « Reconfigurer » provisionne un nouvel opérateur et laisse cet agent en place."
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
@@ -5199,7 +5203,8 @@
       "activatedChecking": "Opérateur de plateforme activé. Les vérifications de connexion s'exécutent en arrière-plan.",
       "writeProbeVerified": "Accès en écriture vérifié — une écriture réelle protégée a été mise en pause pour approbation.",
       "writeProbeFailed": "La barrière d'approbation n'a pas tenu — l'opérateur a été supprimé.",
-      "writeProbeInconclusive": "Le test d'écriture en direct n'a pas été concluant."
+      "writeProbeInconclusive": "Le test d'écriture en direct n'a pas été concluant.",
+      "unregistered": "Opérateur de plateforme désinscrit"
     },
     "canary": {
       "genericFailure": "La vérification de connexion a échoué.",

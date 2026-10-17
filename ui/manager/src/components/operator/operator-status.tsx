@@ -35,6 +35,15 @@ interface OperatorStatusPanelProps {
   onRecheck: () => void;
   recheckPending?: boolean;
   busy?: boolean;
+  /**
+   * Whether the registered agent passed the trust checks (`useOperatorTrust`).
+   * When it did not, this panel will not probe, undeploy or delete it:
+   * `platform.operator` is editor-writable, so the id may name an agent nobody
+   * provisioned as an operator, and acting on it from here would do so on an
+   * editor's say-so. Reconfigure stays (it provisions a new agent and leaves this
+   * one in place) and Delete becomes Unregister, which drops the config only.
+   */
+  verified: boolean;
 }
 
 export function OperatorStatusPanel({
@@ -49,6 +58,7 @@ export function OperatorStatusPanel({
   onRecheck,
   recheckPending = false,
   busy = false,
+  verified,
 }: OperatorStatusPanelProps) {
   const { t } = useTranslation();
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
@@ -148,20 +158,38 @@ export function OperatorStatusPanel({
         )}
 
         <div className="space-y-2 pt-2">
-          <Button
-            variant="outline"
-            className="w-full gap-2"
-            onClick={onRecheck}
-            disabled={busy || recheckPending}
-            data-testid="operator-connection-check"
-          >
-            {recheckPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PlugZap className="h-4 w-4" />
-            )}
-            {t("operator.status.connectionCheck", "Check connection")}
-          </Button>
+          {!verified && (
+            <p
+              className="flex items-start gap-2 text-xs text-muted-foreground"
+              data-testid="operator-unverified-actions"
+            >
+              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />
+              <span>
+                {t(
+                  "operator.status.unverifiedActions",
+                  "This agent could not be verified as an operator the Manager set up, so this screen will not probe, undeploy or delete it. Reconfigure provisions a new operator and leaves this agent in place.",
+                )}
+              </span>
+            </p>
+          )}
+          {/* The connection check starts a conversation with the agent — the one
+              thing the trust checks exist to withhold from an unverified one. */}
+          {verified && (
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={onRecheck}
+              disabled={busy || recheckPending}
+              data-testid="operator-connection-check"
+            >
+              {recheckPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PlugZap className="h-4 w-4" />
+              )}
+              {t("operator.status.connectionCheck", "Check connection")}
+            </Button>
+          )}
           <Button
             variant="outline"
             className="w-full gap-2"
@@ -171,25 +199,29 @@ export function OperatorStatusPanel({
             <RefreshCw className="h-4 w-4" />
             {t("operator.status.reconfigure", "Reconfigure")}
           </Button>
-          <Button
-            variant="destructive"
-            className="w-full gap-2"
-            onClick={() => setConfirmDeactivate(true)}
-            disabled={busy}
-            data-testid="operator-kill-switch"
-          >
-            <Power className="h-4 w-4" />
-            {t("operator.status.deactivate", "Deactivate")}
-          </Button>
+          {verified && (
+            <Button
+              variant="destructive"
+              className="w-full gap-2"
+              onClick={() => setConfirmDeactivate(true)}
+              disabled={busy}
+              data-testid="operator-kill-switch"
+            >
+              <Power className="h-4 w-4" />
+              {t("operator.status.deactivate", "Deactivate")}
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="w-full gap-2 text-muted-foreground"
             onClick={() => setConfirmReset(true)}
             disabled={busy}
-            data-testid="operator-reset"
+            data-testid={verified ? "operator-reset" : "operator-unregister"}
           >
             <Trash2 className="h-4 w-4" />
-            {t("operator.status.reset", "Delete operator")}
+            {verified
+              ? t("operator.status.reset", "Delete operator")
+              : t("operator.status.unregister", "Unregister operator")}
           </Button>
         </div>
       </CardContent>
@@ -210,9 +242,21 @@ export function OperatorStatusPanel({
       <AlertDialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
-        title={t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")}
-        description={t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")}
-        confirmLabel={t("operator.status.reset", "Delete operator")}
+        title={
+          verified
+            ? t("operator.status.resetConfirmTitle", "Delete the Platform Operator?")
+            : t("operator.status.unregisterConfirmTitle", "Unregister the Platform Operator?")
+        }
+        description={
+          verified
+            ? t("operator.status.resetConfirmBody", "The operator agent and all the resources created for it are permanently deleted, along with its saved configuration. This cannot be undone.")
+            : t("operator.status.unregisterConfirmBody", "Only the saved operator configuration is removed. The registered agent could not be verified as one this Manager set up, so it is not deployed, undeployed or deleted — review it on the Agents screen.")
+        }
+        confirmLabel={
+          verified
+            ? t("operator.status.reset", "Delete operator")
+            : t("operator.status.unregister", "Unregister operator")
+        }
         cancelLabel={t("common.cancel", "Cancel")}
         variant="destructive"
         onConfirm={() => {

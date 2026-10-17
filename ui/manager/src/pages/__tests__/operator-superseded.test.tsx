@@ -23,7 +23,7 @@ import { serveTrustedOperator } from "@/test/operator-trust";
  * own wiring and nothing else.
  */
 
-const outcome = vi.hoisted(() => ({ current: null as unknown }));
+const outcome = vi.hoisted(() => ({ current: null as unknown, params: null as unknown }));
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
@@ -46,9 +46,12 @@ vi.mock("@/hooks/use-operator", async (importOriginal) => {
     useActivateOperator: () => ({
       isPending: false,
       mutate: (
-        _params: unknown,
+        params: unknown,
         options?: { onSuccess?: (result: ActivationOutcome) => void },
-      ) => options?.onSuccess?.(outcome.current as ActivationOutcome),
+      ) => {
+        outcome.params = params;
+        options?.onSuccess?.(outcome.current as ActivationOutcome);
+      },
     }),
   };
 });
@@ -112,6 +115,32 @@ describe("OperatorPage — superseded operator banner", () => {
     const banner = await screen.findByTestId("operator-superseded-warning");
     expect(banner).toHaveTextContent("op-old");
     expect(banner).toHaveTextContent("op-new");
+  });
+
+  /**
+   * Whether the replaced agent is retired is the page's call, made from the trust
+   * checks: a verified operator is retired as always; one that failed them is
+   * left exactly as it is, because the id came from an editor-writable variable
+   * and the replacement must not become the way to delete somebody's agent.
+   */
+  it("asks the activation to retire a verified predecessor", async () => {
+    outcome.current = outcomeWith(null);
+    await reconfigure();
+    await waitFor(() => expect(outcome.params).not.toBeNull());
+    expect((outcome.params as { retirePredecessor?: boolean }).retirePredecessor).toBe(true);
+  });
+
+  it("asks the activation to leave an unverified predecessor in place", async () => {
+    serveTrustedOperator("op-old", { marker: false });
+    outcome.current = outcomeWith(null);
+    renderWithProviders(<OperatorPage />);
+    expect(await screen.findByTestId("operator-untrusted")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /reconfigure/i }));
+    await userEvent.click(await screen.findByTestId("operator-next"));
+    await userEvent.click(await screen.findByTestId("operator-stored-prompt-confirm-checkbox"));
+    await userEvent.click(await screen.findByTestId("operator-activate"));
+    await waitFor(() => expect(outcome.params).not.toBeNull());
+    expect((outcome.params as { retirePredecessor?: boolean }).retirePredecessor).toBe(false);
   });
 
   it("shows no banner when the retirement succeeded", async () => {
