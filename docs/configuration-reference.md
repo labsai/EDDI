@@ -243,6 +243,18 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 
 ---
 
+## Agent testing
+
+Full narrative: [agent-testing.md](agent-testing.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.agent-tests.max-parallel-cases` | `4` | Case repetitions of one run that execute at the same time, each a real conversation in the `test` environment |
+| `eddi.agent-tests.max-concurrent-runs` | `2` | Runs that may execute at once on one node; another start is answered 429 |
+| `eddi.agent-tests.max-runs-per-agent` | `50` | Run records kept per agent; older ones are deleted when a run finishes |
+
+---
+
 ## Security & authentication
 
 > Authentication itself is Quarkus OIDC, not an `eddi.*` property:

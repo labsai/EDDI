@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
@@ -830,6 +831,32 @@ class ConversationServiceTest {
             assertEquals(USER_ID, handler.getUserId());
             assertSame(userMemoryStore, handler.getUserMemoryStore());
             assertNull(handler.getUserMemoryConfig());
+        }
+
+        /**
+         * Without a store, Conversation skips both loadUserProperties at init and
+         * storePropertiesPermanently at turn end — an agent test neither reads nor
+         * writes what real users have stored.
+         */
+        @Test
+        @DisplayName("an agent-test conversation gets no user memory store")
+        void agentTestConversationGetsNoUserMemoryStore() {
+            IPropertiesHandler handler = conversationService
+                    .createPropertiesHandler(AgentTestConversations.userIdFor("0123456789abcdef01234567", 0, 1), null, true);
+
+            assertNull(handler.getUserMemoryStore());
+            assertTrue(handler.isMemoryToolsEnabled(), "the tool surface under test stays the same");
+        }
+
+        @Test
+        @DisplayName("undo of an agent-test turn never touches user memory")
+        void undoOfAgentTestTurnSkipsUserMemory() {
+            var memory = mock(IConversationMemory.class);
+            when(memory.getUserId()).thenReturn(AgentTestConversations.userIdFor("0123456789abcdef01234567", 0, 1));
+
+            conversationService.syncLongTermChanges(memory, mock(IConversationMemory.IConversationStep.class), true);
+
+            verifyNoInteractions(userMemoryStore);
         }
     }
 

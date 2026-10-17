@@ -1,0 +1,165 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.apicalls.impl;
+
+import ai.labs.eddi.configs.agenttests.model.AgentTestSuite;
+import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.MockResponse;
+import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
+import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
+import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
+import ai.labs.eddi.engine.httpclient.IHttpClient;
+import ai.labs.eddi.engine.httpclient.IRequest;
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.secrets.SecretResolver;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Rule-triggered httpcalls in an agent-test conversation: the suite's mock is
+ * the response, nothing is ever sent, and the call's normal post-processing —
+ * saveResponse, postResponse property instructions — runs on the mocked data.
+ */
+@DisplayName("ApiCallExecutor — agent-test mocks")
+class ApiCallExecutorAgentTestMockTest {
+
+    private static final String SERVER = "http://api.example.com";
+    private static final String TEST_USER = AgentTestConversations.userIdFor("0123456789abcdef01234567", 0, 1);
+
+    private IHttpClient httpClient;
+    private IRequest request;
+    private PrePostUtils prePostUtils;
+    private IRuntime runtime;
+    private ApiCallExecutor executor;
+    private IConversationMemory memory;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        httpClient = mock(IHttpClient.class);
+        runtime = mock(IRuntime.class);
+        prePostUtils = mock(PrePostUtils.class);
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+
+        executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), runtime, prePostUtils, globalVariableResolver,
+                secretResolver, callerIdentityResolver, new CallerIdentityContext(null, null), new RequestRedactor(callerIdentityResolver),
+                mock(ConnectionResolver.class), false, 30_000L, 2_000_000);
+
+        memory = mock(IConversationMemory.class);
+        when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));
+        when(memory.getUserId()).thenReturn(TEST_USER);
+
+        request = mock(IRequest.class);
+        when(httpClient.newRequest(any(URI.class), any())).thenReturn(request);
+        when(request.setHttpHeader(any(), any())).thenReturn(request);
+        when(request.toMap()).thenReturn(new HashMap<>());
+
+        when(prePostUtils.executePreRequestPropertyInstructions(any(), any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        when(prePostUtils.templateValues(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @AfterEach
+    void tearDown() {
+        ToolMockRegistry.unregister(TEST_USER);
+    }
+
+    private static void arm(List<ToolMock> mocks) {
+        ToolMockRegistry.register(TEST_USER, new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null, mocks, null)));
+    }
+
+    private static ApiCall call(boolean fireAndForget) {
+        ApiCall call = new ApiCall();
+        call.setName("getAvailability");
+        call.setFireAndForget(fireAndForget);
+        call.setSaveResponse(true);
+        call.setResponseObjectName("availability");
+        Request req = new Request();
+        req.setPath("/rooms");
+        req.setMethod("GET");
+        call.setRequest(req);
+        call.setPostResponse(new HttpPostResponse());
+        return call;
+    }
+
+    @Test
+    @DisplayName("a mocked call sends nothing and its postResponse runs on the mocked response")
+    void mockedCallSendsNothingAndPostResponseRuns() throws Exception {
+        arm(List.of(new ToolMock("getAvailability", null, new MockResponse(200, "3 rooms"))));
+        var templateData = new HashMap<String, Object>();
+
+        Map<String, Object> result = executor.execute(call(false), memory, templateData, SERVER);
+
+        verify(request, never()).send();
+        verify(request, never()).send(any());
+        assertEquals(200, result.get("httpCode"));
+        assertEquals("3 rooms", result.get("body"));
+        assertEquals("3 rooms", templateData.get("availability"), "saveResponse stores the mocked body for templates");
+        verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(200), eq(false));
+    }
+
+    @Test
+    @DisplayName("an unmocked call is answered 501 NOT_EXECUTED and nothing is sent")
+    void unmockedCallIsNotExecuted() throws Exception {
+        arm(List.of());
+
+        Map<String, Object> result = executor.execute(call(false), memory, new HashMap<>(), SERVER);
+
+        verify(request, never()).send();
+        verify(request, never()).send(any());
+        assertEquals(ToolMockRegistry.NOT_EXECUTED_HTTP_CODE, result.get("httpCode"));
+        assertTrue(String.valueOf(result.get("body")).contains("NOT_EXECUTED"), String.valueOf(result.get("body")));
+    }
+
+    @Test
+    @DisplayName("an orphaned test conversation (no session) still sends nothing")
+    void orphanedTestConversationSendsNothing() throws Exception {
+        executor.execute(call(false), memory, new HashMap<>(), SERVER);
+
+        verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("a fire-and-forget call of a test conversation is not dispatched")
+    void fireAndForgetIsNotSent() throws Exception {
+        arm(List.of());
+
+        executor.execute(call(true), memory, new HashMap<>(), SERVER);
+
+        verify(httpClient, never()).newRequest(any(URI.class), any());
+        verify(request, never()).send(any());
+        verify(runtime, never()).submitCallable(any(), any());
+    }
+}
