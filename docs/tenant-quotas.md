@@ -45,7 +45,10 @@ start of the month.
 A turn that crosses the limit is never failed over it, and neither is a turn whose cost could not
 be recorded because the quota store was down — the spend already happened. Its cost is not lost:
 the turn's step records it as `audit:pending_cost`, and the conversation's next settle charges it
-together with its own cost (the pending amount carries forward until a charge succeeds). A store
+together with its own cost (the pending amount carries forward until a charge succeeds). It is
+charged to the month that settle runs in: a charge lost to an outage across a month boundary lands
+in the new month, because the closed month's counter has already been reset and there is no
+window left to add it to. A store
 outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts

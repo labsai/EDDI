@@ -1715,13 +1715,24 @@ tools priced at $0.00 until the canonical-slug fix — has passed; a deployment
 that upgrades with ceilings on built-in-only agents will see them bind for the
 first time.
 
+The check runs *before* each call and uses `<=`, so the call that crosses the
+ceiling still completes and the next one is refused with
+`Error: Budget exceeded for conversation <id>`.
+
+Default per-call prices: `webscraper` $0.002, `websearch` $0.001, `pdfreader`
+$0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
+`textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
+and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
+Negative `toolPricing` values are clamped to 0.0.
+
 **Prices drive the tenant budget.** Each settled turn charges its priced cost —
 LLM tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step prices) plus
 tracked tool cost — to the tenant's `maxMonthlyCostUsd`. Once that budget is spent,
 every LLM task serves its fallback answer (`responseValidation.fallbackMessage`, or
 the default sentence) instead of calling its model, and records
-`llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 and is never
-bounded by it. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
+`llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 in token cost,
+but once the tenant budget is spent (by priced tools or other priced models) its
+calls are refused too. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
 
 #### Per-conversation LLM cost ceiling
 
@@ -1753,19 +1764,9 @@ tool cost. It is checked
 The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
 unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
-refuses every model call, priced or not, since the spend so far already equals it. This is unrelated to the task-level
-`maxBudgetPerConversation` (tool cost only; see `enforceBudget` above), which is unchanged.
-
-
-The check runs *before* each call and uses `<=`, so the call that crosses the
-ceiling still completes and the next one is refused with
-`Error: Budget exceeded for conversation <id>`.
-
-Default per-call prices: `webscraper` $0.002, `websearch` $0.001, `pdfreader`
-$0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
-`textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
-and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
-Negative `toolPricing` values are clamped to 0.0.
+refuses every model call, priced or not, since the spend so far already equals it. This is
+unrelated to the task-level `maxBudgetPerConversation` (tool cost only; see `enforceBudget`
+above), which is unchanged.
 
 #### Tool cache scoping
 
