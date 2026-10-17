@@ -70,6 +70,17 @@ public class HitlAccessGuard {
      * @throws ForbiddenException
      *             if the caller may not decide this conversation.
      */
+    /**
+     * Whether the caller may cancel a conversation that is <em>executing</em>, not
+     * only one awaiting a decision: the owner and admins may, a caller who is only
+     * an {@code eddi-approver} may not (L9 of the 2026-10-15 security review). The
+     * REST and MCP cancel surfaces both decide with this, so the approver's cancel
+     * is the paused-only compare-and-set on either.
+     */
+    public boolean mayCancelExecuting(String ownerId) {
+        return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
+    }
+
     public String requireConversationHitlAccess(String conversationId) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);

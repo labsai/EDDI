@@ -322,6 +322,22 @@ public interface IConversationService {
             throws ResourceStoreException;
 
     /**
+     * Cancels the conversation only if it is awaiting a human decision — one
+     * compare-and-set from {@code AWAITING_HUMAN}; an executing turn is neither
+     * signalled nor interrupted. This is the cancel an {@code eddi-approver} who is
+     * neither the owner nor an admin is entitled to, and the state check and the
+     * cancel are the same atomic operation, so a resume that lands in between
+     * cannot turn the approver's decision into a stop of another user's running
+     * turn.
+     *
+     * @return {@link CancelOutcome#CANCELLED} when the pause was cancelled,
+     *         {@link CancelOutcome#NOTHING_TO_CANCEL} when the conversation is in
+     *         any other state, {@link CancelOutcome#NOT_FOUND} when it does not
+     *         exist
+     */
+    CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException;
+
+    /**
      * Resume a paused (HITL) conversation with the given human decision.
      *
      * @param conversationId

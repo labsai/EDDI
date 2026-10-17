@@ -108,6 +108,7 @@ two.
 | `quarkus.http.host` | `QUARKUS_HTTP_HOST` | Quarkus default: `localhost` in dev and test, `0.0.0.0` otherwise | Bind address. The container image sets `-Dquarkus.http.host=0.0.0.0` in `JAVA_OPTS_APPEND`, and a system property outranks an environment variable, so in the image change it through `JAVA_OPTS_APPEND`, not `QUARKUS_HTTP_HOST` |
 | `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:3000,http://localhost:7070,https://localhost:7443` | Origins allowed to call the API from a browser. Add the origin of every page that embeds the Chat UI or calls EDDI from another host. CORS itself is on (`quarkus.http.cors.enabled=true`); the allowed methods and headers are set next to it in `application.properties` |
 | `quarkus.http.limits.max-body-size` | `QUARKUS_HTTP_LIMITS_MAX_BODY_SIZE` | `60M` | The absolute ceiling on any request body, enforced before EDDI sees the request. Only a knowledge base's file upload may use all of it; every other endpoint is held to `eddi.http.limits.default-max-body-size` (below) |
+| `eddi.rest.listing.max-limit` | `EDDI_REST_LISTING_MAX_LIMIT` | `1000` | Largest `limit` any paginated listing accepts — the descriptor listings of every config store and the cross-resource `/descriptors`, the conversation listing, `/usermemorystore/memories/{userId}/visible` and both `/administration/logs` listings. A request above it, or with a negative `index`/`skip`, is refused with **400** (`{"error": …}`) rather than silently clamped, so a client that asked for more than a page holds cannot mistake a truncated page for the whole; page through `index` instead. The Manager's largest page is 1000 (agent-name lookups, dashboard counts), so do not set it lower |
 
 ### Secrets and external configuration
 
@@ -169,7 +170,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
-| `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error |
+| `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---
 
@@ -420,8 +421,8 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-per-turn` | `5` | Attachments per turn — **per member turn** in a group conversation |
 | `eddi.attachments.max-per-conversation` | `50` | Attachments per conversation |
 | `eddi.attachments.max-total-bytes-per-conversation` | `104857600` (100 MB) | Aggregate bytes per conversation |
-| `eddi.attachments.max-per-user` | `0` (off) | Attachments per user across all of their conversations, counted against the conversation's owner. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
-| `eddi.attachments.max-total-bytes-per-user` | `0` (off) | Aggregate bytes per user across all of their conversations |
+| `eddi.attachments.max-per-user` | `500` | Attachments per user across all of their conversations, counted against the conversation's owner. `0` disables the quota — it used to be the default, which let one user fill the attachment store alone. Quotas are checked and the blob stored under a lock per scope, so concurrent uploads cannot overshoot any of them |
+| `eddi.attachments.max-total-bytes-per-user` | `1073741824` (1 GiB) | Aggregate bytes per user across all of their conversations; `0` disables |
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |

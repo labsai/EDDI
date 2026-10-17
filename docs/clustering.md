@@ -148,7 +148,11 @@ API behind it, and why each action is safe, is in
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
 replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`,
-`A2A_CONTEXTS`, `TOOL_PAGES`, `DEDUP` and `CHANNEL`; object store: `ARCHIVES`;
+`A2A_CONTEXTS`, `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
+principal's writes on every node), `A2A_INDEX` (per principal, the task and context ids it
+holds — how a GDPR sweep or export on one node reaches records another node wrote, since
+bucket keys are hashed and cannot be enumerated by principal), `TOOL_PAGES`, `DEDUP` and
+`CHANNEL`; object store: `ARCHIVES`;
 streams: `EVENTS`, `DEAD_LETTERS` and `ACTIVITY` (the console's timeline, subjects
 `eddi.<prefix>.ops.>`). EDDI's own subjects live under `eddi.<prefix>.>`.
 
@@ -287,10 +291,24 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   `eddi.coordinator.dead-letter.max-age` (7 days by default) expires it. That stream is then
   its only copy: losing NATS within that window loses the entry. Only when the stream itself
   cannot take the entry does it go to the JSONL file at `eddi.audit.dead-letter-path`, which
-  nothing expires. Paginated tool responses (15 min) and A2A task mappings (24 h) expire on
-  their own TTL. An erasure that must also cover these should wait out the stream windows or
-  purge the streams, and handle the JSONL file separately (see
+  nothing expires. Paginated tool responses expire on their own 15-minute TTL. A2A task
+  mappings are **not** in this group any more: the erasure's `a2aTasks` step on the erasing node sweeps records written on any
+  node through the shared index (next bullet), and their 24 h TTL only bounds the one
+  record that step can miss. An erasure that must also cover the stream and the tool pages
+  should wait out their windows or purge the streams, and handle the JSONL file separately (see
   [GDPR](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it)).
+- **An A2A task write on another node can, in theory, outlive the erasure of its
+  principal.** The erasure cascade's stop phase sets a marker in `A2A_ERASING` that every
+  node's A2A task store reads before it writes, and the erasing node sweeps `A2A_TASKS` and
+  `A2A_CONTEXTS` several steps later, through the per-principal `A2A_INDEX` so records other
+  nodes wrote are reached (the index is kept with a revision-checked compare-and-set on the
+  bucket, so concurrent writers on any nodes all land their ids). One gap remains, and it is
+  narrow: on the erasing node the check and the write are serialised against the sweep; on
+  another node they are not, so a write that read the marker as absent an instant before it
+  was set and whose `put` reaches the bucket only after the sweep survives, until the 24 h
+  task TTL expires it. The write would have to stall for the whole cascade. The conversation
+  such a record points at is deleted by the cascade regardless, so it holds the peer's own
+  message and the reply, not a live conversation.
 - An erasure marks the user on every node before it pseudonymises the stored
   audit rows: each node does so while answering the `gdpr-stop` request the
   erasing node waits for, and from then on that node pseudonymises the user's

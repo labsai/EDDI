@@ -462,6 +462,16 @@ two replicas booting against an empty database cannot each derive their KEK from
 different salt. A salt that cannot be read fails the start: falling back to the
 legacy salt on a deployment that has a random one derives the wrong KEK.
 
+**An upgrade that stays on the legacy salt is told so, louder each time.** A deployment
+that already holds DEKs but no per-deployment salt — one upgraded from before 6.0.2 —
+boots on the legacy fixed salt so its DEKs stay readable, and logs a **WARN** naming
+`POST /secretstore/secrets/admin/rotate-kek` as the way out. That salt is shared by every
+such deployment, so the master key is then the only secret protecting the DEKs. The first
+such boot is recorded (`vault-kek-legacy-salt-seen` in the vault metadata); every later boot
+still on the legacy salt logs an **ERROR** instead, with the date the legacy salt was first
+adopted and the same command. Rotating the KEK — with the current master key as both old
+and new key is enough — generates the per-deployment salt and clears the record.
+
 ### Configuration
 
 The vault requires a master key (KEK) to encrypt/decrypt secrets. If not set, the vault is **disabled** — all `${vault:...}` references pass through unresolved and a prominent warning is logged at startup.
