@@ -20,6 +20,8 @@ import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class WebhookSignatureVerifierTest {
 
@@ -57,6 +59,22 @@ class WebhookSignatureVerifierTest {
         @Test
         void valid() {
             assertEquals(Result.VALID, verify(verifier, settings, BODY, Map.of("X-Eddi-Signature", eddiHeader(SECRET, NOW, BODY))));
+        }
+
+        @Test
+        void replayKeyIsCanonicalAcrossHeaderVariations() {
+            String header = eddiHeader(SECRET, NOW, BODY);
+            var plain = verifier.verifyWithReplayKey(settings, BODY, name -> "X-Eddi-Signature".equalsIgnoreCase(name) ? header : null);
+            String padded = header + ",v1=" + "00".repeat(32);
+            var varied = verifier.verifyWithReplayKey(settings, BODY, name -> "X-Eddi-Signature".equalsIgnoreCase(name) ? padded : null);
+            assertEquals(Result.VALID, varied.result());
+            assertEquals(plain.replayKey(), varied.replayKey());
+            // A different timestamp is a different signed message, hence a different key.
+            String later = eddiHeader(SECRET, NOW + 1, BODY);
+            var other = verifier.verifyWithReplayKey(settings, BODY, name -> "X-Eddi-Signature".equalsIgnoreCase(name) ? later : null);
+            assertNotEquals(plain.replayKey(), other.replayKey());
+            // Never a key for a refused request.
+            assertNull(verifier.verifyWithReplayKey(settings, BODY, name -> null).replayKey());
         }
 
         @Test

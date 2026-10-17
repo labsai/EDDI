@@ -52,6 +52,18 @@ public class WebhookSignatureVerifier {
         VALID, MISSING_SIGNATURE, MALFORMED_SIGNATURE, STALE_TIMESTAMP, INVALID_SIGNATURE, NO_SECRET
     }
 
+    /**
+     * A verification outcome and, when {@link Result#VALID}, the request's replay
+     * key.
+     *
+     * @param replayKey
+     *            a canonical identity of what was signed — the expected MAC, which
+     *            no header variation (extra {@code v1=} candidates, hex case, a
+     *            base64 re-encoding) can change; {@code null} unless VALID
+     */
+    public record Verification(Result result, String replayKey) {
+    }
+
     private final Clock clock;
 
     public WebhookSignatureVerifier() {
@@ -71,6 +83,46 @@ public class WebhookSignatureVerifier {
      *            header lookup by (case-insensitive) name; returns null when absent
      */
     public Result verify(WebhookChannelSettings settings, byte[] rawBody, UnaryOperator<String> headers) {
+        return verifyWithReplayKey(settings, rawBody, headers).result();
+    }
+
+    /**
+     * Like {@link #verify}, and on success also the canonical replay key the
+     * endpoint deduplicates on. It is derived from the MAC EDDI computed, never
+     * from the header the sender supplied: the header can be varied without
+     * breaking the signature (an extra invalid {@code v1=} candidate, upper-case
+     * hex), and a key taken from it would let a captured request be replayed under
+     * a new key.
+     */
+    public Verification verifyWithReplayKey(WebhookChannelSettings settings, byte[] rawBody, UnaryOperator<String> headers) {
+        Result result = check(settings, rawBody, headers);
+        if (result != Result.VALID) {
+            return new Verification(result, null);
+        }
+        byte[] body = rawBody == null ? new byte[0] : rawBody;
+        String secret = settings.signingSecret();
+        WebhookChannelSettings.Scheme scheme = settings.scheme() == null ? WebhookChannelSettings.Scheme.EDDI_V1 : settings.scheme();
+        String key = scheme == WebhookChannelSettings.Scheme.EDDI_V1
+                ? "t:" + HmacSignatures.hmacSha256Hex(secret,
+                        (timestampOf(headers.apply(EDDI_SIGNATURE_HEADER)) + ".").getBytes(StandardCharsets.UTF_8), body)
+                : "b:" + HmacSignatures.hmacSha256Hex(secret, body);
+        return new Verification(Result.VALID, key);
+    }
+
+    /**
+     * The {@code t=} value of an eddi-v1 header already verified as well-formed.
+     */
+    private static String timestampOf(String header) {
+        for (String part : header.split(",")) {
+            int eq = part.indexOf('=');
+            if (eq > 0 && "t".equals(part.substring(0, eq).trim())) {
+                return part.substring(eq + 1).trim();
+            }
+        }
+        throw new IllegalStateException("verified eddi-v1 header without t=");
+    }
+
+    private Result check(WebhookChannelSettings settings, byte[] rawBody, UnaryOperator<String> headers) {
         String secret = settings == null ? null : settings.signingSecret();
         if (secret == null || secret.isBlank() || secret.startsWith("${vault:")) {
             // An unresolvable vault reference reads back as null — or, defensively,

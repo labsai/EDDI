@@ -146,9 +146,10 @@ public class RestWebhookChannel {
         ChannelIntegrationConfiguration integration = found.get();
         WebhookChannelSettings settings = WebhookChannelSettings.from(integration.getPlatformConfig());
 
-        WebhookSignatureVerifier.Result verification = verifier.verify(settings, raw, name -> headers.get(name.toLowerCase(Locale.ROOT)));
-        if (verification != WebhookSignatureVerifier.Result.VALID) {
-            LOGGER.warnf("Webhook %s: request refused (%s)", sanitize(integrationId), verification);
+        WebhookSignatureVerifier.Verification verification = verifier.verifyWithReplayKey(settings, raw,
+                name -> headers.get(name.toLowerCase(Locale.ROOT)));
+        if (verification.result() != WebhookSignatureVerifier.Result.VALID) {
+            LOGGER.warnf("Webhook %s: request refused (%s)", sanitize(integrationId), verification.result());
             return error(401, "Invalid or missing signature.");
         }
 
@@ -159,21 +160,12 @@ public class RestWebhookChannel {
             return error(e.status(), e.getMessage());
         }
 
-        // Used when the event carries no id. The signature value is unique to the
-        // signed bytes (and, for eddi-v1, the timestamp), so a captured request
-        // replayed verbatim is recognised. For github and generic-hmac — which sign
-        // no timestamp — this dedup window is the only replay protection there is.
-        String fallbackDedupKey = headers.get(signatureHeaderName(settings).toLowerCase(Locale.ROOT));
-        Dispatch dispatch = handler.dispatch(integrationId, integration, settings, event, fallbackDedupKey);
+        // Deduplicated on the canonical replay key (derived from the MAC EDDI
+        // computed, so no header variation changes it) as well as on the event id.
+        // The id alone is not enough: outside a CloudEvents envelope it is an
+        // unsigned header, so a captured request could be replayed under a new one.
+        Dispatch dispatch = handler.dispatch(integrationId, integration, settings, event, verification.replayKey());
         return toResponse(dispatch);
-    }
-
-    private static String signatureHeaderName(WebhookChannelSettings settings) {
-        return switch (settings.scheme() == null ? WebhookChannelSettings.Scheme.EDDI_V1 : settings.scheme()) {
-            case EDDI_V1 -> WebhookSignatureVerifier.EDDI_SIGNATURE_HEADER;
-            case GITHUB -> WebhookSignatureVerifier.GITHUB_SIGNATURE_HEADER;
-            case GENERIC_HMAC -> settings.signatureHeader();
-        };
     }
 
     private Response toResponse(Dispatch dispatch) {

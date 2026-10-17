@@ -19,7 +19,7 @@ export function SchemeHint({ scheme, className, testId }: { scheme: string; clas
     scheme === "github"
       ? t("webhook.schemeHintGithub", "GitHub's X-Hub-Signature-256 header (sha256=<hex>). Use it to receive GitHub webhooks as they are.")
       : scheme === "generic-hmac"
-        ? t("webhook.schemeHintGenericHmac", "A plain HMAC-SHA256 of the body in a header you name below — for senders that sign their own way.")
+        ? t("webhook.schemeHintGenericHmac", "A plain HMAC-SHA256 of the body, sent in X-Signature unless you set another header on the channel page — for senders that sign their own way.")
         : t("webhook.schemeHintEddi", "EDDI's timestamped signature (X-Eddi-Signature). Stale requests are refused, which protects against replays.");
   return <p className={className} data-testid={testId}>{text}</p>;
 }
@@ -126,7 +126,14 @@ export function WebhookSigningInstructions({ scheme }: { scheme: string }) {
         : "X-Eddi-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, t + \".\" + body)>";
   return (
     <div className="text-xs text-muted-foreground space-y-1" data-testid="webhook-signing-instructions">
-      <p>{t("webhook.signingInstructions", "Sign the raw request body with the signing secret and send the signature in this header. Unsigned, stale or tampered requests are refused with 401.")}</p>
+      <p>{t("webhook.signingInstructions", "Sign the raw request body with the signing secret and send the signature in this header. Unsigned or tampered requests are refused with 401.")}</p>
+      {/* Only eddi-v1 signs a timestamp; promising stale-request refusal for the
+          other schemes would read as replay protection they do not have. */}
+      <p data-testid="webhook-replay-note">
+        {scheme === "github" || scheme === "generic-hmac"
+          ? t("webhook.signingInstructionsNoTimestamp", "This scheme signs no timestamp: a replayed request is caught only by deduplication, for 10 minutes on each node.")
+          : t("webhook.signingInstructionsStale", "Requests whose timestamp is more than 5 minutes off are refused with 401 too, which protects against replays.")}
+      </p>
       <code className="block rounded-lg bg-background border border-border px-3 py-2 font-mono break-all">{header}</code>
       <p>{t("webhook.formatsHint", "Accepts CloudEvents 1.0 (structured or binary mode) and plain JSON up to 256 KB. Answers 202 with the conversationId; a repeated event id answers 200.")}</p>
     </div>

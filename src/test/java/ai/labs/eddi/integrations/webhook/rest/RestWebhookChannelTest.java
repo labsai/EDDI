@@ -33,6 +33,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -231,6 +232,46 @@ class RestWebhookChannelTest {
                 body.getBytes(StandardCharsets.UTF_8)));
 
         assertEquals(202, endpoint.receive(INTEGRATION_ID, headers, body.getBytes(StandardCharsets.UTF_8)).getStatus());
+    }
+
+    @Test
+    void eddiV1ReplayWithAnExtraInvalidCandidateIsStillADuplicate() throws Exception {
+        // An ID-less plain-JSON event. The verifier accepts a header whose ANY v1=
+        // matches, so appending a junk candidate keeps the signature valid — the
+        // dedup key must not change with it.
+        integration.setPlatformConfig(Map.of("signingSecret", SECRET));
+        long t = Instant.now().getEpochSecond();
+        String header = "t=" + t + ",v1=" + HmacSignatures.hmacSha256Hex(SECRET, (t + ".").getBytes(StandardCharsets.UTF_8),
+                PUSH.getBytes(StandardCharsets.UTF_8));
+        Map<String, String> first = new HashMap<>(Map.of("content-type", "application/json", "x-eddi-signature", header));
+        Map<String, String> replay = new HashMap<>(Map.of("content-type", "application/json",
+                "x-eddi-signature", header + ",v1=" + "ab".repeat(32)));
+
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, first, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        assertEquals(200, endpoint.receive(INTEGRATION_ID, replay, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void githubReplayUnderANewDeliveryIdIsStillADuplicate() throws Exception {
+        // X-GitHub-Delivery is not covered by GitHub's signature, so a captured
+        // request resent with a fresh delivery id (and upper-cased hex, which the
+        // verifier also accepts) must not start another turn.
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-40"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        Map<String, String> substituted = githubHeaders(PUSH, "d-41");
+        substituted.put("x-hub-signature-256",
+                "sha256=" + HmacSignatures.hmacSha256Hex(SECRET, PUSH.getBytes(StandardCharsets.UTF_8)).toUpperCase(Locale.ROOT));
+
+        assertEquals(200, endpoint.receive(INTEGRATION_ID, substituted, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void distinctDeliveryIdsWithDifferentBodiesAreBothProcessed() throws Exception {
+        String other = PUSH.replace("main", "release");
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-50"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(other, "d-51"), other.getBytes(StandardCharsets.UTF_8)).getStatus());
+        verify(conversationService, times(2)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     @Test

@@ -40,8 +40,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -148,32 +150,47 @@ public class WebhookEventHandler {
      *            the integration, secrets resolved
      * @param event
      *            the parsed event
-     * @param fallbackDedupKey
+     * @param replayKey
      *            a key unique to this exact signed request, used when the event
      *            carries no id (the signature header value, for every scheme); may
      *            be null
      */
     public Dispatch dispatch(String integrationId, ChannelIntegrationConfiguration integration,
-                             WebhookChannelSettings settings, InboundEvent event, String fallbackDedupKey) {
-        String dedupKey = event.id() != null
-                ? integrationId + ":id:" + event.id()
-                : fallbackDedupKey != null ? integrationId + ":sig:" + fallbackDedupKey : null;
-        if (dedupKey != null) {
-            String previous = dedup.putIfAbsent(dedupKey, IN_FLIGHT);
-            if (previous != null) {
-                if (previous.isEmpty()) {
-                    // The first delivery has not finished. It may still be refused
-                    // (429, 503, ...), which releases the reservation — so a 200 here
-                    // would tell the sender an event was delivered that never was,
-                    // and it would not retry. Answer retryably instead; only a
-                    // recorded 202 makes a repeat a duplicate.
-                    count("in_progress");
-                    return new Dispatch(409, null, null, true, IN_PROGRESS);
-                }
-                count("duplicate");
-                boolean group = previous.startsWith("group:");
-                return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null);
+                             WebhookChannelSettings settings, InboundEvent event, String replayKey) {
+        // Two keys, either of which makes a delivery a repeat: the sender's event id
+        // (a legitimate redelivery keeps it) and the canonical replay key of what
+        // was signed (a captured request replayed under a NEW, unsigned id keeps
+        // that). The price: two deliveries with byte-identical signed content
+        // inside the window count as one — for eddi-v1 that needs the same
+        // timestamp second as well.
+        List<String> keys = new ArrayList<>(2);
+        if (event.id() != null) {
+            keys.add(integrationId + ":id:" + event.id());
+        }
+        if (replayKey != null) {
+            keys.add(integrationId + ":sig:" + replayKey);
+        }
+        List<String> reserved = new ArrayList<>(keys.size());
+        for (String key : keys) {
+            String previous = dedup.putIfAbsent(key, IN_FLIGHT);
+            if (previous == null) {
+                reserved.add(key);
+                continue;
             }
+            // Give back what this call reserved: the delivery is not processed here.
+            reserved.forEach(own -> dedup.remove(own, IN_FLIGHT));
+            if (previous.isEmpty()) {
+                // The first delivery has not finished. It may still be refused
+                // (429, 503, ...), which releases the reservation — so a 200 here
+                // would tell the sender an event was delivered that never was,
+                // and it would not retry. Answer retryably instead; only a
+                // recorded 202 makes a repeat a duplicate.
+                count("in_progress");
+                return new Dispatch(409, null, null, true, IN_PROGRESS);
+            }
+            count("duplicate");
+            boolean group = previous.startsWith("group:");
+            return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null);
         }
 
         Dispatch outcome;
@@ -182,15 +199,15 @@ public class WebhookEventHandler {
         } catch (RuntimeException e) {
             outcome = refusal(integrationId, e);
         }
-        if (dedupKey != null) {
+        for (String key : reserved) {
             if (outcome.status() == 202) {
-                dedup.put(dedupKey, outcome.groupConversationId() != null
+                dedup.put(key, outcome.groupConversationId() != null
                         ? "group:" + outcome.groupConversationId()
                         : outcome.conversationId());
             } else {
                 // A refused event was not processed: its retry must be, so the
                 // reservation is released rather than remembered.
-                dedup.remove(dedupKey, IN_FLIGHT);
+                dedup.remove(key, IN_FLIGHT);
             }
         }
         count(outcome.status() == 202 ? "accepted" : "refused_" + outcome.status());

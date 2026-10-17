@@ -92,19 +92,21 @@ endpoint path as `webhookEndpoint`.
 
 ## Signature schemes
 
-All schemes compute HMAC-SHA256 over the **raw request bytes, exactly as sent**.
-Comparison is constant-time.
+All schemes compute HMAC-SHA256 over the **raw request body, exactly as sent**;
+`eddi-v1` additionally prepends the timestamp and a `.` (`t + "." + body`), so a
+sender that signs only the body gets a 401 under that scheme. Comparison is
+constant-time.
 
 | Scheme | Header | MAC input | Replay protection |
 | --- | --- | --- | --- |
 | `eddi-v1` | `X-Eddi-Signature: t=<unix seconds>,v1=<hex>` | `t + "." + body` | timestamp must be within 5 minutes, plus deduplication |
-| `github` | `X-Hub-Signature-256: sha256=<hex>` | `body` | deduplication only (by `X-GitHub-Delivery`, else the signature) |
-| `generic-hmac` | `<signatureHeader>: <signaturePrefix><hex or base64>` | `body` | deduplication only (by `eventIdHeader`, else the signature) |
+| `github` | `X-Hub-Signature-256: sha256=<hex>` | `body` | deduplication only (by `X-GitHub-Delivery` and by the signature) |
+| `generic-hmac` | `<signatureHeader>: <signaturePrefix><hex or base64>` | `body` | deduplication only (by `eventIdHeader` and by the signature) |
 
 `eddi-v1` accepts several `v1=` entries in one header, so a sender can sign with an
 old and a new secret while you rotate. `github` and `generic-hmac` sign no
-timestamp: a captured request can be replayed once its delivery id (or, without
-one, its signature) has left the 10-minute deduplication window. Prefer `eddi-v1`
+timestamp: a captured request can be replayed once its signature has left the
+10-minute deduplication window (or on another node of a cluster). Prefer `eddi-v1`
 for anything you control.
 
 ### Signing a request (`eddi-v1`)
@@ -215,12 +217,22 @@ conversation coordinator, as for any REST turn. The one exception is a new
 conversation's `CONVERSATION_START` turn, which runs inline: keep webhook agents'
 start rules light.
 
-Deduplication is per node (an in-memory cache, 10 minutes). Only an accepted
-(202) event is remembered: a refused one (4xx, 429, 5xx) is forgotten, so the
-sender's retry is processed, and a repeat that arrives while the first delivery is
-still running gets a retryable 409 rather than a 200 it could mistake for
-delivery. Without an event id, every scheme deduplicates on the signature header
-value itself.
+Deduplication is per node (an in-memory cache, 10 minutes) and keyed twice: by
+the event id when there is one, and always by a **replay key derived from the
+signature EDDI computed** (not from the header the sender sent, which can be
+varied without invalidating it — an extra `v1=` candidate, upper-case hex). A
+delivery matching either key is a repeat. The second key matters because an event
+id outside a CloudEvents envelope is an unsigned header: GitHub signs only the
+body, so a captured request resent with a fresh `X-GitHub-Delivery` would
+otherwise run again. The trade-off: two deliveries with byte-identical signed
+content inside the window count as one (for `eddi-v1`, only within the same
+timestamp second) — give events a distinguishing field if you send identical
+payloads on purpose.
+
+Only an accepted (202) event is remembered: a refused one (4xx, 429, 5xx) is
+forgotten, so the sender's retry is processed, and a repeat that arrives while the
+first delivery is still running gets a retryable 409 rather than a 200 it could
+mistake for delivery.
 
 ### Quotas
 

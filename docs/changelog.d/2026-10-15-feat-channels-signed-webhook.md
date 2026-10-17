@@ -33,6 +33,14 @@ its `targets` table and `ChannelTargetRouter` (Pillar 3).
   without an id are deduplicated on the signature value for every scheme, not only
   `eddi-v1`: for `github` and `generic-hmac`, which sign no timestamp, that window
   is the only replay protection, as the docs now say.
+- **PR review (#1059):** deduplication is keyed by the event id AND by a canonical
+  replay key the verifier derives from the MAC it computed (never from the sender's
+  header — an extra `v1=` candidate or upper-case hex no longer yields a fresh key),
+  so a captured request replayed under a new, unsigned delivery id is a duplicate.
+  Trade-off, documented: byte-identical signed deliveries within the window count as
+  one. Docs separate `eddi-v1`'s `t + "." + body` MAC input from the body-only
+  schemes; the Manager labels the create-dialog secret field, names `X-Signature` as
+  the generic-HMAC default, and promises stale-request refusal only for `eddi-v1`.
 - **Conversations:** `new` per event, or `correlate` — one conversation per value at
   `correlationKeyPath`, mapped through `IUserConversationStore` like Slack threads.
 - **Identity:** turns run as `webhook:<integrationId>`.

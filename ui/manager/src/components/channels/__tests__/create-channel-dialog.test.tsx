@@ -175,4 +175,18 @@ describe("CreateChannelDialog", () => {
     fireEvent.change(screen.getByTestId("create-webhook-signing-secret-input"), { target: { value: "${vault:hook}" } });
     expect(screen.getByTestId("create-channel-next")).not.toBeDisabled();
   });
+
+  it("labels the webhook signing-secret field and names the generic-hmac default header", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateChannelDialog open={true} onOpenChange={vi.fn()} />);
+    await user.type(screen.getByTestId("create-channel-name"), "Hooks");
+    await user.selectOptions(screen.getByTestId("create-channel-type"), "webhook");
+    await user.click(screen.getByTestId("create-channel-next"));
+
+    expect(screen.getByLabelText("Signing Secret")).toBe(screen.getByTestId("create-webhook-signing-secret-input"));
+    await user.selectOptions(screen.getByTestId("create-webhook-scheme"), "generic-hmac");
+    const hint = screen.getByTestId("create-webhook-scheme-hint").textContent ?? "";
+    expect(hint).toContain("X-Signature");
+    expect(hint).not.toContain("below");
+  });
 });
