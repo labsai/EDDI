@@ -307,11 +307,12 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
   earlier is answered 409 instead (an error event on a stream, whose tokens up to
   then were already sent). Its client is expected to retry, so replay its dead
   letter only if the client did not; otherwise the turn runs twice.
-- A paginated tool response is not bound to its conversation or its caller.
-  Anyone who can talk to an agent that has the page-fetch tool, and who knows
-  another response's random id, can fetch its pages, from any node that holds
-  them. This is the same as on a single node: the tool does not check who the
-  response belongs to.
+- A paginated tool response is bound to its conversation, on every node: its
+  pages are keyed by `(conversationId, responseId)` and the page-fetch tool a
+  turn is given fetches for that turn's conversation only, so another
+  conversation that knows a response's random id gets "not found" (until 6.6.0
+  the id alone was enough — security review 2026-10-15, L13). It is not bound to
+  a caller beyond that: whoever may continue the conversation may read its pages.
 - On PostgreSQL, replicas that boot together run their startup one after
   another (an advisory lock around table creation and migrations), so the
   last of N replicas of a first install becomes ready later than the first.

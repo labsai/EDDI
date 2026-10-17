@@ -18,6 +18,8 @@ import static org.mockito.MockitoAnnotations.openMocks;
 @DisplayName("FetchToolResponsePageTool Tests")
 class FetchToolResponsePageToolTest {
 
+    private static final String CONV = "68f1c0ffee0000000000c0de";
+    private FetchToolResponsePageTool unbound;
     private FetchToolResponsePageTool tool;
 
     @Mock
@@ -26,15 +28,30 @@ class FetchToolResponsePageToolTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        tool = new FetchToolResponsePageTool();
+        unbound = new FetchToolResponsePageTool();
         // Inject mock store
         try {
             var f = FetchToolResponsePageTool.class.getDeclaredField("paginatedResponseStore");
             f.setAccessible(true);
-            f.set(tool, paginatedResponseStore);
+            f.set(unbound, paginatedResponseStore);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        tool = unbound.boundTo(CONV);
+    }
+
+    @Test
+    @DisplayName("L13: the unbound catalog bean fetches nothing, and binding yields a copy that reads its own conversation only")
+    void unboundBeanRefuses() {
+        String result = unbound.fetchPage("valid-id", 1);
+        assertTrue(result.contains("error"), result);
+        assertTrue(result.contains("within the conversation"), result);
+        verifyNoInteractions(paginatedResponseStore);
+
+        assertEquals(CONV, tool.conversationId());
+        assertNull(unbound.conversationId());
+        assertSame(unbound, unbound.boundTo(null), "nothing to bind to");
+        assertSame(unbound, unbound.boundTo(" "));
     }
 
     @Test
@@ -63,7 +80,7 @@ class FetchToolResponsePageToolTest {
     @Test
     @DisplayName("Should return error when response not found (expired)")
     void testExpiredResponse() {
-        when(paginatedResponseStore.getPage("expired-id", 1)).thenReturn(null);
+        when(paginatedResponseStore.getPage(CONV, "expired-id", 1)).thenReturn(null);
 
         String result = tool.fetchPage("expired-id", 1);
         assertTrue(result.contains("error"));
@@ -74,7 +91,7 @@ class FetchToolResponsePageToolTest {
     @DisplayName("Should return error when page out of range")
     void testOutOfRangePage() {
         var pageResult = new PaginatedResponseStore.PageResult(null, 3, 300, "testTool", "Page 5 out of range (1-3)");
-        when(paginatedResponseStore.getPage("valid-id", 5)).thenReturn(pageResult);
+        when(paginatedResponseStore.getPage(CONV, "valid-id", 5)).thenReturn(pageResult);
 
         String result = tool.fetchPage("valid-id", 5);
         assertTrue(result.contains("error"));
@@ -86,7 +103,7 @@ class FetchToolResponsePageToolTest {
     @DisplayName("Should return page content on success")
     void testSuccessfulPageFetch() {
         var pageResult = new PaginatedResponseStore.PageResult("Page 2 content here", 3, 300, "testTool", null);
-        when(paginatedResponseStore.getPage("valid-id", 2)).thenReturn(pageResult);
+        when(paginatedResponseStore.getPage(CONV, "valid-id", 2)).thenReturn(pageResult);
 
         String result = tool.fetchPage("valid-id", 2);
         assertTrue(result.contains("\"page\":2") || result.contains("\"page\": 2"));
@@ -99,7 +116,7 @@ class FetchToolResponsePageToolTest {
     @DisplayName("Should escape special characters in content")
     void testSpecialCharacterEscaping() {
         var pageResult = new PaginatedResponseStore.PageResult("Line 1\nLine 2\t\"quoted\"", 1, 50, "tool", null);
-        when(paginatedResponseStore.getPage("id", 1)).thenReturn(pageResult);
+        when(paginatedResponseStore.getPage(CONV, "id", 1)).thenReturn(pageResult);
 
         String result = tool.fetchPage("id", 1);
         // Should contain escaped versions

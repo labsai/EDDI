@@ -456,8 +456,13 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > the instance's cloud credentials; nobody configures it as an API. With protection
 > off redirects are still followed, so the httpCalls client checks every redirect
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
-> instead of being followed. For MCP servers and A2A peers only the configured
-> target is checked while protection is off; turn it on to stop a redirect there.
+> instead of being followed. The MCP client and the A2A client never follow a
+> redirect at all, protection on or off: the transport is built with
+> `followRedirects(false)` (pinned in `McpToolProviderManager`, held to its word
+> by `McpTransportRedirectTest` against an embedded redirecting server), so a
+> `3xx` from a configured MCP URL fails the handshake instead of carrying the
+> session — and its `Authorization` header — to a host nobody validated. (Until
+> 6.6.0 the MCP transport followed redirects: security review 2026-10-15, M2.)
 
 ### Scheme Allowlist
 
@@ -625,11 +630,11 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 ### Cost Tracking
 
-- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `false`, deployment fallback `eddi.tools.budget.enforce-by-default`)
+- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `true`, deployment fallback `eddi.tools.budget.enforce-by-default`)
 - **Scope:** `maxBudgetPerConversation` bounds **tool** cost only. LLM token spend is governed separately and per run by the model cascade's `maxCostPerRun`; the two are not summed
 - **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001, `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
 - **Eviction:** To prevent unbounded memory growth, the tracker caps per-conversation entries at 10 000 and evicts the oldest ~10% when the limit is reached
-- **Behaviour:** Enforcement is **opt-in**. A configured `maxBudgetPerConversation` records cost but refuses nothing until `enforceBudget: true` (per task) or `eddi.tools.budget.enforce-by-default=true` (per deployment). Once enforced, the budget is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Enforcing by default was rejected because built-ins priced at $0.00 until the canonical-slug fix, so it would make those ceilings bind for the first time and abort tool calls on upgrade. The converse cost is real — http/MCP/A2A/dynamic tools dispatch under their configured name, so an agent with a tool called `websearch`/`webscraper`/`pdfreader` *was* being refused before this release — so every task carrying a ceiling without the flag is named once in a startup WARN rather than lapsing silently
+- **Behaviour:** Enforcement is the **default** (6.6.0, security review finding M8). A configured `maxBudgetPerConversation` is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Opting out — `enforceBudget: false` per task, or `eddi.tools.budget.enforce-by-default=false` per deployment — keeps cost tracking and reporting and turns the refusal off; every task whose ceiling is opted out is named once in a WARN rather than lapsing silently, and the MCP `get_agent`/`deploy_agent` tools report the effective default as `toolBudgetEnforcedByDefault`. Until 6.6.0 this was an opt-in whose deployment key was not declared, so every stored ceiling was advisory
 
 ### Configuration Example
 

@@ -369,7 +369,7 @@ Full guide: [hitl.md](hitl.md).
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.tools.budget.enforce-by-default` | `false` | Enforce per-conversation tool cost ceilings without a per-task `enforceBudget` flag. See [langchain.md](langchain.md) |
+| `eddi.tools.budget.enforce-by-default` | `true` | Whether a per-conversation tool cost ceiling (`maxBudgetPerConversation`) refuses calls when the task does not set `enforceBudget` itself. `false` makes such ceilings advisory (tracked, never refused) and names each one in a WARN. See [langchain.md](langchain.md#budgets) |
 | `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
 | `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
@@ -456,7 +456,9 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.mcp.tool-cache.ttl-ms` | `300000` (5 min) | How long a remote server's tool list is cached. Lower it while developing against a changing MCP server |
-| `eddi.mcp.tool-description.max-chars` | `1024` | Truncation cap on imported tool descriptions, bounding prompt cost |
+| `eddi.mcp.tool-description.max-chars` | `1024` | Truncation cap on imported tool descriptions, bounding prompt cost. Also the cap on every description, title and enum value inside a tool's parameter schema |
+| `eddi.mcp.tool-schema.max-bytes` | `32768` | Cap on one remote tool's serialised parameter schema. Over it, the schema's descriptions are stripped first; a schema still over it is dropped with its tool (`eddi_mcp_tool_schema_governed_total{outcome=dropped}`) |
+| `eddi.mcp.tool-schema.max-bytes-per-server` | `524288` (512 KB) | Cap on the schema bytes one MCP server may put into the prompt across all its tools per discovery; tools past it are dropped (`outcome=dropped_server_cap`) |
 
 ### A2A
 
@@ -466,7 +468,9 @@ Full guide: [import-export-an-agent.md](import-export-an-agent.md).
 | `eddi.a2a.base-url` | `http://localhost:7070` | The URL advertised in Agent Cards. **Wrong here means peers cannot reach you** |
 | `eddi.a2a.public-token-endpoint` | *(derived)* | The token endpoint advertised in Agent Cards, for peers that cannot resolve the address EDDI uses. Empty derives `<issuer>/protocol/openid-connect/token` from `eddi.keycloak.public.url`, falling back to `quarkus.oidc.auth-server-url` — **which assumes Keycloak**. Set it on any other IdP |
 | `eddi.a2a.capabilities.public` | `false` | Serve `/.well-known/capabilities` and `/.well-known/capabilities/skills` unauthenticated, provided `eddi.a2a.enabled` is on too. With either off, both answer 404 to authenticated and anonymous callers alike; no separate authentication gate applies. Exposes agent **ids** (not names), their matching skill, a confidence and any registry attributes; `/skills` exposes the registered skill names |
-| `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions |
+| `eddi.a2a.tool-description.max-chars` | `1024` | Truncation cap on peer tool descriptions, and on every text inside a peer tool's parameter schema |
+| `eddi.a2a.tool-schema.max-bytes` | `32768` | As `eddi.mcp.tool-schema.max-bytes`, for A2A peer tools |
+| `eddi.a2a.tool-schema.max-bytes-per-agent` | `524288` (512 KB) | As `eddi.mcp.tool-schema.max-bytes-per-server`, per A2A peer |
 | `eddi.a2a.signing.nonce.max-age-ms` | `300000` (5 min) | Replay window for signed requests |
 | `eddi.a2a.signing.nonce.clock-skew-ms` | `30000` | Tolerated clock difference between peers |
 | `eddi.a2a.task-timeout-seconds` | `systemRuntime.agentTimeoutInSeconds` | How long a blocking A2A send (`SendMessage`, `message/send`, `tasks/send`) waits for the turn before answering with the task still `working` — the peer then polls `GetTask`. Inherits the REST surface's budget, because an operator who raised that has already decided how long a turn may take |

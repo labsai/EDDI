@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.hitl.tools;
 
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.Protection;
+
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
@@ -26,7 +28,7 @@ import java.util.function.Supplier;
  */
 public final class ApprovedCallScope {
 
-    private static final ThreadLocal<String> ACTING_AGENT = new ThreadLocal<>();
+    private static final ThreadLocal<Protection> ACTING_AGENT = new ThreadLocal<>();
 
     private ApprovedCallScope() {
     }
@@ -36,8 +38,17 @@ public final class ApprovedCallScope {
      * {@code actingAgentId}.
      */
     public static <T> T run(String actingAgentId, Supplier<T> work) {
-        String previous = ACTING_AGENT.get();
-        ACTING_AGENT.set(actingAgentId == null ? "" : actingAgentId);
+        return run(Protection.ofAgent(actingAgentId), work);
+    }
+
+    /**
+     * Runs {@code work} as the approved execution of a call under
+     * {@code protection} — the acting agent and the resources it runs on, as
+     * {@code ToolLoopResumer} resolved them (L13).
+     */
+    public static <T> T run(Protection protection, Supplier<T> work) {
+        Protection previous = ACTING_AGENT.get();
+        ACTING_AGENT.set(protection == null ? Protection.ofAgent(null) : protection);
         try {
             return work.get();
         } finally {
@@ -50,12 +61,12 @@ public final class ApprovedCallScope {
      * runs it.
      */
     public static <T> Callable<T> propagate(Callable<T> work) {
-        String captured = ACTING_AGENT.get();
+        Protection captured = ACTING_AGENT.get();
         if (captured == null) {
             return work;
         }
         return () -> {
-            String previous = ACTING_AGENT.get();
+            Protection previous = ACTING_AGENT.get();
             ACTING_AGENT.set(captured);
             try {
                 return work.call();
@@ -78,17 +89,17 @@ public final class ApprovedCallScope {
      *             naming the reason; nothing has been sent
      */
     public static void checkOutgoing(String method, String uri, String body) {
-        String actingAgentId = ACTING_AGENT.get();
-        if (actingAgentId == null) {
+        Protection protection = ACTING_AGENT.get();
+        if (protection == null) {
             return;
         }
-        String refusal = SelfUngatingGuard.refusal(method, uri, body, actingAgentId.isEmpty() ? null : actingAgentId);
+        String refusal = SelfUngatingGuard.refusal(method, uri, body, protection);
         if (refusal != null) {
             throw new IllegalArgumentException("NOT_EXECUTED: " + refusal + " (refused before sending)");
         }
     }
 
-    private static void restore(String previous) {
+    private static void restore(Protection previous) {
         if (previous == null) {
             ACTING_AGENT.remove();
         } else {
