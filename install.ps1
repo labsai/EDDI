@@ -859,6 +859,7 @@ function Initialize-ReleaseChecksums {
     catch {
         # A missing asset (404) and a network error end the same way: no checksums, TLS only.
         $fetchError = $_.Exception.Message
+        Write-Verbose "SHA256SUMS for release $EddiBranch could not be fetched: $fetchError"
     }
     if ($fetchError) {
         Write-Warn "Release $EddiBranch publishes no SHA256SUMS ($fetchError) -- downloaded files are verified by TLS only."
