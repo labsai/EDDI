@@ -56,6 +56,16 @@ public interface IResourceStorage<T> {
         return limit < 1 ? MAX_RESULT_LIMIT : Math.min(limit, MAX_RESULT_LIMIT);
     }
 
+    /**
+     * Guards {@link #setNumberField}: the name becomes part of a MongoDB update
+     * path and a PostgreSQL JSON path, so only plain top-level names are accepted.
+     */
+    static void requireTopLevelFieldName(String fieldName) {
+        if (fieldName == null || !fieldName.matches("[A-Za-z0-9_]+")) {
+            throw new IllegalArgumentException("Not a top-level field name: " + fieldName);
+        }
+    }
+
     IResource<T> newResource(T content) throws IOException;
 
     IResource<T> newResource(String id, Integer version, T content) throws IOException;
@@ -251,6 +261,32 @@ public interface IResourceStorage<T> {
         throw new UnsupportedOperationException(
                 "storeHistoryAndRemove is not implemented by " + getClass().getName()
                         + " — a version-checked delete must never silently degrade to an unconditional one");
+    }
+
+    /**
+     * Sets one top-level numeric field of the <em>current</em> version of a
+     * resource in place, in a single write, leaving every other field and the
+     * version untouched. Nothing is read first and nothing is historized.
+     * <p>
+     * For bookkeeping fields such as a descriptor's {@code lastModifiedOn}, which
+     * every conversation turn stamps: a read-modify-write costs three reads and a
+     * full-document replace, and the replace can overwrite a concurrent edit of any
+     * other field with the copy it read. The single update cannot.
+     * <p>
+     * The value is stored as a JSON number — the format the persistence mapper
+     * writes dates in (epoch millis), so range queries and sorts on the field see
+     * no difference from a full write.
+     *
+     * @param fieldName
+     *            a top-level field name (letters, digits, underscore)
+     * @return {@code false} when there is no current version of {@code id} (it was
+     *         deleted or never existed), so nothing was written
+     * @throws UnsupportedOperationException
+     *             when the backend cannot do it; callers fall back to a full write
+     */
+    default boolean setNumberField(String id, String fieldName, long value) {
+        throw new UnsupportedOperationException(
+                "setNumberField is not implemented by " + getClass().getName());
     }
 
     /**
