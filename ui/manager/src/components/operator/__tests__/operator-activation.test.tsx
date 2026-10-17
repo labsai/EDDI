@@ -391,6 +391,9 @@ describe("OperatorActivation", () => {
     // No default model to fall back on, so the field starts empty and gates progress.
     expect(screen.getByTestId("operator-model")).toHaveValue("");
     expect(screen.getByTestId("operator-next")).toBeDisabled();
+    // Both required fields say what to type, and the inputs point at that text.
+    expect(screen.getByTestId("operator-model")).toHaveAccessibleDescription(/exactly as your server serves it/);
+    expect(screen.getByTestId("operator-base-url")).toHaveAccessibleDescription(/usually ending in \/v1/);
 
     await userEvent.type(screen.getByTestId("operator-model"), "ibm-granite/granite-4.0-h-small");
     expect(screen.getByTestId("operator-next")).toBeDisabled();

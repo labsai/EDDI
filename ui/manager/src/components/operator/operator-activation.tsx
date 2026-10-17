@@ -333,13 +333,25 @@ export function OperatorActivation({
               </Field>
             )}
 
-            <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
+            <Field
+              label={t("operator.activation.model", "Model")}
+              htmlFor="operator-model"
+              hint={
+                provider === SELF_HOSTED_PROVIDER_ID
+                  ? t(
+                      "setupWizard.modelHintSelfHosted",
+                      "The model id exactly as your server serves it (its /v1/models list). There is no default.",
+                    )
+                  : undefined
+              }
+            >
               <input
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 list="operator-model-suggestions"
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 id="operator-model"
+                aria-describedby={provider === SELF_HOSTED_PROVIDER_ID ? "operator-model-hint" : undefined}
                 data-testid="operator-model"
               />
               <datalist id="operator-model-suggestions">
@@ -350,13 +362,25 @@ export function OperatorActivation({
             </Field>
 
             {baseUrlRequired && (
-              <Field label={t("operator.activation.baseUrl", "Base URL")} htmlFor="operator-base-url">
+              <Field
+                label={t("operator.activation.baseUrl", "Base URL")}
+                htmlFor="operator-base-url"
+                hint={
+                  provider === SELF_HOSTED_PROVIDER_ID
+                    ? t(
+                        "setupWizard.baseUrlHintSelfHosted",
+                        "Required — your server's OpenAI API URL, usually ending in /v1. http:// is fine inside your network.",
+                      )
+                    : t("setupWizard.baseUrlHintLocal", "Required — the URL where your local model server is running")
+                }
+              >
                 <input
                   value={baseUrl}
                   onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder={provider === SELF_HOSTED_PROVIDER_ID ? SELF_HOSTED_EXAMPLES.baseUrl : "http://localhost:11434"}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   id="operator-base-url"
+                  aria-describedby="operator-base-url-hint"
                   data-testid="operator-base-url"
                 />
               </Field>
