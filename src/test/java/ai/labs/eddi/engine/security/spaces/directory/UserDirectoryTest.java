@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -77,6 +79,95 @@ class UserDirectoryTest {
         return new DirectoryUser(principal, "sub-" + principal, username, email, verified, name, List.of(), Instant.EPOCH, Instant.EPOCH);
     }
 
+    private static DirectoryUser member(String principal, String email, String... groups) {
+        List<String> teams = Arrays.stream(groups).map(Subjects::team).toList();
+        return new DirectoryUser(principal, "sub-" + principal, principal, email, true, principal.toUpperCase(), teams, Instant.EPOCH,
+                Instant.EPOCH);
+    }
+
+    @Nested
+    @DisplayName("the directory cannot be harvested (M2)")
+    class Harvest {
+
+        @Test
+        @DisplayName("a non-administrator is offered only people who share one of their teams, searched in the store")
+        void nonAdminSearchesOwnTeamsOnly() {
+            when(store.searchWithinTeams(eq("bob"), any(), anyInt())).thenReturn(List.of(member("bob", "bob@example.com", "engineering")));
+
+            var matches = directory.search("bob", 8, ALICE, false);
+
+            assertEquals(1, matches.size());
+            assertEquals(Subjects.user("bob"), matches.get(0).subject());
+            assertEquals("bob@example.com", matches.get(0).detail(), "a teammate's email is fine to show");
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Collection<String>> teams = ArgumentCaptor.forClass(Collection.class);
+            verify(store).searchWithinTeams(eq("bob"), teams.capture(), anyInt());
+            assertEquals(Set.of(Subjects.team("engineering")), Set.copyOf(teams.getValue()));
+            verify(store, never()).search(anyString(), anyInt());
+            verify(store, never()).searchTeams(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("somebody outside the caller's teams is dropped even if the store returns them")
+        void outsiderDropped() {
+            when(store.searchWithinTeams(eq("mal"), any(), anyInt())).thenReturn(List.of(member("mallory", "m@example.com", "finance")));
+
+            assertTrue(directory.search("mal", 8, ALICE, false).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a caller in no team is offered nobody, and the store is not asked")
+        void noTeamsNoPeople() {
+            var loner = CallerSpaces.of("lone", Set.of());
+
+            assertTrue(directory.search("bob", 8, loner, false).isEmpty());
+            verify(store, never()).searchWithinTeams(anyString(), any(), anyInt());
+            verify(store, never()).search(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("people are searched from three characters on, for administrators too")
+        void shortQuerySearchesNobody() {
+            assertTrue(directory.search("bo", 8, CallerSpaces.of("lone", Set.of()), true).isEmpty());
+            assertTrue(directory.search("b", 8, ALICE, false).stream().noneMatch(m -> "user".equals(m.kind())));
+            verify(store, never()).search(anyString(), anyInt());
+            verify(store, never()).searchWithinTeams(anyString(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("a short query still offers the caller's own teams, and only those, to a non-administrator")
+        void ownTeamsOnShortQuery() {
+            var matches = directory.search("en", 8, ALICE, false);
+
+            assertEquals(List.of(Subjects.team("engineering")), matches.stream().map(UserDirectory.Match::subject).toList());
+            verify(store, never()).searchTeams(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("the email is shown to an administrator or a teammate, never to anybody else")
+        void detailNeedsAdminOrSharedTeam() {
+            var bob = member("bob", "bob@example.com", "finance");
+
+            assertEquals("bob@example.com", directory.detailFor(bob, ALICE, true));
+            assertEquals("bob@example.com", directory.detailFor(bob, CallerSpaces.of("carol", Set.of("/finance")), false));
+            assertEquals("bob", directory.detailFor(bob, ALICE, false), "an outsider gets the username at most");
+            assertEquals("bob", directory.detailFor(bob, null, false), "no caller, no team in common");
+            assertNull(directory.detailFor(null, ALICE, true));
+        }
+
+        @Test
+        @DisplayName("unset, the directory follows workspace enforcement; set, the operator's word wins")
+        void enabledFollowsEnforcement() {
+            when(settings.isEnforcing()).thenReturn(false);
+            assertFalse(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true).isActive(),
+                    "no enforced workspaces, nothing to share, no directory");
+            when(settings.isEnforcing()).thenReturn(true);
+            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true).isActive());
+            when(settings.isEnforcing()).thenReturn(false);
+            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.of(true), true).isActive());
+        }
+    }
+
     @Nested
     @DisplayName("search is not an email oracle")
     class SearchPrivacy {
@@ -86,7 +177,7 @@ class UserDirectoryTest {
         void unverifiedEmailNotSearchable() {
             when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", false, "Jane Doe")));
 
-            assertTrue(directory.search("ceo", 8, ALICE).isEmpty());
+            assertTrue(directory.search("ceo", 8, ALICE, true).isEmpty());
         }
 
         @Test
@@ -95,7 +186,7 @@ class UserDirectoryTest {
             var hidden = new UserDirectory(store, identity, spaceContext, settings, executor, true, false);
             when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", true, "Jane Doe")));
 
-            assertTrue(hidden.search("ceo", 8, ALICE).isEmpty());
+            assertTrue(hidden.search("ceo", 8, ALICE, true).isEmpty());
         }
 
         @Test
@@ -104,8 +195,8 @@ class UserDirectoryTest {
             when(store.search(eq("jan"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", false, "Jane Doe")));
             when(store.search(eq("ceo"), anyInt())).thenReturn(List.of(user("u-1", "jdoe", "ceo@example.com", true, "Jane Doe")));
 
-            assertEquals(1, directory.search("jan", 8, ALICE).size());
-            assertEquals(1, directory.search("ceo", 8, ALICE).size());
+            assertEquals(1, directory.search("jan", 8, ALICE, true).size());
+            assertEquals(1, directory.search("ceo", 8, ALICE, true).size());
         }
     }
 
@@ -344,14 +435,14 @@ class UserDirectoryTest {
         @Test
         @DisplayName("offers teams first, never the caller themselves, and escapes nothing into a pattern")
         void searchOrdersAndExcludesSelf() {
-            when(store.searchTeams("e", 5)).thenReturn(List.of(Subjects.team("engineering"), Subjects.team("exec")));
-            when(store.search("e", 6)).thenReturn(List.of(user("alice", "alice", "e.alice@example.com", true, "Alice"),
+            when(store.searchTeams("eve", 5)).thenReturn(List.of(Subjects.team("evening-shift")));
+            when(store.search("eve", 6)).thenReturn(List.of(user("alice", "alice", "eve.alice@example.com", true, "Alice"),
                     user("eve", "eve", "eve@example.com", true, "Eve")));
 
-            var matches = directory.search("e", 5, ALICE);
+            var matches = directory.search("eve", 5, ALICE, true);
 
             assertEquals("team", matches.get(0).kind());
-            assertEquals("engineering", matches.get(0).label());
+            assertEquals("evening-shift", matches.get(0).label());
             assertTrue(matches.stream().noneMatch(m -> m.subject().equals(Subjects.user("alice"))), "sharing with yourself is never meant");
             assertTrue(matches.stream().anyMatch(m -> m.subject().equals(Subjects.user("eve")) && "eve@example.com".equals(m.detail())));
         }
@@ -362,7 +453,7 @@ class UserDirectoryTest {
             var private_ = new UserDirectory(store, identity, spaceContext, settings, executor, true, false);
             when(store.search(anyString(), anyInt())).thenReturn(List.of(user("eve", "eve", "eve@example.com", true, "Eve")));
 
-            var matches = private_.search("ev", 5, ALICE);
+            var matches = private_.search("eve", 5, ALICE, true);
 
             assertTrue(matches.stream().noneMatch(m -> "eve@example.com".equals(m.detail())));
         }

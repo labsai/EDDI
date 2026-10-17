@@ -26,7 +26,7 @@ Two switches, and they mean different things.
 | `eddi.workspaces.groups-claim` | `groups` | JWT claim carrying Keycloak group membership, which becomes team spaces. |
 | `eddi.workspaces.legacy-visibility` | `shared` | What happens to resources created before ownership was recorded: `shared` or `admin-only`. **Changeable at runtime** — see [Runtime settings](#runtime-settings). |
 | `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment: that team's members create there by default, everyone else keeps their personal space. **Changeable at runtime.** |
-| `eddi.workspaces.directory.enabled` | `true` | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
+| `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
 
 **Recording and enforcing are deliberately separate.** Deploy the release,
@@ -171,6 +171,22 @@ dialog labels each grant with the person's name, and flags grants that match no
 recorded user (typically ones made before the directory existed) so an owner can
 remove them. The directory is covered by GDPR erasure and export. Set
 `eddi.workspaces.directory.enabled=false` to take shares exactly as typed.
+
+The directory holds everybody who ever signed in, chat-only users included, so
+its search is deliberately narrow:
+
+- **It is off unless workspaces are enforced.** Left unset,
+  `eddi.workspaces.directory.enabled` follows `eddi.workspaces.enabled`; set it
+  to `true` explicitly to keep a directory without enforcement.
+- **People are searched from three characters on.** Shorter queries offer only
+  the caller's own teams.
+- **A non-administrator is offered only their own teams and the people who share
+  one of them.** Other people and teams are still reachable by typing their
+  exact username, verified email or `team:<name>`; they are just not suggested.
+  `eddi-admin` is offered every recorded person and team.
+- **An email address is shown only to an administrator or to somebody who shares
+  a team with that person** — in suggestions and in a resource's grant list.
+  Anyone else sees the username.
 
 ### Where new resources land
 
