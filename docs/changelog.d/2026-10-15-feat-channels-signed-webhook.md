@@ -41,6 +41,9 @@ its `targets` table and `ChannelTargetRouter` (Pillar 3).
   one. Docs separate `eddi-v1`'s `t + "." + body` MAC input from the body-only
   schemes; the Manager labels the create-dialog secret field, names `X-Signature` as
   the generic-HMAC default, and promises stale-request refusal only for `eddi-v1`.
+  A second `t=` entry in `X-Eddi-Signature` is refused as malformed (it let the
+  verified timestamp and the replay key diverge), and `eddi.webhook.events` also
+  counts refusals answered before dispatch.
 - **Conversations:** `new` per event, or `correlate` — one conversation per value at
   `correlationKeyPath`, mapped through `IUserConversationStore` like Slack threads.
 - **Identity:** turns run as `webhook:<integrationId>`.
