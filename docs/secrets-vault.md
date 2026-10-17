@@ -532,7 +532,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset?confirm=true` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -720,7 +720,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
-| `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
@@ -772,7 +772,7 @@ It returns the vault reference:
 }
 ```
 
-**`POST /{tenantId}/reset`** — deletes every secret and the DEK for the tenant:
+**`POST /{tenantId}/reset?confirm=true`** — deletes every secret and the DEK for the tenant (without `confirm=true`: `400`, `{"error": "confirm=true is required", …}`):
 
 ```json
 {
@@ -962,7 +962,7 @@ When the previous master key is **gone for good**:
      keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
      created on the next store);
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
-3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+3. `POST /secretstore/secrets/{tenantId}/reset?confirm=true` for each of them, then store the
    secrets again.
 
 Never call it while a KEK rotation is merely unfinished, or because one replica was

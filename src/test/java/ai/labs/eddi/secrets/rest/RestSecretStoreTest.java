@@ -933,7 +933,7 @@ class RestSecretStoreTest {
         void returns200OnSuccess() throws Exception {
             when(secretProvider.resetTenant("default")).thenReturn(3);
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(200, resp.getStatus());
             Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -947,7 +947,7 @@ class RestSecretStoreTest {
         void returns503WhenUnavailable() {
             when(secretProvider.isAvailable()).thenReturn(false);
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(503, resp.getStatus());
         }
@@ -955,7 +955,7 @@ class RestSecretStoreTest {
         @Test
         @DisplayName("should return 400 for path-traversal tenantId")
         void returns400ForPathTraversalTenantId() {
-            Response resp = rest.resetTenant("../etc/passwd");
+            Response resp = rest.resetTenant("../etc/passwd", true);
 
             assertEquals(400, resp.getStatus());
         }
@@ -963,7 +963,7 @@ class RestSecretStoreTest {
         @Test
         @DisplayName("should return 400 for blank tenantId")
         void returns400ForBlankTenantId() {
-            Response resp = rest.resetTenant(" ");
+            Response resp = rest.resetTenant(" ", true);
 
             assertEquals(400, resp.getStatus());
         }
@@ -974,7 +974,7 @@ class RestSecretStoreTest {
             when(secretProvider.resetTenant("default"))
                     .thenThrow(new ISecretProvider.SecretProviderException("DEK corrupted"));
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(500, resp.getStatus());
         }
@@ -984,9 +984,22 @@ class RestSecretStoreTest {
         void invalidatesCacheOnSuccess() throws Exception {
             when(secretProvider.resetTenant("default")).thenReturn(2);
 
-            rest.resetTenant("default");
+            rest.resetTenant("default", true);
 
             verify(secretResolver).invalidateAll();
+        }
+
+        @Test
+        @DisplayName("L11 (2026-10-17): without confirm=true it is a 400 naming the flag, and nothing is deleted")
+        @SuppressWarnings("unchecked")
+        void refusesWithoutConfirm() throws Exception {
+            Response resp = rest.resetTenant("default", false);
+
+            assertEquals(400, resp.getStatus());
+            Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+            assertEquals("confirm=true is required", body.get("error"));
+            verify(secretProvider, never()).resetTenant(anyString());
+            verify(secretResolver, never()).invalidateAll();
         }
     }
 }

@@ -264,9 +264,15 @@ public interface IRestSecretStore {
      * be permanently deleted. Use this when the master key has changed and the old
      * key is not available.
      *
+     * Refused without {@code confirm=true}, like {@link #adoptMasterKey}: one
+     * mistyped or replayed request would otherwise destroy every secret of the
+     * tenant with no way back.
+     *
      * @param tenantId
      *            the tenant to reset
-     * @return 200 with details of what was deleted
+     * @param confirm
+     *            must be {@code true}
+     * @return 200 with details of what was deleted, 400 without confirmation
      */
     @POST
     @Path("/{tenantId}/reset")
@@ -275,8 +281,9 @@ public interface IRestSecretStore {
     @Operation(summary = "Reset vault for a tenant",
                description = "Deletes ALL secrets and the Data Encryption Key for the tenant. "
                        + "Use this when the master key has changed and recovery is not possible. "
-                       + "WARNING: This permanently destroys all encrypted secrets for the tenant.")
-    Response resetTenant(@PathParam("tenantId") String tenantId);
+                       + "WARNING: This permanently destroys all encrypted secrets for the tenant. Requires confirm=true.")
+    Response resetTenant(@PathParam("tenantId") String tenantId, @QueryParam("confirm")
+    @DefaultValue("false") boolean confirm);
 
     /**
      * Request body for storing a secret. Includes the plaintext value, an optional

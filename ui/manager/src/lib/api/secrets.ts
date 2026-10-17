@@ -528,7 +528,9 @@ export async function resetTenant(
   tenantId: string,
 ): Promise<ResetTenantResponse> {
   const res = await fetch(
-    `${api.getBaseUrl()}${secretPath(tenantId)}/reset`,
+    // confirm=true: the backend refuses a reset without it (the dialog that
+    // calls this has already made the admin type the tenant id).
+    `${api.getBaseUrl()}${secretPath(tenantId)}/reset?confirm=true`,
     { method: "POST", headers: api.getAuthHeader() },
   );
   if (!res.ok) {

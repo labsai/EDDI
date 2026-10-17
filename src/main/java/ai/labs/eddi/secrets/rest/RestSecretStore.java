@@ -623,7 +623,7 @@ public class RestSecretStore implements IRestSecretStore {
                     "message", "The configured master key is now the vault's master key and new secrets can be stored. "
                             + (adoption.tenantsNeedingReset().isEmpty()
                                     ? "No tenant holds unreadable DEKs."
-                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset — "
+                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset?confirm=true — "
                                             + "their secrets were sealed under the lost key.")))
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -633,10 +633,19 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response resetTenant(String tenantId) {
+    public Response resetTenant(String tenantId, boolean confirm) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
+
+        if (!confirm) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "confirm=true is required",
+                            "action", "Resetting a tenant permanently deletes every secret and DEK it holds. Only do this when its "
+                                    + "secrets were sealed under a master key that is lost for good, then repeat the request with "
+                                    + "?confirm=true."))
+                    .build();
+        }
 
         try {
             validateId(tenantId, "tenantId");
