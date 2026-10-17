@@ -177,9 +177,11 @@ as artifacts and written to the job summary, never gated.
 What is gated, and what is not:
 
 - **`max_ops_per_turn`** caps `serverStatus().opcounters`. MongoDB counts inserted, updated and
-  deleted *documents* there, which the fixed scenario reproduces, with one exception: the audit
-  ledger is written in batches, and a run that ends before the last flush comes in *lower* (3.2
-  inserts per turn on the laptop, 2.66 on a 2-second runner run). Never higher, so the ceiling holds.
+  deleted *documents* there, which the fixed scenario reproduces. The audit ledger is written from a
+  queue every 3 s, so without care a short run catches the warm-up's last batch or loses its own
+  (runner runs showed 3.8 and 2.66 inserts per turn against 3.2). Every measurement therefore
+  *settles* before both snapshots: it waits until each node's `eddi_audit_queue_depth` is 0, then
+  one more flush interval (`LOADTEST_AUDIT_FLUSH_S`, default 3).
 - **`max_collection_ops_per_turn`** caps the operations of the collections a turn reads and writes
   itself (`top` per collection): conversation memory, descriptors, vault, user memory.
 - **Clock-driven reads are reported, not gated.** Agent, workflow and quota caches refresh on a

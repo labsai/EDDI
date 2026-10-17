@@ -500,10 +500,26 @@ def counters_diff(before, after):
     return total
 
 
+# EDDI writes the audit ledger from a queue every eddi.audit.flush-interval-seconds (default 3), so a
+# measurement window could otherwise catch the warm-up's last batch or lose its own (CI saw 3.8 and
+# 2.66 inserts per turn against 3.2). Each snapshot waits until that queue is empty and one more
+# interval has passed, for a batch already taken off the queue but not yet stored.
+AUDIT_FLUSH_S = float(os.environ.get("LOADTEST_AUDIT_FLUSH_S", "3"))
+
+
+def settle(timeout=60):
+    def drained():
+        return all(sum(v for k, v in node.items() if k.startswith("eddi_audit_queue_depth")) == 0 for node in scrape_all())
+    if not wait_until(drained, timeout, 0.5):
+        print("warning: the audit queue did not drain; database counts may include a late batch", flush=True)
+    time.sleep(AUDIT_FLUSH_S + 0.5)
+
+
 class Measurement:
     """Snapshots around one load phase: metrics of every node, database counters, gauge peaks."""
 
     def __enter__(self):
+        settle()
         self.m_before, self.db_before = scrape_all(), db_snapshot()
         self.sampler = Sampler()
         self.sampler.start()
@@ -514,7 +530,7 @@ class Measurement:
         self.elapsed = time.time() - self.t0
         self.sampler.stop.set()
         self.sampler.join(5)
-        time.sleep(2)  # let the last turns' persistence settle before counting database ops
+        settle()  # the last turns' persistence and audit batch, before counting database ops
         self.counters = counters_diff(self.m_before, scrape_all())
         self.db = db_diff(self.db_before, db_snapshot())
         self.peaks = self.sampler.peaks
