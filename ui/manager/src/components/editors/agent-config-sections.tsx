@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, memo } from "react";
+import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -19,11 +19,13 @@ import {
   Search,
   Hand,
   NotebookPen,
+  Gauge,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { EditorSection } from "./editor-section";
@@ -932,6 +934,110 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
             </div>
           </div>
         )}
+      </div>
+    </EditorSection>
+  );
+});
+
+// ─── Limits ─────────────────────────────────────────────────────────────────
+
+/**
+ * Spend limits for one conversation. A section of its own rather than a field in
+ * an existing one: it bounds the whole agent, whatever the memory, session or
+ * approval settings are.
+ */
+export const LimitsSection = memo(function LimitsSection({
+  agent,
+  onChange,
+  disabled = false,
+  modified = false,
+}: AgentSectionProps) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const ceiling = agent.maxCostPerConversationUsd;
+
+  // The field edits its own text so an empty box stays empty (= unlimited) and a
+  // half-typed "-" survives; the draft only ever receives a valid value.
+  const [text, setText] = useState(() => (ceiling === undefined ? "" : String(ceiling)));
+  // A number input reports half-typed text ("-", "1e") as "" — which would read
+  // as "unlimited" while the box still shows the "-" — so it is tracked apart.
+  const [badInput, setBadInput] = useState(false);
+  const parsed = badInput ? { ok: false as const } : parseCostCeiling(text);
+  useEffect(() => {
+    // Follow the draft when it changes underneath (Discard, a save, a version switch).
+    setText((prev) => {
+      const p = parseCostCeiling(prev);
+      return p.ok && p.value === ceiling ? prev : ceiling === undefined ? "" : String(ceiling);
+    });
+  }, [ceiling]);
+
+  function commit(next: string, bad: boolean) {
+    setText(next);
+    setBadInput(bad);
+    const p = bad ? ({ ok: false } as const) : parseCostCeiling(next);
+    if (!p.ok) return;
+    // Only write the field when it is set: an unset ceiling means unlimited, and
+    // a stored `null` or -1 would say something the author never typed.
+    const { maxCostPerConversationUsd: _unset, ...rest } = agent;
+    void _unset;
+    onChange(p.value === undefined ? rest : { ...rest, maxCostPerConversationUsd: p.value });
+  }
+
+  return (
+    <EditorSection
+      label={t("agentDetail.limits", "Limits")}
+      icon={Gauge}
+      accent="text-sky-500"
+      variant="card"
+      modified={modified}
+      defaultOpen={ceiling !== undefined}
+    >
+      <div className="space-y-3" data-testid="limits-section">
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.limitsDesc",
+            "Caps what a single conversation with this agent may spend. Once the cap is reached the agent stops calling its model and serves its fallback answer.",
+          )}
+        </p>
+        <div>
+          <label htmlFor={id} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.maxCostPerConversation", "Max cost per conversation (USD)")}
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground" aria-hidden="true">$</span>
+            <input
+              id={id}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={0.01}
+              value={text}
+              placeholder={t("agentDetail.unlimited", "Unlimited")}
+              disabled={disabled}
+              onChange={(e) => commit(e.target.value, e.target.validity?.badInput === true)}
+              aria-invalid={!parsed.ok || undefined}
+              aria-describedby={hintId}
+              className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 aria-invalid:border-destructive"
+              data-testid="max-cost-per-conversation"
+            />
+          </div>
+          {parsed.ok ? (
+            <p id={hintId} className="mt-1 text-[10px] text-muted-foreground">
+              {t("agentDetail.maxCostHint", "Empty = unlimited. 0 = no priced spend at all.")}
+            </p>
+          ) : (
+            <p id={hintId} className="mt-1 text-[10px] text-destructive" data-testid="max-cost-per-conversation-invalid">
+              {t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited.")}
+            </p>
+          )}
+        </div>
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.maxCostPricedOnly",
+            "Only priced models count. A model with no input/output price in its LLM configuration adds $0, so it is never bounded by this cap.",
+          )}
+        </p>
       </div>
     </EditorSection>
   );

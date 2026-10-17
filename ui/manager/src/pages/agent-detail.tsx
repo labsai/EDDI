@@ -86,6 +86,7 @@ import {
   UserMemorySection,
   MemoryPolicySection,
   SessionManagementSection,
+  LimitsSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -494,6 +495,7 @@ export function AgentDetailPage() {
     touched("enableMemoryTools", "userMemoryConfig"),
     touched("memoryPolicy"),
     touched("sessionManagement"),
+    touched("maxCostPerConversationUsd"),
     touched("conversationReview"),
     touched("hitlConfig"),
     touched("channels"),
@@ -995,6 +997,9 @@ export function AgentDetailPage() {
         disabled={isSaving}
         modified={touched("conversationReview")}
       />
+
+      {/* Spend limits */}
+      <LimitsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
