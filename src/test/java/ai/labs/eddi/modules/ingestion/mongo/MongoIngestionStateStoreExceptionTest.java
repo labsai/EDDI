@@ -54,6 +54,7 @@ class MongoIngestionStateStoreExceptionTest {
         MongoCollection<Document> documents = mock(MongoCollection.class);
         when(database.getCollection("rag_ingestion_runs")).thenReturn(runs);
         when(database.getCollection("rag_ingestion_documents")).thenReturn(documents);
+        when(database.getCollection("rag_ingestion_sources")).thenReturn(mock(MongoCollection.class));
 
         // nextGeneration runs before the insert and must not be what fails.
         FindIterable<Document> iterable = mock(FindIterable.class);

@@ -215,6 +215,19 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         }
     }
 
+    /** Production keeps these in a table of their own, one row per source. */
+    private final Map<String, String> storeFingerprints = new HashMap<>();
+
+    @Override
+    public synchronized Optional<String> storeFingerprint(String sourceId) {
+        return Optional.ofNullable(storeFingerprints.get(sourceId));
+    }
+
+    @Override
+    public synchronized void recordStoreFingerprint(String sourceId, String fingerprint) {
+        storeFingerprints.put(sourceId, fingerprint);
+    }
+
     @Override
     public synchronized List<DocumentState> listDocuments(String sourceId, int limit) {
         return documents.values().stream()
@@ -227,6 +240,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     public synchronized void purgeSource(String sourceId) {
         documents.values().removeIf(state -> state.sourceId().equals(sourceId));
         runs.values().removeIf(run -> run.sourceId().equals(sourceId));
+        storeFingerprints.remove(sourceId);
         String prefix = sourceId + KEY_SEPARATOR;
         fencingRunIds.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
         fencingGenerations.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));

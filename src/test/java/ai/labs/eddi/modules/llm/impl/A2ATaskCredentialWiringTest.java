@@ -110,7 +110,8 @@ class A2ATaskCredentialWiringTest {
 
     private A2AToolProviderManager manager() {
         return new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
-                A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, connectionResolver, TestOutbound.facade(engine));
+                A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver, TestOutbound.facade(engine));
     }
 
     private static A2AAgentConfig config(String apiKey) {
@@ -228,7 +229,8 @@ class A2ATaskCredentialWiringTest {
                         new ByteArrayInputStream(new byte[0]));
             };
             var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
-                    A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, connectionResolver, TestOutbound.facade(redirecting));
+                    A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                    A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver, TestOutbound.facade(redirecting));
 
             assertTrue(manager.discoverTools(List.of(config("${connection:sf}"))).executors().isEmpty());
 

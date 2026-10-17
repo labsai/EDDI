@@ -22,7 +22,7 @@ class MongoIngestionStateStoreTest extends MongoTestBase implements IngestionSta
 
     @BeforeEach
     void setUp() {
-        dropCollections("rag_ingestion_documents", "rag_ingestion_runs");
+        dropCollections("rag_ingestion_documents", "rag_ingestion_runs", "rag_ingestion_sources");
         // Rebuilt per test: the constructor creates the indexes, including the
         // partial unique index that enforces one in-flight run per source, and
         // dropping the collections drops those with them.

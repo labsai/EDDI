@@ -128,8 +128,10 @@ If you prefer manual control over Docker Compose:
 docker compose up
 
 # PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
-# docker-compose.yml (an overlay cannot un-declare the base's mongodb service)
-docker compose -f docker-compose.postgres-only.yml up
+# docker-compose.yml (an overlay cannot un-declare the base's mongodb service).
+# The database password has no default; keep the value stable across runs
+# (install.sh --db=postgres generates one into .env for you)
+POSTGRES_PASSWORD=$(openssl rand -base64 24) docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication. No realm account ships a password (see the
 # header of docker-compose.auth.yml, or let install.sh --with-auth set one)
@@ -153,7 +155,7 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
 
 # A cluster: three EDDI replicas behind a round-robin load balancer, a
 # three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own
-EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) NATS_PASSWORD=$(openssl rand -base64 24) \
+EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) MONGO_PASSWORD=$(openssl rand -base64 24) NATS_PASSWORD=$(openssl rand -base64 24) \
   docker compose -f docker-compose.cluster.yml up -d
 ```
 

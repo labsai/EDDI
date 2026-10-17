@@ -96,8 +96,7 @@ public class RemoteApiResourceSource implements IResourceSource {
 
     /**
      * Cap on every JSON document a live sync reads from the source (descriptor
-     * listings, agent/workflow/extension configs). See
-     * {@link CappedStringBodyHandler}.
+     * listings, agent/workflow/extension configs). See {@link #sendJson}.
      */
     static final String MAX_RESPONSE_BYTES_PROPERTY = "eddi.backup.sync.max-response-bytes";
     static final long DEFAULT_MAX_RESPONSE_BYTES = 16L * 1024 * 1024;

@@ -50,7 +50,10 @@ const MAX_TOKEN_LENGTH = 16_384;
  * (comma-separated, exact `scheme://host[:port]` each). An explicit opt-in:
  * with no value no token is accepted and nothing is ever posted to the host.
  * A malformed entry, a wildcard, a path or the opaque origin "null" is dropped
- * rather than widening the allow-list.
+ * rather than widening the allow-list. A plain-http origin is kept — local
+ * development runs on one — but any that is not localhost is warned about:
+ * the token the host posts travels over that page's own transport, and a
+ * network attacker who can read it can also read the token.
  */
 export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
   const raw = params.get("tokenOrigin");
@@ -62,11 +65,29 @@ export function parseAllowedTokenOrigins(params: URLSearchParams): string[] {
       if (!o || o.includes("*")) return false;
       try {
         const url = new URL(o);
-        return (url.protocol === "https:" || url.protocol === "http:") && url.origin === o;
+        const kept = (url.protocol === "https:" || url.protocol === "http:") && url.origin === o;
+        if (kept && url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+          console.warn(
+            `[eddi-chat] tokenOrigin ${o} is plain http: the bearer token the host page posts is only as ` +
+              "private as that page. Serve the host page over https.",
+          );
+        }
+        return kept;
       } catch {
         return false;
       }
     });
+}
+
+/** localhost and the loopback addresses, as the URL parser spells them. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h === "[::1]" ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
+  );
 }
 
 /** A plausible bearer token: printable ASCII, no whitespace, bounded. */
