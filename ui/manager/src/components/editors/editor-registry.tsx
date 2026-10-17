@@ -43,6 +43,10 @@ import {
   type PromptSnippetConfig,
 } from "@/components/editors/snippet-editor";
 import {
+  TestSuiteEditor,
+  type AgentTestSuite,
+} from "@/components/editors/test-suite-editor";
+import {
   ParserEditor,
 } from "@/components/editors/parser-editor";
 import type {
@@ -98,6 +102,9 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   parser: (p, o, r) => (
     <ParserEditor data={p as ParserData} onChange={o} readOnly={r} />
   ),
+  testsuite: (p, o, r) => (
+    <TestSuiteEditor data={p as AgentTestSuite} onChange={o} readOnly={r} />
+  ),
 };
 
 /**
@@ -120,4 +127,7 @@ export const EXTENSION_TO_SLUG: Record<string, string> = {
   "eddi://ai.labs.snippet": "snippets",
   "eddi://ai.labs.snippets": "snippets",
   "eddi://ai.labs.parser": "parser",
+  // Not a pipeline step, but a resource type like the rest: lets a link by
+  // extension URI find the suite editor.
+  "eddi://ai.labs.testsuite": "testsuite",
 };

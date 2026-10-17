@@ -25,8 +25,8 @@ describe("getResourceType", () => {
     expect(getResourceType("nonexistent")).toBeUndefined();
   });
 
-  it("returns all 10 resource types", () => {
-    expect(RESOURCE_TYPES).toHaveLength(10);
+  it("returns all 11 resource types", () => {
+    expect(RESOURCE_TYPES).toHaveLength(11);
     const slugs = RESOURCE_TYPES.map((rt) => rt.slug);
     expect(slugs).toContain("rules");
     expect(slugs).toContain("apicalls");
@@ -38,6 +38,7 @@ describe("getResourceType", () => {
     expect(slugs).toContain("rag");
     expect(slugs).toContain("snippets");
     expect(slugs).toContain("parser");
+    expect(slugs).toContain("testsuite");
   });
 });
 

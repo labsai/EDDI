@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
+import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
   {
@@ -308,6 +309,7 @@ const STORE_EXTENSIONS: Record<string, string> = {
   ragstore: "ai.labs.rag",
   snippetstore: "ai.labs.snippet",
   parserstore: "ai.labs.parser",
+  testsuitestore: "ai.labs.testsuite",
 };
 
 /**
@@ -5816,5 +5818,75 @@ export const connectionHandlers = [
     // 204 whether or not a grant existed — whether a given user had linked a
     // given connection is not something a caller learns by probing.
     return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ---------------------------------------------------------------------------
+// Agent regression harness — test suites (`/testsuitestore/testsuites`) and runs
+// (`/agenttests/runs`). Its own group rather than `createResourceHandlers`
+// because that factory also mocks `jsonSchema` and `POST /{id}` (duplicate),
+// which this store does not have — see ResourceTypeConfig.duplicable/jsonSchema.
+// ---------------------------------------------------------------------------
+
+/** Runs started through the mock, by id. A RUNNING run turns PASSED after `MOCK_RUN_DURATION_MS`. */
+const startedMockRuns = new Map<string, ReturnType<typeof buildRunningRun>>();
+export const MOCK_RUN_DURATION_MS = 4000;
+
+function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
+  if (Date.now() - run.startedAt < MOCK_RUN_DURATION_MS) return run;
+  const [, passed] = buildMockRuns(run.agentId);
+  return {
+    ...passed!,
+    id: run.id,
+    suiteId: run.suiteId,
+    suiteVersion: run.suiteVersion ?? passed!.suiteVersion,
+    startedAt: run.startedAt,
+    finishedAt: run.startedAt + MOCK_RUN_DURATION_MS,
+    durationMs: MOCK_RUN_DURATION_MS,
+  };
+}
+
+export const agentTestHandlers = [
+  http.get("*/testsuitestore/testsuites/:id", ({ request }) => {
+    if (isNotAnId(new URL(request.url).pathname)) return;
+    return HttpResponse.json(MOCK_SUITE);
+  }),
+  http.post("*/testsuitestore/testsuites", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/testsuitestore/testsuites/suite-new?version=1" },
+    });
+  }),
+  http.put("*/testsuitestore/testsuites/:id", ({ request, params }) => {
+    const version = parseInt(new URL(request.url).searchParams.get("version") ?? "1", 10);
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${params.id}?version=${version + 1}` },
+    });
+  }),
+  http.delete("*/testsuitestore/testsuites/:id", () => new HttpResponse(null, { status: 204 })),
+
+  http.get("*/agenttests/runs", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId") ?? "";
+    const started = [...startedMockRuns.values()].filter((r) => r.agentId === agentId).map(settleMockRun);
+    const all = [...started.reverse(), ...buildMockRuns(agentId)];
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
+  }),
+  http.get("*/agenttests/runs/:runId", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (started) return HttpResponse.json(settleMockRun(started));
+    // Fixture runs carry an agent id of their own; the id is all the lookup needs.
+    const found = buildMockRuns("agent1").find((r) => r.id === runId);
+    return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
+  http.post("*/agenttests/runs", async ({ request }) => {
+    const body = (await request.json()) as { suiteId: string; agentId: string; suiteVersion?: number };
+    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion);
+    startedMockRuns.set(run.id, run);
+    return HttpResponse.json(run, { status: 202 });
   }),
 ];
