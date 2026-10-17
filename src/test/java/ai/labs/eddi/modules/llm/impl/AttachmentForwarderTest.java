@@ -5,7 +5,9 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -40,7 +42,6 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -49,7 +50,7 @@ import static org.mockito.Mockito.*;
 class AttachmentForwarderTest {
 
     private IAttachmentStore store;
-    private SafeHttpClient httpClient;
+    private OutboundHttp httpClient;
     private IConversationMemory memory;
     private IWritableConversationStep currentStep;
     private AttachmentForwarder forwarder;
@@ -57,7 +58,7 @@ class AttachmentForwarderTest {
     @BeforeEach
     void setUp() {
         store = mock(IAttachmentStore.class);
-        httpClient = mock(SafeHttpClient.class);
+        httpClient = mock(OutboundHttp.class);
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
         when(memory.getCurrentStep()).thenReturn(currentStep);
@@ -374,7 +375,7 @@ class AttachmentForwarderTest {
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
-            verify(httpClient).sendValidatedBounded(any(), anyLong());
+            verify(httpClient).send(any(OutboundRequest.class), any());
         }
 
         @Test
@@ -614,8 +615,8 @@ class AttachmentForwarderTest {
     @Test
     void downloadNon200_addsNote() throws Exception {
         mockAttachments(urlImage());
-        doReturn(new SafeHttpClient.BoundedResponse(500, new byte[0], false))
-                .when(httpClient).sendValidatedBounded(any(), anyLong());
+        doReturn(TestOutbound.response(500, new byte[0], false))
+                .when(httpClient).send(any(OutboundRequest.class), any());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash"); // needs download
@@ -627,7 +628,7 @@ class AttachmentForwarderTest {
     @Test
     void downloadException_addsNote() throws Exception {
         mockAttachments(urlImage());
-        doThrow(new IOException("boom")).when(httpClient).sendValidatedBounded(any(), anyLong());
+        doThrow(new IOException("boom")).when(httpClient).send(any(OutboundRequest.class), any());
         List<ChatMessage> messages = messages(UserMessage.from("look"));
 
         forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash");
@@ -740,8 +741,8 @@ class AttachmentForwarderTest {
 
     @SuppressWarnings("unchecked")
     private void mockDownload(byte[] bytes) throws Exception {
-        doReturn(new SafeHttpClient.BoundedResponse(200, bytes, false))
-                .when(httpClient).sendValidatedBounded(any(), anyLong());
+        doReturn(TestOutbound.response(200, bytes, false))
+                .when(httpClient).send(any(OutboundRequest.class), any());
     }
 
     private static Attachment urlImage() {

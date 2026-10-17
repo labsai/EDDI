@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.utils.PageBounds;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.jboss.logging.Logger;
 
@@ -91,6 +92,7 @@ public class RestDocumentDescriptorStore implements IRestDocumentDescriptorStore
     @Override
     public List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit, String space, String ownership) {
         requireConfigType(type);
+        PageBounds.require(index, limit);
         try {
             // The cross-resource listing: it takes the descriptor type as a query
             // parameter rather than deriving it from a store, which makes it the one

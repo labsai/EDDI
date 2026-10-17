@@ -1,0 +1,63 @@
+# Load-test stack for the throughput work (planning/throughput-optimization-plan.md, WS0).
+# Driven by loadtest.py; see README.md. Everything binds to 127.0.0.1 only: EDDI runs
+# unauthenticated here, exactly like the README quick start.
+name: eddi-loadtest
+
+services:
+  mongodb:
+    image: mongo:7.0.43
+    environment:
+      - "MONGO_INITDB_ROOT_USERNAME=eddi"
+      - "MONGO_INITDB_ROOT_PASSWORD=changeme"
+    ports:
+      - "127.0.0.1:${LOADTEST_MONGO_PORT:-27370}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Mock OpenAI-compatible LLM. The delay is not set here: WireMock cannot read it from the
+  # environment, so loadtest.py sets it per run through PUT /__admin/settings {"fixedDelay": ms}.
+  # Async responses keep a delayed answer from holding a Jetty thread, so the mock is not the
+  # bottleneck at 1000 concurrent calls; the request journal is off so it does not grow unbounded.
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    command: ["--port", "8080", "--async-response-enabled", "true", "--async-response-threads", "64",
+              "--container-threads", "400", "--no-request-journal", "--disable-banner"]
+    volumes:
+      - "./wiremock/mappings:/home/wiremock/mappings:ro"
+    ports:
+      - "127.0.0.1:${LOADTEST_WIREMOCK_PORT:-18370}:8080"
+
+  # The published runtime image. loadtest.py adds docker-compose.app.yml, which mounts a local
+  # build (default: this checkout's target/quarkus-app) over /deployments so the run measures
+  # this branch inside the shipped runtime — the same approach as scripts/cluster-demo.
+  eddi:
+    image: ${LOADTEST_EDDI_IMAGE:-labsai/eddi:6.5.0}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      # Boot guards refuse to start without these while OIDC is off (see docker-compose.yml).
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
+      - "QUARKUS_OIDC_TENANT_ENABLED=false"
+      - "QUARKUS_ANALYTICS_DISABLED=true"
+      - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
+      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin"
+      - "JAVA_OPTS_APPEND=${LOADTEST_JAVA_OPTS:--Xmx2g}"
+      # Off by default in EDDI; on here so a /v1 scenario can be added without a restart.
+      - "EDDI_OPENAI_COMPAT_ENABLED=true"
+    mem_limit: ${LOADTEST_EDDI_MEMORY:-3g}
+    ports:
+      - "127.0.0.1:${LOADTEST_EDDI_PORT:-7370}:7070"
+
+  # One-shot load generator: `docker compose run --rm k6 run /scripts/turns.js`.
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["k6"]
+    volumes:
+      - "./k6:/scripts:ro"
+      - "./results:/results"

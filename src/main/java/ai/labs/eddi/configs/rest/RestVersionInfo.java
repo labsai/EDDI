@@ -7,10 +7,12 @@ package ai.labs.eddi.configs.rest;
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
 import ai.labs.eddi.engine.security.spaces.AccessScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.utils.PageBounds;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 import org.jboss.logging.Logger;
@@ -18,6 +20,7 @@ import org.jboss.logging.Logger;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+import java.util.function.Function;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -112,6 +115,8 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
 
     private List<DocumentDescriptor> readDescriptors(String type, String filter, Integer index, Integer limit,
                                                      AccessScope scope) {
+        // A page is a page: ?limit=2147483647 used to return every descriptor at once.
+        PageBounds.require(index, limit);
         try {
             // Filtered in the query rather than on the returned page: post-filtering
             // returns short pages and forces the scan-budgeted back-fill that conversation
@@ -228,6 +233,55 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Applies an RFC 6902 JSON Patch to version {@code version} of a stored
+     * document and stores the result as a new version — {@link #update}'s contract,
+     * reached by describing the change instead of re-sending the document.
+     * <p>
+     * Everything {@link #update} enforces still applies, because it is what this
+     * calls: edit access, the version check (a stale {@code version} is the same
+     * {@code 409} with the current resource URI), the store write, and the
+     * {@code Location} of the new version. On top of that the patched document is
+     * parsed strictly ({@link ConfigJsonPatcher}) and then run through
+     * {@code validator}, which is the store's own pre-write check — the one its
+     * {@code PUT} runs — so nothing a {@code PUT} would refuse is storable here. A
+     * patch is applied to the stored document as the REST mapper serialises it,
+     * which is exactly what a {@code GET} of that version returns, references and
+     * all, and never needs the caller to hold a copy.
+     *
+     * @param validator
+     *            the store's pre-write validation. Returns a response to refuse
+     *            with (which is returned as-is), or {@code null} to proceed; it may
+     *            instead throw
+     * @throws jakarta.ws.rs.BadRequestException
+     *             (400) for a body that is not a patch, an operation that fails — a
+     *             {@code test} that does not hold, a path that does not resolve —
+     *             or a patched document the model rejects
+     */
+    public Response patch(String id, Integer version, String patchBody, Class<T> type, ConfigJsonPatcher patcher,
+                          Function<T, Response> validator) {
+        requireEditAccess(id);
+        version = validateParameters(id, version);
+        // Before the patch is applied rather than only when the store write fails:
+        // a patch is meaningful against the version it was written for, and applying
+        // it to anything else is how a lost update starts. The same 409 either way.
+        requireCurrentVersion(id, version);
+
+        T current;
+        try {
+            current = resourceStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+
+        T patched = patcher.apply(current, patchBody, type);
+        Response refusal = validator != null ? validator.apply(patched) : null;
+        if (refusal != null) {
+            return refusal;
+        }
+        return update(id, version, patched);
     }
 
     public Response delete(String id, Integer version) {

@@ -722,11 +722,12 @@ It is provisioned by EDDI-Manager (at `/manage/operator`) through `POST /adminis
 
 ### How It Works
 
-1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag.
+1. **Tool generation**: the Manager fetches EDDI's own OpenAPI spec and passes it to `setup-api` with an endpoint allow-list. `McpApiToolBuilder` turns each allow-listed operation into an `apicalls` tool, named by its `operationId` (falling back to a `method_path` slug) and grouped by its first OpenAPI tag. An allow-listed endpoint whose tool could not send an input it requires — a request body that is neither JSON nor plain text, or a required header parameter — is skipped by the generator and reported as `resources.unusableEndpoints`; activation also checks the spec itself *before* creating anything and refuses, naming the endpoints, exactly as it does for an endpoint the spec lacks. (A `text/plain` body such as `updateResourceUri`'s URI is supported — see [MCP Server](mcp-server.md#how-create_api_agent-builds-a-write-tools-body).)
 2. **Provisioning**: `AgentSetupService.createApiAgent` creates the parser, behaviour rules, one `apicalls` config per group, LLM config, workflow and agent — in that order, with compensating deletes if any step fails.
 3. **Gating**: the agent is created *with* its `hitlConfig` on v1, so the approval gate cannot be bypassed by redeploying an earlier version. The gate requires approval by HTTP *method* — `http.post:*`, `http.put:*`, `http.patch:*`, `http.delete:*` — and exempts `http.get:*`. Gating by method rather than by an enumerated list of tool names is what keeps it fail-safe: a write endpoint granted later is covered the moment it exists, with nobody having to remember to add its name.
 4. **Operation**: the model calls a tool; `ToolApprovalGate` classifies it; a write pauses the conversation (`hitlPauseType: "TOOL_CALL"`) until a human approves the *resolved request*, which is fingerprinted at gate time and re-checked before execution.
 5. **Self-modification**: on approval, the tool call reaches EDDI's REST API and the new agent configuration is written.
+6. **Editing, not echoing**: a stored configuration holds credential *references* (`${vault:…}`), and an API call resolves those before it sends — so an edit that echoed a document back would write the plaintext secret, and is refused. The operator edits LLM, HTTP-call and MCP-call configurations with `PATCH` (RFC 6902) and sends only what changes; see [Editing a configuration that holds a reference](secrets-vault.md#editing-a-configuration-that-holds-a-reference-patch-not-echo). The Manager refuses any LLM-config patch that touches a task's `toolApprovals`, the same way it refuses a `PUT` that carries one.
 
 ### Keeping It Up to Date
 
@@ -972,18 +973,21 @@ Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent
 | Layer | Component | What It Blocks |
 |-------|-----------|----------------|
 | **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
-| **Layer 2: Redirect Validation** | `SafeHttpClient.sendWithRedirects()` | Each redirect hop is validated against Layer 1 rules. `HttpClient.Redirect.NEVER` prevents the JDK from following redirects silently. Maximum 5 hops |
+| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and strips credentials (fixed names and any `${caller:...}`-derived header) on a cross-origin hop. Maximum 5 hops |
 | **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
 
 **Usage pattern:**
 ```java
-@Inject SafeHttpClient httpClient;
+@Inject OutboundHttp http;
 
-// For user-controlled URLs (LLM tools, web scraping):
-httpClient.sendValidated(request, bodyHandler);  // validates initial + redirect targets
+// For user-controlled URLs (LLM tools, web scraping): SsrfPolicy.STRICT, the
+// DEFAULT profile's default, validates the initial URL and every redirect hop.
+http.send(OutboundRequest.get(Profile.DEFAULT, uri).build(),
+        BodyMode.string(1_000_000, BodyMode.OnOverflow.TRUNCATE));
 
-// For config-controlled URLs (known APIs):
-httpClient.send(request, bodyHandler);            // validates redirect targets only
+// For config-controlled URLs (known APIs): the initial URL is trusted,
+// redirect hops are still validated.
+http.send(OutboundRequest.get(Profile.DEFAULT, uri).ssrf(SsrfPolicy.HOPS_ONLY).build(), mode);
 ```
 
 **DNS Rebinding:** EDDI validates hostnames at request time. A TOCTOU (time-of-check-time-of-use) gap exists between DNS validation and TCP connect. This is an accepted risk — exploitation requires a cooperating DNS server AND a successful race condition AND bypassing Layer 2 redirect validation. Defense-in-depth makes this impractical in practice.

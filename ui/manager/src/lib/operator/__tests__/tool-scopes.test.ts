@@ -10,12 +10,15 @@ import {
   grantsWriteCapability,
   grantsAgentCreation,
   grantsAgentModification,
+  grantsAgentCascade,
   grantsKnowledgeBaseReads,
   grantsIngestionStatusReads,
   grantsIngestionRunReads,
   grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
+  grantedPatchEndpoints,
+  grantsCredentialSafeEdits,
 } from "../tool-scopes";
 
 describe("tool-scopes", () => {
@@ -53,6 +56,10 @@ describe("tool-scopes", () => {
         "GET /administration/{environment}/deploymentstatus/{agentId}",
       );
       expect(READ_ENDPOINTS).toContain("GET /administration/logs");
+    });
+
+    it("can look up which EDDI build is running", () => {
+      expect(READ_ENDPOINTS).toContain("GET /administration/version");
     });
 
     it("can see the schedule it might later be asked to disable", () => {
@@ -204,6 +211,7 @@ describe("tool-scopes", () => {
         "PUT /workflowstore/workflows/{id}",
         "POST /workflowstore/workflows",
         "PUT /agentstore/agents/{id}/updateResourceUri",
+        "POST /agentstore/agents/{id}/cascade",
         "PUT /llmstore/llms/{id}",
         "POST /llmstore/llms",
         "PUT /rulestore/rulesets/{id}",
@@ -218,6 +226,11 @@ describe("tool-scopes", () => {
         "POST /apicallstore/apicalls",
         "PUT /mcpcallsstore/mcpcalls/{id}",
         "POST /mcpcallsstore/mcpcalls",
+        // Credential-safe partial edits (RFC 6902): the stores whose documents hold
+        // ${vault:…} references, which a full PUT cannot round-trip.
+        "PATCH /llmstore/llms/{id}",
+        "PATCH /apicallstore/apicalls/{id}",
+        "PATCH /mcpcallsstore/mcpcalls/{id}",
       ]);
     });
 
@@ -244,8 +257,26 @@ describe("tool-scopes", () => {
       // a hitlConfig. A full PUT can, and stays out.
       expect(WRITE_ENDPOINTS).not.toContain("PUT /agentstore/agents/{id}");
       expect(WRITE_ENDPOINTS).not.toContain("POST /agentstore/agents");
+      // Both agent-store writes are pointer changes: a bare URI, or a list of
+      // {oldUri, newUri} pairs. Neither has a field that could carry a document.
       const agentWrites = WRITE_ENDPOINTS.filter((e) => e.includes("/agentstore/"));
-      expect(agentWrites).toEqual(["PUT /agentstore/agents/{id}/updateResourceUri"]);
+      expect(agentWrites).toEqual([
+        "PUT /agentstore/agents/{id}/updateResourceUri",
+        "POST /agentstore/agents/{id}/cascade",
+      ]);
+    });
+
+    it("grants the one-pass cascade as a gated write, and the predicate that lets the prompt name it follows the grant", () => {
+      expect(WRITE_ENDPOINTS).toContain("POST /agentstore/agents/{id}/cascade");
+      // POST, so `buildToolApprovals`' `http.post:*` gates it the moment it is
+      // allow-listed — there is no separate list to forget to update.
+      expect(buildToolApprovals().requireApproval).toContain("http.post:*");
+      expect(buildToolApprovals().exempt).not.toContain("http.post:*");
+      expect(grantsAgentCascade(endpointsForScope("read_write"))).toBe(true);
+      // Not a read, and not in a read-only operator.
+      expect(READ_ENDPOINTS).not.toContain("POST /agentstore/agents/{id}/cascade");
+      expect(grantsAgentCascade(endpointsForScope("read_only"))).toBe(false);
+      expect(grantsAgentCascade(["PUT /agentstore/agents/{id}/updateResourceUri"])).toBe(false);
     });
 
     it("can create a whole new agent (both shapes), but never touch an existing agent's own document", () => {
@@ -256,9 +287,9 @@ describe("tool-scopes", () => {
       // comment on WRITE_ENDPOINTS), so that stays out categorically.
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup");
       expect(WRITE_ENDPOINTS).toContain("POST /administration/agents/setup-api");
-      // The only agent-store write is the bare-URI repoint, asserted above.
+      // The only agent-store writes are the pointer changes, asserted above.
       const fullDocumentWrites = WRITE_ENDPOINTS.filter(
-        (e) => e.includes("/agentstore/") && !e.endsWith("/updateResourceUri"),
+        (e) => e.includes("/agentstore/") && !e.endsWith("/updateResourceUri") && !e.endsWith("/cascade"),
       );
       expect(fullDocumentWrites).toEqual([]);
     });
@@ -293,6 +324,7 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).toContain("POST /llmstore/llms");
       // Still no DELETE and no duplicate-by-id, same as every other store.
       expect(WRITE_ENDPOINTS.filter((e) => e.includes("/llmstore/")).sort()).toEqual([
+        "PATCH /llmstore/llms/{id}",
         "POST /llmstore/llms",
         "PUT /llmstore/llms/{id}",
       ]);
@@ -473,6 +505,57 @@ describe("tool-scopes", () => {
     it("agrees with the real read_write endpoint set", () => {
       expect(grantsAgentCreation(endpointsForScope("read_write"))).toBe(true);
       expect(grantsAgentCreation(endpointsForScope("read_only"))).toBe(false);
+    });
+  });
+
+  describe("credential-safe edits (PATCH)", () => {
+    const PATCHES = [
+      "PATCH /llmstore/llms/{id}",
+      "PATCH /apicallstore/apicalls/{id}",
+      "PATCH /mcpcallsstore/mcpcalls/{id}",
+    ];
+
+    it("grants a PATCH on exactly the stores whose documents hold credential references", () => {
+      const granted = WRITE_ENDPOINTS.filter((e) => e.startsWith("PATCH /") && !e.includes("descriptorstore"));
+      expect(granted).toEqual(PATCHES);
+    });
+
+    it("every patchable store is also writable and readable — a patch is applied to a document the operator can read", () => {
+      for (const entry of PATCHES) {
+        const store = entry.replace(/^PATCH \//, "").replace(/\/\{id\}$/, "");
+        expect(WRITE_ENDPOINTS, store).toContain(`PUT /${store}/{id}`);
+        expect(READ_ENDPOINTS, store).toContain(`GET /${store}/{id}`);
+      }
+    });
+
+    it("keeps the full-document PUT — it still works for documents with no reference", () => {
+      for (const entry of PATCHES) {
+        expect(WRITE_ENDPOINTS).toContain(entry.replace("PATCH", "PUT"));
+      }
+    });
+
+    it("never PATCHes a store that cannot carry a reference, or one that is not granted at all", () => {
+      for (const store of ["rulestore/rulesets", "outputstore/outputsets", "propertysetterstore/propertysetters", "dictionarystore/dictionaries"]) {
+        expect(WRITE_ENDPOINTS).not.toContain(`PATCH /${store}/{id}`);
+      }
+      expect(WRITE_ENDPOINTS.filter((e) => e.includes("/ragstore/"))).toEqual([]);
+      expect(WRITE_ENDPOINTS).not.toContain("PATCH /agentstore/agents/{id}");
+      expect(WRITE_ENDPOINTS).not.toContain("PATCH /groupstore/groups/{id}");
+    });
+
+    it("is gated like every other write — http.patch is among the patterns that require approval", () => {
+      expect(buildToolApprovals().requireApproval).toContain("http.patch:*");
+    });
+
+    it("reports exactly the granted PATCH endpoints, in a stable order", () => {
+      expect(grantedPatchEndpoints(endpointsForScope("read_write"))).toEqual(PATCHES);
+      expect(grantedPatchEndpoints(endpointsForScope("read_only"))).toEqual([]);
+      expect(grantedPatchEndpoints([...READ_ENDPOINTS, "PATCH /mcpcallsstore/mcpcalls/{id}"])).toEqual([
+        "PATCH /mcpcallsstore/mcpcalls/{id}",
+      ]);
+      // The descriptor metadata PATCH is a different verb with a different body.
+      expect(grantsCredentialSafeEdits(["PATCH /descriptorstore/descriptors/{id}"])).toBe(false);
+      expect(grantsCredentialSafeEdits(endpointsForScope("read_write"))).toBe(true);
     });
   });
 

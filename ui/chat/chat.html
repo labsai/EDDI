@@ -39,6 +39,9 @@
 </head>
 <body>
   <div id="root"></div>
+  <!-- Operator settings the widget needs before its first request
+       (window.__EDDI_CHAT__), served by the EDDI backend; see src/api/chat-config.ts. -->
+  <script src="/chat/__config__.js"></script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

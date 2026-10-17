@@ -151,8 +151,8 @@ class AgentOrchestratorToolContextBudgetTest {
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
         // Truncation stays OFF (no toolResponseLimits) on purpose: per-result
         // truncation is opt-in, so the aggregate guard has to hold without it.
-        lenient().when(toolResponseTruncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any()))
-                .thenAnswer(inv -> inv.getArgument(1));
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(2));
     }
 
     private AgentOrchestrator newOrchestrator() {

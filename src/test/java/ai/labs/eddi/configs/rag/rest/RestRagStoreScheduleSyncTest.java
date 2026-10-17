@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,7 +54,7 @@ class RestRagStoreScheduleSyncTest {
         ragStore = mock(IRagStore.class);
         sourceIngestionService = mock(RagSourceIngestionService.class);
         restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(ResourceAccessGuard.class), sourceIngestionService);
+                mock(ResourceAccessGuard.class), sourceIngestionService, mock(EmbeddingStoreFactory.class));
     }
 
     @Test

@@ -173,7 +173,7 @@ public class AgentCardService {
      * OIDC discovery ({@code <issuer>/.well-known/openid-configuration}) would
      * remove the assumption rather than document it, and is the right follow-up. It
      * is not done here because it turns card rendering into an outbound HTTP call —
-     * needing {@code SafeHttpClient}, a cache and a failure policy — on a path that
+     * needing {@code OutboundHttp}, a cache and a failure policy — on a path that
      * is now anonymous.
      *
      * @return the token endpoint, or null when OIDC is not configured at all

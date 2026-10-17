@@ -243,6 +243,20 @@ what it finds. Off by default. Worth knowing before touching it:
   Manager's approval UI only — defence in depth: a pause approved over REST, MCP
   or a Slack approval channel never reaches them, and the server's own check of
   the approved call is the enforcement on those paths.
+  **Edits go through `PATCH`, not `PUT`.** LLM, apicall and mcpcall documents hold
+  `${vault:…}` references, and a full `PUT` of a document the model read back is
+  refused by the backend's `ConfigReferenceGuard` — correctly, and an echo that
+  got past it would be resolved to the plaintext key before it was stored. So
+  `PATCH /{store}/{id}` (RFC 6902, `application/json-patch+json`) is granted for
+  those three stores (`PATCHABLE_EXTENSION_STORES`), the prompt tells the operator
+  to send only what changes, and `gate-guard.ts` reads patch operations: a path
+  or value naming `toolApprovals` is refused, and so are `copy` and `move` (they
+  can carry a stored override or reference somewhere new). The approval card
+  lists a patch operation by operation (`request-preview.tsx`). `PUT` stays
+  granted for documents without references. Never loosen the guard's `PATCH`
+  rules without reading its "Patches" section; a new patchable store needs the
+  same three things: the endpoint in `tool-scopes.ts`, a backend `PATCH`, and a
+  line in `openapi-operations.json`.
   `read_write` is the DEFAULT scope and freely selectable on first activation
   (read-only is the explicit opt-down); the safety lives in activation itself:
   the gate is read back from the just-provisioned document
@@ -252,6 +266,44 @@ what it finds. Off by default. Worth knowing before touching it:
   **Backend floor: operator activation requires EDDI 6.2.0+** — the allow-list
   includes `GET /administration/docs{,/{name}}` (`@since 6.2.0`), and
   `findMissingEndpoints` refuses activation when the spec lacks an entry.
+  **A path in the spec is not a usable tool.** The generator
+  (`McpApiToolBuilder`) maps only `application/json` and `text/plain` request
+  bodies; an operation that *requires* any other body, or a required header
+  parameter, is skipped and reported (`resources.unusableEndpoints` on the
+  `setup-api` response). `findUnusableEndpoints` runs the same test against the
+  fetched spec before anything is created, and activation also rolls back on the
+  backend's report, so an allow-listed endpoint can never ship as a tool that
+  can only fail after the admin approved it (`updateResourceUri`'s `text/plain`
+  body was exactly that). **Before adding an endpoint to the allow-list, check
+  its body media type**; the two lists (`SUPPORTED_BODY_MEDIA_TYPES` in
+  `operator.ts`, `isSupportedBodyType` in the builder) must stay in step. An
+  older backend that does not report the field is covered by the pre-flight.
+- **Multi-step changes cost two approvals, not one per step.** Two levers, both
+  stated to the operator by `buildBatchingSection` in `system-prompt.ts` (a
+  clearly delimited block — keep it that way): (1) it lists the WHOLE plan before
+  the first gated call — after a look/check/verify request the plan is a
+  *proposal* and it waits for agreement (the "check/look/verify is read-only"
+  rule); for a change asked for outright it states the plan and makes the first
+  call in the same turn, because the approval pause is the confirmation — then
+  issues independent writes as **parallel tool calls in one turn** — the backend
+  gate classifies a whole model message as one batch and pauses it once
+  (`docs/hitl.md` → "Batching"), and `approval-banner.tsx` already decides it call
+  by call (`requireExplicitPerCall`); (2) it lands an edit with ONE
+  `POST /agentstore/agents/{id}/cascade` (`cascadeAgentChanges`) instead of
+  separate workflow-repoint, agent-repoint and deploy calls. A call whose
+  arguments need an earlier call's *result* (a version number) cannot be batched
+  with it — approval binds to the exact resolved request ("request pinning"). The
+  cascade is in `WRITE_ENDPOINTS` because its body is URI pairs only, so it cannot
+  carry `hitlConfig`; aimed at the operator's own agent it is the same
+  self-ungating hinge as `updateResourceUri`, and `self-guard.ts` covers it for
+  the same reason (the agent id is a path segment). `cascade-preview.ts` /
+  `cascade-summary.tsx` render a gated cascade as `llm <id> v1 → v2` plus
+  "will redeploy to <env>"; the raw body stays below it. Knowledge-base binding:
+  batch 1 = the LLM config edit as a credential-safe PATCH plus the workflow write that
+  adds the RAG step as `PUT /workflowstore/workflows/{id}` (the workflow store has no
+  PATCH and a workflow holds no credential references), issued in parallel; batch 2 = one
+  cascade carrying both new versions plus the redeploy. The batching block names no write
+  method; it defers to the editing rules, so it stays right whichever method they teach.
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.

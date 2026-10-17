@@ -215,7 +215,8 @@ class ConversationStepRunner {
                 try {
                     Void result = runConversationStep(environment, conversationMemory, conversationId, loggingContext,
                             identityBoundExecution,
-                            rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier, lease);
+                            rebuildWhenSuperseded ? memory -> bindIdentity.apply(turnBuilder.build(memory)) : null, skipNotifier, lease,
+                            processingTurn);
                     TurnLeaseLostException lost = leaseLostTurns.remove(conversationId);
                     if (lost != null) {
                         // Stopped at a task boundary because this node lost the lease: nothing
@@ -238,6 +239,13 @@ class ConversationStepRunner {
                     // a pipeline error or a cancelled inner future never reaches it — and
                     // an entry that is never released leaks into the gauge forever.
                     // release() is one-shot, so releasing twice is a no-op.
+                    //
+                    // The same applies to a deferred paused-turn delivery: the runtime
+                    // callbacks flush it, and this is the backstop for a turn that never
+                    // reached either (cancelled before it ran, a runtime that dropped
+                    // it) — the caller's response/stream must terminate exactly once.
+                    // deliver() is one-shot too.
+                    flushDeferredDelivery(processingTurn, conversationId);
                     processingTurn.release();
                 }
             }
@@ -294,7 +302,7 @@ class ConversationStepRunner {
                              Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
                              Consumer<IConversationMemory> skipNotifier) {
         return runConversationStep(environment, submittedMemory, conversationId, loggingContext, submittedExecution, rebuildTurn,
-                skipNotifier, null);
+                skipNotifier, null, null);
     }
 
     /**
@@ -361,14 +369,27 @@ class ConversationStepRunner {
         }
     }
 
+    /** A turn under {@code lease} with no deferred client completion. */
+    Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
+                             Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
+                             Consumer<IConversationMemory> skipNotifier, LeaseHandle lease) {
+        return runConversationStep(environment, submittedMemory, conversationId, loggingContext, submittedExecution, rebuildTurn,
+                skipNotifier, lease, null);
+    }
+
     /**
      * @param lease
      *            the cluster lease this turn runs under (cluster mode), or
      *            {@code null} on a single node
+     * @param processingTurn
+     *            carries the turn's deferred paused-turn delivery (see
+     *            {@link #runGuardedConversationStep}); {@code null} where no client
+     *            completion is deferred
      */
     Void runConversationStep(Environment environment, IConversationMemory submittedMemory, String conversationId,
                              Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
-                             Consumer<IConversationMemory> skipNotifier, LeaseHandle lease) {
+                             Consumer<IConversationMemory> skipNotifier, LeaseHandle lease,
+                             ConversationService.ProcessingTurn processingTurn) {
         // Queued-say guard: this memory copy was loaded at REST-request time;
         // a previously queued turn may have committed a pause (or a resume may
         // be executing), or the conversation may have been terminally resolved
@@ -489,7 +510,7 @@ class ConversationStepRunner {
             // make a later cancel signal the wrong (dead) pipeline.
             conversationService.conversationHitlService.populateToolApprovalsConfig(conversationMemory);
             abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                    registration.track(executeConversation), memoryStateAtSubmit, persistedState);
+                    registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn);
         } finally {
             registration.release(abandoned);
         }
@@ -624,17 +645,35 @@ class ConversationStepRunner {
     }
 
     /**
+     * Runs one turn under the agent-timeout watchdog and persists its outcome.
+     * <p>
+     * <b>Ordering contract.</b> A turn that ends {@code AWAITING_HUMAN} must not be
+     * announced to its client before the pause is durable. The pipeline's
+     * completion callback therefore only <i>defers</i> that announcement (see
+     * {@code ConversationService#completeTurn} and {@link DeferredDelivery}); this
+     * method's {@code onComplete} commits the pause (compare-and-store from the
+     * state the turn started in, cancel re-check, counter, timeout schedule) and
+     * only then — from a {@code finally}, on every exit — delivers it with the
+     * state the store actually holds. {@code onFailure} and the task's own
+     * {@code finally} flush a still-pending delivery, and delivery is one-shot, so
+     * the client's response / stream terminates exactly once on every path.
+     * Non-pause turns are answered immediately from the callback and are not
+     * affected.
+     *
      * @return {@code true} when the watchdog gave up on the turn (see
      *         {@link #waitForExecutionFinishOrTimeout})
      */
     boolean runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
                                        Environment environment, IConversationMemory conversationMemory,
                                        Callable<Void> executeConversation, ConversationState memoryStateAtSubmit,
-                                       ConversationState preTurnPersistedState) {
+                                       ConversationState preTurnPersistedState, ConversationService.ProcessingTurn processingTurn) {
         return waitForExecutionFinishOrTimeout(loggingContext, conversationId, conversationMemory,
                 runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
                     @Override
                     public void onComplete(Void result) {
+                        // Set only once the pause is durably committed AND not cancel-raced.
+                        // Drives what the deferred client completion reports (see finally).
+                        boolean pauseCommitted = false;
                         try {
                             // #2 (say path parity with resume): a concurrent cancel/end
                             // may have signalled this in-flight memory (e.g. a group
@@ -738,6 +777,7 @@ class ConversationStepRunner {
                                             conversationId);
                                     return;
                                 }
+                                pauseCommitted = true;
                                 // M1: a durably-committed pause is counted and its timeout armed.
                                 conversationService.counterHitlPause.increment();
                                 conversationService.conversationHitlService.scheduleHitlTimeout(conversationId, conversationMemory);
@@ -774,11 +814,35 @@ class ConversationStepRunner {
                             refreshCachedState(conversationId);
                         } catch (ResourceStoreException e) {
                             logConversationError(loggingContext, conversationId, e);
+                        } finally {
+                            // Ordering contract: a turn that ended AWAITING_HUMAN tells its
+                            // client only NOW, after the pause commit above has succeeded
+                            // or failed, so approval-status / pending-approvals / resume
+                            // always find the pause the client was told about. A pause that
+                            // was not committed is reported with the state the store holds.
+                            // Runs on every exit (returns, conflicts, store errors); a no-op
+                            // for turns that delivered immediately.
+                            if (processingTurn != null) {
+                                processingTurn.deferredDelivery
+                                        .deliver(pauseCommitted ? ConversationState.AWAITING_HUMAN : committedStateOrError(conversationId));
+                            }
                         }
                     }
 
                     @Override
                     public void onFailure(Throwable t) {
+                        try {
+                            onFailureInner(t);
+                        } finally {
+                            // The body completed its pipeline (and deferred a paused
+                            // completion) before the runtime routed it here: abandoned by
+                            // the watchdog, or failed afterwards. This path never commits a
+                            // pause, so the caller hears the state the store holds.
+                            flushDeferredDelivery(processingTurn, conversationId);
+                        }
+                    }
+
+                    private void onFailureInner(Throwable t) {
                         // C3: an abandoned turn that completed anyway is routed here by
                         // BaseRuntime's abandonment token. It must NOT be flipped to
                         // ERROR — the watchdog already persisted the accurate
@@ -828,6 +892,30 @@ class ConversationStepRunner {
                         }
                     }
                 }, null));
+    }
+
+    /**
+     * The state the store holds for the conversation, or {@code ERROR} when it
+     * cannot be read. Used to tell a client the truth about a paused turn whose
+     * pause was not committed.
+     */
+    ConversationState committedStateOrError(String conversationId) {
+        try {
+            ConversationState state = conversationMemoryStore.getConversationState(conversationId);
+            if (state != null) {
+                return state;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not read the committed state of conversation %s while completing a paused turn: %s",
+                    sanitize(conversationId), e.getMessage());
+        }
+        return ConversationState.ERROR;
+    }
+
+    private void flushDeferredDelivery(ConversationService.ProcessingTurn processingTurn, String conversationId) {
+        if (processingTurn != null && processingTurn.deferredDelivery.isPending()) {
+            processingTurn.deferredDelivery.deliver(committedStateOrError(conversationId));
+        }
     }
 
     /**

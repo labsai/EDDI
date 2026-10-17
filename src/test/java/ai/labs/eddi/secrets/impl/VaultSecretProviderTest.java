@@ -352,7 +352,7 @@ class VaultSecretProviderTest {
                 .when(persistence).upsertSecret(any(EncryptedSecret.class));
 
         SecretProviderException ex = assertThrows(SecretProviderException.class,
-                () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME), "value", null, null));
+                () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME), "value", null, List.of("*")));
         assertInstanceOf(PersistenceException.class, ex.getCause());
     }
 

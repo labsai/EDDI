@@ -215,6 +215,19 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         }
     }
 
+    /** Production keeps these in a table of their own, one row per source. */
+    private final Map<String, String> storeFingerprints = new HashMap<>();
+
+    @Override
+    public synchronized Optional<String> storeFingerprint(String sourceId) {
+        return Optional.ofNullable(storeFingerprints.get(sourceId));
+    }
+
+    @Override
+    public synchronized void recordStoreFingerprint(String sourceId, String fingerprint) {
+        storeFingerprints.put(sourceId, fingerprint);
+    }
+
     @Override
     public synchronized List<DocumentState> listDocuments(String sourceId, int limit) {
         return documents.values().stream()
@@ -227,6 +240,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
     public synchronized void purgeSource(String sourceId) {
         documents.values().removeIf(state -> state.sourceId().equals(sourceId));
         runs.values().removeIf(run -> run.sourceId().equals(sourceId));
+        storeFingerprints.remove(sourceId);
         String prefix = sourceId + KEY_SEPARATOR;
         fencingRunIds.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
         fencingGenerations.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
@@ -261,7 +275,23 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         runs.put(run.runId(), new IngestionRun(run.runId(), existing.sourceId(), run.status(),
                 existing.startedAt(), run.finishedAt() == null ? Instant.now() : run.finishedAt(),
                 run.documentsSeen(), run.documentsIngested(), run.documentsUnchanged(), run.documentsFailed(),
-                run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error()));
+                run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error(),
+                run.documentsSkipped(),
+                run.stopReason() != null ? run.stopReason() : existing.stopReason(),
+                run.trigger() != null ? run.trigger() : existing.trigger()));
+    }
+
+    @Override
+    public synchronized void reportProgress(IngestionRun progress) {
+        IngestionRun existing = runs.get(progress.runId());
+        if (existing == null || existing.status() != IngestionRun.Status.RUNNING) {
+            return;
+        }
+        runs.put(progress.runId(), new IngestionRun(existing.runId(), existing.sourceId(), existing.status(),
+                existing.startedAt(), null, progress.documentsSeen(), progress.documentsIngested(),
+                progress.documentsUnchanged(), progress.documentsFailed(), progress.documentsTombstoned(),
+                progress.segmentsStored(), progress.costUsd(), existing.error(), progress.documentsSkipped(),
+                existing.stopReason(), progress.trigger() != null ? progress.trigger() : existing.trigger()));
     }
 
     @Override

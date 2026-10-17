@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.utils.PageBounds;
+import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -55,6 +57,34 @@ class RestVersionInfoTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         accessGuard = mock(ResourceAccessGuard.class);
         restVersionInfo = new RestVersionInfo<>(RESOURCE_URI, resourceStore, documentDescriptorStore, accessGuard);
+    }
+
+    // L10 (security review 2026-10-15): ?limit=2147483647 returned every
+    // descriptor.
+
+    @Test
+    void readDescriptors_limitAboveTheCeiling_isRefusedBeforeTheStoreIsRead() throws Exception {
+        assertThrows(BadRequestException.class, () -> restVersionInfo.readDescriptors("filter", 0, PageBounds.maxLimit() + 1));
+        assertThrows(BadRequestException.class, () -> restVersionInfo.readDescriptors("filter", 0, Integer.MAX_VALUE));
+
+        verify(documentDescriptorStore, never()).readDescriptors(anyString(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void readDescriptors_negativeIndex_isRefused() throws Exception {
+        assertThrows(BadRequestException.class, () -> restVersionInfo.readDescriptors("filter", -1, 20));
+
+        verify(documentDescriptorStore, never()).readDescriptors(anyString(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void readDescriptors_limitAtTheCeiling_reachesTheStore() throws Exception {
+        when(accessGuard.listingScope()).thenReturn(null);
+        when(documentDescriptorStore.readDescriptors(anyString(), any(), any(), any(), anyBoolean(), any())).thenReturn(List.of());
+
+        restVersionInfo.readDescriptors("filter", 0, PageBounds.maxLimit());
+
+        verify(documentDescriptorStore).readDescriptors(anyString(), eq("filter"), eq(0), eq(PageBounds.maxLimit()), eq(false), any());
     }
 
     /**

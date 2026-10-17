@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.configs;
 
+import io.quarkus.oidc.OidcTenantConfig;
+import io.quarkus.oidc.runtime.ResourceMetadataHandler;
+import io.vertx.core.http.HttpServerRequest;
+import io.vertx.ext.web.RoutingContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +22,8 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * EDDI advertises {@code /mcp} as an OAuth 2.0 protected resource (RFC 9728) so
@@ -174,18 +180,65 @@ class McpOAuthDiscoveryConfigTest {
     }
 
     /**
-     * {@code quarkus.http.proxy.*} is configured nowhere in this file, so the
-     * scheme in the advertised identifier is whatever the request carried — which
-     * behind a TLS-terminating ingress is {@code http}. A deployment with
-     * authentication on advertising an {@code http} resource identifier is a
-     * downgrade it should never publish, so the default is pinned the other way and
-     * the one plain-http deployment (the auth E2E tier) overrides it explicitly.
+     * The 2026-10-15 security review fetched the document from a plain-http
+     * instance with authentication on and got {@code https://localhost:7070/mcp} —
+     * an identifier nothing served, and the one an MCP client binds its token to.
+     * {@code force-https-scheme} was pinned to {@code true} for the
+     * TLS-terminating-proxy case, and every plain-http deployment had to remember
+     * to undo it. The scheme now follows the request, which behind a proxy that
+     * forwards it ({@code quarkus.http.proxy.proxy-address-forwarding}) is the
+     * public one too.
+     * <p>
+     * This drives quarkus-oidc's own URL builder with the values from the
+     * properties file rather than asserting the property: the builder is what
+     * writes the challenge's {@code resource_metadata} URL, and the document's
+     * {@code resource} goes through the same {@code buildUri} with the same
+     * {@code forceHttpsScheme} flag.
      */
     @Test
-    @DisplayName("the advertised identifier is https unless a deployment opts out")
-    void httpsSchemeIsForced() throws Exception {
-        assertEquals("true", required(applicationProperties(), "quarkus.oidc.resource-metadata.force-https-scheme"),
-                "an authenticated deployment must not advertise an http resource identifier by default");
+    @DisplayName("the advertised scheme is the request's scheme when no absolute URL is configured")
+    void advertisedSchemeFollowsTheRequest() throws Exception {
+        var properties = applicationProperties();
+        String resource = required(properties, RESOURCE);
+        assertFalse(resource.startsWith("http"),
+                "this test covers the relative default; an absolute " + RESOURCE + " carries its own scheme");
+        String mcpRootPath = required(properties, MCP_ROOT_PATH);
+        boolean forceHttps = Boolean.parseBoolean(
+                required(properties, "quarkus.oidc.resource-metadata.force-https-scheme"));
+
+        OidcTenantConfig config = OidcTenantConfig.builder()
+                .tenantId("Default")
+                .resourceMetadata()
+                .enabled()
+                .resource(resource.replace("${" + MCP_ROOT_PATH + "}", mcpRootPath))
+                .forceHttpsScheme(forceHttps)
+                .end()
+                .build();
+
+        assertEquals("http://localhost:7070" + WELL_KNOWN + mcpRootPath,
+                ResourceMetadataHandler.buildAbsoluteResourceIdentifierUrl(
+                        request("http", "localhost:7070"), config, "/", false),
+                "a plain-http instance must advertise an http identifier, not one nothing serves");
+        assertEquals("https://eddi.example.com" + WELL_KNOWN + mcpRootPath,
+                ResourceMetadataHandler.buildAbsoluteResourceIdentifierUrl(
+                        request("https", "eddi.example.com"), config, "/", false),
+                "a TLS instance must advertise an https identifier");
+    }
+
+    /**
+     * The request as Vert.x presents it to the handler. With
+     * {@code quarkus.http.proxy.proxy-address-forwarding} on, {@code scheme()} and
+     * {@code absoluteURI()} already reflect {@code X-Forwarded-Proto}, so a
+     * forwarded request is the https case above.
+     */
+    private static RoutingContext request(String scheme, String authority) {
+        HttpServerRequest request = mock(HttpServerRequest.class);
+        when(request.scheme()).thenReturn(scheme);
+        when(request.absoluteURI()).thenReturn(scheme + "://" + authority + WELL_KNOWN + "/mcp");
+        when(request.getHeader("X-Forwarded-Prefix")).thenReturn(null);
+        RoutingContext context = mock(RoutingContext.class);
+        when(context.request()).thenReturn(request);
+        return context;
     }
 
     /**

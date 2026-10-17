@@ -774,13 +774,30 @@ filters on the run id.
 
 | Method | Path | Access | Purpose |
 | ------ | ---- | ------ | ------- |
-| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202 with its `runId`, or 409 if one is in flight) |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
-| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors — including the run in flight, whose counters move while it works |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
+| `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata) |
+| `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 naming the cause when the provider or store fails) |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
 Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
-design, and a run rewrites what every agent using it retrieves.
+design, and a run rewrites what every agent using it retrieves. Reading chunks and searching need EDIT
+for the same reason in the other direction: they return the knowledge base's text and cost an
+embedding call each, while the document listing returns only ingestion state and needs VIEW.
+
+#### What a run records
+
+Each run row carries, besides its counters, **why it stopped** (`stopReason`: `COMPLETED`, or the limit
+it hit — `PAGE_LIMIT`, `FETCH_LIMIT`, `BYTE_LIMIT`, `TIME_LIMIT` — or `CANCELLED`, which also covers a
+run that was superseded or reached its chunk budget), **what started it** (`trigger`: `MANUAL` or
+`SCHEDULED`; absent on rows written before it was recorded) and how many documents were **skipped** for
+having no text worth embedding. A running run writes its counters every couple of seconds
+(`IIngestionStateStore.reportProgress`), fenced on the row still being `RUNNING`, so a late write can
+neither reopen nor overwrite a finished run. A run cancelled at shutdown keeps the counters it had got to.
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
 the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
@@ -803,6 +820,24 @@ it, the files the source holds, each marked **Indexed**, **Changed** or **Not in
 uploaded file, one that is in the knowledge base, and one that was replaced after it was indexed are
 told apart without running the source and comparing counters. While anything is waiting, a line says so
 with a **Run now** beside it. Deleting a file confirms first and says what it removes.
+
+While a run is in flight the card shows its **progress**: documents looked at so far against what the
+last complete run saw (or, for a Files source, the number of files), each counter as it moves, the
+trigger, and the time used against the source's time budget. Each past run opens to everything it
+recorded — skipped, failed, removed, chunks stored, duration, estimated cost and how it ended — and a
+failed **Run now**, **Preview** or **Purge** shows the server's own reason rather than a guess.
+
+The **schedule** is chosen from presets (hourly, daily, weekly, monthly — all UTC) or typed as a custom
+cron, which is checked against the server's rules as it is typed and shows its next fire times in the
+viewer's local time. Once saved, the card shows what the scheduler is actually doing: the next run, the
+last fire, a warning when a saved cron produced no schedule, and recent fires with their errors —
+failing, disabled by the scheduler and dead-lettered are each said in words. On the **Schedules** page an
+ingestion schedule links back to its knowledge base.
+
+**Ingested documents** lists what the source has put into the knowledge base — filterable, paged, each
+marked **Live**, **Missed by the last N runs** or **Removed** — and opens a document to the chunks it was
+stored as. **Test Retrieval** searches the knowledge base, or one source, exactly as an agent would and
+shows each chunk with its score and origin.
 
 Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
 the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
@@ -860,7 +895,7 @@ all. Otherwise work through it in this order:
 | 3 | Does the agent's workflow carry an `eddi://ai.labs.rag` step? | Read the workflow config. **This is the usual cause** — see [step 2](#2-workflow-step-binds-the-kb-to-the-agent) |
 | 4 | Does `knowledgeBases[].name` match the KB's `name`? | Compare against the `RagConfiguration`. It matches on `name`, not id, and a miss is skipped silently |
 | 5 | Is the deployed agent version the one you edited? | Retrieval reads the workflow of the agent version in the conversation, and configs are versioned |
-| 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, confirm nothing has evicted it since (see [Vector Stores](#vector-stores)) |
+| 6 | Was anything actually ingested — and is it still there? | Poll the ingestion status. On an `in-memory` store, check whether EDDI has restarted since, or the knowledge base changed its embedding model or moved to a new store (below): each empties it until the next run of each source re-embeds it (see [Vector Stores](#vector-stores)) |
 | 7 | Did ingestion write where retrieval reads? | Both address the store by the knowledge base's id, so they cannot diverge any more. If the KB was renamed while in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, it now has a new, empty store — re-ingest (see [Knowledge base isolation](#knowledge-base-isolation)) |
 
 Raise `RagContextProvider` to `DEBUG` to see the missing-step early return directly (it will not show
@@ -954,23 +989,49 @@ parameter rather than ignoring it.
 
 | Store Type | Required Parameters | Notes |
 |---|---|---|
-| `in-memory` | — | Ephemeral, for dev/test only — **loses every ingested document** on restart, after 30 minutes without a query, or on any secret rotation (see below) |
+| `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
 | `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |
 | `chroma` | — | `baseUrl` (default: `http://localhost:8000`); `collectionName` |
 
-> **`in-memory` is not a small-corpus option, it is a dev/test option.** For this store the cached
-> object *is* the data, and `EmbeddingStoreFactory` holds it in a bounded Caffeine cache — max 50
-> stores, `expireAfterAccess` of 30 minutes, and a full invalidation whenever a vault secret or a
-> global variable changes. So an in-memory KB silently empties itself after 30 minutes with no
-> retrieval, on every restart, and on any credential rotation, and the next query returns no context
-> rather than an error. Re-ingesting refills it until the next eviction. Any agent expected to answer
-> from a knowledge base tomorrow needs a persistent store. Note that `storeType` still **defaults to**
-> `in-memory`, so persistence is opt-in: `pgvector` is the recommended choice, and — with `in-memory`
-> — one of the two stores whose document-replacement semantics are verified (see
-> [Ingestion Sources](#ingestion-sources)).
+> **`in-memory` is a dev/test option, not a small-corpus one.** For this store the object in the
+> EDDI process *is* the data, so it is kept apart from the cache of external-store clients: it is
+> not evicted after a period without queries, not dropped when a vault secret or a global variable
+> changes, and not pushed out by other knowledge bases. It goes away only when:
+>
+> - **EDDI restarts.** Everything ingested is gone. The next run of each
+>   [ingestion source](#ingestion-sources) notices that the store is not the one its state was
+>   written against and **re-embeds every document** — it no longer reports them "unchanged" over an
+>   empty store, so a scheduled source refills the knowledge base without a purge. Until that run,
+>   retrieval returns no context rather than an error. Documents sent to `/ingest` have no
+>   source and have to be sent again.
+> - **The knowledge base is deleted** (its last version), **moves to a new store** — renamed
+>   while still in the 6.5.0 name layout, or switched to `storeNamespace: "id"`, exactly as for
+>   every other store type (see [Knowledge base isolation](#knowledge-base-isolation)) — **moves to
+>   another `storeType`**, or **changes how its vectors are made**: another embedding provider,
+>   model (`model` and `modelName` count as one setting), Azure `deploymentName`, endpoint
+>   (`baseUrl`/`endpoint`) or `dimensions`/`outputDimensionality`. These are compared after
+>   `${vars:…}` references are resolved, so a global variable that names a new model counts too.
+>   The old vectors are unreachable or meaningless. A new version that only changes chunking, retrieval settings or sources keeps
+>   the data, and so do rotating the embedding API key and renaming a knowledge base in the id
+>   layout.
+>
+> Each knowledge base has its own in-memory store, addressed like every other store by its id:
+> two knowledge bases with the same name do not share one, and deleting one cannot empty another.
+>
+> All in-memory knowledge bases together may hold at most `eddi.rag.in-memory.max-segments`
+> segments (default `50000`; `0` disables the cap — see the
+> [configuration reference](configuration-reference.md#knowledge-bases-rag)). A write past the cap
+> fails — the run reports `FAILED` with an error naming the setting — and nothing is evicted to make
+> room. A run that is still writing when its store is replaced or dropped (the knowledge base
+> changed its embedding model, moved, or was deleted) stops the same way, with an error saying the
+> store was replaced or removed. Its remaining writes would otherwise land in a store nothing reads,
+> outside the cap. The next run re-embeds into the current store. Any agent expected to answer from a knowledge base after a restart needs a persistent store.
+> `storeType` still **defaults to** `in-memory`, so persistence is opt-in: `pgvector` is the
+> recommended choice, and — with `in-memory` — one of the two stores whose document-replacement
+> semantics are verified (see [Ingestion Sources](#ingestion-sources)).
 
 ## Status
 

@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { ShieldAlert, Loader2 } from "lucide-react";
 import { detectEscalationFlags } from "@/lib/operator/escalation-flags";
 import { resolveConfigWriteTarget, bodyHasRedactions } from "@/lib/operator/config-write-target";
+import { parseJsonPatchBody } from "@/lib/operator/json-patch";
 import { parseLeadingJson, parseRedactedJson } from "@/lib/redacted-json";
+import { CascadeSummary } from "@/components/operator/cascade-summary";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { getResource } from "@/lib/api/resources";
 import { useAuth } from "@/hooks/use-auth";
@@ -74,6 +76,20 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
    * most of the config".
    */
   const writeTarget = preview.bodyTruncated ? null : resolveConfigWriteTarget(preview);
+  /**
+   * A `PATCH` of a stored configuration (RFC 6902) is listed operation by
+   * operation, with the document and version it applies to. The body IS the diff,
+   * so there is nothing to fetch and compare against — which is also why it is
+   * the credential-safe way to edit: it never carries the stored credentials.
+   *
+   * Not offered for a truncated body (a cut list reads as a shorter one) or for a
+   * PATCH whose body is not a patch, e.g. the descriptor metadata edit — those
+   * keep the raw body below.
+   */
+  const patchTarget = preview.bodyTruncated ? null : resolveConfigWriteTarget(preview, "PATCH");
+  const parsedPatch =
+    preview.bodyTruncated || preview.method?.toUpperCase() !== "PATCH" ? null : parseJsonPatchBody(preview.body);
+  const patchOps = parsedPatch?.ok ? parsedPatch.ops : null;
   // A whole-document config write has to be JSON. When it is not, the capability
   // scan can say nothing and the diff can only line text up — both quiet
   // failures an approver would read as "looks fine". Observed: the operator sent
@@ -116,6 +132,9 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
   const diffUnavailable = Boolean(writeTarget) && (!canReadStoredDocument || currentDocument.isError);
   const showDiff = Boolean(writeTarget) && currentDocument.isSuccess;
   const [showFullBody, setShowFullBody] = useState(false);
+  // Whether a structured view (the diff, or the patch's operation list) stands in
+  // for the raw body, which then sits behind a toggle.
+  const structured = showDiff || Boolean(patchOps);
 
   return (
     <div className="mb-1.5 space-y-1" data-testid={`request-preview-${callId}`}>
@@ -153,6 +172,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           {t("operator.approval.headers", "Headers")}: {headerEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}
         </p>
       )}
+      <CascadeSummary preview={preview} callId={callId} />
       {escalations.length > 0 && (
         <div
           className="rounded border border-destructive/40 bg-destructive/10 p-2"
@@ -211,6 +231,47 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
                 )}
         </p>
       )}
+      {patchOps && (
+        <div data-testid={`request-preview-patch-${callId}`}>
+          <p className="mb-1 text-[10px] font-medium text-muted-foreground" data-testid={`request-preview-patch-heading-${callId}`}>
+            {patchTarget
+              ? t(
+                  "operator.approval.patchHeading",
+                  "Patch to {{type}} {{id}} — applied to version {{version}}, stored as version {{next}}",
+                  {
+                    type: patchTarget.resourceType.slug,
+                    id: patchTarget.id,
+                    version: patchTarget.version,
+                    next: patchTarget.version + 1,
+                  },
+                )
+              : t("operator.approval.patchHeadingBare", "Patch operations")}
+          </p>
+          <ol className="space-y-0.5">
+            {patchOps.map((op, index) => (
+              <li
+                key={index}
+                className="break-all font-mono text-[11px] text-foreground"
+                data-testid={`request-preview-patch-op-${callId}-${index}`}
+              >
+                <span className="font-semibold uppercase">{op.op}</span> <span>{op.path === "" ? t("operator.approval.patchWholeDocument", "(whole document)") : op.path}</span>
+                {op.from !== undefined && (
+                  <>
+                    {" ← "}
+                    <span>{op.from}</span>
+                  </>
+                )}
+                {op.value !== undefined && (
+                  <>
+                    {" = "}
+                    <span className="text-muted-foreground">{JSON.stringify(op.value)}</span>
+                  </>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       {showDiff && (
         <div data-testid={`request-preview-diff-${callId}`}>
           <p className="mb-1 text-[10px] font-medium text-muted-foreground">
@@ -266,7 +327,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
               reading aid, but approval covers the whole document, and the old
               fixed 128px box made "read it in full before approving" advice
               the UI could not actually support. */}
-          {showDiff && (
+          {structured && (
             <button
               type="button"
               onClick={() => setShowFullBody((open) => !open)}
@@ -274,12 +335,16 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
               aria-expanded={showFullBody}
               data-testid={`request-preview-body-toggle-${callId}`}
             >
-              {showFullBody
-                ? t("operator.approval.hideFullRequest", "Hide the full proposed document")
-                : t("operator.approval.showFullRequest", "Show the full proposed document")}
+              {patchOps
+                ? showFullBody
+                  ? t("operator.approval.hideRawPatch", "Hide the raw patch")
+                  : t("operator.approval.showRawPatch", "Show the raw patch")
+                : showFullBody
+                  ? t("operator.approval.hideFullRequest", "Hide the full proposed document")
+                  : t("operator.approval.showFullRequest", "Show the full proposed document")}
             </button>
           )}
-          {(!showDiff || showFullBody) && (
+          {(!structured || showFullBody) && (
             <>
               <pre
                 className={`${showFullBody ? "max-h-[32rem]" : "max-h-32"} overflow-auto rounded bg-muted/60 p-2 text-[11px] leading-relaxed text-foreground`}
@@ -287,7 +352,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
               >
                 {preview.body}
               </pre>
-              {!showDiff && !showFullBody && (
+              {!structured && !showFullBody && (
                 <button
                   type="button"
                   onClick={() => setShowFullBody(true)}

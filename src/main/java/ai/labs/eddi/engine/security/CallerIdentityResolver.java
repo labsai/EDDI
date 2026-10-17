@@ -49,6 +49,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li><b>Fails closed.</b> An unsatisfiable reference throws instead of
  * resolving to an empty string, which would silently send {@code "Bearer "} and
  * look like a puzzling 401 further downstream.</li>
+ * <li><b>Only trusted authors may write it.</b> Same-origin does not say
+ * <em>whose</em> authority is used: a config naming EDDI's own address spends
+ * the token of whoever chats with the agent, so an editor-authored call would
+ * run admin-only endpoints when an admin chats. Saving or importing a config
+ * that contains {@code ${caller:token}} therefore needs one of
+ * {@code eddi.caller-identity.author-roles} ({@link CallerTokenAuthorPolicy}).
+ * {@code ${caller:userId}} is not a credential and stays open to editors.</li>
  * </ul>
  *
  * @author ginccc
@@ -159,6 +166,15 @@ public class CallerIdentityResolver {
     /** Whether a value contains any {@code ${caller:...}} reference. */
     public static boolean containsReference(String value) {
         return value != null && CALLER_PATTERN.matcher(value).find();
+    }
+
+    /**
+     * Whether a value contains a {@code ${caller:token}} reference, with or without
+     * the {@code $} — the same broad match {@link #rejectTokenReference} refuses
+     * on, so a near-miss spelling cannot slip past a check that relies on this.
+     */
+    public static boolean containsTokenReference(String value) {
+        return value != null && ANY_TOKEN_PATTERN.matcher(value).find();
     }
 
     /**

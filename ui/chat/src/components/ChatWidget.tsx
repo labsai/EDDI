@@ -5,7 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Hand, MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
+import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import { useChatState, useChatDispatch } from "@/store/chat-store";
@@ -34,6 +34,7 @@ import {
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
 import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
+import { readUrlToken } from "@/api/chat-config";
 import {
   isDemoMode,
   demoStartConversation,
@@ -86,6 +87,12 @@ interface TurnContext {
   /** Id of this turn's optimistic user bubble, so a dropped turn can withdraw it. */
   userMessageId: string | null;
   /**
+   * This turn's own `done` said AWAITING_HUMAN. A read right after it can still
+   * see the previous stored state (READY), because a backend may announce the
+   * pause before persisting it; such a read must not take the pause back.
+   */
+  announcedPause: boolean;
+  /**
    * The stream ended with a `done` whose payload could not be parsed. The turn
    * finished on the server, but its outputs, quick replies and state are not
    * known yet: the caller re-reads the conversation and applies that instead.
@@ -97,7 +104,7 @@ function newTurn(
   stateBeforeSend: ConversationState | null,
   userMessageId: string | null = null,
 ): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId, doneUnreadable: false };
+  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false };
 }
 
 function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
@@ -294,9 +301,11 @@ export function ChatWidget() {
   /**
    * `?token=` is read ONCE and then removed from the address bar. Left there,
    * a bearer token sat in the visible URL, the history entry, and anything the
-   * user copied or bookmarked.
+   * user copied or bookmarked. It is honoured only when the operator set
+   * `eddi.chat.url-token.enabled` (readUrlToken warns and yields null
+   * otherwise); the parameter is stripped either way.
    */
-  const [urlToken] = useState(() => searchParams.get("token"));
+  const [urlToken] = useState(() => readUrlToken(searchParams));
   const tokenOriginParam = searchParams.get("tokenOrigin");
   /**
    * False while a token is still expected from the embedding page. With
@@ -418,10 +427,12 @@ export function ChatWidget() {
     // `urlToken` was read once and stripped from the address above, so it does
     // not linger in the address bar, history, a Referer header or access logs.
     //
-    // NOTE (residual risk): accepting a token straight from the URL is still a
+    // NOTE (residual risk): accepting a token straight from the URL is a
     // login-CSRF vector — a crafted link can silently authenticate the widget as
-    // someone else's session. Fully closing this needs a PKCE/OIDC login flow
-    // (out of scope here). Prefer the postMessage handshake below, or config.
+    // someone else's session — and the first request logs it before the strip
+    // above. That is why `urlToken` is null unless the operator opted in with
+    // eddi.chat.url-token.enabled. Prefer the postMessage handshake below, or
+    // config.
     //
     // Only a token that is actually present is installed: clearing it here
     // would wipe one the host handed over by postMessage.
@@ -548,6 +559,8 @@ export function ChatWidget() {
       }
 
       if (snapshot?.conversationState) {
+        // Remembered for the post-stream re-read, which may still see READY.
+        if (snapshot.conversationState === "AWAITING_HUMAN") turn.announcedPause = true;
         dispatch({
           type: "SET_CONVERSATION_STATE",
           state: snapshot.conversationState,
@@ -1195,7 +1208,11 @@ export function ChatWidget() {
             // set — and with it the recovery banner. handleStop clears
             // abortRef, so a controller that is no longer current means this
             // turn was stopped and its refresh must not speak for the state.
-            if (after.conversationState && !stopped()) {
+            // A READY read straight after this turn announced a pause is the
+            // store not having caught up, not a decision: keep the pause, and let
+            // the approval-status watch (useHitlPolling) say when it resolves.
+            const staleOverPause = turn.announcedPause && after.conversationState === "READY";
+            if (after.conversationState && !stopped() && !staleOverPause) {
               dispatch({
                 type: "SET_CONVERSATION_STATE",
                 state: after.conversationState,
@@ -1834,23 +1851,14 @@ export function ChatWidget() {
               />
             ))}
 
-            {isPaused && state.approvalStatus ? (
+            {isPaused ? (
+              // From the stream's own news, at once: approval-status may not have
+              // the pause stored yet, and the composer is locked meanwhile.
               <PausedCard
                 status={state.approvalStatus}
                 onCancel={handleCancel}
                 cancelDisabled={state.isProcessing}
               />
-            ) : isPaused ? (
-              // Paused but the approval status has not arrived (still polling, or
-              // the poll is failing). The composer is closed meanwhile, so say why
-              // instead of showing an unexplained dead end.
-              <div className="paused-card paused-card--pending" data-testid="paused-pending">
-                <div className="paused-card__head">
-                  <Hand className="paused-card__icon" size="1em" aria-hidden="true" />
-                  <span className="paused-card__title">{t("paused.title")}</span>
-                </div>
-                <p className="paused-card__text">{t("paused.pending")}</p>
-              </div>
             ) : (
               <>
                 {(state.isThinking || state.isEscalating || state.activeTool) && (

@@ -26,10 +26,15 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 @DisplayName("Cluster-shared and cluster-invalidated caches")
@@ -48,6 +53,81 @@ class SharedKvCacheTest {
         assertNull(nodeA.putIfAbsent("nonce-1", Boolean.TRUE));
         assertEquals(Boolean.TRUE, nodeB.putIfAbsent("nonce-1", Boolean.TRUE), "a nonce used on A is a replay on B");
         assertTrue(kv.keys().stream().allMatch(k -> k.startsWith("h_")), "keys are hashed, never in clear");
+    }
+
+    @Test
+    @DisplayName("replace(key, expected, next) is a revision-checked compare-and-set on the bucket, not get-then-put")
+    void replaceIsACompareAndSet() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        ICache<String, String> nodeA = new SharedKvCache<>(local("a"), kv, false);
+        ICache<String, String> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        nodeA.put("k", "v0");
+
+        // Both nodes read v0; only the first replace lands, the second sees the
+        // revision moved and fails instead of overwriting the first.
+        assertTrue(nodeA.replace("k", "v0", "a1"));
+        assertFalse(nodeB.replace("k", "v0", "b1"));
+        assertEquals("a1", nodeB.get("k"));
+        assertTrue(nodeB.replace("k", "a1", "b2"));
+        assertEquals("b2", nodeA.get("k"));
+        assertFalse(nodeA.replace("missing", "x", "y"));
+    }
+
+    /**
+     * The case get-then-put gets wrong: the compare passes on the value this node
+     * read, another node writes in between, and the update must then be refused
+     * because the revision moved — not land and erase the other node's write.
+     */
+    /**
+     * A node with no local copy reads the bucket's value, compares, and the bucket
+     * goes away before the update. The replacement must land node-locally with the
+     * whole value — not answer false and leave the caller to retry from an empty
+     * local copy, which rebuilt the A2A principal index without its existing ids.
+     */
+    @Test
+    @DisplayName("when the bucket fails after the comparison, the whole replacement is kept node-locally")
+    void replaceKeepsTheWholeValueWhenTheBucketFailsAfterTheRead() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        new SharedKvCache<String, String>(local("seed"), kv, false).put("k", "ids:1,2,3");
+        ISharedKv failingUpdate = spy(kv);
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).update(any(), any(), anyLong());
+        ICache<String, String> noLocalCopy = new SharedKvCache<>(local("fresh"), failingUpdate, false);
+
+        assertTrue(noLocalCopy.replace("k", "ids:1,2,3", "ids:1,2,3,4"), "the comparison passed; the write is taken node-locally");
+        // The bucket is still unreachable for this node: the node-local copy answers,
+        // and it holds the complete value, not a fragment.
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).get(any());
+        assertEquals("ids:1,2,3,4", noLocalCopy.get("k"));
+    }
+
+    @Test
+    @DisplayName("when the bucket cannot even be read and there is no local copy, replace answers false and changes nothing")
+    void replaceWithoutAnyCopyIsFalse() {
+        ICache<String, String> node = new SharedKvCache<>(local("none"), new DownSharedKv(), false);
+
+        assertFalse(node.replace("k", "old", "new"));
+        assertNull(node.get("k"));
+    }
+
+    @Test
+    @DisplayName("a write that lands between the read and the update defeats the replace")
+    void replaceLosesToAWriteInBetween() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        ICache<String, String> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        var slipIn = new AtomicBoolean(true);
+        ISharedKv racy = spy(kv);
+        doAnswer(invocation -> {
+            Object read = invocation.callRealMethod();
+            if (slipIn.getAndSet(false)) {
+                nodeB.put("k", "b1");
+            }
+            return read;
+        }).when(racy).get(any()); // the cache hashes its keys, so match any
+        ICache<String, String> nodeA = new SharedKvCache<>(local("a"), racy, false);
+        new SharedKvCache<String, String>(local("seed"), kv, false).put("k", "v0");
+
+        assertFalse(nodeA.replace("k", "v0", "a1"), "the revision moved under the replace, so it must not land");
+        assertEquals("b1", nodeB.get("k"), "the write that slipped in is kept");
     }
 
     @Test

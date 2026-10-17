@@ -210,7 +210,7 @@ class McpAuthChallengeParserTest {
     @DisplayName("a metadata url with no host at all is refused")
     void refusesHostlessUrl() {
         // file:// parses cleanly and would otherwise be handed to the fetcher; the
-        // origin check is what stops it before SafeHttpClient ever sees it.
+        // origin check is what stops it before OutboundHttp ever sees it.
         String header = "Bearer resource_metadata=\"file:///etc/passwd\"";
         assertTrue(McpAuthChallengeParser.resourceMetadataUrl(header, SERVER).isEmpty());
     }

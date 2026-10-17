@@ -87,6 +87,10 @@ export function findBlockedCalls(
       "operator.approval.blockedGateCarrying",
       "This request writes an LLM configuration that sets its own approval gate (toolApprovals), which would replace the gate reviewing it. Approving is unavailable for the whole batch while it is present — reject, and change the gate from the agent's own page.",
     ),
+    "unsupported-patch-op": t(
+      "operator.approval.blockedGatePatchOp",
+      "This request patches an LLM configuration with an operation the approval-gate check cannot reason about (anything but add, replace, remove or test — copy and move can carry part of the stored document, a gate override included, somewhere else). Approving is unavailable for the whole batch while it is present — reject, and ask for the edit as add, replace or remove operations.",
+    ),
     "unverifiable-body": t(
       "operator.approval.blockedGateUnverifiable",
       "This request writes an LLM configuration whose body cannot be read in full — it is either too large to display or not valid JSON — so it cannot be confirmed free of an approval-gate override. Approving is unavailable for the whole batch while it is present — reject, and make this change from the agent's own page.",

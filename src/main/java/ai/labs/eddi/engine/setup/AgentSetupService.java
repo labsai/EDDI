@@ -35,7 +35,9 @@ import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.engine.mcp.OpenApiSpecFetcher;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -205,6 +207,18 @@ public class AgentSetupService {
     /** Who is calling: the flag is for administrators only. */
     @Inject
     ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * {@code eddi.security.ssrf-protection.enabled} for {@code llmBaseUrl} and the
+     * OpenAPI spec location. Field-injected like the collaborators above; a
+     * directly constructed instance (tests) has neither and validates as with
+     * protection off.
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
+
+    @Inject
+    OpenApiSpecFetcher specFetcher;
 
     /**
      * Strict parse, same reasoning as {@code VaultGrantGate.Mode.parseStrict}: an
@@ -505,6 +519,11 @@ public class AgentSetupService {
         }
     }
 
+    /** The injected spec fetcher, or the protection-off one outside CDI. */
+    private OpenApiSpecFetcher specFetcher() {
+        return specFetcher != null ? specFetcher : OpenApiSpecFetcher.permissive();
+    }
+
     /**
      * Create an API agent from an OpenAPI specification. Parses the spec, generates
      * ApiCalls configurations grouped by tag, and creates a fully deployed agent.
@@ -529,19 +548,20 @@ public class AgentSetupService {
             throw new AgentSetupException(
                     "API key is required for cloud LLM providers — pass apiKey, or vaultKeyName to reuse a key already in the vault");
         }
-        // Scheme-level check only. Full SSRF validation would reject loopback and
-        // private addresses, which is precisely where a local LLM provider lives —
-        // the reason this field exists.
+        // The same target policy the LLM builders apply when the model is built:
+        // with protection off (the default) a loopback or private address is fine —
+        // it is precisely where a local LLM provider lives, the reason this field
+        // exists — but never the cloud instance-metadata service; with
+        // eddi.security.ssrf-protection.enabled only a public address or this
+        // deployment's own origin passes.
         if (request.llmBaseUrl() != null && !request.llmBaseUrl().isBlank()) {
             if (!UrlValidationUtils.isValidHttpUrl(request.llmBaseUrl())) {
                 throw new AgentSetupException("llmBaseUrl must be a valid http(s) URL");
             }
-            // A local LLM base URL may point at loopback/private hosts on purpose, but
-            // never at the cloud instance-metadata service (always-on guard).
             try {
-                UrlValidationUtils.rejectCloudMetadataTarget(request.llmBaseUrl());
+                OutboundTargetPolicy.orPermissive(targetPolicy).validateUrl(request.llmBaseUrl());
             } catch (IllegalArgumentException e) {
-                throw new AgentSetupException(e.getMessage(), e);
+                throw new AgentSetupException("llmBaseUrl refused: " + e.getMessage(), e);
             }
         }
         // Validate the HITL config HERE, before a single resource exists.
@@ -571,7 +591,7 @@ public class AgentSetupService {
         McpApiToolBuilder.ApiBuildResult buildResult;
         try {
             buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), request.apiAuth(),
-                    request.apiAuthHeader());
+                    request.apiAuthHeader(), specFetcher());
         } catch (IllegalArgumentException e) {
             throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
         }
@@ -593,7 +613,7 @@ public class AgentSetupService {
             String effectiveApiAuth = vaultApiAuth(request.apiAuth(), request.agentName(), createdResources);
             if (!Objects.equals(effectiveApiAuth, request.apiAuth())) {
                 buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth,
-                        request.apiAuthHeader());
+                        request.apiAuthHeader(), specFetcher());
             }
 
             // --- Step 2: Create ApiCalls resources (one per group) ---
@@ -616,6 +636,13 @@ public class AgentSetupService {
             // Filter entries that matched nothing were silently ignored — report them.
             if (!buildResult.unmatchedEndpoints().isEmpty()) {
                 createdResources.put("unmatchedEndpoints", buildResult.unmatchedEndpoints());
+            }
+            // Operations the filter selected but that need an input a generated tool
+            // cannot send (e.g. a body type other than JSON or plain text). They were
+            // skipped, not generated half-working — report them so the caller can
+            // refuse to proceed instead of finding out at the first call.
+            if (!buildResult.unusableEndpoints().isEmpty()) {
+                createdResources.put("unusableEndpoints", buildResult.unusableEndpoints());
             }
 
             // --- Step 3: Create Parser ---

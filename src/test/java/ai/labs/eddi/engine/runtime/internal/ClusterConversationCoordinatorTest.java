@@ -595,6 +595,50 @@ class ClusterConversationCoordinatorTest {
         assertTrue(coordinator.discardDeadLetter(cursor));
         assertEquals(second, coordinator.getDeadLetters(2, cursor), "a discarded cursor still pages from where it was");
     }
+
+    @Test
+    @DisplayName("two local dead letters recorded concurrently keep id order in the ring, so a cursor skips neither")
+    void concurrentLocalDeadLettersPageInIdOrder() throws Exception {
+        CountDownLatch slowEntered = new CountDownLatch(1);
+        CountDownLatch releaseSlow = new CountDownLatch(1);
+        // Describing the failed turn is the work between "this failure starts
+        // recording"
+        // and "its entry is in the ring"; holding it open lets a second failure finish
+        // first, the interleaving that put local-2 ahead of local-1 in CI.
+        Turn slow = new Turn("slow", log) {
+            @Override
+            public Map<String, Object> describe() {
+                slowEntered.countDown();
+                try {
+                    // An AssertionError escapes describe(task), which catches only
+                    // RuntimeException, and fails the test through slowId.get().
+                    assertTrue(releaseSlow.await(5, TimeUnit.SECONDS), "the slow failure was not released after the fast one");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    fail("the slow failure was interrupted before it was released");
+                }
+                return super.describe();
+            }
+        };
+        ExecutorService recorder = Executors.newSingleThreadExecutor();
+        try {
+            Future<String> slowId = recorder.submit(() -> coordinator.recordLocalDeadLetter("conv-slow", new IllegalStateException("slow"), slow));
+            assertTrue(slowEntered.await(5, TimeUnit.SECONDS), "the slow failure started recording");
+            coordinator.recordLocalDeadLetter("conv-fast", new IllegalStateException("fast"), new Turn("fast", log));
+            releaseSlow.countDown();
+            slowId.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseSlow.countDown();
+            recorder.shutdownNow();
+        }
+
+        List<DeadLetterEntry> first = coordinator.getDeadLetters(1, null);
+        assertEquals(1, first.size());
+        List<DeadLetterEntry> second = coordinator.getDeadLetters(1, first.get(0).id());
+        assertEquals(1, second.size(), "the entry after the cursor is not skipped: first page " + first + ", ring "
+                + coordinator.getDeadLetters());
+        assertNotEquals(first.get(0).id(), second.get(0).id());
+    }
     @Test
     @DisplayName("a dead letter that fails over locally while NATS is connected is forwarded shortly, not only at the next reconnect")
     void localDeadLetterIsRetriedWhileConnected() throws Exception {

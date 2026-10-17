@@ -4,48 +4,89 @@
  */
 package ai.labs.eddi.configs.agents.rest;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.BadRequestException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.ForbiddenException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.NotFoundException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.WebApplicationException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.DisplayName;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Nested;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.ArgumentCaptor;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import org.mockito.Mock;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.net.URI;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.ArrayList;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.List;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import jakarta.ws.rs.BadRequestException;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.junit.jupiter.api.Assertions.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.ArgumentMatchers.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.Mockito.*;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import static org.mockito.MockitoAnnotations.openMocks;
 
 class RestAgentStoreTest {
@@ -80,7 +121,8 @@ class RestAgentStoreTest {
     void setUp() throws Exception {
         openMocks(this);
         restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), agentSigningService, agentFactory, "default");
+                capabilityRegistryService, deploymentStore, mock(ResourceAccessGuard.class), agentSigningService, agentFactory, "default",
+                mock(AgentCascadeService.class));
         // The Agent is live at v1: a cascade is only allowed against the CURRENT
         // version, since it tears down workflows and schedules before the delete —
         // the only place the version used to be checked — has run.
@@ -230,7 +272,8 @@ class RestAgentStoreTest {
             ResourceAccessGuard denyingGuard = mock(ResourceAccessGuard.class);
             doThrow(new ForbiddenException("no")).when(denyingGuard).requireAccess(eq("agent-x"), eq(AccessLevel.EDIT), any());
             var guardedStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
-                    capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default");
+                    capabilityRegistryService, deploymentStore, denyingGuard, agentSigningService, agentFactory, "default",
+                    mock(AgentCascadeService.class));
 
             assertThrows(ForbiddenException.class, () -> guardedStore.updateAgent("agent-x", 1, referencing(PKG1_ID), false));
 

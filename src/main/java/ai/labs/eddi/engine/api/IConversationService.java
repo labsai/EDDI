@@ -221,11 +221,11 @@ public interface IConversationService {
     // conversation) ---
     //
     // The environment-qualified twins of these (readConversation,
-    // getConversationState,
-    // sayStreaming, undo/redo and their availability checks) had no caller outside
-    // ConversationService and are no longer part of the contract. say() keeps its
-    // qualified form above: schedules and A2A address an agent, not a stored
-    // record.
+    // getConversationState, undo/redo and their availability checks) had no caller
+    // outside ConversationService and are no longer part of the contract. say() and
+    // sayStreaming() keep their qualified forms: schedules and A2A address an
+    // agent,
+    // not a stored record.
 
     /**
      * Read a conversation memory snapshot — resolves agentId + environment from the
@@ -253,6 +253,16 @@ public interface IConversationService {
      */
     void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
                       StreamingResponseHandler streamingHandler)
+            throws Exception;
+
+    /**
+     * Process user input with SSE streaming for a known agent — the streaming twin
+     * of the qualified {@code say}. For callers that address an agent rather than a
+     * stored conversation record (A2A {@code message/stream}); the conversation-id
+     * overload above applies the caller-facing checks instead.
+     */
+    void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                      List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception;
 
     Boolean isUndoAvailable(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
@@ -310,6 +320,22 @@ public interface IConversationService {
                                      ControlSignal mode,
                                      String cancelledBy)
             throws ResourceStoreException;
+
+    /**
+     * Cancels the conversation only if it is awaiting a human decision — one
+     * compare-and-set from {@code AWAITING_HUMAN}; an executing turn is neither
+     * signalled nor interrupted. This is the cancel an {@code eddi-approver} who is
+     * neither the owner nor an admin is entitled to, and the state check and the
+     * cancel are the same atomic operation, so a resume that lands in between
+     * cannot turn the approver's decision into a stop of another user's running
+     * turn.
+     *
+     * @return {@link CancelOutcome#CANCELLED} when the pause was cancelled,
+     *         {@link CancelOutcome#NOTHING_TO_CANCEL} when the conversation is in
+     *         any other state, {@link CancelOutcome#NOT_FOUND} when it does not
+     *         exist
+     */
+    CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException;
 
     /**
      * Resume a paused (HITL) conversation with the given human decision.
@@ -420,8 +446,18 @@ public interface IConversationService {
         private final int limit;
 
         public InputTooLargeException(int length, int limit) {
-            super("Input is " + length + " characters long; this deployment accepts at most " + limit
-                    + " per turn (eddi.conversations.max-input-chars).");
+            this("Input is " + length + " characters long; this deployment accepts at most " + limit
+                    + " per turn (eddi.conversations.max-input-chars).", length, limit);
+        }
+
+        /**
+         * A bound other than the text length — a {@code context} entry of type
+         * {@code expressions} that is longer or nests deeper than
+         * {@code eddi.expressions.max-length} / {@code eddi.expressions.max-depth}
+         * allows. Same refusal, same status, with the message naming the bound.
+         */
+        public InputTooLargeException(String message, int length, int limit) {
+            super(message);
             this.length = length;
             this.limit = limit;
         }

@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.connections.names.InMemoryConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -87,7 +88,7 @@ class RestConnectionStoreWriteGuardTest {
 
     private RestConnectionStore rest(IConnectionNameClaimStore nameClaimStore) {
         return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry, grantStore,
-                secretProvider, true, mock(ResourceAccessGuard.class), nameClaimStore);
+                secretProvider, true, mock(ResourceAccessGuard.class), nameClaimStore, mock(CredentialReferenceResolver.class));
     }
 
     /** A document that passes every OTHER check, so a refusal is attributable. */
@@ -421,7 +422,7 @@ class RestConnectionStoreWriteGuardTest {
 
         private RestConnectionStore restWithoutAuthorization() {
             return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry,
-                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class), claims);
+                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class), claims, mock(CredentialReferenceResolver.class));
         }
 
         private ConnectionConfiguration callerSupplied() {

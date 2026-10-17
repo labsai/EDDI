@@ -333,7 +333,38 @@ describe("New conversation", () => {
 });
 
 describe("the ?token= parameter", () => {
-  it("is used for auth and then removed from the address", async () => {
+  afterEach(() => {
+    delete window.__EDDI_CHAT__;
+  });
+
+  it("is ignored, with a console warning naming the flag, unless the operator enabled it", async () => {
+    // Off by default: a crafted link must not sign the widget in as someone
+    // else (login CSRF). The parameter is still stripped from the address.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = mockBackend();
+    renderAt("/chat/production/agent-1?token=abc123&theme=light");
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/start"))).toBe(true));
+    const start = calls.find((c) => c.url.includes("/start"))!;
+    expect(start.headers.get("Authorization")).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("eddi.chat.url-token.enabled"));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat/production/agent-1?theme=light"),
+    );
+  });
+
+  it("is not switched on by a truthy non-boolean", async () => {
+    window.__EDDI_CHAT__ = { urlTokenEnabled: "true" };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const calls = mockBackend();
+    renderAt("/chat/production/agent-1?token=abc123");
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes("/start"))).toBe(true));
+    expect(calls.find((c) => c.url.includes("/start"))!.headers.get("Authorization")).toBeNull();
+  });
+
+  it("is used for auth and then removed from the address once enabled", async () => {
+    window.__EDDI_CHAT__ = { urlTokenEnabled: true };
     const calls = mockBackend();
     renderAt("/chat/production/agent-1?token=abc123&theme=light");
 
@@ -439,6 +470,35 @@ describe("image output items", () => {
       "src",
       "https://cdn.example/a.png",
     );
+  });
+});
+
+describe("a streamed pause (PR 1004 review)", () => {
+  it("is not taken back by a READY read the store has not caught up on", async () => {
+    // The done event announces the pause; the conversation re-read that follows
+    // it (for undo/redo) still sees the stored READY. The paused card stays.
+    const calls = mockBackend({
+      frames: [
+        `event: done\ndata: ${JSON.stringify({
+          conversationState: "AWAITING_HUMAN",
+          conversationOutputs: [{ output: ["Waiting for approval."] }],
+        })}\n\n`,
+      ],
+    });
+    renderAt("/chat/production/agent-1");
+
+    await send("delete it");
+
+    expect(await screen.findByTestId("paused-card")).toBeInTheDocument();
+    const readsAfterStream = () =>
+      calls.filter(
+        (c) => c.method === "GET" && /\/agents\/conv-1(\?|$)/.test(c.url) && !c.url.includes("approval-status"),
+      ).length;
+    await waitFor(() => expect(readsAfterStream()).toBeGreaterThan(0));
+    // Let the re-read's dispatches land before asserting.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByTestId("paused-card")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-input")).toBeDisabled();
   });
 });
 

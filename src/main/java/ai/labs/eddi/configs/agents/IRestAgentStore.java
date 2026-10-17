@@ -5,11 +5,17 @@
 package ai.labs.eddi.configs.agents;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
+import ai.labs.eddi.configs.agents.model.AgentCascadeRequest;
+import ai.labs.eddi.configs.agents.model.AgentCascadeResult;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -123,10 +129,40 @@ public interface IRestAgentStore extends IRestVersionInfo {
     Response updateResourceInAgent(@PathParam("id") String id,
                                    @Parameter(name = "version", required = true, example = "1")
                                    @QueryParam("version") Integer version,
-                                   URI resourceURI,
+                                   @RequestBody(required = true,
+                                                description = "Plain-text URI of the new version of a resource this agent already references; "
+                                                        + "the existing reference to that resource is repointed to it. The URI MUST carry ?version=N.",
+                                                content = @Content(mediaType = MediaType.TEXT_PLAIN,
+                                                                   schema = @Schema(type = SchemaType.STRING, format = "uri",
+                                                                                    example = "eddi://ai.labs.workflow/workflowstore/workflows/ID?version=3"))) URI resourceURI,
                                    @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
                                    @QueryParam("compatible")
                                    @DefaultValue("false") Boolean compatible);
+
+    @POST
+    @Path("/{id}/cascade")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(operationId = "cascadeAgentChanges", summary = "Wire new resource versions into an agent in one pass",
+               description = "After editing resources (each edit writes a NEW version and the agent still references the old one), "
+                       + "this swaps old resource URIs for new ones through the agent's workflows and into the agent, saving "
+                       + "every changed workflow and the agent exactly ONCE — no intermediate versions — and optionally "
+                       + "redeploys. A mapping can also name a workflow itself (oldUri = the workflow version the agent "
+                       + "references, newUri = a newer version of it), in which case step mappings then apply to the newer "
+                       + "version's steps. It only rewrites resource references: it cannot change any other agent setting, "
+                       + "the approval gate (hitlConfig) included, which is carried forward unchanged. Each oldUri must be a "
+                       + "reference the agent really holds and each newUri the same kind of resource with a version; if any "
+                       + "pair is unknown, NOTHING is written (400). A redeploy goes through the normal deploy checks.")
+    @APIResponse(responseCode = "200", description = "Cascaded. Carries the new agent version, the workflow versions written, and the "
+            + "deployment outcome when redeploy was requested.")
+    @APIResponse(responseCode = "400", description = "A mapping is malformed, names different kinds of resource, or its oldUri is not "
+            + "referenced by the agent. Nothing was written.")
+    @APIResponse(responseCode = "404", description = "Agent version not found.")
+    @APIResponse(responseCode = "409", description = "version is not the agent's current version. Nothing was written.")
+    AgentCascadeResult cascadeAgentChanges(@PathParam("id") String id,
+                                           @Parameter(name = "version", required = true, example = "1")
+                                           @QueryParam("version") Integer version,
+                                           AgentCascadeRequest request);
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)

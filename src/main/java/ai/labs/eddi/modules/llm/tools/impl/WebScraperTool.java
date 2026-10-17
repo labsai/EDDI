@@ -4,7 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import dev.langchain4j.agent.tool.P;
@@ -22,7 +27,6 @@ import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.Callable;
@@ -98,7 +102,7 @@ public class WebScraperTool {
      */
     private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
 
-    private final SafeHttpClient httpClient;
+    private final OutboundHttp http;
     private final HtmlToMarkdownConverter htmlToMarkdownConverter;
     private final long maxResponseBytes;
     private final long parseTimeoutMs;
@@ -114,12 +118,12 @@ public class WebScraperTool {
     private final Semaphore parsePermits;
 
     @Inject
-    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter,
+    public WebScraperTool(OutboundHttp http, HtmlToMarkdownConverter htmlToMarkdownConverter,
             @ConfigProperty(name = "eddi.tools.web-scraper.max-response-bytes",
                             defaultValue = "5242880") long maxResponseBytes,
             @ConfigProperty(name = "eddi.tools.web-scraper.parse-timeout-ms", defaultValue = "10000") long parseTimeoutMs,
             @ConfigProperty(name = "eddi.tools.web-scraper.parse-threads", defaultValue = "2") int parseThreads) {
-        this.httpClient = httpClient;
+        this.http = http;
         this.htmlToMarkdownConverter = htmlToMarkdownConverter;
         this.maxResponseBytes = maxResponseBytes > 0 ? maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES;
         this.parseTimeoutMs = parseTimeoutMs > 0 ? parseTimeoutMs : DEFAULT_PARSE_TIMEOUT_MS;
@@ -129,8 +133,8 @@ public class WebScraperTool {
     }
 
     /** Convenience constructor for tests and callers with no configured cap. */
-    public WebScraperTool(SafeHttpClient httpClient, HtmlToMarkdownConverter htmlToMarkdownConverter) {
-        this(httpClient, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_PARSE_TIMEOUT_MS, DEFAULT_PARSE_THREADS);
+    public WebScraperTool(OutboundHttp http, HtmlToMarkdownConverter htmlToMarkdownConverter) {
+        this(http, htmlToMarkdownConverter, DEFAULT_MAX_RESPONSE_BYTES, DEFAULT_PARSE_TIMEOUT_MS, DEFAULT_PARSE_THREADS);
     }
 
     /**
@@ -417,25 +421,25 @@ public class WebScraperTool {
     }
 
     /**
-     * Fetches the content of a URL using the SSRF-safe SafeHttpClient. The URL is
-     * validated (SSRF check) and redirects are handled safely.
+     * Fetches the content of a URL through {@link OutboundHttp}. The URL is
+     * SSRF-checked here, and every redirect hop by the facade.
      */
     private FetchedPage fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
+        OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, URI.create(url))
+                .ssrf(SsrfPolicy.HOPS_ONLY)
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
-                .GET().build();
+                .build();
 
         // Bounded read: an LLM-chosen URL must not be able to stream an unbounded
         // body into memory. The body is capped as it arrives rather than pulled in
         // full and measured afterwards.
-        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, maxResponseBytes);
+        OutboundResponse<byte[]> response = http.send(request, BodyMode.bytes(maxResponseBytes, BodyMode.OnOverflow.TRUNCATE));
 
-        if (response.statusCode() != 200) {
-            throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);
+        if (response.status() != 200) {
+            throw new IOException("HTTP " + response.status() + " for URL: " + url);
         }
 
         if (!response.truncated()) {

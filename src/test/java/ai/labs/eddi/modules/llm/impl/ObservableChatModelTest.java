@@ -14,10 +14,15 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -61,6 +66,138 @@ class ObservableChatModelTest {
     // That class also pins the properties this one never could, because it uses a
     // delegate shaped like a real provider binding rather than a mock that stubs
     // chat(): single listener dispatch, and delegate.chat() never re-entered.
+
+    // --- request logging (L12 of the 2026-10-15 security review) ---
+
+    @Nested
+    class RequestLogging {
+
+        private static final String SECRET = "sk-abcdefghijklmnopqrstuvwxyz0123456789";
+
+        private List<LogRecord> captureLogs(Runnable action, Level level) {
+            List<LogRecord> records = new ArrayList<>();
+            var handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    records.add(record);
+                }
+
+                @Override
+                public void flush() {
+                    // nothing is buffered
+                }
+
+                @Override
+                public void close() {
+                    // nothing to release
+                }
+            };
+            var logger = Logger.getLogger(ObservableChatModel.class.getName());
+            var previousLevel = logger.getLevel();
+            boolean previousUseParentHandlers = logger.getUseParentHandlers();
+            logger.setLevel(level);
+            logger.setUseParentHandlers(false);
+            logger.addHandler(handler);
+            try {
+                action.run();
+            } finally {
+                logger.removeHandler(handler);
+                logger.setLevel(previousLevel);
+                logger.setUseParentHandlers(previousUseParentHandlers);
+            }
+            return records;
+        }
+
+        private static String rendered(LogRecord record) {
+            return record.getParameters() == null ? record.getMessage() : String.format(record.getMessage(), record.getParameters());
+        }
+
+        @Test
+        void requestLineIsDebugAndRedacted() {
+            ChatModel delegate = providerLikeMock();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("my api_key=" + SECRET + " please"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            var requestLines = records.stream().filter(r -> rendered(r).contains("Chat request")).toList();
+            assertEquals(1, requestLines.size(), "one request line: " + records);
+            assertEquals(Level.FINE, requestLines.get(0).getLevel(), "the request line is DEBUG, not INFO");
+            assertFalse(rendered(requestLines.get(0)).contains(SECRET), "the credential must be redacted: " + rendered(requestLines.get(0)));
+        }
+
+        /**
+         * The filter recognises a key only when it sees it whole: truncating first left
+         * up to 19 characters of a key straddling the cutoff in the log.
+         */
+        @Test
+        void credentialStraddlingTheRequestCutoffIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            // The logged form is UserMessage.toString(), 61 characters of wrapper plus the
+            // text, so 15 of the key sit before the 200-character
+            // cutoff — more than the 8 the assertion checks for, fewer than the filter
+            // needs to recognise the key, so truncating first would leave them in the log.
+            // No
+            // credential-named key precedes it: the name-bound rule would mask the value
+            // whatever its shape and hide exactly the cut this test is about.
+            String straddling = "x".repeat(124) + " " + SECRET;
+            String unredactedPrefix = UserMessage.from(straddling).toString().substring(0, 200);
+            assertTrue(unredactedPrefix.contains(SECRET.substring(0, 8)) && !unredactedPrefix.contains(SECRET),
+                    "the fixture must put the cutoff inside the key: " + unredactedPrefix);
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from(straddling))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            String line = rendered(records.stream().filter(r -> rendered(r).contains("Chat request")).findFirst().orElseThrow());
+            assertFalse(line.contains(SECRET.substring(0, 8)), "no prefix of the key may survive the cutoff: " + line);
+        }
+
+        @Test
+        void credentialStraddlingTheResponseCutoffIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            // 485 characters of prefix: 15 of the key sit before the 500-character cutoff.
+            String response = "y".repeat(484) + " " + SECRET;
+            String unredactedPrefix = response.substring(0, 500);
+            assertTrue(unredactedPrefix.contains(SECRET.substring(0, 8)) && !unredactedPrefix.contains(SECRET),
+                    "the fixture must put the cutoff inside the key: " + unredactedPrefix);
+            when(delegate.chat(any(ChatRequest.class)))
+                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(response)).build());
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            String line = rendered(records.stream().filter(r -> rendered(r).contains("Chat response")).findFirst().orElseThrow());
+            assertFalse(line.contains(SECRET.substring(0, 8)), "no prefix of the key may survive the cutoff: " + line);
+        }
+
+        @Test
+        void requestLineIsNotWrittenAtInfo() {
+            ChatModel delegate = providerLikeMock();
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.INFO);
+
+            assertTrue(records.stream().noneMatch(r -> rendered(r).contains("Chat request")), "nothing at INFO: " + records);
+        }
+
+        @Test
+        void responseLineIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            when(delegate.chat(any(ChatRequest.class)))
+                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("your token=" + SECRET)).build());
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            var responseLines = records.stream().filter(r -> rendered(r).contains("Chat response")).toList();
+            assertEquals(1, responseLines.size(), "one response line: " + records);
+            assertFalse(rendered(responseLines.get(0)).contains(SECRET), rendered(responseLines.get(0)));
+        }
+    }
 
     // --- chat() delegation ---
 

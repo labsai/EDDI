@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, Link, useLocation } from "react-router-dom";
+import { useParams, useSearchParams, Link, useLocation } from "react-router-dom";
 import {
   ArrowLeft,
   MessageSquare,
@@ -49,7 +49,7 @@ import {
 } from "@/lib/api/conversations";
 import { AgentSwitchNotice } from "@/components/conversations/agent-switch-notice";
 import { useNavigate } from "react-router-dom";
-import { ApprovalBanner } from "@/components/hitl/approval-banner";
+import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import {
@@ -109,16 +109,41 @@ export function ConversationDetailPage() {
   // arguments) — fetched only while the conversation is actually paused.
   const {
     data: approvalStatus,
-    isLoading: approvalStatusLoading,
-    isError: approvalStatusError,
-    refetch: refetchApprovalStatus,
+    detailsPending: approvalStatusLoading,
+    detailsError: approvalStatusError,
+    retry: retryApprovalStatus,
   } = useApprovalStatus(
     id,
     conversation?.conversationState === "AWAITING_HUMAN",
     // Keyed by the pause instance so a later pause of the same conversation
     // never renders this pause's cached calls — see useApprovalStatus.
     conversation?.hitlPausedAt,
+    // The same verify-the-pause rule every approval surface uses: a response that
+    // does not describe THIS pause is withheld and re-polled, never rendered.
+    { verifyPause: true },
   );
+
+  // Arriving from a "Review" link the moment a turn paused: the stream announces
+  // the pause before it is stored, so this page can read "not paused" for a second
+  // or two. Re-read briefly (up to 10 s) rather than show nothing to decide.
+  const [searchParams] = useSearchParams();
+  const arrivedForPause = searchParams.get("awaiting") === "1";
+  const [waitExpired, setWaitExpired] = useState(false);
+  useEffect(() => {
+    if (!arrivedForPause) return;
+    const timer = setTimeout(() => setWaitExpired(true), 10_000);
+    return () => clearTimeout(timer);
+  }, [arrivedForPause]);
+  const liveState = conversation?.conversationState;
+  const waitingForPause =
+    arrivedForPause &&
+    !waitExpired &&
+    (liveState === "READY" || liveState === "IN_PROGRESS");
+  useEffect(() => {
+    if (!waitingForPause) return;
+    const timer = setInterval(() => void refetch(), 1000);
+    return () => clearInterval(timer);
+  }, [waitingForPause, refetch]);
 
   const blockedCalls = useMemo(() => {
     const details = approvalStatus?.pauseDetails;
@@ -306,6 +331,17 @@ export function ConversationDetailPage() {
         </div>
       )}
 
+      {waitingForPause && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-muted-foreground"
+          data-testid="awaiting-pause-notice"
+        >
+          <Clock className="h-4 w-4 shrink-0 animate-pulse text-amber-500" aria-hidden="true" />
+          {t("conversationDetail.waitingForPause", "Waiting for the pause to be saved…")}
+        </div>
+      )}
+
       {/* HITL Approval Banner */}
       {state === "AWAITING_HUMAN" && (
         /* Pause metadata comes from approval-status, not the conversation: this
@@ -315,8 +351,13 @@ export function ConversationDetailPage() {
            countdown in ApprovalBanner never rendered for a 1:1 pause and the
            reason was blank. `conversation` stays as the fallback for pausedAt,
            which it genuinely does carry. */
-        <ApprovalBanner
+        <ApprovalCard
           surface="regular"
+          cardKey={`${id}:${conversation.hitlPausedAt ?? ""}`}
+          // The decision is in flight, or went through and the page has not yet
+          // refetched the resumed state.
+          isResolving={resumeMutation.isPending || resumeMutation.isSuccess}
+          expectToolCall={conversation.hitlPauseType === "TOOL_CALL"}
           // approval-status only: the conversation snapshot never carried a
           // reason (the fallback read a phantom TS field, undefined always).
           pauseReason={approvalStatus?.pauseReason}
@@ -330,7 +371,7 @@ export function ConversationDetailPage() {
           // one and permanently blocked on another.
           pauseDetailsPending={approvalStatusLoading}
           pauseDetailsError={approvalStatusError}
-          onRetryPauseDetails={() => void refetchApprovalStatus()}
+          onRetryPauseDetails={() => void retryApprovalStatus()}
           isSubmitting={resumeMutation.isPending || cancelMutation.isPending}
           // The THIRD approval surface, and the one an admin reaches by clicking
           // a conversation id in the approvals inbox — the natural "let me see

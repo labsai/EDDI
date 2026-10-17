@@ -68,6 +68,28 @@ conversation data — user input, a model reply, an API response, client context
 instead of being resolved, with an error naming the field. Grants are checked at deploy time, so
 without this rule a user could have a template substitute any secret of the tenant.
 
+**Who typed it does not matter.** The rule is about where the reference came from, not who wrote
+it, so there is no way to make a conversation-supplied reference acceptable: an admin pasting
+`${vault:openai-prod}` into a chat, a model copying one out of a configuration it read, and a
+reference in a tool call all arrive as conversation data and are refused the same way. The error
+says so, and says what to do instead: **send the credential's NAME in a field the endpoint documents
+for that, or edit with a partial update that does not repeat the credential — never a reference.**
+For creating an agent over REST that field is [`vaultKeyName`](#reusing-one-key-across-agents): a
+bare name (`"openai-prod"`) with `apiKey` left empty requires the entry to already exist and points
+the new agent at it. A bare name contains no `${…}`, so this guard has nothing to refuse, and the
+[deploy-time grant check](#agent-grants-allowedagents) still applies: a new agent is not yet on a
+restricted secret's `allowedAgents`, so its first deploy is refused and explained, and an administrator
+grants it (see [New agents always need adding](#new-agents-always-need-adding)). Both tools the
+Platform Operator writes agents with, `setupAgent` and `createApiAgent`, carry `vaultKeyName` for exactly
+this reason. The operator cannot read the vault and does not grant: it asks the admin for the name,
+reports a `VAULT_GRANT_MISSING` refusal, and points at the Manager's grant dialog. It must not set
+`grantReferencedSecrets` (the admin opt-in described there) even though that field is part of the
+setup body schema it is generated from.
+
+For a tool call that needs a human's approval, the same refusal is made **before** the approval is
+requested: a call certain to be refused is returned to the model with the explanation instead of
+being put in front of a person (see [Request pinning](hitl.md#request-pinning--approval-binds-to-a-request-not-a-tool-name)).
+
 This holds through `${vars:…}` as well. A global variable may itself hold a vault or connection
 reference, so a `${vars:…}` the configuration wrote still resolves through to the secret, while one
 that arrived through conversation data refuses the call — the check runs again after variable
@@ -148,6 +170,31 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 **Caching:** Successfully resolved secrets are cached in a Caffeine cache (configurable TTL). Failed resolutions are **never cached**, ensuring newly created secrets resolve immediately without waiting for cache expiry.
 
+### Editing a configuration that holds a reference: PATCH, not echo
+
+A stored configuration carries your credential **references**, not secrets — `GET /llmstore/llms/{id}` returns `"apiKey": "${vault:anthropic-api-key}"`. Editing it by reading the document and sending the whole thing back with `PUT` therefore means *sending a reference back*, and that is the one thing a caller that is not a human at the Manager should not do:
+
+- An agent's API call (the Platform Operator's tools are such calls, generated from EDDI's own OpenAPI spec) resolves `${vault:…}` in its rendered request **just before sending**. A document body that echoes a reference it read would reach the store as the **plaintext secret** — written into a new, exportable configuration version.
+- It never gets that far: the reference in the body was not written by the call's own configuration, so the check above refuses the call. That is correct, and it is deliberately **not** relaxed with an "unchanged from the stored document" exemption — the check does not know the target document, and what the model read back is itself conversation data.
+
+The way through is to not send what does not change. `PATCH /{store}/{id}?version=N` with `Content-Type: application/json-patch+json` applies an [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) JSON Patch to version `N` and stores the result as a new version (returned in `Location`, like `PUT`):
+
+```bash
+curl -X PATCH "$EDDI/llmstore/llms/$ID?version=2" \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[{"op":"replace","path":"/tasks/0/parameters/modelName","value":"claude-sonnet-4-5"}]'
+```
+
+The reference already in the document is untouched, and a patch that tried to *introduce* one is refused by the same check as any other call — so a caller restricted this way can edit everything in the document **except** its credentials. `add`, `replace`, `remove` and `test` all work; `test` makes an edit conditional on what it expects to find.
+
+| Outcome | Status |
+| --- | --- |
+| New version stored | `200`, `Location` of the new version |
+| `N` is not the current version | `409`, the current resource URI in the body — nothing is applied |
+| Not a patch, an unknown operation, a `test` that does not hold, a path that does not resolve, or a patched document the model rejects (unknown field, wrong shape) | `400` with the reason |
+
+The patched document goes through the same strict parse and the same pre-write checks as a `PUT` body, so nothing a `PUT` would refuse can be stored this way. Available on `llmstore/llms`, `apicallstore/apicalls` and `mcpcallsstore/mcpcalls` — the stores whose documents carry references. A patch is limited to 256 KiB and 200 operations: it is a diff, not a document.
+
 ## Secrets that belong to a space
 
 With [workspaces](workspaces.md) enforced, writing to the vault stays with
@@ -162,6 +209,8 @@ applies on top. See [Secrets and variables that belong to a space](workspaces.md
 ## Agent Grants (`allowedAgents`)
 
 Every stored secret carries an `allowedAgents` list — the agent IDs permitted to use it, or `["*"]` for all agents. It is checked **when an agent is deployed**, not when a secret is resolved. What a violation costs is set by [the enforcement mode](#modes) — blocked, logged, or not checked at all.
+
+**Nothing is granted by default.** Under `enforce` (the shipped default) a `PUT /secretstore/secrets/{tenantId}/{keyName}` that *creates* a secret must carry `allowedAgents` — the agent ids, or `["*"]` to grant every agent out loud — and a create without it is a **400** that says so. A secret used to be granted to every agent by a default three layers down when the field was left out; that is the one grant an operator running in enforce mode has said they do not want applied silently. The provider itself refuses a create without a grant in every mode, so no code path reaches the old default: the setup wizard and the conversation auto-vaulting pass their lists explicitly (`["*"]` and the agent's own id respectively). Under `warn` and `off` the REST endpoint still fills in `["*"]` for an omitted list, since those modes have opted out of the control. A **rotation** may omit the list in every mode and keeps the stored grant — the Manager's rotate dialog relies on that, and it can never widen anything. The grant endpoint (`PUT …/grant`) has always required the list.
 
 ### Why deploy time, not resolution time
 
@@ -203,7 +252,7 @@ The agent document itself plus each workflow's LLM, HTTP-call, MCP-call, and RAG
 On most deployments this control is inert, for two reasons worth confirming rather than assuming:
 
 1. **No master key, no check.** With `eddi.vault.master-key` unset the vault is disabled and the checker reports no violations without looking at anything.
-2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]`.
+2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]` — written out by the wizard, which says why in its source: the agent being set up has no id yet.
 
 The deployments that *are* affected have **both** a master key and a grant an operator has deliberately narrowed. There, enforcement is a behavior change with no warning phase — the first symptom is an agent refusing to deploy. Before enabling it, run once with `warn` and confirm the log is free of:
 
@@ -330,6 +379,31 @@ Three properties are worth knowing:
 
 **In the Manager UI:** *Secrets* → the **Allowed Agents** column, or the **Access** action on a row. Agents are picked from a searchable list of the ones that exist (a raw ID can still be typed, for an agent not created yet), and a change that would strip access from a deployed agent shows the warning above and has to be acknowledged before it can be saved.
 
+## Destination allow-list (`allowedHosts`)
+
+The agent grant says *which agent* may use a key. It says nothing about *where* the key goes: an editor who may change an agent's LLM configuration can point `baseUrl` at a host of their own, keep `apiKey: ${vault:openai-key}`, and the deploy-time check passes because the agent *is* granted the key. `${connection:…}` closes this with its `baseUrlAllowlist`; `${vault:…}` had nothing.
+
+A secret may now carry an optional **`allowedHosts`** list: the exact destinations it may be sent to.
+
+```bash
+# At creation, with the value ...
+curl -X PUT "$EDDI/secretstore/secrets/default/openai-key" \
+  -H 'Content-Type: application/json' \
+  -d '{"value": "sk-...", "allowedAgents": ["*"], "allowedHosts": ["api.openai.com"]}'
+
+# ... or later, without it (the grant endpoint; eddi-admin, no plaintext needed)
+curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
+  -H 'Content-Type: application/json' \
+  -d '{"allowedAgents": ["*"], "allowedHosts": ["api.openai.com", "eu.api.openai.com:443"]}'
+```
+
+- **Entries are exact `host` or `host:port`** — no scheme, no path, no wildcard, compared case-insensitively. `host` alone admits that host on any port; `host:port` admits only that port, where the destination's port is the one in its URL or the scheme default (443 for `https`, 80 for `http`). There is no suffix matching: `example.com` admits neither `api.example.com` nor `example.com.attacker.net`. At most 100 entries.
+- **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl` or `host` in `langchain.json`), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
+- **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing until an operator sets it. `[]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
+- **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use.
+- **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's.
+- **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+
 ## Encryption
 
 ### Envelope Encryption
@@ -387,6 +461,16 @@ It is written with an insert-if-absent and every other replica adopts the winner
 two replicas booting against an empty database cannot each derive their KEK from a
 different salt. A salt that cannot be read fails the start: falling back to the
 legacy salt on a deployment that has a random one derives the wrong KEK.
+
+**An upgrade that stays on the legacy salt is told so, louder each time.** A deployment
+that already holds DEKs but no per-deployment salt — one upgraded from before 6.0.2 —
+boots on the legacy fixed salt so its DEKs stay readable, and logs a **WARN** naming
+`POST /secretstore/secrets/admin/rotate-kek` as the way out. That salt is shared by every
+such deployment, so the master key is then the only secret protecting the DEKs. The first
+such boot is recorded (`vault-kek-legacy-salt-seen` in the vault metadata); every later boot
+still on the legacy salt logs an **ERROR** instead, with the date the legacy salt was first
+adopted and the same command. Rotating the KEK — with the current master key as both old
+and new key is enough — generates the per-deployment salt and clears the record.
 
 ### Configuration
 
@@ -627,8 +711,8 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …}`) |
-| `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value). `?dryRun=true` previews the impact without writing |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …, "allowedHosts": …}`). A create under `enforce` must carry `allowedAgents` |
+| `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description and `allowedHosts`) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value) and [Destination allow-list](#destination-allow-list-allowedhosts). `?dryRun=true` previews the impact without writing |
 | `POST`   | `/{tenantId}/{keyName}/grant/agents/{agentId}` | Add one agent to `allowedAgents`, atomically and idempotently; never changes a `*` grant — see [Adding one agent](#adding-one-agent-to-a-grant). `?dryRun=true` previews |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
 | `GET`    | `/{tenantId}/{keyName}`      | Get secret **metadata only** (never returns plaintext) |
@@ -643,7 +727,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, and the optional agent grant list. On a **create**, an omitted `allowedAgents` defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, the agent grant list and an optional [destination allow-list](#destination-allow-list-allowedhosts). On a **create**, `allowedAgents` is required under `eddi.vault.grant-enforcement=enforce` (the default) — send `["*"]` to grant every agent explicitly; under `warn` and `off` an omitted list still defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents`, `allowedHosts` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {

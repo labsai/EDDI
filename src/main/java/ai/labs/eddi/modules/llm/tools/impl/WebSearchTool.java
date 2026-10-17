@@ -5,7 +5,12 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.llm.tools.ToolFailureException;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
@@ -18,7 +23,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
@@ -41,7 +45,7 @@ public class WebSearchTool {
      * the limit only has to stop a misbehaving endpoint from filling the heap.
      */
     static final long MAX_RESPONSE_BYTES = 2L * 1024 * 1024;
-    private final SafeHttpClient httpClient;
+    private final OutboundHttp http;
     private final ObjectMapper objectMapper;
 
     @ConfigProperty(name = "eddi.tools.websearch.google.api-key")
@@ -54,8 +58,8 @@ public class WebSearchTool {
     String searchProvider;
 
     @Inject
-    public WebSearchTool(SafeHttpClient httpClient, ObjectMapper objectMapper) {
-        this.httpClient = httpClient;
+    public WebSearchTool(OutboundHttp http, ObjectMapper objectMapper) {
+        this.http = http;
         this.objectMapper = objectMapper;
     }
 
@@ -105,9 +109,7 @@ public class WebSearchTool {
                 URLEncoder.encode(googleApiKey.get(), StandardCharsets.UTF_8), URLEncoder.encode(googleCx.get(), StandardCharsets.UTF_8),
                 encodedQuery, maxResults);
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).GET().build();
-
-        String body = fetch(request, "Google search");
+        String body = fetch(get(url).build(), "Google search");
 
         return formatGoogleResults(body, query);
     }
@@ -117,23 +119,30 @@ public class WebSearchTool {
         String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
         String url = "https://api.duckduckgo.com/?q=" + encodedQuery + "&format=json&no_html=1";
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
-                .GET().build();
-
-        String body = fetch(request, "DuckDuckGo search");
+        String body = fetch(get(url).header("User-Agent", "EDDI-Agent/1.0").build(), "DuckDuckGo search");
 
         return formatDuckDuckGoResults(body, query, maxResults);
     }
 
     /**
-     * Sends {@code request} through {@link SafeHttpClient#sendBounded} and returns
-     * the body of a 200 answer. A body cut short at {@link #MAX_RESPONSE_BYTES} or
-     * the read deadline is refused rather than parsed as a fragment.
+     * A GET of a search provider's fixed host: the URL is trusted, every redirect
+     * hop is SSRF-checked.
      */
-    private String fetch(HttpRequest request, String source) throws IOException, InterruptedException {
-        SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
-        if (response.statusCode() != 200) {
-            throw new IOException(source + " returned status: " + response.statusCode());
+    private static OutboundRequest.Builder get(String url) {
+        return OutboundRequest.get(Profile.DEFAULT, URI.create(url))
+                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .timeout(Duration.ofSeconds(15));
+    }
+
+    /**
+     * Sends {@code request} with the body capped at {@link #MAX_RESPONSE_BYTES} and
+     * returns the body of a 200 answer. A body cut short at the cap or the read
+     * deadline is refused rather than parsed as a fragment.
+     */
+    private String fetch(OutboundRequest request, String source) throws IOException, InterruptedException {
+        OutboundResponse<byte[]> response = http.send(request, BodyMode.bytes(MAX_RESPONSE_BYTES, BodyMode.OnOverflow.TRUNCATE));
+        if (response.status() != 200) {
+            throw new IOException(source + " returned status: " + response.status());
         }
         if (response.truncated()) {
             throw new IOException(source + " response exceeded " + MAX_RESPONSE_BYTES + " bytes or its read deadline");
@@ -248,10 +257,7 @@ public class WebSearchTool {
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
             String url = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + encodedQuery + "&format=json&srlimit=3";
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "EDDI-Agent/1.0")
-                    .GET().build();
-
-            String body = fetch(request, "Wikipedia search");
+            String body = fetch(get(url).header("User-Agent", "EDDI-Agent/1.0").build(), "Wikipedia search");
 
             return formatWikipediaResults(body, query);
 

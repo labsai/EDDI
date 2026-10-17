@@ -97,8 +97,22 @@ describe("buildOperatorSafetyPreamble", () => {
       expect(preamble).toContain("a new agent with no approval");
     });
 
-    it("numbers nine rules contiguously", () => {
-      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    it("numbers eleven rules contiguously", () => {
+      expect(ruleNumbers(preamble)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    });
+
+    it("treats check/look/verify requests as read-only: propose in plain words, wait for agreement", () => {
+      // Observed: asked "can you check pls", the operator issued two workflow
+      // writes nobody asked for, undescribed, needing three approvals in a turn.
+      expect(preamble).toMatch(/check, look at, verify, review, inspect or read/);
+      expect(preamble).toMatch(/READ-ONLY request/);
+      expect(preamble).toMatch(/PROPOSE it in plain\s+words/);
+      expect(preamble).toMatch(/wait for the person to agree before making the gated call/);
+      expect(preamble).toMatch(/Never\s+chain a change they did not ask for/);
+    });
+
+    it("says why a failed write failed before trying another", () => {
+      expect(preamble).toMatch(/tell the\s+person why it failed BEFORE you try anything else/);
     });
   });
 
@@ -236,6 +250,58 @@ describe("buildOperatorPromptBody", () => {
 
     it("still states the boundary: no gate, memory/session, or top-level workflow changes", () => {
       expect(body).toContain("You cannot change an agent's own approval gate");
+    });
+  });
+
+  describe("credential-safe edits (PATCH)", () => {
+    const body = buildOperatorPromptBody(endpointsForScope("read_write"));
+
+    it("tells the operator to edit with PATCH and never to send back a document it read", () => {
+      expect(body).toContain("EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH, not PUT");
+      expect(body).toContain("never send back a document you read");
+    });
+
+    it("names the patch endpoints it actually holds, and no others", () => {
+      expect(body).toContain("/llmstore/llms/{id}, /apicallstore/apicalls/{id}, /mcpcallsstore/mcpcalls/{id}");
+      const llmOnly = buildOperatorPromptBody([
+        ...READ_ENDPOINTS,
+        "PUT /llmstore/llms/{id}",
+        "PATCH /llmstore/llms/{id}",
+      ]);
+      expect(llmOnly).toContain("PATCH endpoints you hold:\n  /llmstore/llms/{id}.");
+      expect(llmOnly).not.toContain("/apicallstore/apicalls/{id}, ");
+    });
+
+    it("says what a patch is, and how to write one", () => {
+      expect(body).toContain("RFC 6902");
+      expect(body).toContain('{"op":"add","path":"/tasks/0/knowledgeBases"');
+      expect(body).toContain("op is add, replace, remove or test");
+    });
+
+    it("says what is refused: copy and move, a written vault reference, toolApprovals in a patch", () => {
+      expect(body).toContain("Never use copy or move");
+      expect(body).toContain("Do NOT write a ${vault:…} reference in a patch");
+      expect(body).toContain('no operation may name "toolApprovals"');
+    });
+
+    it("explains a 409 as a newer version, and when PUT is still right", () => {
+      expect(body).toContain("A 409 means the document\n  has a newer version");
+      expect(body).toContain("Use PUT only for a document that holds no references");
+    });
+
+    it("is absent when no PATCH is granted, even if the PUTs are", () => {
+      const putOnly = buildOperatorPromptBody([...READ_ENDPOINTS, "PUT /llmstore/llms/{id}"]);
+      expect(putOnly).toContain("You can change an existing agent's system prompt");
+      expect(putOnly).not.toContain("RFC 6902");
+      expect(putOnly).not.toContain("with PATCH, not PUT");
+    });
+
+    it("is absent for a read-only operator", () => {
+      expect(buildOperatorPromptBody(endpointsForScope("read_only"))).not.toContain("RFC 6902");
+    });
+
+    it("sits next to the modification guidance, not appended as a second authoring section", () => {
+      expect(body.indexOf("RFC 6902")).toBeGreaterThan(body.indexOf("You can change an existing agent's system prompt"));
     });
   });
 
@@ -537,14 +603,110 @@ describe("prompt corrections from dev testing", () => {
     const body = defaultOperatorPromptBody("read_write");
     // Anchored to the cloud-provider sentence itself — a bare /apiKey.*REQUIRED/
     // could be satisfied by an unrelated later "REQUIRED".
-    expect(body).toMatch(/For a CLOUD\s+provider \(anthropic, openai, gemini\) `apiKey` is REQUIRED/);
-    expect(body).toContain("${vault:key-name}");
+    expect(body).toMatch(/A CLOUD\s+provider \(anthropic, openai, gemini\) REQUIRES a key/);
     // ...and the local exception, so the operator does not demand a key ollama
     // does not need.
     expect(body).toMatch(/Local\s+providers \(ollama\) need no key/);
-    expect(body).toMatch(/ask which one to use BEFORE proposing the\s+call/);
+    expect(body).toMatch(/ask which one to use BEFORE\s+proposing the call/);
     // And the read-only scope, which cannot create agents, does not carry it.
     expect(defaultOperatorPromptBody("read_only")).not.toContain("setupAgent essentials");
+  });
+});
+
+/**
+ * The platform refuses any `${vault:…}`/`${connection:…}`/`${caller:…}` reference
+ * that reaches a request body from conversation data (`ConfigReferenceGuard`).
+ * Observed: the operator copied its own LLM config's reference into setupAgent,
+ * told the admin that typing the reference would make it acceptable (false),
+ * burned an approval on the retry, and sent the admin to build the agent by
+ * hand. The prompt must teach the supported path instead.
+ */
+describe("credential references in tool-call bodies", () => {
+  const body = defaultOperatorPromptBody("read_write");
+  const flat = body.replace(/\s+/g, " ");
+
+  it("forbids a reference in any tool-call body, whoever typed it", () => {
+    expect(flat).toContain("NEVER put a ${vault:…}, ${connection:…} or ${caller:…} reference in any tool-call body");
+    expect(flat).toContain("whoever typed it");
+    expect(flat).toContain("The platform refuses a reference that comes from conversation data");
+  });
+
+  it("says that having the admin type the reference does not help — the exact false claim it made", () => {
+    expect(flat).toContain('having the admin type or "confirm" the reference does not change that');
+  });
+
+  it("points at vaultKeyName with a bare name and an empty apiKey, on both creation tools", () => {
+    expect(flat).toContain("pass its bare NAME where the endpoint takes a key name");
+    expect(flat).toContain("`vaultKeyName` on setupAgent and createApiAgent");
+    expect(flat).toContain("leave `apiKey` empty");
+    // The creation bullet states it where the operator decides the call.
+    expect(flat).toContain("put its bare NAME (for example `anthropic-api-key`) in `vaultKeyName` and leave `apiKey` empty");
+  });
+
+  it("never advertises writing a reference — the sentences that taught the opposite are gone", () => {
+    expect(flat).not.toContain("pass a ${vault:key-name} reference");
+    expect(flat).not.toContain("Secrets are always written as a ${vault:key-name} reference");
+    expect(flat).not.toContain("is always a ${vault:key-name} reference");
+  });
+
+  it("says it cannot read the vault, so it never claims a key exists", () => {
+    expect(flat).toContain("You cannot read the vault, so never claim a key exists");
+  });
+
+  it("says a new agent's first deploy is refused until an administrator grants it, and never to set grantReferencedSecrets", () => {
+    // Amends the vault-grant guidance of #983 instead of repeating it: no deploy:false
+    // detour any more, because the manager's grant dialog adds and deploys in one step.
+    expect(flat).toContain("its first deploy is refused with `VAULT_GRANT_MISSING`");
+    expect(flat).toContain("Granting is the administrator's decision");
+    expect(flat).toContain("never set it");
+    expect(flat).toContain("`grantReferencedSecrets`");
+    expect(flat).not.toContain("create it with `deploy` false");
+  });
+
+  it("tells it to explain and retry with the name — not to send the admin off to do it by hand", () => {
+    expect(flat).toContain("propose the call again with the key's name and do not send the admin to do the work by hand");
+  });
+
+  it("offers the key-name retry only where the endpoint has a key-name field — a whole-document write has none", () => {
+    // CodeRabbit on #1010: a blanket "retry with the key's name" misleads for an
+    // update that replaces a document already holding a reference.
+    expect(flat).toContain("Where the endpoint documents a key-name field");
+    expect(flat).toContain("a write that replaces a whole document which already holds a reference");
+    // Generic, so it is right with or without a PATCH tool: use a partial update
+    // when the store offers one, and only otherwise send the admin to the manager.
+    expect(flat).toContain("If the store offers a partial update (a JSON Patch), edit with that and leave the credential out of it");
+    expect(flat).toContain("Only when neither a key-name field nor a partial update exists, do not retry or improvise");
+    expect(flat).toContain("point the admin at the manager for that change");
+    expect(flat).not.toMatch(/patch[A-Z]\w+|operationId/);
+  });
+
+  it("states the refusal guidance exactly once, not twice (a merge once left a truncated copy of its opener)", () => {
+    // toContain would pass with a duplicate; count the occurrences.
+    const opener = "- If a call is refused over a credential reference, explain this rule. Where";
+    expect(body.split(opener).length - 1).toBe(1);
+  });
+
+  it.each(["read_only", "read_write"] as const)(
+    "has no substantial line twice in the %s prompt body — a duplicated or truncated line is a merge accident",
+    (scope) => {
+      const seen = new Map<string, number>();
+      for (const line of defaultOperatorPromptBody(scope).split("\n")) {
+        const text = line.trim();
+        // Short lines are structural (list markers, "...", headings that legitimately repeat).
+        if (text.length < 30) continue;
+        seen.set(text, (seen.get(text) ?? 0) + 1);
+      }
+      const duplicated = [...seen].filter(([, count]) => count > 1).map(([text]) => text);
+      expect(duplicated).toEqual([]);
+    },
+  );
+
+  it("appears once — an amendment of the existing sections, not a second copy", () => {
+    expect(body.split("Credentials in tool-call bodies:").length - 1).toBe(1);
+  });
+
+  it("is a write-scope rule: the read-only body has no use for it", () => {
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("Credentials in tool-call bodies:");
   });
 });
 
@@ -740,5 +902,134 @@ describe("test-drive: talking to another agent", () => {
     expect(
       grantsConversationTesting(["POST /agents/{agentId}/start", "POST /agents/{conversationId}"]),
     ).toBe(true);
+  });
+});
+
+/**
+ * Batched changes: plan first, batch the independent writes in one turn, land the
+ * edit with ONE cascade call. These pin the SHAPE of the guidance — the plan and
+ * the approval count a knowledge-base binding is told to produce — because the
+ * operator's behaviour is exactly what its prompt says, and the whole point of
+ * the change is fewer approvals.
+ */
+describe("batched changes: the plan shape the operator is taught", () => {
+  const full = buildOperatorPromptBody(endpointsForScope("read_write"));
+
+  /** The section as it is delimited in the body: from its heading to the next blank line. */
+  const section = (body: string) => {
+    const start = body.indexOf("Planning and batching changes:");
+    expect(body, "batching section missing").toContain("Planning and batching changes:");
+    const end = body.indexOf("\n\n", start);
+    return body.slice(start, end === -1 ? undefined : end);
+  };
+
+  it("tells it to list the whole plan before the first gated call, and to wait for agreement", () => {
+    const text = section(full);
+    expect(text).toContain("set out the WHOLE plan");
+    expect(text).toContain("before the\n  first gated call");
+    expect(text).toContain("how many approvals the user should expect");
+    // Composes with the read-only/propose-first rule: a plan is a proposal, and
+    // agreement is what releases the first write.
+    // After a look/check request the plan is a proposal and waits; for a change asked
+    // for outright the pause is the confirmation, so it does not ask in chat first.
+    expect(text).toContain("a plan is a proposal: wait for the\n  user's agreement before the first write");
+    expect(text).toContain("make the first call in the same turn");
+    expect(text).toContain("the approval pause is\n  the confirmation");
+  });
+
+  it("tells it to issue independent writes as parallel tool calls in the same turn", () => {
+    const text = section(full);
+    expect(text).toContain("do not depend on each other's results");
+    expect(text).toContain("parallel tool calls in the same turn");
+    expect(text).toContain("reviewed in one approval");
+  });
+
+  it("forbids batching a call that needs another call's result, and guessing versions to do so", () => {
+    // Approval is bound to the exact resolved request, so a dependent call cannot
+    // be pre-approved. An operator that guesses a version to batch it would burn
+    // the approval on a request that is wrong, or worse, right by accident.
+    const text = section(full);
+    expect(text).toContain("RESULT");
+    expect(text).toContain("cannot go in the same batch");
+    expect(text).toContain("Never guess a\n  version number");
+  });
+
+  it("says what to do when one call in a batch is rejected, and when a write fails", () => {
+    const text = section(full);
+    expect(text).toContain("If one call in a batch is rejected");
+    expect(text).toContain("say why before trying anything");
+  });
+
+  it("is present for any write-capable operator and absent for a read-only one", () => {
+    expect(buildOperatorPromptBody(WITH_A_WRITE)).toContain("Planning and batching changes:");
+    expect(buildOperatorPromptBody(READ_ENDPOINTS)).not.toContain("Planning and batching changes:");
+    expect(defaultOperatorPromptBody("read_only")).not.toContain("parallel tool calls");
+  });
+
+  describe("with the cascade tool granted", () => {
+    const text = section(full);
+
+    it("teaches ONE cascade call instead of separate repoint and deploy calls", () => {
+      expect(text).toContain("Landing an edit is ONE call");
+      expect(text).toContain("cascadeAgentChanges");
+      expect(text).toContain("instead of\n  separate workflow-repoint, agent-repoint and deploy calls");
+      expect(text).toContain("resourceMappings");
+      expect(text).toContain("redeploy");
+      expect(text).toContain("compatible");
+    });
+
+    it("teaches the workflow pair, so a workflow patched in the same plan is not overwritten", () => {
+      expect(text).toContain("add the pair for the workflow\n  itself");
+    });
+
+    it("tells it a 400 wrote nothing and to re-read rather than retry blind", () => {
+      expect(text).toContain("NOTHING was\n  written");
+      expect(text).toContain("re-read the agent");
+    });
+
+    it("plans a knowledge-base binding as TWO approvals: parallel config + workflow writes, then one cascade", () => {
+      // Before this, the same binding was five single-call approvals: llm write,
+      // workflow write, workflow repoint, agent repoint, deploy.
+      expect(text).toContain("Connecting a knowledge base is also two");
+      expect(text).toContain("batch 1 is the config\n  edits");
+      expect(text).toContain("the workflow gaining the\n  rag step");
+      // The write METHOD is deliberately not named: a full-document PUT of an LLM
+      // config echoes its ${vault:…} apiKey and is refused by the vault-reference
+      // guard, and the editing rules are where the right method is taught.
+      expect(text).not.toMatch(/\bPUT\b|\bPATCH\b/);
+      expect(text).toContain("issued as parallel\n  calls in one turn");
+      expect(text).toContain("batch 2 is one cascade carrying both new versions plus\n  the redeploy");
+      expect(text).toContain('Say "2 approvals" up');
+    });
+
+    it("is not claimed when the cascade endpoint is not granted", () => {
+      const without = endpointsForScope("read_write").filter((e) => e !== "POST /agentstore/agents/{id}/cascade");
+      const body = buildOperatorPromptBody(without);
+      // The generic batching rules stay; the promise of a tool that was not
+      // generated does not — the module's rule that the prompt never describes a
+      // capability the agent lacks.
+      expect(body).toContain("Planning and batching changes:");
+      expect(body).not.toContain("cascadeAgentChanges");
+      expect(body).not.toContain("Landing an edit is ONE call");
+    });
+  });
+
+  it("reads as two approvals once credential-safe PATCH is granted: the editing rules come first, the batch defers to them", () => {
+    // The editing section teaches PATCH; the batching block names no method and
+    // points back at it, so batch 1 is the LLM-config PATCH plus the workflow PUT (the workflow store has no PATCH) and batch 2 is the cascade.
+    const editingMarker = "EDIT an existing LLM, HTTP-call or MCP-call configuration with PATCH";
+    const batchingMarker = "Planning and batching changes:";
+    // Both present, proven by toContain, so the two indices below are real positions.
+    expect(full).toContain(editingMarker);
+    expect(full).toContain(batchingMarker);
+    expect(full.indexOf(editingMarker)).toBeLessThan(full.indexOf(batchingMarker));
+    expect(section(full)).toContain("each made as the editing rules above describe");
+    expect(section(full)).toContain('Say "2 approvals" up');
+  });
+
+  it("contains no braces, which the runtime Qute templating would parse as expressions", () => {
+    // The body is rendered as a template on every turn. `{oldUri, newUri}` would
+    // be read as a variable reference and render empty or fail.
+    expect(section(full)).not.toMatch(/\{/);
   });
 });

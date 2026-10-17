@@ -23,7 +23,7 @@ describe("ChatPage — HITL pause UX", () => {
     expect(screen.getByText("Deletion needs sign-off")).toBeInTheDocument();
     const review = screen.getByTestId("chat-pause-review");
     expect(review).toBeInTheDocument();
-    expect(review).toHaveAttribute("href", "/manage/conversationview/conv-1");
+    expect(review).toHaveAttribute("href", "/manage/conversationview/conv-1?awaiting=1");
     expect(screen.getByTestId("chat-input")).toBeDisabled();
   });
 
@@ -57,5 +57,14 @@ describe("ChatPage — HITL pause UX", () => {
       }),
     );
     expect(screen.getAllByTestId("quick-reply-btn")).toHaveLength(2);
+  });
+
+  it("offers the same review deep link in the Workforce chat as everywhere else", () => {
+    renderWithProviders(<ChatPage />, { initialRoute: "/workforce/chat" });
+    act(() => useChatStore.setState({ conversationId: "conv-1", isPaused: true, pauseReason: "Needs sign-off" }));
+    expect(screen.getByTestId("chat-pause-review")).toHaveAttribute(
+      "href",
+      "/manage/conversationview/conv-1?awaiting=1",
+    );
   });
 });

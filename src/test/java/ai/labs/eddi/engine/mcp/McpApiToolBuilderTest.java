@@ -414,6 +414,45 @@ class McpApiToolBuilderTest {
     }
 
     @Test
+    @DisplayName("an application/json-patch+json body is mapped, with its own content type")
+    void parseAndBuild_jsonPatchBodyIsMapped() {
+        // A PATCH declared as json-patch+json ONLY used to lose its body entirely —
+        // the builder looked for application/json alone — leaving a tool with
+        // nothing to send, which is the credential-safe edit path being unusable.
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things/{id}":{"patch":{
+                "operationId":"patchThing","tags":["things"],
+                "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+                "requestBody":{"required":true,"content":{"application/json-patch+json":{"schema":{"type":"array"}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall patchThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("application/json-patch+json", patchThing.getRequest().getContentType());
+        assertEquals("{" + McpApiToolBuilder.WHOLE_BODY_VARIABLE + "}", patchThing.getRequest().getBody());
+        String description = patchThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE);
+        assertTrue(description.contains("JSON array"), description);
+        assertTrue(description.contains("RFC 6902"), description);
+    }
+
+    @Test
+    @DisplayName("plain application/json wins when a body declares both")
+    void parseAndBuild_plainJsonWinsOverJsonPatch() {
+        String spec = """
+                {"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{"/things":{"post":{
+                "operationId":"createThing","tags":["things"],
+                "requestBody":{"content":{"application/json":{"schema":{"type":"object"}},"application/json-patch+json":{"schema":{"type":"array"}}}},
+                "responses":{"200":{"description":"ok"}}}}}}
+                """;
+        var result = McpApiToolBuilder.parseAndBuild(spec, null, null, null);
+        ApiCall createThing = result.configsByGroup().get("things").getHttpCalls().get(0);
+
+        assertEquals("application/json", createThing.getRequest().getContentType());
+        assertFalse(createThing.getParameters().get(McpApiToolBuilder.WHOLE_BODY_VARIABLE).contains("RFC 6902"));
+    }
+
+    @Test
     @DisplayName("required properties are marked so, and optional ones are not forced")
     void parseAndBuild_bodyDescriptionMarksRequiredProperties() {
         // Every declared parameter becomes a REQUIRED tool parameter, so optionality

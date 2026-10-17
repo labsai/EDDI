@@ -1165,6 +1165,7 @@ function WorkforceBoard() {
               conversation: selectedConversation.id,
             }).toString()}`}
             className="font-medium text-amber-500 underline-offset-2 hover:underline"
+            data-testid="board-awaiting-approval-review"
           >
             {t("Workforce.board.reviewInManager", "Review it")}
           </Link>

@@ -59,6 +59,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.security.NoSuchAlgorithmException;
 import java.security.MessageDigest;
@@ -145,6 +146,23 @@ class ConversationHitlService {
                                                                  ControlSignal mode,
                                                                  String cancelledBy)
             throws ResourceStoreException {
+        return cancel(conversationId, mode, cancelledBy, false);
+    }
+
+    /**
+     * The approver's cancel: the {@code AWAITING_HUMAN} compare-and-set alone. No
+     * in-flight signal, no {@code IN_PROGRESS} transition — so a resume that lands
+     * between the caller's authorization and this call leaves nothing for the
+     * approver to stop, and the CAS simply fails (L9 of the 2026-10-15 security
+     * review, review thread on the read-then-cancel race).
+     */
+    public IConversationService.CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy)
+            throws ResourceStoreException {
+        return cancel(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy, true);
+    }
+
+    private IConversationService.CancelOutcome cancel(String conversationId, ControlSignal mode, String cancelledBy, boolean pausedOnly)
+            throws ResourceStoreException {
         ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
         if (currentState == null) {
             return IConversationService.CancelOutcome.NOT_FOUND;
@@ -154,19 +172,20 @@ class ConversationHitlService {
         // flag at task boundaries and stops before the next lifecycle task.
         // CANCEL_IMMEDIATE currently degrades to graceful semantics on the
         // regular surface (no per-conversation future handle to interrupt).
-        var inFlightMemory = inFlightConversations.get(conversationId);
+        // A paused-only cancel never signals: an executing turn is not its to stop.
+        var inFlightMemory = pausedOnly ? null : inFlightConversations.get(conversationId);
         if (inFlightMemory != null) {
             inFlightMemory.setCancelled(true);
             LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
         }
         // Cluster mode: the turn may be running on another node (the lease holder) —
         // ask that node to signal it. Always false on a single node.
-        boolean remoteSignalled = inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
+        boolean remoteSignalled = !pausedOnly && inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
         boolean changed = pauseCancelled;
-        if (!changed) {
+        if (!changed && !pausedOnly) {
             changed = conversationMemoryStore.compareAndSetState(conversationId,
                     ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
         }
@@ -405,11 +424,29 @@ class ConversationHitlService {
             // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
             populateToolApprovalsConfig(memory);
 
+            // Ordering contract (same as the say path, see ConversationService
+            // .completeTurn): a resume that RE-PAUSES tells its client only after the
+            // re-pause is persisted by resumeFinished below, with the state the store
+            // holds — never "paused" while the store still reads IN_PROGRESS. Any other
+            // outcome is delivered immediately, as before.
+            final DeferredDelivery resumeDelivery = new DeferredDelivery();
+            // The state resumeFinished committed, once it has; read by its delivery step.
+            final AtomicReference<ConversationState> committedResumeState = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     handler != null ? returnMemory -> {
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
                         memorySnapshot.setEnvironment(environment);
+                        if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                            resumeDelivery.defer(committedState -> {
+                                if (committedState != null) {
+                                    memorySnapshot.setConversationState(committedState);
+                                    conversationService.cacheConversationState(conversationId, committedState);
+                                }
+                                handler.onComplete(memorySnapshot);
+                            });
+                            return;
+                        }
                         conversationService.cacheConversationState(conversationId, memorySnapshot.getConversationState());
                         handler.onComplete(memorySnapshot);
                     } : null);
@@ -464,6 +501,18 @@ class ConversationHitlService {
             // zombie resume can never overwrite state written after its timeout.
             IRuntime.IFinishedExecution<Void> resumeFinished = new IRuntime.IFinishedExecution<>() {
                 public void onComplete(Void result) {
+                    try {
+                        persistResumeOutcome();
+                    } finally {
+                        // A re-pause is announced to the client only now, after the
+                        // persist above succeeded or was discarded (see resumeDelivery).
+                        // Runs on every exit; a no-op when nothing was deferred.
+                        ConversationState committed = committedResumeState.get();
+                        resumeDelivery.deliver(committed != null ? committed : conversationService.committedStateOrError(conversationId));
+                    }
+                }
+
+                private void persistResumeOutcome() {
                     if (memory.isCancelled()) {
                         // aborted before execution — the cancel path owns the state
                         return;
@@ -512,6 +561,7 @@ class ConversationHitlService {
                             return;
                         }
                         conversationService.cacheConversationState(conversationId, memory.getConversationState());
+                        committedResumeState.set(memory.getConversationState());
                         // Task 10 — AUTO_REJECT no-progress: the re-pause is now durably
                         // persisted (AWAITING_HUMAN); break the loop with a reject-all resume
                         // through the SAME resume path (journal-bearing, no shortcut). The
@@ -540,6 +590,16 @@ class ConversationHitlService {
                     }
                 }
                 public void onFailure(Throwable t) {
+                    try {
+                        handleResumeFailure(t);
+                    } finally {
+                        // The resumed pipeline already deferred a re-pause announcement;
+                        // this path commits nothing, so the caller hears the stored state.
+                        resumeDelivery.deliver(conversationService.committedStateOrError(conversationId));
+                    }
+                }
+
+                private void handleResumeFailure(Throwable t) {
                     // See the say path's onFailure: only the DEDICATED abandonment type
                     // means "the watchdog already recorded the outcome". A genuine
                     // InterruptedException from the body is a real failure and falls
@@ -597,6 +657,12 @@ class ConversationHitlService {
                                                 callerIdentityContext.withApprover(approvedCallsIdentity, resumeCallable))),
                                         resumeFinished, null));
                     } finally {
+                        // Backstop: the runtime callbacks flush a deferred re-pause, but a
+                        // resume that reached neither (cancelled before it ran) must still
+                        // terminate its caller's handler. One-shot, so never a double event.
+                        if (resumeDelivery.isPending()) {
+                            resumeDelivery.deliver(conversationService.committedStateOrError(conversationId));
+                        }
                         // value-conditional: never evict a newer execution's registration
                         inFlightConversations.remove(conversationId, memory);
                     }

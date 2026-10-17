@@ -27,7 +27,7 @@ Changes touching the following areas require **extra scrutiny** and explicit sec
 
 - **Authentication / authorization** — `AuthStartupGuard`, OIDC configuration, role checks
 - **Secrets handling** — `VaultSecretProvider`, `VaultSaltManager`, `SecretResolver`, property `scope: secret`
-- **HTTP clients** — Must use `SafeHttpClient`. No direct `HttpClient.newBuilder()`. All URLs validated via `UrlValidationUtils`.
+- **HTTP clients** — Must use `OutboundHttp`. No direct `HttpClient.newBuilder()`. A user- or model-chosen URL keeps `SsrfPolicy.STRICT`; every body is read with a capped `BodyMode`.
 - **Input validation** — Template injection, path traversal, SSRF vectors
 - **Deserialization** — Jackson `@JsonTypeInfo`, polymorphic type handling
 - **Dependencies** — New transitive dependencies reviewed for known vulnerabilities
@@ -43,6 +43,7 @@ Changes touching the following areas require **extra scrutiny** and explicit sec
 - **Merge commits** are used only for long-lived branches or release merges.
 - Branch protection on `main` requires two status checks: **CodeQL Analysis** and **Build & Test** (both from `ci.yml`). The branch does not have to be up to date with `main` first. The other checks (integration and E2E tests, secret scanning, Trivy, changelog discipline, review bots) are not merge-blocking, but a red one is expected to be fixed or explained before merging.
 - Force-push to `main` is prohibited (enforced by branch protection and `.githooks/pre-push`).
+- **At least one approval must come from a human.** `.github/workflows/auto-approve-copilot.yml` turns a clean Copilot review plus a green CI run into a bot approval, but that approval is *additional*: it only ever satisfies the second of two required approvals, never the first. Whether `main` requires two approvals is a repository setting (Settings → Branches → `main` → *Require approvals*), not something the workflow can read or enforce, so an admin who lowers it to one must disable the workflow (unset the `AUTO_APPROVE_BOT_LOGIN` variable) in the same change. The workflow also never approves a PR from a `COLLABORATOR` (only `OWNER`/`MEMBER` authors) or one that touches CI, build, deploy or the security-critical code (`engine/security/**`, `secrets/**`, `engine/httpclient/**`, `connections/**`, `application.properties`, any `*Guard*.java`); those always wait for a human.
 
 ## AI-Assisted Code
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
+import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -38,6 +39,7 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -297,6 +299,40 @@ class ApiCallExecutorConfigReferenceTest {
         assertNotNull(preview.fingerprint());
         assertFalse(String.valueOf(preview).contains(SECRET), "preview: " + preview);
         assertEquals("{\"key\":\"" + RequestRedactor.REDACTED + "\"}", preview.body());
+    }
+
+    @Test
+    @DisplayName("resolve() — what the approval gate calls — refuses a data-supplied reference as the guard's own exception, not a generic failure")
+    void resolveRefusesDataSuppliedReferenceAsItself() {
+        // The body is ONE variable, as McpApiToolBuilder generates it: the model wrote
+        // the whole document, reference included.
+        var failure = assertThrows(ConfigReferenceRefusedException.class,
+                () -> executor.resolve(call(Map.of(), "{requestBody}"), memory, requestBodyData("{\"apiKey\":\"${vault:api-key}\"}"), SERVER));
+
+        assertTrue(failure.getMessage().contains("${vault:api-key}"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("vaultKeyName"), "must say what to do instead: " + failure.getMessage());
+        assertFalse(failure.getMessage().contains(SECRET), "a refusal must never carry a resolved value");
+    }
+
+    @Test
+    @DisplayName("resolve() on a call that can diverge from execute() keeps the generic failure — its refusal would be a guess")
+    void resolveOfDivergentCallStaysGeneric() {
+        var divergent = call(Map.of(), "{requestBody}");
+        var preRequest = new HttpPreRequest();
+        preRequest.setPropertyInstructions(new ArrayList<>());
+        divergent.setPreRequest(preRequest);
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.resolve(divergent, memory, requestBodyData("{\"apiKey\":\"${vault:api-key}\"}"), SERVER));
+
+        assertEquals(LifecycleException.class, failure.getClass());
+        assertTrue(failure.getCause() instanceof ConfigReferenceRefusedException, String.valueOf(failure.getCause()));
+    }
+
+    private static Map<String, Object> requestBodyData(String requestBody) {
+        var data = data("hi");
+        data.put("requestBody", requestBody);
+        return data;
     }
 
     @Nested

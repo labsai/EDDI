@@ -260,9 +260,11 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
         DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure, turn);
         String id;
         synchronized (deadLetterLock) {
-            // Numbered under the lock, so the ring holds its entries in id order:
-            // paging by id (ClusterConversationCoordinator) would otherwise skip an
-            // entry that was numbered before, but added after, a concurrent one.
+            // The id is taken under the same lock as the append, so the deque's order IS
+            // the id order. Taken outside it, two concurrent failures could draw ids 2 and
+            // 3 and append 3 before 2 — and the cursor paging over local entries, which
+            // skips by id number, then dropped an entry from one page or repeated it on
+            // the next (ClusterConversationCoordinatorTest.localDeadLettersPage, flaky).
             id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
             deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload, turn,
                     classification.reason(), localNodeId(), classification.fence()));
