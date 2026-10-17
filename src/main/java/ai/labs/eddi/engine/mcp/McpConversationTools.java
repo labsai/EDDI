@@ -143,6 +143,23 @@ public class McpConversationTools {
     }
 
     /**
+     * Uniform answer when a turn is refused. The turn guard refuses both a caller
+     * who does not own the conversation and an owner who may no longer use its
+     * agent (L4), so the answer names neither reason — as the REST surface does —
+     * rather than tell an owner they do not own their own conversation. A new
+     * conversation has no id yet; there the refusal is the USE check on the agent.
+     */
+    private String turnDenied(String tool, String conversationId) {
+        meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", tool).increment();
+        if (conversationId == null || conversationId.isBlank()) {
+            LOGGER.infof("%s denied: caller may not use the agent", tool);
+            return errorJson("Access denied: you may not use this agent");
+        }
+        LOGGER.infof("%s denied: caller may not continue conversation %s", tool, LogSanitizer.sanitize(conversationId));
+        return errorJson("Access denied: you may not continue this conversation");
+    }
+
+    /**
      * Uniform answer when the conversation guard reports that a conversation has no
      * descriptor (never existed, or deleted) and the caller is not an admin. An
      * expected outcome of probing an id, so it is logged at debug, not as an error
@@ -247,7 +264,7 @@ public class McpConversationTools {
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
-            return accessDenied("talk_to_agent", conversationId);
+            return turnDenied("talk_to_agent", conversationId);
         } catch (NotFoundException e) {
             return conversationNotFound("talk_to_agent", conversationId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
@@ -318,7 +335,7 @@ public class McpConversationTools {
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
-            return accessDenied("chat_with_agent", convId);
+            return turnDenied("chat_with_agent", convId);
         } catch (NotFoundException e) {
             return conversationNotFound("chat_with_agent", convId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {

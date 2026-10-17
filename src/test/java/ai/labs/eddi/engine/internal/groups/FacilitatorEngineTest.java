@@ -571,6 +571,26 @@ class FacilitatorEngineTest {
         }
 
         @Test
+        void recruit_useCheckThatThrows_isRefused_andTheCheckpointDoesNotThrow() throws Exception {
+            // The check reads the descriptor store and the workspace context. An
+            // exception from it must be a refused recruitment, like an unverifiable
+            // deployment — not an exception out of checkpoint(), which executeDiscussion
+            // would turn into a FAILED discussion over a facilitator proposal.
+            engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry, (agentId, principal) -> {
+                throw new IllegalStateException("descriptor store unavailable");
+            });
+            gc.setUserId("owner-1");
+            stubDeployed("specialist");
+            stubReply("{\"move\": \"RECRUIT\", \"args\": {\"agentId\": \"specialist\"}}");
+
+            assertEquals(FacilitatorAction.Kind.NONE, checkpoint(boundaryCtx()).kind());
+            assertTrue(gc.getRecruitedAgentIds().isEmpty());
+            assertTrue(gc.getDynamicMembers().isEmpty());
+            assertTrue(facilitationEntries().get(0).content().contains("not available"));
+            verify(deploymentStore, never()).readDeploymentInfos(any());
+        }
+
+        @Test
         void recruit_agentTheOwnerMayUse_isAdded() {
             engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
                     (agentId, principal) -> true);

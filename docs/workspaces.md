@@ -186,7 +186,17 @@ its search is deliberately narrow:
   `eddi-admin` is offered every recorded person and team.
 - **An email address is shown only to an administrator or to somebody who shares
   a team with that person** — in suggestions and in a resource's grant list.
-  Anyone else sees the username.
+  Anyone else sees the username. A username that is itself an address counts
+  as one: it is never used as a person's label, and as the secondary line it
+  follows the same rule as the email. (The principal is the id a grant is
+  stored under, so where the identity provider uses the address as the
+  principal, the grant's `subject` carries it regardless.)
+- **Teams are what the token carried at the person's last recorded sign-in.**
+  The directory is refreshed from the token about every ten minutes while
+  someone is signed in; a person removed from a team keeps that membership in
+  the directory — and stays suggested to their former teammates — until they
+  next sign in. Nothing expires a directory entry by age; GDPR erasure removes
+  one.
 
 ### Where new resources land
 

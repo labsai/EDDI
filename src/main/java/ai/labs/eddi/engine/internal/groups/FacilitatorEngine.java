@@ -455,7 +455,7 @@ public class FacilitatorEngine {
         }
         // Before the deployment check, as in RecruitAgentTool: the other order would
         // tell the model whether an agent it may not touch is deployed.
-        if (useCheck != null && !useCheck.test(agentId, gc.getUserId())) {
+        if (useCheck != null && !ownerMayUse(agentId, gc)) {
             LOGGER.warnf("Facilitator recruitment of '%s' into group conversation %s refused: the discussion owner has no access to it",
                     LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(gc.getId()));
             return "agent '" + agentId + "' is not available to this discussion's owner";
@@ -464,6 +464,22 @@ public class FacilitatorEngine {
             return "agent '" + agentId + "' is not deployed and ready";
         }
         return null;
+    }
+
+    /**
+     * Same rule as {@link #isDeployedAndReady}: unverifiable means refused. The
+     * check reads the descriptor store and the workspace context; an exception from
+     * it is a refused recruitment, not a failed discussion — {@code checkpoint}
+     * promises never to throw.
+     */
+    private boolean ownerMayUse(String agentId, GroupConversation gc) {
+        try {
+            return useCheck.test(agentId, gc.getUserId());
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not verify the discussion owner's access to '%s' — refusing facilitator recruitment: %s",
+                    LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(e.getMessage()));
+            return false;
+        }
     }
 
     /** Same rule as {@code RecruitAgentTool}: unverifiable means not ready. */

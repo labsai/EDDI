@@ -156,6 +156,23 @@ class UserDirectoryTest {
         }
 
         @Test
+        @DisplayName("a username that is itself an email address is treated as one, as label and as detail")
+        void emailShapedUsernameCountsAsEmail() {
+            var bob = new DirectoryUser("u-bob", "sub-bob", "bob@example.com", "bob@example.com", true, null, List.of(Subjects.team("finance")),
+                    Instant.EPOCH, Instant.EPOCH);
+
+            assertEquals("u-bob", bob.label(), "no name: the principal, never the address, is the label");
+            assertEquals("bob@example.com", directory.detailFor(bob, ALICE, true));
+            assertEquals("bob@example.com", directory.detailFor(bob, CallerSpaces.of("carol", Set.of("/finance")), false));
+            assertNull(directory.detailFor(bob, ALICE, false), "an outsider must not get the address as a username either");
+            assertNull(directory.detailFor(bob, null, false));
+
+            var private_ = new UserDirectory(store, identity, spaceContext, settings, executor, true, false);
+            assertNull(private_.detailFor(bob), "expose-email=false withholds an email-shaped username too");
+            assertEquals("bob", private_.detailFor(member("bob", "bob@example.com", "finance")), "a plain username is still shown");
+        }
+
+        @Test
         @DisplayName("unset, the directory follows workspace enforcement; set, the operator's word wins")
         void enabledFollowsEnforcement() {
             when(settings.isEnforcing()).thenReturn(false);

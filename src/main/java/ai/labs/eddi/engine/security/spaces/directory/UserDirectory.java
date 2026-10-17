@@ -409,7 +409,7 @@ public class UserDirectory {
         if (callerIsAdmin || sharesTeam(user, caller)) {
             return detailFor(user);
         }
-        return user.username() != null && !user.username().equals(user.label()) ? user.username() : null;
+        return usernameDetail(user, false);
     }
 
     /** Whether {@code user} belongs to any team {@code caller} belongs to. */
@@ -442,7 +442,21 @@ public class UserDirectory {
         if (exposeEmail && user.email() != null) {
             return user.email();
         }
-        return user.username() != null && !user.username().equals(user.label()) ? user.username() : null;
+        return usernameDetail(user, exposeEmail);
+    }
+
+    /**
+     * The username as a secondary line, when it adds to the label. A username that
+     * is itself an email address is one, and is shown only where an address may be
+     * ({@code emailAllowed}): an account whose username is its address would
+     * otherwise be exactly as exposed as before.
+     */
+    private static String usernameDetail(DirectoryUser user, boolean emailAllowed) {
+        String username = user.username();
+        if (username == null || username.isBlank() || username.equals(user.label())) {
+            return null;
+        }
+        return emailAllowed || !DirectoryUser.emailForm(username) ? username : null;
     }
 
     // --- Search -------------------------------------------------------------

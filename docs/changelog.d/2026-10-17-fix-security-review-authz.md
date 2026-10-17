@@ -2,7 +2,7 @@
 
 **Repo:** EDDI (`fix/security-review-authz`)
 
-Findings M2, M3, M5, L2, L3 and L4 of the 2026-10-17 security review. Every change below is a no-op for an administrator, and the workspace ones (M3, L4) are no-ops unless `eddi.workspaces.enabled=true` with authorization on.
+Findings M2, M3, M5, L2, L3 and L4 of the 2026-10-17 security review. The authorization changes (M2, M3, M5, L2, L4) are no-ops for an administrator, and the workspace ones (M3, L4) are no-ops unless `eddi.workspaces.enabled=true` with authorization on. L3 is not an authorization check: a token whose principal is in a reserved namespace is refused whatever roles it carries.
 
 ### M2 — the user directory could be harvested by any editor
 
