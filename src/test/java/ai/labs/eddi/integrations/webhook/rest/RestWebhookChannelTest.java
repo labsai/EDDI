@@ -51,7 +51,7 @@ class RestWebhookChannelTest {
 
     private static final String INTEGRATION_ID = "0123456789abcdef01234567";
     private static final String AGENT_ID = "abcdefabcdefabcdefabcdef";
-    private static final String SECRET = "resolved-signing-secret";
+    private static final String SECRET = "test-key-test-key";
     private static final String PUSH = "{\"ref\":\"refs/heads/main\",\"repository\":{\"full_name\":\"labsai/EDDI\"}}";
 
     private ChannelTargetRouter router;

@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 class WebhookSignatureVerifierTest {
 
-    private static final String SECRET = "s3cr3t-signing-key";
+    private static final String SECRET = "test-key-test-key";
     private static final long NOW = 1_760_000_000L;
     private static final byte[] BODY = "{\"action\":\"opened\",\"number\":7}".getBytes(StandardCharsets.UTF_8);
 

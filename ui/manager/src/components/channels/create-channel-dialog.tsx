@@ -162,8 +162,8 @@ export function CreateChannelDialog({
           {step === "credentials" && isWebhook && (
             <>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground" htmlFor="create-webhook-signing-secret-field">{t("channels.signingSecret", "Signing Secret")}</label>
-                <SecretKeyPicker id="create-webhook-signing-secret-field" referenceOnly testId="create-webhook-signing-secret" value={signingSecret} onChange={setSigningSecret} placeholder="${vault:webhook-signing-secret}" />
+                <label className="text-sm font-medium text-foreground" htmlFor="create-webhook-signing-field">{t("channels.signingSecret", "Signing Secret")}</label>
+                <SecretKeyPicker id="create-webhook-signing-field" referenceOnly testId="create-webhook-signing-secret" value={signingSecret} onChange={setSigningSecret} placeholder="${vault:webhook-signing-secret}" />
                 <p className="text-xs text-muted-foreground">{t("webhook.signingSecretHint", "Required. The shared HMAC secret, stored in the secrets vault and referenced as ${vault:…}.")}</p>
               </div>
               <div className="space-y-1.5">
