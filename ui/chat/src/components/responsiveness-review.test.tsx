@@ -3,12 +3,12 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QuickReplies } from "./QuickReplies";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
 import { indicatorStatusText } from "./Indicators";
-import { ChatProvider } from "@/store/chat-store";
+import { ChatProvider, useChatDispatch } from "@/store/chat-store";
 import { stepsToMessages } from "@/api/snapshot";
 import { setLocale } from "@/i18n";
 
@@ -101,5 +101,31 @@ describe("ChatInput on a touch screen", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("chat-send"));
     expect(onSend).toHaveBeenCalledWith("line one", false);
+  });
+});
+
+describe("ChatInput focus handoff", () => {
+  it("holds a focus request until the turn has finished", () => {
+    let dispatch!: ReturnType<typeof useChatDispatch>;
+    function Grab() {
+      dispatch = useChatDispatch();
+      return null;
+    }
+    const ui = (focusSignal: number) => (
+      <ChatProvider>
+        <Grab />
+        <ChatInput onSend={vi.fn()} focusSignal={focusSignal} />
+      </ChatProvider>
+    );
+    const { rerender } = render(ui(0));
+    act(() => dispatch({ type: "SET_PROCESSING", value: true }));
+
+    // A quick reply asks for focus as its turn starts...
+    rerender(ui(1));
+    expect(screen.getByTestId("chat-input")).not.toHaveFocus();
+
+    // ...and gets it once the turn is over, not while the reply is arriving.
+    act(() => dispatch({ type: "SET_PROCESSING", value: false }));
+    expect(screen.getByTestId("chat-input")).toHaveFocus();
   });
 });

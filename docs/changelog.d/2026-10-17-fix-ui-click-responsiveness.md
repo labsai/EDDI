@@ -85,6 +85,24 @@ inert.
 - **The Chat UI no longer polls approval status from a hidden tab.** The next
   read is parked and taken at once when the tab is visible again.
 
+### Review fixes
+
+- Optimistic rollbacks are scoped to their own operation. A failed schedule
+  toggle undoes only its row, and a failed notification dismiss undoes only its
+  items and its share of the badge, instead of restoring a whole snapshot over a
+  later change. Every schedule row with a toggle in flight stays disabled
+  (`useMutationState`), not just the latest one.
+- The share dialog refreshes the agent's detail and descriptor queries as well
+  as the lists. Those keys have their own roots, `agent` and
+  `agent-descriptor`, not `agents`.
+- Dead-letter paging is disabled while a page is still placeholder data, so a
+  second click cannot push the same cursor twice.
+- The logs instance box follows back/forward navigation.
+- Schedule edits made through the trigger tabs, cron presets and the agent
+  picker count as edits, so Escape or a backdrop click no longer discards them.
+- The Chat composer takes a pending focus request only once the turn has
+  finished, so the phone keyboard does not cover a reply as it arrives.
+
 ### Not done (follow-ups)
 
 - A client-side idle watchdog for a stalled chat stream was considered and

@@ -119,18 +119,19 @@ export function ChatInput({ onSend, disabled, conversationId, focusSignal = 0 }:
   /** Set when a secret send swaps the password field for the textarea. */
   const refocusAfterSecretRef = useRef(false);
 
-  // A focus request can arrive while the composer is disabled (a quick reply
-  // or Stop starts or ends a turn), and a disabled textarea cannot take focus.
-  // Hold the request until the composer is enabled again.
+  // A focus request can arrive while the composer is disabled or a turn is
+  // still running (a quick reply starts one): a disabled textarea cannot take
+  // focus, and focusing mid-turn would pop a phone keyboard up over the reply
+  // being read. Hold the request until the composer is free again.
   const pendingFocusRef = useRef(false);
   useEffect(() => {
     if (focusSignal > 0) pendingFocusRef.current = true;
   }, [focusSignal]);
   useEffect(() => {
-    if (!pendingFocusRef.current || disabled) return;
+    if (!pendingFocusRef.current || disabled || isProcessing) return;
     pendingFocusRef.current = false;
     textareaRef.current?.focus();
-  }, [focusSignal, disabled]);
+  }, [focusSignal, disabled, isProcessing]);
 
   // Leaving secret mode unmounts the focused password field; without this the
   // next thing a keyboard user types goes nowhere.

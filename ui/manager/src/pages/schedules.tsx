@@ -28,7 +28,7 @@ import {
   Hand,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useQueries } from "@tanstack/react-query";
+import { useMutationState, useQueries } from "@tanstack/react-query";
 import { isApiError, getErrorMessage } from "@/lib/api-client";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { useAgentNames } from "@/hooks/use-agent-names";
@@ -39,6 +39,7 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useToggleSchedule,
+  TOGGLE_SCHEDULE_KEY,
   useFireNow,
   useRetryDeadLetter,
   useDismissDeadLetter,
@@ -1062,6 +1063,7 @@ function ScheduleFormDialog({
                 <button
                   key={mode}
                   onClick={() => {
+                    setTouched(true);
                     setFormMode(mode);
                     if (mode === "heartbeat") setStrategy("persistent");
                   }}
@@ -1091,7 +1093,10 @@ function ScheduleFormDialog({
                   <button
                     key={p.key}
                     type="button"
-                    onClick={() => setCronExpression(p.expression)}
+                    onClick={() => {
+                      setTouched(true);
+                      setCronExpression(p.expression);
+                    }}
                     title={p.expression}
                     data-testid={`cron-preset-${p.key}`}
                     className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
@@ -1235,7 +1240,11 @@ function ScheduleFormDialog({
               <AgentPicker
                 id={`${uid}-agent`}
                 value={agentId}
-                onChange={setAgentId}
+                onChange={(value) => {
+                  // The picker is a popup, outside onChangeCapture's reach.
+                  setTouched(true);
+                  setAgentId(value);
+                }}
                 placeholder={t(
                   "schedules.agentIdPlaceholder",
                   "Enter agent ID..."
@@ -1465,6 +1474,10 @@ export function SchedulesPage() {
   const { data: failedFires } = useFailedFires();
   const deleteMutation = useDeleteSchedule();
   const toggleMutation = useToggleSchedule();
+  const togglingIds = useMutationState({
+    filters: { mutationKey: TOGGLE_SCHEDULE_KEY, status: "pending" },
+    select: (m) => (m.state.variables as { id: string } | undefined)?.id,
+  });
   const fireMutation = useFireNow();
   const retryMutation = useRetryDeadLetter();
 
@@ -1982,9 +1995,10 @@ export function SchedulesPage() {
                               {/* Toggle Enable/Disable */}
                               <button
                                 onClick={() => handleToggle(s)}
-                                // Only the row whose request is in flight; the
-                                // others stay clickable.
-                                disabled={toggleMutation.isPending && toggleMutation.variables?.id === s.id}
+                                // Every row with a toggle in flight, and only
+                                // those: a second click there would race the
+                                // first request.
+                                disabled={togglingIds.includes(s.id!)}
                                 aria-pressed={!!s.enabled}
                                 title={
                                   s.enabled

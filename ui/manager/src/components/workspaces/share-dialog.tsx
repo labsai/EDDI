@@ -120,14 +120,17 @@ export function ShareDialog({ open, onClose, resourceId, resourceName, chatLink 
       // detail view showing this resource is now stale. Those refresh in the
       // background: awaiting them held every control here disabled, and the
       // success toast back, until each list on the page had refetched.
-      // (agentKeys.all is the prefix of the agent detail and descriptor keys.)
+      // agentKeys.detail and .descriptor have their own roots ("agent",
+      // "agent-descriptor"), not "agents", so they are named here too.
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: agentKeys.all }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.detail(resourceId) }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.descriptor(resourceId) }),
         queryClient.invalidateQueries({ queryKey: ["workflows"] }),
         queryClient.invalidateQueries({ queryKey: ["resources"] }),
       ]);
     },
-    [refetch, queryClient]
+    [refetch, queryClient, resourceId]
   );
 
   /**

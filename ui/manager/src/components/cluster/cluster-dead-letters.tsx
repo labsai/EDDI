@@ -102,7 +102,9 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
     };
   }, [reason, nodeId, debouncedAgentId, debouncedConversationId, period]);
   const after = cursors[cursors.length - 1] ?? null;
-  const { data, isLoading, isError, refetch } = useClusterDeadLetters(filter, after);
+  // While a new page loads, `data` still holds the previous one (keepPreviousData)
+  // and so its cursor: paging again then would push that same cursor twice.
+  const { data, isLoading, isError, refetch, isPlaceholderData } = useClusterDeadLetters(filter, after);
   const replay = useReplayDeadLetters();
   const discard = useDiscardDeadLetters();
 
@@ -360,7 +362,7 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
         <Button
           size="sm"
           variant="outline"
-          disabled={cursors.length <= 1}
+          disabled={cursors.length <= 1 || isPlaceholderData}
           onClick={() => {
             setCursors((c) => c.slice(0, -1));
             setSelected(new Set());
@@ -374,7 +376,7 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
         <Button
           size="sm"
           variant="outline"
-          disabled={!data?.nextCursor}
+          disabled={!data?.nextCursor || isPlaceholderData}
           onClick={() => {
             setCursors((c) => [...c, data!.nextCursor]);
             setSelected(new Set());

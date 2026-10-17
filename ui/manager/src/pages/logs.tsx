@@ -579,6 +579,15 @@ function HistoryTab() {
     // Only a settled draft writes to the URL.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInstance]);
+  // ...and the URL can change on its own (back/forward): show that value.
+  // Our own write always equals the settled draft, so this never fires for it,
+  // and it never overwrites text that has not settled into the URL yet.
+  useEffect(() => {
+    const fromUrl = filters.instanceId ?? "";
+    if (fromUrl !== debouncedInstance) setInstanceDraft(fromUrl);
+    // Only a URL change is an outside change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.instanceId]);
 
   // Reset conversation when agent changes
   const handleAgentChange = useCallback(

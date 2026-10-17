@@ -75,6 +75,38 @@ describe("useToggleSchedule", () => {
   });
 });
 
+describe("useToggleSchedule with two rows in flight", () => {
+  it("undoes only the row that failed, keeping another row's toggle", async () => {
+    let failA!: () => void;
+    const aFails = new Promise<void>((r) => (failA = r));
+    server.use(
+      http.post("*/schedulestore/schedules/:id/enable", async ({ params }) => {
+        if (params.id === "a") {
+          await aFails;
+          return HttpResponse.json({ message: "nope" }, { status: 500 });
+        }
+        return new Promise<Response>(() => {}); // b is still in flight
+      }),
+    );
+    const { queryClient, wrapper } = setup();
+    queryClient.setQueryData(LIST_KEY, [schedule("a", false), schedule("b", false)]);
+    queryClient.setQueryDefaults(["schedules"], { queryFn: () => new Promise(() => {}) });
+    const first = renderHook(() => useToggleSchedule(), { wrapper }).result;
+    const second = renderHook(() => useToggleSchedule(), { wrapper }).result;
+    const enabled = () => queryClient.getQueryData<ScheduleConfiguration[]>(LIST_KEY)?.map((s) => s.enabled);
+
+    act(() => first.current.mutate({ id: "a", enable: true }));
+    await waitFor(() => expect(enabled()).toEqual([true, false]));
+    act(() => second.current.mutate({ id: "b", enable: true }));
+    await waitFor(() => expect(enabled()).toEqual([true, true]));
+
+    failA();
+    await waitFor(() => expect(first.current.isError).toBe(true));
+    // a is back off; b keeps the toggle the user made after a's started.
+    expect(enabled()).toEqual([false, true]);
+  });
+});
+
 describe("agentDeploymentQueries", () => {
   const matches = (key: readonly unknown[], ids = ["agent-1"]) =>
     agentDeploymentQueries(ids).predicate({ queryKey: key });
