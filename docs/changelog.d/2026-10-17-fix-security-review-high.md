@@ -113,3 +113,39 @@ rule can refuse them. `HttpClientModuleTest` covers the same hosts as redirect
 hops, plus a hop with no host. The old assertion that an unparseable URL "is
 left to the caller" was inverted. Reverting the null-host throw fails both
 classes (mutation-checked).
+
+## 🔒 fix(llm): linear JSON fence stripping; cap the recall tool's query (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-2026-10-17-high`) — security review 2026-10-17, finding **H3**
+
+### What changed and why
+
+`ModelOutputParser.stripFence` ran every reply of a `convertToObject` LLM task
+(and every `FormatRetryRunner` retry) through a regex with three quantifiers
+competing for one whitespace run. A reply of three backticks, N spaces and a
+letter cost O(N³): 462 ms at 1,000 spaces, 3.7 s at 2,000, about an hour at
+16,000. That CPU is spent on the turn thread, and any chat user can trigger it
+by prompt injection, as can a hostile model endpoint.
+
+- **`stripFence`** is now `startsWith` / `endsWith` / `substring`, plus an
+  ASCII case-insensitive check for the `json` tag. It returns the same result as
+  the old regex for every input: the regex's leading `[ \t]*\r?\n?` and trailing
+  `\s*` only moved whitespace that the `trim()` removed anyway.
+- **`ConversationRecallTool`** reads only the first 500 characters of the
+  model-written `query` (`MAX_QUERY_LENGTH`). Its range pattern was quadratic
+  over a long digit run (10.9 s at 40,000 characters). A null query now means
+  "the last summarized turns" instead of a `NullPointerException`.
+
+### Tests
+
+`ModelOutputParserFenceTest` (new, 24) keeps the old regex as an oracle and
+compares it with the new code on 23 fixtures, including non-ASCII look-alikes of
+`json` and a vertical tab. It also runs the 50,000-space input through
+`stripFence` and through `parse()`, each within 100 ms. `ConversationRecallToolTest`
+adds a 40,000-digit query (100 ms budget), a turn range followed by a 40,000-char
+tail, and a null query. Removing the cap fails the budget test at 10.4 s. The
+fence budget was not mutation-run: the old regex needs hours at 50,000 spaces.
+
+### Not done here
+
+The L14 alternation-loop regexes from the same review are untouched.
