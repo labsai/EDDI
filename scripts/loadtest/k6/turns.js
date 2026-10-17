@@ -8,6 +8,7 @@
 //   TURNS      turns per VU (steady, long-conversation, same-conversation)
 //   THINK_MS   pause between a VU's turns
 //   RAMP       burst: ramp-up duration (default 30s); HOLD: time at peak (default 60s)
+//   DELAY_MS   the mock LLM's delay for this run; turn_overhead = turn latency minus it
 //   OUT        summary file name under /results
 //
 // Every VU owns one conversation (except same-conversation), started on its first iteration,
@@ -25,7 +26,12 @@ const TURNS = parseInt(__ENV.TURNS || (SCENARIO === 'long-conversation' ? '200' 
 const THINK_MS = parseInt(__ENV.THINK_MS || '0', 10);
 const TIMEOUT = __ENV.HTTP_TIMEOUT || '180s';
 
+const DELAY_MS = parseInt(__ENV.DELAY_MS || '0', 10);
+
 const turnDuration = new Trend('turn_duration', true);
+// EDDI's own share of a turn: its latency minus the time the mock LLM was told to wait. One turn
+// is one LLM call here, so this is everything the platform adds (HTTP, pipeline, persistence).
+const turnOverhead = new Trend('turn_overhead', true);
 const turnsOk = new Counter('turns_ok');
 const turns503 = new Counter('turns_503');
 const turns429 = new Counter('turns_429');
@@ -119,6 +125,7 @@ export default function (data) {
     } else {
       turnsOk.add(1);
       turnDuration.add(res.timings.duration);
+      turnOverhead.add(res.timings.duration - DELAY_MS);
     }
   } else if (s === 503) turns503.add(1);
   else if (s === 429) turns429.add(1);

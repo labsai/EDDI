@@ -1,2 +1,5 @@
 results/*.json
 results/.state.json
+results/.nginx.conf
+results/.cluster-nodes.json
+results/gate-summary.md

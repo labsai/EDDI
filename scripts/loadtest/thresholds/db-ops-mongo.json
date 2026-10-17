@@ -1,0 +1,68 @@
+{
+  "description": "Ceilings on MongoDB operations per successful turn for `loadtest.py gate` (.github/workflows/loadtest-db-ops.yml). See scripts/loadtest/README.md#regression-gate. Lower a ceiling when a change removes round trips; raise one only with a reason in the changelog. `gate --record` rewrites every ceiling as measured + headroom.",
+  "db": "mongo",
+  "scenario": {
+    "vus": 10,
+    "turns": 10,
+    "warmup_turns": 2,
+    "delay_ms": 100
+  },
+  "headroom": {
+    "default": 0.3,
+    "query": 5.0
+  },
+  "lower_hint": 1.0,
+  "max_ops_per_turn": {
+    "insert": 3.5,
+    "update": 2.3,
+    "delete": 0.3,
+    "query": 22.7
+  },
+  "max_collection_ops_per_turn": {
+    "conversationmemories": {
+      "queries": 5.4,
+      "insert": 0.4,
+      "update": 1.3
+    },
+    "descriptors": {
+      "queries": 6.4,
+      "insert": 0.4,
+      "update": 1.3
+    },
+    "secretvault_secrets": {
+      "queries": 3.3
+    },
+    "usermemories": {
+      "queries": 1.5
+    }
+  },
+  "measured": {
+    "ops_per_turn": {
+      "command": 1.27,
+      "insert": 3.2,
+      "query": 17.62,
+      "update": 2.0,
+      "total": 24.09
+    },
+    "per_collection": {
+      "secretvault_secrets": {
+        "queries": 3.0
+      },
+      "conversationmemories": {
+        "queries": 5.07,
+        "insert": 0.1,
+        "update": 1.0
+      },
+      "usermemories": {
+        "queries": 1.2
+      },
+      "descriptors": {
+        "queries": 6.1,
+        "insert": 0.1,
+        "update": 1.0
+      }
+    },
+    "commit": "4b83ffb8b18c2589009953f0984b75477d940280",
+    "date": "2026-10-17"
+  }
+}

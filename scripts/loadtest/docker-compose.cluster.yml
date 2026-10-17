@@ -1,0 +1,37 @@
+# Cluster topology for the scaling scenario (`loadtest.py up --nodes N`), after
+# scripts/cluster-demo: EDDI nodes on eddi.messaging.type=nats behind an nginx round robin with
+# no affinity. One NATS JetStream server (R1) instead of the demo's three: the scenario measures
+# throughput, not NATS failover, and three servers would take memory from the EDDI nodes.
+#
+# This file makes `eddi` node 1. Nodes 2..N are copies of the fully merged `eddi` service
+# (same image, build mount, database and limits) that loadtest.py writes to
+# results/.cluster-nodes.json, together with the nginx config they need.
+services:
+  nats:
+    image: nats:2.11-alpine
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222", "--user", "eddi", "--pass", "loadtest-nats-password-1234"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  eddi:
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - "EDDI_MESSAGING_TYPE=nats"
+      - "EDDI_NATS_URL=nats://nats:4222"
+      - "EDDI_NATS_USERNAME=eddi"
+      - "EDDI_NATS_PASSWORD=loadtest-nats-password-1234"
+      - "EDDI_NATS_REPLICAS=1"
+      - "EDDI_CLUSTER_NODE_ID=n1"
+      - "EDDI_SCHEDULE_INSTANCE_ID=eddi-1"
+
+  lb:
+    image: nginx:1.27.3-alpine
+    volumes:
+      - "${LOADTEST_NGINX_CONF:?written by loadtest.py up --nodes}:/etc/nginx/nginx.conf:ro"
+    ports:
+      - "127.0.0.1:${LOADTEST_LB_PORT:-7380}:8080"
