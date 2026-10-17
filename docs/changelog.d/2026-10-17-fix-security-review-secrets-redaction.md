@@ -124,3 +124,36 @@ so a lookbehind admits a start only where a token run begins — without it `eyJ
 **Files:** [`SecretRedactionFilter.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilter.java),
 [`SecretRedactionFilterProviderShapesTest.java`](../../src/test/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilterProviderShapesTest.java),
 [`secrets-vault.md`](../secrets-vault.md#log-redaction)
+
+## 🔒 fix(security): legacy no-AAD vault rows are re-sealed bound on first read (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-secrets-redaction`)
+
+L10 of the 2026-10-17 security review. `VaultSecretProvider.decryptSecretWithFallback`
+kept a permanent no-AAD fallback for rows written before row binding, so with database
+write access the ciphertexts of two such rows could be swapped and each still decrypted.
+Only a DEK rotation retired the fallback, and a deployment that never rotates kept it
+forever.
+
+- `resolve()` now notices when a row opened only through the legacy path and re-seals
+  it bound (`tenantId|keyName|dekId` AAD) under the **same** DEK generation, through the
+  new `ISecretPersistence.resealSecretInPlace` (Mongo and Postgres). It rewrites only the
+  ciphertext and IV — not `dekId`, not `lastRotatedAt` — and is guarded on the **IV** the
+  row was read with: a dekId guard cannot see a concurrent `store` under the same
+  generation and would write the old value back over the new one. A lost guard, a
+  failure or an implementation without the method (the interface default writes nothing)
+  leaves the row legacy and readable; the read never fails because of it. Logged once
+  per key per node.
+- `openSealedData` (OAuth grants and other participant-owned sealed data) cannot write
+  back — the provider does not own those rows — so it logs once per tenant that
+  `POST /secretstore/secrets/{tenantId}/rotate-dek` re-seals them bound.
+
+**Files:** [`VaultSecretProvider.java`](../../src/main/java/ai/labs/eddi/secrets/impl/VaultSecretProvider.java),
+[`ISecretPersistence.java`](../../src/main/java/ai/labs/eddi/secrets/persistence/ISecretPersistence.java),
+[`MongoSecretPersistence.java`](../../src/main/java/ai/labs/eddi/secrets/persistence/MongoSecretPersistence.java),
+[`PostgresSecretPersistence.java`](../../src/main/java/ai/labs/eddi/secrets/persistence/PostgresSecretPersistence.java),
+[`secrets-vault.md`](../secrets-vault.md#encryption)
+
+**Tests:** `VaultLegacySealingRetirementTest` (re-seal on read, swap refused afterwards,
+a store racing the write-back wins, a failing write-back does not fail the read) and
+guard tests in the Mongo and Postgres persistence unit tests; mutation-checked.

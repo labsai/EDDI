@@ -431,8 +431,11 @@ generations existed carries no generation and reads as generation 1.
 data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
 with write access to the database fails authentication instead of decrypting as that
 row's value. Rows written before this keep decrypting through a no-AAD fallback, so
-nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
-form. System values (such as the pinned audit key) are bound to their name and have
+nothing has to be migrated, and the fallback retires itself: the first time such a row
+is resolved it is re-sealed in the bound form in place (same value, same DEK
+generation, not counted as a rotation), guarded on the IV it was read with so a
+concurrent store or DEK rotation always wins, and logged once per key. A DEK rotation
+still re-seals every remaining row, including those never read. System values (such as the pinned audit key) are bound to their name and have
 no unbound form. Wrapped DEKs are not bound.
 
 **Sealed runtime data is bound too.** OAuth connection grants are sealed through the
