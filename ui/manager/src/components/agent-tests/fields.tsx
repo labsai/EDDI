@@ -196,12 +196,14 @@ export function OptionalNumberField({
   testId?: string;
 }) {
   const [text, setText] = useState(value === undefined ? "" : String(value));
+  const [outOfRange, setOutOfRange] = useState(false);
   const lastCommitted = useRef(value);
 
   useEffect(() => {
     if (value !== lastCommitted.current) {
       lastCommitted.current = value;
       setText(value === undefined ? "" : String(value));
+      setOutOfRange(false);
     }
   }, [value]);
 
@@ -217,16 +219,24 @@ export function OptionalNumberField({
       readOnly={readOnly}
       placeholder={placeholder}
       data-testid={testId}
-      className={INPUT_CLASS}
+      aria-invalid={outOfRange || undefined}
+      title={outOfRange ? `${min ?? ""}–${max ?? ""}` : undefined}
+      className={cn(INPUT_CLASS, outOfRange && "border-destructive")}
       onChange={(e) => {
         setText(e.target.value);
         if (e.target.value.trim() === "") {
+          setOutOfRange(false);
           lastCommitted.current = undefined;
           onChange(undefined);
           return;
         }
         const n = Number(e.target.value);
         if (!Number.isFinite(n) || (integer && !Number.isInteger(n))) return;
+        if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
+          setOutOfRange(true);
+          return;
+        }
+        setOutOfRange(false);
         lastCommitted.current = n;
         onChange(n);
       }}

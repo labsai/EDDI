@@ -8,7 +8,15 @@ import {
   type ToolCallExpectation,
 } from "@/lib/api/agent-tests";
 import { cleanExpectation as clean, propertyKind, type PropertyKind } from "@/lib/agent-test-utils";
+import { RenamableKeyInput } from "@/components/editors/renamable-key-input";
 import { INPUT_CLASS, JsonField, LabelledField, OptionalNumberField, StringListField } from "./fields";
+
+/** A `property_N` name no other row uses, so a new row never overwrites one. */
+function freshPropertyName(taken: string[]): string {
+  let n = taken.length + 1;
+  while (taken.includes(`property_${n}`)) n++;
+  return `property_${n}`;
+}
 
 function buildProperty(kind: PropertyKind, value: unknown): PropertyExpectation {
   switch (kind) {
@@ -109,7 +117,7 @@ export function ExpectationEditor({
           {!readOnly && (
             <button
               type="button"
-              onClick={() => setProperties([...properties, [`property_${properties.length + 1}`, { equals: "" }]])}
+              onClick={() => setProperties([...properties, [freshPropertyName(properties.map(([n]) => n)), { equals: "" }]])}
               className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               data-testid="expect-add-property"
             >
@@ -124,13 +132,13 @@ export function ExpectationEditor({
             setProperties(properties.map((x, j) => (j === i ? entry : x)));
           return (
             <div key={i} className="flex flex-wrap items-start gap-2" data-testid="expect-property-row">
-              <input
-                type="text"
+              <RenamableKeyInput
                 aria-label={t("testSuiteEditor.propertyName", "Property name")}
                 className={`${INPUT_CLASS} w-36 sm:w-44`}
                 value={name}
                 readOnly={readOnly}
-                onChange={(ev) => replace([ev.target.value, p])}
+                isAvailable={(next) => !properties.some(([other], j) => j !== i && other === next)}
+                onRename={(next) => replace([next, p])}
               />
               <select
                 aria-label={t("testSuiteEditor.propertyCheck", "Check")}

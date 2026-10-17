@@ -290,7 +290,7 @@ function isNotAnId(pathname: string): boolean {
  * be swallowed. `groupstore` was, silently, for as long as this list said only
  * `channelstore`.
  */
-const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore", "testsuitestore"];
 
 /**
  * The extension each resource store stamps on its `eddi://` URIs — the backend's
@@ -5840,31 +5840,76 @@ function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
     id: run.id,
     suiteId: run.suiteId,
     suiteVersion: run.suiteVersion ?? passed!.suiteVersion,
+    agentVersion: run.agentVersion,
     startedAt: run.startedAt,
     finishedAt: run.startedAt + MOCK_RUN_DURATION_MS,
     durationMs: MOCK_RUN_DURATION_MS,
   };
 }
 
+/**
+ * The suite store: id -> every saved version (index 0 is version 1). The list,
+ * a read, a create, a save and a delete all go through it, so a suite created or
+ * edited in mock mode is the one the list and the run picker then show.
+ */
+const suiteStore = new Map<string, { docs: unknown[]; createdOn: number; lastModifiedOn: number }>();
+function seedSuites() {
+  suiteStore.clear();
+  const t = Date.now();
+  suiteStore.set("res1", { docs: [MOCK_SUITE], createdOn: t - 86400000, lastModifiedOn: t - 3600000 });
+}
+seedSuites();
+/** Restores the seeded suite; tests that save or create suites call it in afterEach. */
+export function resetAgentTestMockState(): void {
+  seedSuites();
+  startedMockRuns.clear();
+}
+
 export const agentTestHandlers = [
-  http.get("*/testsuitestore/testsuites/:id", ({ request }) => {
-    if (isNotAnId(new URL(request.url).pathname)) return;
-    return HttpResponse.json(MOCK_SUITE);
+  http.get("*/testsuitestore/testsuites/descriptors", () => {
+    return HttpResponse.json(
+      [...suiteStore.entries()].map(([id, s]) => ({
+        resource: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${s.docs.length}`,
+        name: ((s.docs[s.docs.length - 1] as { name?: string }).name ?? "") || id,
+        description: ((s.docs[s.docs.length - 1] as { description?: string }).description ?? ""),
+        createdOn: s.createdOn,
+        lastModifiedOn: s.lastModifiedOn,
+        deleted: false,
+      }))
+    );
   }),
-  http.post("*/testsuitestore/testsuites", () => {
+  http.get("*/testsuitestore/testsuites/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (isNotAnId(url.pathname)) return;
+    const stored = suiteStore.get(String(params.id));
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const version = Number(url.searchParams.get("version") ?? stored.docs.length);
+    return HttpResponse.json((stored.docs[version - 1] ?? stored.docs[stored.docs.length - 1]) as Record<string, unknown>);
+  }),
+  http.post("*/testsuitestore/testsuites", async ({ request }) => {
+    const id = `suite${String(suiteStore.size + 1).padStart(20, "0")}`;
+    const t = Date.now();
+    suiteStore.set(id, { docs: [await request.json()], createdOn: t, lastModifiedOn: t });
     return new HttpResponse(null, {
       status: 201,
-      headers: { Location: "/testsuitestore/testsuites/suite-new?version=1" },
+      headers: { Location: `/testsuitestore/testsuites/${id}?version=1` },
     });
   }),
-  http.put("*/testsuitestore/testsuites/:id", ({ request, params }) => {
-    const version = parseInt(new URL(request.url).searchParams.get("version") ?? "1", 10);
+  http.put("*/testsuitestore/testsuites/:id", async ({ request, params }) => {
+    const id = String(params.id);
+    const stored = suiteStore.get(id);
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    stored.docs.push(await request.json());
+    stored.lastModifiedOn = Date.now();
     return new HttpResponse(null, {
       status: 200,
-      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${params.id}?version=${version + 1}` },
+      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${stored.docs.length}` },
     });
   }),
-  http.delete("*/testsuitestore/testsuites/:id", () => new HttpResponse(null, { status: 204 })),
+  http.delete("*/testsuitestore/testsuites/:id", ({ params }) => {
+    suiteStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   http.get("*/agenttests/runs", ({ request }) => {
     const url = new URL(request.url);
@@ -5884,8 +5929,13 @@ export const agentTestHandlers = [
     return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
   }),
   http.post("*/agenttests/runs", async ({ request }) => {
-    const body = (await request.json()) as { suiteId: string; agentId: string; suiteVersion?: number };
-    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion);
+    const body = (await request.json()) as {
+      suiteId: string;
+      agentId: string;
+      suiteVersion?: number;
+      agentVersion?: number;
+    };
+    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion, body.agentVersion);
     startedMockRuns.set(run.id, run);
     return HttpResponse.json(run, { status: 202 });
   }),

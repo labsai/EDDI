@@ -118,6 +118,10 @@ export function AgentTestsSection({ agentId, agentVersion }: { agentId: string; 
           {t("agentTests.title", "Golden conversations")}
           {latest && <RunStatusBadge status={latest.status} />}
         </button>
+        {/* The history changes under polling; say so once, politely. */}
+        <span className="sr-only" role="status" data-testid="agent-tests-live">
+          {latest ? t(`agentTests.status.${latest.status}`, latest.status) : ""}
+        </span>
       </h2>
 
       {expanded && (

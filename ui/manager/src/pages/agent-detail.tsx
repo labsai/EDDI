@@ -1009,7 +1009,7 @@ export function AgentDetailPage() {
 
       {/* Golden conversations: runs the SAVED version, so it sits outside the
           draft fieldset — nothing here edits the agent document. */}
-      <AgentTestsSection agentId={id!} agentVersion={resolvedVersion} />
+      <AgentTestsSection key={id} agentId={id!} agentVersion={resolvedVersion} />
 
       {/* Floating save bar — the header's controls scroll away on a page this
           long, and the edit is usually made far below them. */}

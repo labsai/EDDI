@@ -262,13 +262,20 @@ function Stat({ label, value, testId }: { label: string; value: React.ReactNode;
   );
 }
 
+function announcesItself(run: AgentTestRun): boolean {
+  return run.status === "ABORTED" || run.status === "ERROR" || run.costCeilingReached === true;
+}
+
 export function RunResultBody({ run }: { run: AgentTestRun }) {
   const { t } = useTranslation();
   const cases = run.cases ?? [];
   return (
     <div className="space-y-4" data-testid="run-result">
       <div className="flex flex-wrap items-center gap-2">
-        <RunStatusBadge status={run.status} />
+        {/* ABORTED/ERROR/ceiling are announced by their notice; the rest here. */}
+        <span role={announcesItself(run) ? undefined : "status"}>
+          <RunStatusBadge status={run.status} />
+        </span>
         <span className="text-xs text-muted-foreground">
           {run.suiteName ?? run.suiteId}
           {run.suiteVersion !== undefined && ` · ${t("agentTests.suiteVersion", { version: run.suiteVersion, defaultValue: "suite v{{version}}" })}`}

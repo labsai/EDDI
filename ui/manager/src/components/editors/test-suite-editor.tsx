@@ -326,7 +326,11 @@ function MockEditor({
           </button>
         )}
       </div>
-      <LabelledField label={t("testSuiteEditor.mockBody", "Response body (JSON or plain text)")} className="mt-2">
+      <LabelledField
+        label={t("testSuiteEditor.mockBody", "Response body (JSON)")}
+        hint={t("testSuiteEditor.mockBodyHint", 'A text body needs quotes, for example "forbidden".')}
+        className="mt-2"
+      >
         {(id) => (
           <JsonField
             id={id}

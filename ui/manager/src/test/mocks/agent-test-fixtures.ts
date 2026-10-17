@@ -280,13 +280,21 @@ export function buildMockRuns(agentId: string, now = Date.now()) {
 }
 
 /** A run that was just started: RUNNING, nothing recorded yet. */
-export function buildRunningRun(id: string, agentId: string, startedAt: number, suiteId: string, suiteVersion?: number) {
+export function buildRunningRun(
+  id: string,
+  agentId: string,
+  startedAt: number,
+  suiteId: string,
+  suiteVersion?: number,
+  agentVersion?: number
+) {
   return {
     ...base,
     id,
     agentId,
     suiteId,
     ...(suiteVersion !== undefined ? { suiteVersion } : {}),
+    ...(agentVersion !== undefined ? { agentVersion } : {}),
     status: "RUNNING",
     startedAt,
     casesTotal: 2,
