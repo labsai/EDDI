@@ -504,4 +504,65 @@ describe("QuotasPage", () => {
       expect(screen.getByLabelText("Max API Calls / Minute")).toBe(screen.getByTestId("quota-max-api-calls"));
     });
   });
+  // ─── Cost budget legibility ───────────────────────────────────
+
+  it("states the cost budget is enforced and what it counts", async () => {
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("quota-max-cost-note")).toBeInTheDocument());
+    expect(screen.getByTestId("quota-max-cost-note")).toHaveTextContent("priced spend only");
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/used this month/);
+    expect(screen.queryByText(/not enforced/i)).not.toBeInTheDocument();
+  });
+
+  it("says plainly when the budget has been reached", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 1,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 2600,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/Budget reached/));
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/fallback answer/);
+  });
+
+  it("does not claim a budget is applied while enforcement is off", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 100,
+          enabled: false,
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/enforcement is off/));
+  });
+
+  it("reports an unset budget as unlimited", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: -1,
+          enabled: true,
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/never limited/));
+  });
 });
