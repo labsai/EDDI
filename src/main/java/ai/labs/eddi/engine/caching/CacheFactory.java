@@ -42,6 +42,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "a2aTaskMapping", "A2A_TASKS",
             "a2aTaskMapping:context", "A2A_CONTEXTS",
             "a2aTaskMapping:erasing", "A2A_ERASING",
+            "a2aTaskMapping:index", "A2A_INDEX",
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
             "channel-thread-locks", "CHANNEL");

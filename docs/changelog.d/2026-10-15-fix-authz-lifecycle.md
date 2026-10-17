@@ -26,8 +26,10 @@ name the finding so a later reader can find this entry.
   to the principal's writes for five minutes, so a peer request admitted while the
   cascade runs cannot leave a task behind the sweep; on one node the check and the
   write are serialised against the sweep by a read/write lock, and in cluster mode the
-  marker lives in a shared `A2A_ERASING` bucket so every node refuses the writes (the
-  cross-node residual is in [`clustering.md`](../clustering.md#residual-limitations)). [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
+  marker lives in a shared `A2A_ERASING` bucket so every node refuses the writes, while a
+  shared per-principal `A2A_INDEX` lets a sweep or export on one node reach the records
+  other nodes wrote (bucket keys are hashed, so nothing else can enumerate them; the two
+  narrow cross-node residuals are in [`clustering.md`](../clustering.md#residual-limitations)). [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
   section naming what erasure does **not** reach — RAG knowledge bases, application
   log files, telemetry exports and LLM-provider retention — with why, and what bounds
   each.
@@ -55,7 +57,9 @@ name the finding so a later reader can find this entry.
   who is only an approver now goes through `cancelPausedConversation`, a single
   compare-and-set on `AWAITING_HUMAN` that never signals an executing turn, so the
   entitlement check and the cancel are one atomic operation (any other state is a 403;
-  documented in [`hitl.md`](../hitl.md#who-may-decide)); owner and admin are unchanged.
+  documented in [`hitl.md`](../hitl.md#who-may-decide)); the MCP `cancel_conversation` tool
+  applies the same rule through `HitlAccessGuard.mayCancelExecuting`; owner and admin are
+  unchanged.
 - **L10 — unbounded listings and unbounded per-user attachments.**
   `?limit=2147483647` returned every descriptor in one response (verified live on
   `/agentstore/agents/descriptors`). `PageBounds` applies one ceiling —

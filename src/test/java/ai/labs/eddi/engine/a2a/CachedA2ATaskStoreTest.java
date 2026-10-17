@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -167,6 +168,48 @@ class CachedA2ATaskStoreTest {
         assertEquals(1, removed.get(), "the sweep must have waited for the admitted write and removed it");
         assertTrue(paused.tasksOf("alice").isEmpty(), "nothing of the principal may survive the sweep");
         assertTrue(paused.findTask("alice", "t1").isEmpty());
+    }
+
+    /**
+     * Cluster mode, modelled: two store instances (two nodes) over the same shared
+     * caches, each with its own local mirror. A record written on one node must be
+     * exported and erased from the other, which never saw it in its mirror.
+     */
+    @Test
+    @DisplayName("a record written on another node is exported and erased through the shared index")
+    void recordsWrittenOnAnotherNodeAreReachedThroughTheIndex() {
+        Map<String, ICache<String, Object>> sharedBuckets = new HashMap<>();
+        ICacheFactory sharedFactory = mock(ICacheFactory.class);
+        when(sharedFactory.<String, Object>getCache(anyString()))
+                .thenAnswer(invocation -> sharedBuckets.computeIfAbsent(invocation.getArgument(0), name -> new MapCache<>()));
+        // The second node's mirror would be its own local cache; what the test needs is
+        // that it has NOT written the record itself and still reaches it. Sharing the
+        // bucket map between the two instances models the shared KV buckets.
+        CachedA2ATaskStore nodeA = new CachedA2ATaskStore(sharedFactory);
+        CachedA2ATaskStore nodeB = new CachedA2ATaskStore(sharedFactory);
+
+        nodeA.saveTask("alice", record("t1", "written on A"));
+        nodeA.bindContext("alice", "ctx-a", "conv-a");
+        nodeA.saveTask("bob", record("t1", "bob on A"));
+
+        assertEquals(1, nodeB.tasksOf("alice").size(), "node B exports what node A wrote");
+        assertEquals(2, nodeB.eraseForPrincipal("alice"), "node B erases the task and the binding node A wrote");
+        assertTrue(nodeA.findTask("alice", "t1").isEmpty());
+        assertTrue(nodeA.findContextConversation("alice", "ctx-a").isEmpty());
+        assertTrue(nodeA.findTask("bob", "t1").isPresent());
+        assertTrue(nodeA.saveTaskIsRefused("alice"), "node A sees node B's erasure marker");
+    }
+
+    @Test
+    @DisplayName("the index forgets the oldest ids beyond its cap")
+    void indexIsBounded() {
+        var idx = CachedA2ATaskStore.PrincipalIndex.empty();
+        for (int i = 0; i < CachedA2ATaskStore.MAX_INDEXED_IDS + 5; i++) {
+            idx = idx.withTask("t" + i);
+        }
+        assertEquals(CachedA2ATaskStore.MAX_INDEXED_IDS, idx.taskIds().size());
+        assertEquals("t5", idx.taskIds().get(0));
+        assertTrue(idx.taskIds().contains("t" + (CachedA2ATaskStore.MAX_INDEXED_IDS + 4)));
     }
 
     @Test

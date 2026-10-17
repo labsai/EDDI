@@ -10,9 +10,13 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -32,6 +36,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     static final String TASK_CACHE = "a2aTaskMapping";
     static final String CONTEXT_CACHE = "a2aTaskMapping:context";
     static final String ERASING_CACHE = "a2aTaskMapping:erasing";
+    static final String INDEX_CACHE = "a2aTaskMapping:index";
+    /** Ids remembered per principal; beyond it the oldest are forgotten. */
+    static final int MAX_INDEXED_IDS = 10_000;
     /**
      * How long writes for a principal stay refused after its erasure began — long
      * enough for the cascade, and for a request admitted just before it, to finish;
@@ -42,6 +49,18 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
     private final ICache<String, A2ATaskRecord> tasks;
     private final ICache<String, String> contexts;
     private final ICache<String, Boolean> erasing;
+    /**
+     * Per principal, the task and context ids it holds — so a sweep or an export
+     * reaches records this node never wrote. In cluster mode the task and context
+     * caches are shared KV buckets whose keys are hashed: a node can read a record
+     * by its key but cannot enumerate another node's records by principal, and the
+     * local mirror only holds what this node wrote. The index is the enumeration.
+     * It is written through on every save (read, add, write back under the
+     * node-local lock), so two nodes writing the same principal in the same instant
+     * can each miss the other's id — that record is then still found by the local
+     * scan on the node that wrote it, and nowhere else; see {@code clustering.md}.
+     */
+    private final ICache<String, PrincipalIndex> index;
     /**
      * Writes hold the read side, erasure the write side: a write that has passed
      * the erasure check finishes before a sweep collects its keys, and a write that
@@ -64,6 +83,33 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         this.tasks = cacheFactory.getCache(TASK_CACHE);
         this.contexts = cacheFactory.getCache(CONTEXT_CACHE);
         this.erasing = cacheFactory.getCache(ERASING_CACHE);
+        this.index = cacheFactory.getCache(INDEX_CACHE);
+    }
+
+    /** What a principal holds, by id; the value of the shared index. */
+    public record PrincipalIndex(List<String> taskIds, List<String> contextIds) implements Serializable {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        static PrincipalIndex empty() {
+            return new PrincipalIndex(List.of(), List.of());
+        }
+
+        PrincipalIndex withTask(String taskId) {
+            return taskIds.contains(taskId) ? this : new PrincipalIndex(append(taskIds, taskId), contextIds);
+        }
+
+        PrincipalIndex withContext(String contextId) {
+            return contextIds.contains(contextId) ? this : new PrincipalIndex(taskIds, append(contextIds, contextId));
+        }
+
+        private static List<String> append(List<String> ids, String id) {
+            List<String> copy = new ArrayList<>(ids.size() + 1);
+            copy.addAll(ids.size() >= MAX_INDEXED_IDS ? ids.subList(ids.size() - MAX_INDEXED_IDS + 1, ids.size()) : ids);
+            copy.add(id);
+            return List.copyOf(copy);
+        }
     }
 
     @Override
@@ -79,6 +125,7 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             tasks.put(scopedKey(principal, record.taskId()), record);
+            index.put(principal, indexOf(principal).withTask(record.taskId()));
         } finally {
             erasureLock.readLock().unlock();
         }
@@ -97,9 +144,15 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
                 return;
             }
             contexts.put(scopedKey(principal, contextId), conversationId);
+            index.put(principal, indexOf(principal).withContext(contextId));
         } finally {
             erasureLock.readLock().unlock();
         }
+    }
+
+    /** Whether writes for {@code principal} are currently refused. For tests. */
+    boolean saveTaskIsRefused(String principal) {
+        return erasing.containsKey(principal);
     }
 
     @Override
@@ -114,11 +167,39 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public List<A2ATaskRecord> tasksOf(String principal) {
+        List<A2ATaskRecord> found = new ArrayList<>();
+        for (String key : taskKeysOf(principal)) {
+            A2ATaskRecord record = tasks.get(key);
+            if (record != null) {
+                found.add(record);
+            }
+        }
+        return found;
+    }
+
+    private PrincipalIndex indexOf(String principal) {
+        PrincipalIndex current = index.get(principal);
+        return current == null ? PrincipalIndex.empty() : current;
+    }
+
+    /**
+     * Every task key of the principal this node can name: the local mirror's, and
+     * the index's — the latter is what reaches records another node wrote.
+     */
+    private Set<String> taskKeysOf(String principal) {
         String prefix = principalPrefix(principal);
-        return tasks.entrySet().stream()
-                .filter(entry -> entry.getKey().startsWith(prefix))
-                .map(Map.Entry::getValue)
-                .toList();
+        Set<String> keys = new LinkedHashSet<>();
+        tasks.keySet().stream().filter(key -> key.startsWith(prefix)).forEach(keys::add);
+        indexOf(principal).taskIds().forEach(id -> keys.add(scopedKey(principal, id)));
+        return keys;
+    }
+
+    private Set<String> contextKeysOf(String principal) {
+        String prefix = principalPrefix(principal);
+        Set<String> keys = new LinkedHashSet<>();
+        contexts.keySet().stream().filter(key -> key.startsWith(prefix)).forEach(keys::add);
+        indexOf(principal).contextIds().forEach(id -> keys.add(scopedKey(principal, id)));
+        return keys;
     }
 
     @Override
@@ -128,20 +209,20 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
         erasureLock.writeLock().lock();
         try {
             erasing.put(principal, Boolean.TRUE, ERASURE_WINDOW_MINUTES, TimeUnit.MINUTES);
-            String prefix = principalPrefix(principal);
             long removed = 0;
-            // Both maps are ConcurrentMaps: collect first, then remove, so the removal
-            // never races the iteration it is driven by.
-            for (String key : tasks.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+            // Keys are collected first (local mirror plus the shared index), then
+            // removed, so the removal never races the iteration it is driven by.
+            for (String key : taskKeysOf(principal)) {
                 if (tasks.remove(key) != null) {
                     removed++;
                 }
             }
-            for (String key : contexts.keySet().stream().filter(key -> key.startsWith(prefix)).toList()) {
+            for (String key : contextKeysOf(principal)) {
                 if (contexts.remove(key) != null) {
                     removed++;
                 }
             }
+            index.remove(principal);
             return removed;
         } finally {
             erasureLock.writeLock().unlock();

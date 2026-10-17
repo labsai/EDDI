@@ -495,7 +495,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
             IConversationService.CancelOutcome outcome;
-            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId)) {
+            if (hitlAccessGuard.mayCancelExecuting(ownerId)) {
                 // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
                 // REST contract (IRestAgentEngine#cancelConversation) takes no mode
                 // parameter and documents a graceful cancel, so there is no caller
