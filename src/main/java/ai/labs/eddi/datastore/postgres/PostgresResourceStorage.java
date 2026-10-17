@@ -377,9 +377,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     public boolean setNumberField(String id, String fieldName, long value) {
         checkNotNull(id, "id");
         IResourceStorage.requireTopLevelFieldName(fieldName);
-        try {
-            UUID.fromString(id);
-        } catch (IllegalArgumentException e) {
+        if (!PostgresIds.isStorableId(id)) {
             return false;
         }
         // One UPDATE on the live row: jsonb_set rewrites only this key, the version

@@ -89,6 +89,24 @@ class AgentSigningServiceTest {
     }
 
     @Test
+    void keylessAgent_aMissSeenBeforeTheKeyWasGeneratedIsNotRemembered() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        // The vault answers "not found", but by the time that answer comes back the key
+        // has been generated (and the cache evicted) on this node.
+        secretProvider.beforeNotFound = () -> {
+            try {
+                signingService.generateKeyPair("tenant-1", "agent-x");
+            } catch (AgentSigningService.AgentSigningException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
+        secretProvider.beforeNotFound = null;
+
+        assertNotNull(signingService.sign("tenant-1", "agent-x", "entry"), "the new key signs at once, not after the TTL");
+    }
+
+    @Test
     void vaultFailure_isNotRemembered() {
         signingService.nanoClock = () -> 0L;
         secretProvider.resolveUnreachable = true;
@@ -795,6 +813,12 @@ class AgentSigningServiceTest {
         /** Makes {@code resolve} fail as an unreachable vault would. */
         boolean resolveUnreachable;
 
+        /**
+         * Runs just before {@code resolve} answers "not found" — for racing a key
+         * generation.
+         */
+        Runnable beforeNotFound;
+
         /** Whether a key is still in the vault — for asserting what a delete left. */
         boolean contains(String tenantId, String keyName) {
             return store.containsKey(tenantId + ":" + keyName);
@@ -845,6 +869,9 @@ class AgentSigningServiceTest {
             String key = reference.tenantId() + ":" + reference.keyName();
             String value = store.get(key);
             if (value == null) {
+                if (beforeNotFound != null) {
+                    beforeNotFound.run();
+                }
                 throw new SecretNotFoundException("Secret not found: " + key);
             }
             return value;

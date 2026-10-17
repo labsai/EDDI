@@ -114,7 +114,7 @@ class DescriptorTouchParityTest extends MongoTestBase {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("storages")
-    void aTouchedDescriptorSortsAmongFullyWrittenOnes(String backend, Supplier<Backend> factory, String numberType) throws Exception {
+    void aTouchedDescriptorSortsAmongFullyWrittenOnes(String backend, Supplier<Backend> factory) throws Exception {
         var backendUnderTest = factory.get();
         var storage = backendUnderTest.storage();
         var store = descriptorStoreOver(storage);
@@ -132,7 +132,7 @@ class DescriptorTouchParityTest extends MongoTestBase {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("storages")
-    void noLiveDescriptorMeansNoWrite(String backend, Supplier<Backend> factory, String numberType) throws Exception {
+    void noLiveDescriptorMeansNoWrite(String backend, Supplier<Backend> factory) throws Exception {
         var backendUnderTest = factory.get();
         var storage = backendUnderTest.storage();
         var store = descriptorStoreOver(storage);

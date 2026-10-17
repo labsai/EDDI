@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.stream.IntStream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -96,6 +97,9 @@ public class AgentSigningService {
      * failure.
      */
     private final ConcurrentHashMap<String, Long> missingKeyUntil = new ConcurrentHashMap<>();
+
+    /** Every {@link #evictKey} so far — see {@link #rememberMissing}. */
+    private final AtomicLong evictions = new AtomicLong();
 
     /** Package-private so tests can move time instead of sleeping. */
     LongSupplier nanoClock = System::nanoTime;
@@ -440,6 +444,9 @@ public class AgentSigningService {
         }
 
         String vaultKey = keyVersion > 0 ? vaultKeyNameVersioned(agentId, keyVersion) : vaultKeyName(agentId);
+        // Read before asking the vault: an eviction after this point means a key may
+        // have been stored since, and this lookup's "not found" is then stale.
+        long evictionsAtLookup = evictions.get();
         PrivateKey loaded;
         try {
             SecretReference ref = new SecretReference(tenantId, vaultKey);
@@ -448,7 +455,7 @@ public class AgentSigningService {
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             loaded = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
         } catch (ISecretProvider.SecretNotFoundException e) {
-            rememberMissing(cacheKeyStr);
+            rememberMissing(cacheKeyStr, evictionsAtLookup);
             throw new PrivateKeyLoadException(agentId, e);
         } catch (Exception e) {
             throw new PrivateKeyLoadException(agentId, e);
@@ -458,15 +465,31 @@ public class AgentSigningService {
         return raced != null ? raced : loaded;
     }
 
-    private void rememberMissing(String cacheKeyStr) {
+    /**
+     * Remembers a "not found" — unless a key was generated, rotated or deleted on
+     * this node while the vault was being asked. A lookup that started before
+     * {@link #generateKeyPair} stored the key can otherwise publish its miss after
+     * that method's eviction, and the new key would go unused for the whole TTL.
+     * Publishing first and checking second closes the window: an eviction either
+     * happened before the check (seen, entry withdrawn) or after the publish (it
+     * removes the entry itself).
+     */
+    private void rememberMissing(String cacheKeyStr, long evictionsAtLookup) {
         if (missingKeyUntil.size() >= MAX_MISSING_KEY_ENTRIES) {
             missingKeyUntil.clear();
         }
-        missingKeyUntil.put(cacheKeyStr, nanoClock.getAsLong() + MISSING_KEY_TTL_NANOS);
+        Long until = nanoClock.getAsLong() + MISSING_KEY_TTL_NANOS;
+        missingKeyUntil.put(cacheKeyStr, until);
+        if (evictions.get() != evictionsAtLookup) {
+            missingKeyUntil.remove(cacheKeyStr, until);
+        }
     }
 
     /** Forgets both what was loaded and what was found missing under this key. */
     private void evictKey(String cacheKeyStr) {
+        // Counted BEFORE the removal, so a concurrent rememberMissing that slips its
+        // entry in after the removal still sees the count move and withdraws it.
+        evictions.incrementAndGet();
         privateKeyCache.remove(cacheKeyStr);
         missingKeyUntil.remove(cacheKeyStr);
     }
