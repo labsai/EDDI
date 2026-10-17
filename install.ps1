@@ -842,6 +842,7 @@ function Initialize-ReleaseChecksums {
         Write-Warn "Files from '$EddiBranch' are not a release: no checksums to verify them against (TLS only)."
         return
     }
+    $fetchError = $null
     try {
         $response = Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
         $content = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
@@ -856,9 +857,14 @@ function Initialize-ReleaseChecksums {
         }
     }
     catch {
-        # fall through to the warning below
+        # A missing asset (404) and a network error end the same way: no checksums, TLS only.
+        $fetchError = $_.Exception.Message
     }
-    Write-Warn "Release $EddiBranch publishes no SHA256SUMS -- downloaded files are verified by TLS only."
+    if ($fetchError) {
+        Write-Warn "Release $EddiBranch publishes no SHA256SUMS ($fetchError) -- downloaded files are verified by TLS only."
+    } else {
+        Write-Warn "Release $EddiBranch publishes no SHA256SUMS -- downloaded files are verified by TLS only."
+    }
 }
 
 # Refuses a downloaded file whose hash is not the one the release lists.

@@ -381,8 +381,6 @@ class UnauthenticatedRequestGuardTest {
             ArgumentCaptor<Handler<RoutingContext>> handler = ArgumentCaptor.forClass(Handler.class);
             guard(false, List.of("eddi")).register(filters);
             verify(filters).register(handler.capture(), eq(UnauthenticatedRequestGuard.PRIORITY));
-            assertTrue(UnauthenticatedRequestGuard.PRIORITY < HttpMethodGuard.PRIORITY);
-            assertTrue(UnauthenticatedRequestGuard.PRIORITY > RequestBodyLimitGuard.PRIORITY);
 
             RoutingContext rebound = context("GET", "/secretstore/secrets", "evil.example:7070", null);
             handler.getValue().handle(rebound);

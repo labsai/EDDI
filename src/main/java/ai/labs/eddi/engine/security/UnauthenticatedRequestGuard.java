@@ -452,7 +452,12 @@ public class UnauthenticatedRequestGuard {
         if (portPart.isEmpty() || portPart.length() > 5 || !portPart.chars().allMatch(Character::isDigit)) {
             return -2;
         }
-        int port = Integer.parseInt(portPart);
+        int port;
+        try {
+            port = Integer.parseInt(portPart);
+        } catch (NumberFormatException e) {
+            return -2;
+        }
         return port >= 1 && port <= 65535 ? port : -2;
     }
 
