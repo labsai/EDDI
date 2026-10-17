@@ -32,3 +32,7 @@ Docs: [`workspaces.md`](../workspaces.md#finding-people-the-user-directory), [`c
 ### L2 — non-strict owner check on group-conversation reads and MCP group tools
 
 `McpGroupTools.requireConversationOwner` (follow-up, continue, close, delete) and `read_group_conversation`, and `RestGroupConversation.readGroupConversation`, now use `requireOwnerOrAdminStrict`: a record with no owner is an administrator's alone. The lenient branch of `RestGroupConversation.validateGroupConversationOwnership` had no caller left (every call passed `hitlOperation=true`) and was removed with its parameter.
+
+### L3 — reserved principal namespaces
+
+New [`ReservedPrincipals`](../../src/main/java/ai/labs/eddi/engine/security/ReservedPrincipals.java) is the one list of principal prefixes EDDI makes up for itself — `openwebui:`, `slack:`, `webhook:`, `agent-test:`, `group:`, `system:`, `a2a:`, `mcp:`, `anonymous-`, `gdpr-erased:`, and the whole name `anonymous` — built from the existing constants where they exist. `NamelessPrincipalAugmentor` rejects an authenticated identity whose principal carries one (case-insensitively) with `401` and a throttled `[SECURITY]` WARN naming the prefix and issuer. `ReservedPrincipalsTest` scans `src/main/java` for `"<word>:" +` concatenations and `*PREFIX* = "<word>:"` constants and fails on any that is neither reserved nor listed in the test as not a principal. `webhook:` and `agent-test:` come from open PRs #1059 and #1065 and are reserved ahead of them. Docs: [`security.md`](../security.md#the-token-must-name-the-user).
