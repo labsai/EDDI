@@ -626,6 +626,26 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private ToolApprovalsConfig toolApprovals;
 
+        /**
+         * Guardrails that screen the user's message before the model is called, run in
+         * declaration order. {@code null} or empty = no input screening, and no
+         * guardrail code runs at all. See {@link GuardrailConfig}.
+         *
+         * @since 6.6.0
+         */
+        private List<GuardrailConfig> inputGuardrails;
+
+        /**
+         * Guardrails that screen the model's final answer before it is stored or
+         * delivered, run in declaration order. {@code null} or empty = no output
+         * screening. A guardrail whose action can change the answer ({@code block},
+         * {@code redact}, {@code reprompt}) makes the task buffer its answer instead of
+         * streaming it, because streamed tokens cannot be taken back.
+         *
+         * @since 6.6.0
+         */
+        private List<GuardrailConfig> outputGuardrails;
+
         // === Helper Methods ===
 
         /**
@@ -1144,6 +1164,107 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.multimodal = multimodal;
         }
 
+        public List<GuardrailConfig> getInputGuardrails() {
+            return inputGuardrails;
+        }
+
+        public void setInputGuardrails(List<GuardrailConfig> inputGuardrails) {
+            this.inputGuardrails = inputGuardrails;
+        }
+
+        public List<GuardrailConfig> getOutputGuardrails() {
+            return outputGuardrails;
+        }
+
+        public void setOutputGuardrails(List<GuardrailConfig> outputGuardrails) {
+            this.outputGuardrails = outputGuardrails;
+        }
+
+    }
+
+    /**
+     * One input or output guardrail of a task.
+     * <p>
+     * {@code type} names a guardrail implementation ({@code prompt-injection},
+     * {@code pii-redaction}, {@code regex-filter}, {@code max-length},
+     * {@code json-object}); an unknown type is skipped with a WARN at run time,
+     * never rejected, so a config written for a newer EDDI still loads on an older
+     * one. {@code action} decides what a finding does: {@code block} (the default),
+     * {@code redact}, {@code reprompt} (output only — the same model is asked
+     * again, at most {@code maxRetries} times, then the answer is blocked) or
+     * {@code warn}. An unknown action is treated as {@code block}.
+     * {@code parameters} reach the guardrail as plain strings and are never run
+     * through the template engine.
+     *
+     * @since 6.6.0
+     */
+    public static class GuardrailConfig {
+        /**
+         * Upper bound of {@link #getMaxRetries()}: every reprompt is a billed model
+         * call.
+         */
+        public static final int MAX_RETRIES_CEILING = 5;
+        /** Default of {@link #getMaxRetries()}. */
+        public static final int DEFAULT_MAX_RETRIES = 2;
+
+        private String type;
+        private String action = "block";
+        private Integer maxRetries;
+        private String blockMessage;
+        private Map<String, String> parameters;
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public String getAction() {
+            return action;
+        }
+
+        public void setAction(String action) {
+            this.action = action;
+        }
+
+        /**
+         * The stored reprompt budget, or null when unset; see
+         * {@link #effectiveMaxRetries()} for the value that applies.
+         */
+        public Integer getMaxRetries() {
+            return maxRetries;
+        }
+
+        public void setMaxRetries(Integer maxRetries) {
+            this.maxRetries = maxRetries;
+        }
+
+        /**
+         * The reprompt budget that applies: {@link #DEFAULT_MAX_RETRIES} when unset,
+         * clamped to {@code [0, MAX_RETRIES_CEILING]}.
+         */
+        public int effectiveMaxRetries() {
+            int value = maxRetries != null ? maxRetries : DEFAULT_MAX_RETRIES;
+            return Math.max(0, Math.min(MAX_RETRIES_CEILING, value));
+        }
+
+        public String getBlockMessage() {
+            return blockMessage;
+        }
+
+        public void setBlockMessage(String blockMessage) {
+            this.blockMessage = blockMessage;
+        }
+
+        public Map<String, String> getParameters() {
+            return parameters;
+        }
+
+        public void setParameters(Map<String, String> parameters) {
+            this.parameters = parameters;
+        }
     }
 
     /**

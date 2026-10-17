@@ -195,6 +195,12 @@ public interface IConversationService {
         default void onLlmRetry(String reason, int attempt) {
         }
 
+        /**
+         * Called when an LLM task's input or output guardrail fired. Default no-op.
+         */
+        default void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
