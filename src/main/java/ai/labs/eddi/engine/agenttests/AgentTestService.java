@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -61,13 +62,14 @@ public class AgentTestService {
     private final IAgentStore agentStore;
     private final ResourceAccessGuard accessGuard;
     private final Instance<SecurityIdentity> identity;
+    private final ClusterConfig clusterConfig;
     private final Semaphore concurrentRuns;
     private final int maxConcurrentRuns;
 
     @Inject
     public AgentTestService(IAgentTestSuiteStore suiteStore, IAgentTestRunStore runStore, AgentTestRunner runner,
             IRestAgentAdministration agentAdministration, IAgentFactory agentFactory, IAgentStore agentStore, ResourceAccessGuard accessGuard,
-            Instance<SecurityIdentity> identity,
+            Instance<SecurityIdentity> identity, ClusterConfig clusterConfig,
             @ConfigProperty(name = "eddi.agent-tests.max-concurrent-runs", defaultValue = "2") int maxConcurrentRuns) {
         this.suiteStore = suiteStore;
         this.runStore = runStore;
@@ -77,6 +79,7 @@ public class AgentTestService {
         this.agentStore = agentStore;
         this.accessGuard = accessGuard;
         this.identity = identity;
+        this.clusterConfig = clusterConfig;
         this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
         this.concurrentRuns = new Semaphore(this.maxConcurrentRuns);
     }
@@ -94,6 +97,14 @@ public class AgentTestService {
     public AgentTestRun startRun(String suiteId, Integer suiteVersion, String agentId, Integer agentVersion, boolean keepConversations) {
         if (isBlank(suiteId) || isBlank(agentId)) {
             throw new BadRequestException("suiteId and agentId are required.");
+        }
+        if (clusterConfig != null && clusterConfig.isNats()) {
+            // Tool mocks and the run itself live in this JVM, and cluster mode can route
+            // a test conversation's turn to another node, where every tool call would be
+            // refused for want of a session — a failure the agent did not cause.
+            throw new ClientErrorException("Agent tests are not yet supported in cluster mode (eddi.messaging.type=nats): their tool "
+                    + "mocks live on the node that runs the test, and a turn routed to another node could not use them. Run the "
+                    + "suite against a single-node deployment.", Response.Status.CONFLICT);
         }
         accessGuard.requireAccess(suiteId, AccessLevel.VIEW, "agent test suite");
 

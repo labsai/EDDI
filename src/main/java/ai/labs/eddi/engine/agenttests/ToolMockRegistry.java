@@ -46,6 +46,15 @@ public final class ToolMockRegistry {
     /** What an unmocked call answers when unmocked calls fail. */
     public static final String NOT_EXECUTED_JSON = "{\"status\":\"NOT_EXECUTED\",\"reason\":\"no mock defined in test mode\"}";
 
+    /**
+     * What a call answers when this node holds no session for its test
+     * conversation: the run that owns it has finished, or the turn ran on a
+     * different node. Worded differently from {@link #NOT_EXECUTED_JSON} so the two
+     * can be told apart in a result.
+     */
+    public static final String UNKNOWN_SESSION_JSON = "{\"status\":\"NOT_EXECUTED\",\"reason\":\"no agent-test session on this node "
+            + "(the run owning this conversation has ended, or the turn ran on another cluster node)\"}";
+
     /** What a memory-writing tool answers when the suite runs tools live. */
     public static final String MEMORY_BLOCKED_JSON = "{\"status\":\"NOT_EXECUTED\",\"reason\":\"agent tests never write user memory\"}";
 
@@ -228,7 +237,7 @@ public final class ToolMockRegistry {
         Session session = SESSIONS.get(userId);
         MockResult result = session != null
                 ? session.answer(tool, arguments, source, true)
-                : new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED);
+                : new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED);
         if (result == null) {
             return null;
         }
@@ -261,7 +270,7 @@ public final class ToolMockRegistry {
         }
         Session session = SESSIONS.get(userId);
         if (session == null) {
-            return new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED);
+            return new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED);
         }
         return session.answer(name, arguments, source, false);
     }

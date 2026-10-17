@@ -47,7 +47,7 @@ public class McpAgentTestTools {
 
     @Tool(name = "run_agent_tests", description = "Run an agent test suite (golden conversations) against an agent version. Deploys the "
             + "version to the 'test' environment if needed (never production) and runs in the background: returns the run id at once — "
-            + "poll get_agent_test_run until status is PASSED, FAILED or ERROR. Tool calls are mocked by the suite; an unmocked call is "
+            + "poll get_agent_test_run until status is PASSED, FAILED, ERROR or ABORTED. Tool calls are mocked by the suite; an unmocked call is "
             + "not executed and fails its case.")
     public String runAgentTests(@ToolArg(description = "Test suite id (required)") String suiteId,
                                 @ToolArg(description = "Agent id (required)") String agentId,

@@ -75,7 +75,19 @@ public record AgentTestRun(String id, String suiteId, Integer suiteVersion, Stri
         /** At least one case did not, or the cost ceiling stopped the run. */
         FAILED,
         /** The run could not be executed (agent not deployable, runner failure). */
-        ERROR
+        ERROR,
+        /**
+         * The node executing the run stopped before it finished (restart, crash); found
+         * {@code RUNNING} at the next startup. Its results are incomplete.
+         */
+        ABORTED
+    }
+
+    /** This run, finished as {@link Status#ABORTED} with {@code reason}. */
+    public AgentTestRun aborted(String reason, long now) {
+        return new AgentTestRun(id, suiteId, suiteVersion, suiteName, agentId, agentVersion, Status.ABORTED, startedBy, startedAt, now,
+                startedAt != null ? now - startedAt : null, totalCostUsd, maxCostPerRun, costCeilingReached, models, casesTotal, casesPassed,
+                casesFailed, cases, keepConversations, reason);
     }
 
     public AgentTestRun withId(String newId) {

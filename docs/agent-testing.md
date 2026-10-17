@@ -211,7 +211,8 @@ A run record (`GET /agenttests/runs/{runId}`):
 ```
 
 `status` is `PASSED` when every case met its pass rate, `FAILED` otherwise (or when
-the cost ceiling stopped the run), `ERROR` when the run could not execute. The
+the cost ceiling stopped the run), `ERROR` when the run could not execute, and
+`ABORTED` when the node running it stopped before it finished. The
 newest `eddi.agent-tests.max-runs-per-agent` runs per agent are kept.
 
 ## REST API
@@ -233,8 +234,8 @@ agent, because a run deploys to `test`.
 Suite URIs follow the v6 scheme: `eddi://ai.labs.testsuite/testsuitestore/testsuites/{id}?version=N`.
 
 Errors: 400 (invalid suite, missing ids, empty suite), 404 (suite or agent not
-found), 409 (the version could not be deployed to `test`, or a newer version is
-deployed there), 429 (more than `eddi.agent-tests.max-concurrent-runs` runs at once).
+found), 409 (the version could not be deployed to `test`, a newer version is
+deployed there, or the deployment runs in cluster mode), 429 (more than `eddi.agent-tests.max-concurrent-runs` runs at once).
 
 ### CI recipe
 
@@ -250,7 +251,7 @@ RUN_ID=$(curl -sf -X POST "$EDDI/agenttests/runs" -H "$AUTH" -H 'Content-Type: a
 
 while :; do
   STATUS=$(curl -sf "$EDDI/agenttests/runs/$RUN_ID" -H "$AUTH" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
-  [ "$STATUS" != "RUNNING" ] && break
+  [ "$STATUS" != "RUNNING" ] && break   # PASSED, FAILED, ERROR or ABORTED
   sleep 5
 done
 
@@ -293,8 +294,17 @@ Metrics: `eddi_agent_tests_runs_total{status}`, `eddi_agent_tests_turns_total`,
 
 ## Known limitations
 
-- A run in progress lives on the node that started it; a run on a node that
-  restarts mid-run stays `RUNNING`.
+- **Not supported in cluster mode** (`eddi.messaging.type=nats`): starting a run
+  is refused with 409. A run and its tool mocks live in the JVM that started it,
+  and cluster mode may route a test conversation's turn to another node, where
+  every tool call would be refused. Run suites against a single-node deployment.
+  If a call is ever refused because the node holds no session for the
+  conversation, its result says so —
+  `"reason":"no agent-test session on this node (…)"` — rather than *no mock
+  defined in test mode*, so the two causes cannot be confused.
+- A run executes on the node that accepted it. If that node stops mid-run, the
+  record is marked **`ABORTED`** (with the reason in `error`) at the node's next
+  startup, and the run's test conversations are deleted. Start the run again.
 - Test conversations count against the tenant's conversation quota and appear in
   conversation metrics while they run.
 - A rule-triggered httpcall is still *built* before its mock answers it, so one whose

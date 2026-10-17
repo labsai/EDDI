@@ -37,6 +37,7 @@ public class AgentTestRunStore implements IAgentTestRunStore {
     private static final int SINGLE_VERSION = 1;
     private static final String FIELD_AGENT_ID = "agentId";
     private static final String FIELD_STARTED_AT = "startedAt";
+    private static final String FIELD_STATUS = "status";
 
     /**
      * Agent ids are hex ObjectIds or UUIDs. Anything else cannot have runs, and is
@@ -48,7 +49,7 @@ public class AgentTestRunStore implements IAgentTestRunStore {
 
     @Inject
     public AgentTestRunStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
-        this.storage = storageFactory.create(COLLECTION_NAME, documentBuilder, AgentTestRun.class, FIELD_AGENT_ID, FIELD_STARTED_AT);
+        this.storage = storageFactory.create(COLLECTION_NAME, documentBuilder, AgentTestRun.class, FIELD_AGENT_ID, FIELD_STARTED_AT, FIELD_STATUS);
     }
 
     @Override
@@ -98,6 +99,29 @@ public class AgentTestRunStore implements IAgentTestRunStore {
     public List<AgentTestRun> listByAgent(String agentId, int index, int limit) throws IResourceStore.ResourceStoreException {
         var results = new ArrayList<AgentTestRun>();
         for (var id : idsByAgent(agentId, index, limit)) {
+            try {
+                var resource = storage.read(id.getId(), SINGLE_VERSION);
+                if (resource != null) {
+                    results.add(resource.getData().withId(id.getId()));
+                }
+            } catch (IOException e) {
+                LOGGER.warnf("Could not read agent test run %s: %s", sanitize(id.getId()), e.getMessage());
+            }
+        }
+        return results;
+    }
+
+    @Override
+    public List<AgentTestRun> listByStatus(AgentTestRun.Status status, int limit) throws IResourceStore.ResourceStoreException {
+        var results = new ArrayList<AgentTestRun>();
+        List<IResourceStore.IResourceId> ids;
+        try {
+            var filter = new IResourceFilter.QueryFilters(List.of(IResourceFilter.QueryFilter.exact(FIELD_STATUS, status.name())));
+            ids = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, FIELD_STARTED_AT, 0, limit);
+        } catch (RuntimeException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to list agent test runs: " + e.getMessage(), e);
+        }
+        for (var id : ids) {
             try {
                 var resource = storage.read(id.getId(), SINGLE_VERSION);
                 if (resource != null) {

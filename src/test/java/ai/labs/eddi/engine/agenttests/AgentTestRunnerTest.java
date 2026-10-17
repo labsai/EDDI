@@ -16,7 +16,7 @@ import ai.labs.eddi.engine.agenttests.model.AgentTestRun.AttemptResult;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.model.ConversationState;
-import ai.labs.eddi.engine.memory.rest.RestConversationStore;
+import ai.labs.eddi.engine.memory.ConversationPurgeService;
 import ai.labs.eddi.engine.model.Context;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +49,7 @@ class AgentTestRunnerTest {
     private static final String AGENT_ID = "abcdefabcdefabcdefabcdef";
 
     private IAgentTestRunStore runStore;
-    private RestConversationStore conversationStore;
+    private ConversationPurgeService conversationStore;
     private AuditLedgerService auditLedger;
 
     /** The scripted wizard: deterministic, like a rules-only agent. */
@@ -64,7 +64,7 @@ class AgentTestRunnerTest {
     @BeforeEach
     void setUp() {
         runStore = mock(IAgentTestRunStore.class);
-        conversationStore = mock(RestConversationStore.class);
+        conversationStore = mock(ConversationPurgeService.class);
         auditLedger = mock(AuditLedgerService.class);
     }
 
@@ -115,7 +115,7 @@ class AgentTestRunnerTest {
         String conversationId = engine.conversations.keySet().iterator().next();
         assertEquals(AgentTestConversations.userIdFor(RUN_ID, 0, 1), engine.userIds.get(conversationId));
         verify(engine.service).endConversation(conversationId, AgentTestConversations.SYSTEM_ACTOR);
-        verify(conversationStore).purgeConversation(conversationId);
+        verify(conversationStore).purgeAgentTestConversation(conversationId, RUN_ID);
 
         verify(runStore).update(run);
         verify(runStore).pruneOlderRuns(AGENT_ID, 50);
@@ -216,7 +216,7 @@ class AgentTestRunnerTest {
 
         AgentTestRun run = runner(engine, 4).run(started(true), suite(null, null, happyPath()));
 
-        verify(conversationStore, never()).purgeConversation(anyString());
+        verify(conversationStore, never()).purgeAgentTestConversation(anyString(), anyString());
         assertNotNull(run.cases().getFirst().attempts().getFirst().conversationId());
     }
 

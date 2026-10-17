@@ -92,10 +92,13 @@ class ToolMockRegistryTest {
     @Test
     @DisplayName("a test conversation the registry does not know is refused, not executed")
     void unknownTestConversationFailsClosed() {
-        assertEquals(ToolMockRegistry.NOT_EXECUTED_JSON, ToolMockRegistry.interceptToolCall(memoryOf(USER), "lookup", "{}", "mcp"));
+        // Not "no mock defined": the session is missing, which is a different diagnosis
+        // (run over, or the turn ran on another cluster node).
+        assertEquals(ToolMockRegistry.UNKNOWN_SESSION_JSON, ToolMockRegistry.interceptToolCall(memoryOf(USER), "lookup", "{}", "mcp"));
         var rule = ToolMockRegistry.interceptRuleCall(memoryOf(USER), "lookup", null, "httpcall");
         assertNotNull(rule);
         assertEquals(ToolMockRegistry.NOT_EXECUTED_HTTP_CODE, rule.httpCode());
+        assertEquals(ToolMockRegistry.UNKNOWN_SESSION_JSON, rule.bodyAsText());
         assertFalse(ToolMockRegistry.mayRunLive(memoryOf(USER)));
     }
 

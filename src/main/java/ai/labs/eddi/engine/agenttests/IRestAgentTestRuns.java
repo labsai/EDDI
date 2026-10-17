@@ -45,7 +45,7 @@ public interface IRestAgentTestRuns {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Start a test run", description = "Deploys the agent version to the test environment if needed and runs the suite "
             + "in the background. Returns 202 with the RUNNING run record; poll GET /agenttests/runs/{runId} until status is "
-            + "PASSED, FAILED or ERROR.")
+            + "PASSED, FAILED, ERROR or ABORTED.")
     @APIResponse(responseCode = "202", description = "Run accepted; the body is the RUNNING record with its id.")
     @APIResponse(responseCode = "400", description = "Missing ids, or the suite has no cases.")
     @APIResponse(responseCode = "404", description = "Suite or agent not found.")

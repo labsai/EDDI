@@ -29,6 +29,9 @@ public interface IAgentTestRunStore {
     /** Runs of one agent, newest first. */
     List<AgentTestRun> listByAgent(String agentId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
+    /** Runs in {@code status}, newest first, at most {@code limit}. */
+    List<AgentTestRun> listByStatus(AgentTestRun.Status status, int limit) throws IResourceStore.ResourceStoreException;
+
     /**
      * Deletes all but the {@code keep} newest runs of {@code agentId}.
      *

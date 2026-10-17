@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -52,6 +53,7 @@ class AgentTestServiceTest {
     private IRestAgentAdministration administration;
     private IAgentFactory agentFactory;
     private ResourceAccessGuard accessGuard;
+    private ClusterConfig clusterConfig;
     private AgentTestService service;
 
     @BeforeEach
@@ -65,8 +67,9 @@ class AgentTestServiceTest {
         accessGuard = mock(ResourceAccessGuard.class);
         Instance<SecurityIdentity> identity = mock(Instance.class);
         when(identity.isResolvable()).thenReturn(false);
+        clusterConfig = mock(ClusterConfig.class);
         service = new AgentTestService(suiteStore, runStore, runner, administration, agentFactory, mock(IAgentStore.class), accessGuard,
-                identity, 2);
+                identity, clusterConfig, 2);
 
         var suite = new AgentTestSuite("wizard", null, null, null, null,
                 List.of(new TestCase("c", null, null, null, List.of(new Turn("hi", null, null)))));
@@ -152,5 +155,17 @@ class AgentTestServiceTest {
         when(runStore.read(RUN_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("nope"));
 
         assertThrows(NotFoundException.class, () -> service.readRun(RUN_ID));
+    }
+
+    @Test
+    @DisplayName("cluster mode refuses the run up front: mocks live in one JVM, turns may run on another node")
+    void clusterModeIsRefused() throws Exception {
+        when(clusterConfig.isNats()).thenReturn(true);
+
+        var e = assertThrows(ClientErrorException.class, () -> service.startRun(SUITE_ID, 3, AGENT_ID, 7, false));
+
+        assertEquals(409, e.getResponse().getStatus());
+        assertTrue(e.getMessage().contains("cluster mode"), e.getMessage());
+        verifyNoInteractions(administration, runStore, runner);
     }
 }

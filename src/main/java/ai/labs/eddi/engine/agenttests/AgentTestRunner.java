@@ -15,10 +15,10 @@ import ai.labs.eddi.engine.agenttests.model.AgentTestRun.TurnResult;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.memory.ConversationPurgeService;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -80,20 +80,20 @@ public class AgentTestRunner {
 
     private final IConversationService conversationService;
     private final IAgentTestRunStore runStore;
-    private final RestConversationStore conversationStore;
+    private final ConversationPurgeService purgeService;
     private final AuditLedgerService auditLedgerService;
     private final MeterRegistry meterRegistry;
     private final int maxParallelCases;
     private final int maxRunsPerAgent;
 
     @Inject
-    public AgentTestRunner(IConversationService conversationService, IAgentTestRunStore runStore, RestConversationStore conversationStore,
+    public AgentTestRunner(IConversationService conversationService, IAgentTestRunStore runStore, ConversationPurgeService purgeService,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.agent-tests.max-parallel-cases", defaultValue = "4") int maxParallelCases,
             @ConfigProperty(name = "eddi.agent-tests.max-runs-per-agent", defaultValue = "50") int maxRunsPerAgent) {
         this.conversationService = conversationService;
         this.runStore = runStore;
-        this.conversationStore = conversationStore;
+        this.purgeService = purgeService;
         this.auditLedgerService = auditLedgerService;
         this.meterRegistry = meterRegistry;
         this.maxParallelCases = Math.max(1, maxParallelCases);
@@ -283,7 +283,7 @@ public class AgentTestRunner {
             error = "Could not run the conversation: " + safeMessage(e);
         } finally {
             if (conversationId != null) {
-                cleanUp(conversationId, Boolean.TRUE.equals(run.keepConversations()));
+                cleanUp(conversationId, run.id(), Boolean.TRUE.equals(run.keepConversations()));
             }
             // Only after the conversation is ended: from here on any late call of it is
             // refused (no session, fail closed), never executed.
@@ -400,7 +400,7 @@ public class AgentTestRunner {
      * in-flight turn not to write back — and deletes it unless it is to be kept.
      * Best effort: a test result is never lost to a cleanup failure.
      */
-    private void cleanUp(String conversationId, boolean keep) {
+    private void cleanUp(String conversationId, String runId, boolean keep) {
         try {
             if (conversationService.getConversationState(conversationId) != ConversationState.ENDED) {
                 conversationService.endConversation(conversationId, AgentTestConversations.SYSTEM_ACTOR);
@@ -412,7 +412,7 @@ public class AgentTestRunner {
             return;
         }
         try {
-            conversationStore.purgeConversation(conversationId);
+            purgeService.purgeAgentTestConversation(conversationId, runId);
         } catch (Exception e) {
             LOGGER.warnf("Could not delete test conversation %s: %s", sanitize(conversationId), e.getMessage());
         }
