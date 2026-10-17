@@ -165,17 +165,26 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
   const [hosts, setHosts] = useState<AllowedHostsDraft>(() => newAllowedHostsDraft());
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  const name = keyName.trim();
+  /* An existing key is a rotation: the backend keeps the stored grant and hosts
+     for every list it is not sent, so neither is required here. */
+  const existing = !!data?.some((s) => s.keyName === name);
+
   const save = () => {
-    const resolved = resolveAllowedHostsDraft(hosts);
-    if ("problem" in resolved) {
-      const problem = resolved.problem;
-      if (problem !== "missing") setHosts((d) => ({ ...d, problem }));
-      return;
+    let allowedHosts: string[] | undefined;
+    // Untouched on a rotation: send nothing, so the stored hosts are kept. An
+    // explicit choice is still sent — that is the one way to change them here.
+    if (!(existing && allowedHostsMissing(hosts))) {
+      const resolved = resolveAllowedHostsDraft(hosts);
+      if ("problem" in resolved) {
+        const problem = resolved.problem;
+        if (problem !== "missing") setHosts((d) => ({ ...d, problem }));
+        return;
+      }
+      allowedHosts = resolved.allowedHosts;
     }
-    const name = keyName.trim();
     store.mutate(
-      // An existing key is a rotation: it sends no grant, so the stored one is kept.
-      { keyName: name, value, allowedHosts: resolved.allowedHosts, existing: !!data?.some((s) => s.keyName === name) },
+      { keyName: name, value, allowedHosts, existing },
       {
         onSuccess: () => {
           toast.success(t("workspacesPage.secretStored", "Secret stored"));
@@ -250,7 +259,7 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
         />
         <Button
           onClick={save}
-          disabled={!keyName.trim() || !value || allowedHostsMissing(hosts) || store.isPending}
+          disabled={!name || !value || (!existing && allowedHostsMissing(hosts)) || store.isPending}
           data-testid="space-secret-save"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />

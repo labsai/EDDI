@@ -263,6 +263,12 @@ store_vault_key() {
         exit 1
     fi
 
+    if [ -z "$VAULT_KEY_HOST" ]; then
+        echo "[seed] ERROR: no known endpoint for EDDI_DEMO_LLM_TYPE=${EDDI_DEMO_LLM_TYPE:-openai}." >&2
+        echo "[seed] Set EDDI_DEMO_LLM_ALLOWED_HOST to the host the key may be sent to, or to * for any host." >&2
+        exit 1
+    fi
+
     echo "[seed] Storing the provider key in the vault as '$VAULT_KEY_NAME'…"
     # Fail hard rather than fall back to embedding the key: a silent downgrade
     # to a plaintext credential is the wrong way to be helpful.
@@ -276,14 +282,16 @@ store_vault_key() {
 }
 
 # Where the provider key may be sent. EDDI_DEMO_LLM_ALLOWED_HOST overrides it,
-# and "*" stores the key with no destination restriction.
+# and "*" stores the key with no destination restriction. Any other type has no
+# known endpoint here, so it needs EDDI_DEMO_LLM_ALLOWED_HOST: an unrestricted key
+# is never the silent default.
 demo_llm_host() {
     case "${EDDI_DEMO_LLM_TYPE:-openai}" in
         openai) echo "api.openai.com" ;;
         anthropic) echo "api.anthropic.com" ;;
         gemini) echo "generativelanguage.googleapis.com" ;;
         mistral) echo "api.mistral.ai" ;;
-        *) echo "*" ;;
+        *) echo "" ;;
     esac
 }
 

@@ -169,7 +169,7 @@ describe("WorkspacesPage — storing a space secret", () => {
     expect(writes[0]).toMatchObject({ allowedAgents: ["*"], allowedHosts: ["*"] });
   });
 
-  it("re-saving an existing key sends no grant, so a narrowed one is kept", async () => {
+  it("re-saving an existing key sends neither list, so the stored grant and hosts are kept", async () => {
     enableWorkspaces();
     const writes = captureSecretWrites([
       { keyName: "openai-key", reference: "${vault:u.alice/openai-key}", allowedAgents: ["agent1"], allowedHosts: ["api.openai.com"] },
@@ -178,12 +178,13 @@ describe("WorkspacesPage — storing a space secret", () => {
     const user = userEvent.setup();
     await screen.findByText("openai-key");
     await fillNameAndValue(user);
-    await user.type(screen.getByTestId("space-secret-hosts-input-input"), "api.openai.com");
+    // No host choice needed: a rotation keeps the stored list.
     await user.click(screen.getByTestId("space-secret-save"));
 
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).not.toHaveProperty("allowedAgents");
-    expect(writes[0]).toMatchObject({ value: "sk-test", allowedHosts: ["api.openai.com"] });
+    expect(writes[0]).not.toHaveProperty("allowedHosts");
+    expect(writes[0]).toMatchObject({ value: "sk-test" });
   });
 
   it("shows a stored secret's destinations", async () => {

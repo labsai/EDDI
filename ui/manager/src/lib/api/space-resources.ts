@@ -31,7 +31,8 @@ export interface SpaceSecretWrite {
   description?: string;
   /** Required on a create; omitted on a rotation, which keeps the stored grant. */
   allowedAgents?: string[];
-  allowedHosts: string[];
+  /** Required on a create; omitted on a rotation, which keeps the stored list. */
+  allowedHosts?: string[];
 }
 
 export interface SpaceVariable {
@@ -55,17 +56,19 @@ export function listSpaceSecrets(space: string): Promise<SpaceSecret[]> {
  * explicit wildcard — the backend refuses a create that leaves it to a default.
  * A rotation (`existing`) sends no grant at all, so it keeps whatever is stored
  * and can never widen a grant narrowed through the API. `allowedHosts` is the
- * caller's: hosts, or `["*"]`.
+ * caller's: hosts, or `["*"]` — or `undefined` on a rotation, which keeps the
+ * stored list.
  */
 export function storeSpaceSecret(
   space: string,
   keyName: string,
   value: string,
-  allowedHosts: string[],
+  allowedHosts: string[] | undefined,
   description?: string,
   existing = false
 ): Promise<SpaceSecret> {
-  const body: SpaceSecretWrite = { value, description, allowedHosts };
+  const body: SpaceSecretWrite = { value, description };
+  if (allowedHosts) body.allowedHosts = allowedHosts;
   if (!existing) body.allowedAgents = [ALL_AGENTS];
   return api.put<SpaceSecret>(`/spacestore/secrets/${seg(keyName)}?${q(space)}`, body);
 }

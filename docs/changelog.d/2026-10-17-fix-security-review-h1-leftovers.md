@@ -43,7 +43,7 @@ still omit the list. The user agreed to the break before it was made.
   for the MCP server URL, the A2A agent URL and the LLM `baseUrl`/provider
   default. The Workspaces page create now also sends `allowedAgents: ["*"]`: it
   sent no grant at all, so it already failed under `enforce`. Re-saving an existing space key sends no
-  grant, so the stored grant is kept. The MSW handlers model the `enforce` rules.
+  grant and no hosts, so the stored lists are kept. The MSW handlers model the `enforce` rules.
   The Operator prompt tells an admin a new secret needs its hosts. The operator revision is bumped.
 - `seed-demo-agent.sh` sent neither list and failed under `enforce`. It now sends both,
   with the host taken from `EDDI_DEMO_LLM_TYPE`, or from
