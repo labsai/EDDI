@@ -69,3 +69,34 @@ flag, and the `adopt-master-key` response names it.
 [`RestSecretStore.java`](../../src/main/java/ai/labs/eddi/secrets/rest/RestSecretStore.java),
 [`secrets.ts`](../../ui/manager/src/lib/api/secrets.ts),
 [`secrets-vault.md`](../secrets-vault.md#lost-master-key)
+
+## 🔒 fix(security): name the vault secrets that may still be sent anywhere (2026-10-17)
+
+**Repo:** EDDI (`fix/security-review-secrets-redaction`)
+
+The residual of H1 in the 2026-10-17 security review: PR #1079 makes the setup wizard
+set `allowedHosts` on every key it vaults from now on, but every secret vaulted before
+it keeps an open destination, so an editor can still exfiltrate it by pointing a copy of
+the LLM configuration at their own host.
+
+- New `UnrestrictedSecretsCheck` (next to `VaultStartupBanner`): when the vault is
+  enabled it scans, on a virtual thread after boot, the current version of every LLM,
+  MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references, reads
+  each referenced secret's metadata, and logs **one** `[SECURITY]` WARN naming every
+  secret without `allowedHosts` (`tenant/key`), the configurations that reference it,
+  and the `PUT /secretstore/secrets/{tenantId}/{keyName}/grant` call that narrows it.
+- `GET /secretstore/secrets/{tenantId}` (admin-only) now returns `SecretListing` entries:
+  the same metadata fields as before plus `unrestrictedDestination` (live: `allowedHosts`
+  empty) and `referencedBy` (from the last scan; absent before it).
+
+**Design decision:** no automatic migration. Only the admin knows which host a key
+belongs to; a wrong guess would break a working agent. `AgentSetupService` and
+`VaultSecretProvider` are untouched (PR #1079 changes them).
+
+**Not covered:** references reached only through `${vars:…}` or `${connection:…}`, and
+old configuration versions that are still deployed. No Manager warning state yet (UI).
+
+**Files:** [`UnrestrictedSecretsCheck.java`](../../src/main/java/ai/labs/eddi/secrets/UnrestrictedSecretsCheck.java),
+[`SecretListing.java`](../../src/main/java/ai/labs/eddi/secrets/rest/SecretListing.java),
+[`RestSecretStore.java`](../../src/main/java/ai/labs/eddi/secrets/rest/RestSecretStore.java),
+[`secrets-vault.md`](../secrets-vault.md#destination-allow-list-allowedhosts)

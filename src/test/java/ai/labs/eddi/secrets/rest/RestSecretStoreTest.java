@@ -6,13 +6,14 @@ package ai.labs.eddi.secrets.rest;
 
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.UnrestrictedSecretsCheck;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -591,8 +593,32 @@ class RestSecretStoreTest {
 
         Response resp = rest.listSecrets("default");
         assertEquals(200, resp.getStatus());
-        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
-        assertTrue(list.stream().allMatch(m -> m.checksum() == null), "no listed row may carry a checksum");
+        List<SecretListing> list = (List<SecretListing>) resp.getEntity();
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(list);
+        assertFalse(json.contains("checksum"), "no listed row may carry a checksum: " + json);
+        assertFalse(json.contains("h1:aaa"), json);
+        assertFalse(json.contains("abc123"), json);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("H1 residual (2026-10-17): the listing marks an open destination and names the configs that reference it")
+    void listSecrets_marksUnrestrictedDestinationAndReferences() throws Exception {
+        when(secretProvider.listKeys("default")).thenReturn(List.of(
+                new SecretMetadata("default", "open", Instant.now(), null, null, null, "d", List.of("*"), null),
+                new SecretMetadata("default", "narrow", Instant.now(), null, null, null, "d", List.of("*"), List.of("api.openai.com"))));
+        var check = mock(UnrestrictedSecretsCheck.class);
+        when(check.referencedBy(new SecretReference("default", "open")))
+                .thenReturn(Optional.of(List.of("eddi://ai.labs.llm/llmstore/llms/68a1b2c3d4e5f60718293a4b?version=1")));
+        when(check.referencedBy(new SecretReference("default", "narrow"))).thenReturn(Optional.of(List.of()));
+        rest.unrestrictedSecretsCheck = check;
+
+        List<SecretListing> list = (List<SecretListing>) rest.listSecrets("default").getEntity();
+
+        assertTrue(list.get(0).unrestrictedDestination());
+        assertEquals(List.of("eddi://ai.labs.llm/llmstore/llms/68a1b2c3d4e5f60718293a4b?version=1"), list.get(0).referencedBy());
+        assertFalse(list.get(1).unrestrictedDestination());
+        assertEquals(List.of(), list.get(1).referencedBy());
     }
 
     @Test
@@ -613,8 +639,9 @@ class RestSecretStoreTest {
 
         Response resp = rest.listSecrets("default");
         assertEquals(200, resp.getStatus());
-        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
+        List<SecretListing> list = (List<SecretListing>) resp.getEntity();
         assertEquals(2, list.size());
+        assertNull(list.get(0).referencedBy(), "no scan has run in a unit test");
     }
 
     @Test

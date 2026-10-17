@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.rest;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.UnrestrictedSecretsCheck;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.VaultGrantRequests;
@@ -72,6 +73,14 @@ public class RestSecretStore implements IRestSecretStore {
     /** The caller, recorded as the actor of a grant append; null in tests. */
     @Inject
     SecurityIdentity identity;
+
+    /**
+     * The startup scan for referenced secrets without a destination allow-list (H1
+     * residual of the 2026-10-17 review); null in tests, which leaves
+     * {@code referencedBy} out of the listing.
+     */
+    @Inject
+    UnrestrictedSecretsCheck unrestrictedSecretsCheck;
 
     @Inject
     public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer,
@@ -368,6 +377,18 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     /**
+     * One entry of {@code GET /{tenantId}}: the metadata without its checksum, plus
+     * whether the secret may be sent anywhere and which configurations the last
+     * startup scan found referencing it.
+     */
+    private SecretListing listing(SecretMetadata metadata) {
+        List<String> referencedBy = unrestrictedSecretsCheck == null
+                ? null
+                : unrestrictedSecretsCheck.referencedBy(new SecretReference(metadata.tenantId(), metadata.keyName())).orElse(null);
+        return SecretListing.of(withoutChecksum(metadata), referencedBy);
+    }
+
+    /**
      * The response body for a grant update. Carries the previous list as well as
      * the new one — an operator changing a security control should be able to see
      * what it was, and a UI can diff the two without having re-read the secret
@@ -526,7 +547,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(this::listing).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
