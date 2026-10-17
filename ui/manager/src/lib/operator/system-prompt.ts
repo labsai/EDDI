@@ -238,8 +238,11 @@ const BODY_CAPACITY = `Turn capacity — "why was my turn refused?" and "how big
      conversation was refused because \`eddi.coordinator.max-active-conversations\`
      (default 10000) conversations already hold a turn queue. Follow-up turns
      of existing conversations are never refused by this one.
-  3. "This node is shutting down ...": a draining node during a rolling update;
-     retrying lands on another node.
+  3. "This node is shutting down ...": the node is stopping (a rolling update
+     or restart); retrying lands on another node.
+  A node an administrator DRAINED from the Cluster screen answers differently:
+  HTTP 409 with \`Retry-After\` ("Conversation is processing another turn"),
+  not 503. That is not a capacity limit; retrying reaches an undrained node.
 - \`eddi.conversation.max-in-flight-turns\` (default \`auto\`) counts turns
   queued or executing on ONE node. Turns run on virtual threads, so memory, not
   threads, decides how many fit: \`auto\` is (max heap − 256 MB) ÷

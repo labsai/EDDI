@@ -483,6 +483,12 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
     expect(body).toContain("This node is shutting down");
   });
 
+  it.each(bodies)("%s: keeps an administrator drain (409) apart from shutdown (503)", (_label, body) => {
+    // RestAgentEngine.onSkipped answers a drained node's lease refusal with 409
+    // + Retry-After; only the graceful-shutdown gate is a 503 capacity_exceeded.
+    expect(body).toMatch(/DRAINED from the Cluster screen answers differently:\s+HTTP 409/);
+  });
+
   it.each(bodies)("%s: states the heap-derived auto formula and the per-turn budget", (_label, body) => {
     // InFlightTurnLimit: (max heap - RESERVE_MB 256) / per-turn MB, floor 32.
     expect(body).toMatch(/\(max heap − 256 MB\) ÷\s+`eddi\.conversation\.in-flight-turn-memory-mb`/);
@@ -517,6 +523,18 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
     expect(without).toContain("Turn capacity");
     expect(without).not.toContain("The coordinator status tool shows");
     expect(without).not.toContain("The platform logs show refusals too");
+
+    // Each grant on its own, so a regression that shows both lines for either
+    // endpoint fails here.
+    const withoutCoordinator = buildOperatorPromptBody(
+      READ_ENDPOINTS.filter((e) => e !== "GET /administration/coordinator/status"),
+    );
+    expect(withoutCoordinator).not.toContain("The coordinator status tool shows");
+    expect(withoutCoordinator).toContain("The platform logs show refusals too");
+
+    const withoutLogs = buildOperatorPromptBody(READ_ENDPOINTS.filter((e) => e !== "GET /administration/logs"));
+    expect(withoutLogs).toContain("The coordinator status tool shows");
+    expect(withoutLogs).not.toContain("The platform logs show refusals too");
   });
 });
 
