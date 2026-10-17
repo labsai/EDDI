@@ -67,21 +67,40 @@ inert.
   strings "Thinking…", "Using {tool}…" and the scroll button label are
   translated.
 
+### Team setup, HITL and background polling
+
+- **Group and Workforce wizards set their members up in parallel.**
+  `runDeployManyWithGrants` deploys `DEPLOY_MANY_CONCURRENCY` (3) targets at a
+  time instead of one after another, and both wizards create new agents three
+  at a time. The grant dialog still asks one question at a time: a new request
+  used to cancel the open one, which is why the loop was sequential, so the
+  per-agent second-chance dialogs now go through `serializeGrantDecisions`.
+  Every agent that was created is recorded before a failure is reported,
+  because provisioning is not idempotent. The Workforce wizard raises one
+  toast for the batch, and each failed row shows its own error.
+- **HITL human-input submit is optimistic.** The cached group conversation
+  leaves `AWAITING_HUMAN_INPUT` at once and is put back if the submit fails. It
+  used to await two refetches, which kept the button pending for an extra round
+  trip.
+- **The Chat UI no longer polls approval status from a hidden tab.** The next
+  read is parked and taken at once when the tab is visible again.
+
 ### Not done (follow-ups)
 
-- Group and Workforce wizards still deploy and create their members one at a
-  time. Running them in parallel needs care around the per-target grant dialog.
-- HITL human-input submit still waits for two refetches; making it optimistic
-  needs a cache patch of the group conversation's state.
-- Analytics and the skill registry still fire one request per group or skill;
-  both need batch endpoints on the backend.
-- The Chat UI has no idle watchdog for a stalled stream, and HITL polling does
-  not pause in a hidden tab.
+- A client-side idle watchdog for a stalled chat stream was considered and
+  rejected. The conversation stream sends no keep-alives (only the log stream
+  does), so a single slow tool or model call is legitimately silent for
+  minutes, and a watchdog would cut real turns off as "connection lost". It
+  needs a server-side heartbeat first.
+- Workforce analytics and the skill registry still fire one request per group or
+  skill; both need batch endpoints on the backend.
 
 ### Tests
 
 New: [`responsiveness-review.test.tsx`](../../ui/chat/src/components/responsiveness-review.test.tsx)
 and a Scroll-to-bottom regression in `ChatWidget.ux.test.tsx` (Chat), and
 [`optimistic-mutations.test.tsx`](../../ui/manager/src/hooks/__tests__/optimistic-mutations.test.tsx)
-(Manager). The scroll test was mutation-checked: restoring the old handler fails
-it.
+(Manager), plus [`deploy-many-concurrency.test.ts`](../../ui/manager/src/hooks/__tests__/deploy-many-concurrency.test.ts)
+and a hidden-tab case in `useHitlPolling.test.ts`. Mutation-checked: restoring
+the old scroll handler, dropping the dialog queue (in the serializer or in its
+use), dropping the HITL cache patch and ignoring visibility each fail a test.

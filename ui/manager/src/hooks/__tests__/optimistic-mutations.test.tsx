@@ -5,6 +5,8 @@ import { type ReactNode } from "react";
 import { http, HttpResponse, delay } from "msw";
 import { server } from "@/test/mocks/server";
 import { useToggleSchedule } from "@/hooks/use-schedules";
+import { useSubmitHumanInput } from "@/hooks/use-hitl";
+import type { GroupConversation } from "@/lib/api/groups";
 import type { ScheduleConfiguration } from "@/lib/api/schedules";
 import { agentDeploymentQueries, agentKeys } from "@/lib/query-keys";
 
@@ -94,5 +96,53 @@ describe("agentDeploymentQueries", () => {
 
   it("refreshes a sub-key it does not know, to stay on the safe side", () => {
     expect(matches([...agentKeys.all, "something-new"])).toBe(true);
+  });
+});
+
+describe("useSubmitHumanInput", () => {
+  const KEY = ["groupConversations", "grp-1", "gc-1"];
+  const awaiting = {
+    id: "gc-1",
+    state: "AWAITING_HUMAN_INPUT",
+    pendingHumanInput: { memberId: "human-1" },
+  } as unknown as GroupConversation;
+  const vars = { groupId: "grp-1", gcId: "gc-1", memberId: "human-1", content: "my turn" };
+
+  it("hands the turn over in the cache before the server answers", async () => {
+    let release!: () => void;
+    const answered = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/human-input", async () => {
+        await answered;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    const { queryClient, wrapper } = setup();
+    queryClient.setQueryData(KEY, awaiting);
+    const { result } = renderHook(() => useSubmitHumanInput(), { wrapper });
+
+    act(() => result.current.mutate(vars));
+
+    await waitFor(() => expect(queryClient.getQueryData<GroupConversation>(KEY)?.state).toBe("IN_PROGRESS"));
+    expect(queryClient.getQueryData<GroupConversation>(KEY)?.pendingHumanInput).toBeNull();
+    release();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("gives the turn back when the submit fails", async () => {
+    server.use(
+      http.post("*/groups/:groupId/conversations/:gcId/human-input", async () => {
+        await delay(10);
+        return HttpResponse.json({ message: "nope" }, { status: 500 });
+      }),
+    );
+    const { queryClient, wrapper } = setup();
+    queryClient.setQueryData(KEY, awaiting);
+    queryClient.setQueryDefaults(["groupConversations"], { queryFn: () => new Promise(() => {}) });
+    const { result } = renderHook(() => useSubmitHumanInput(), { wrapper });
+
+    act(() => result.current.mutate(vars));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(queryClient.getQueryData<GroupConversation>(KEY)?.state).toBe("AWAITING_HUMAN_INPUT");
   });
 });
