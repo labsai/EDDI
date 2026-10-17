@@ -28,6 +28,12 @@ services:
       # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Every in-flight turn can hold an LLM socket on top of the database pool, NATS and
+    # client connections; the runtime default (often 1024) runs out under load.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     # EDDI ships unauthenticated by default (the escape hatch above), so it must
     # NOT be reachable from off-box out of the box. MongoDB is already bound to
     # 127.0.0.1 below; EDDI is bound the same way here. To expose it on the LAN
