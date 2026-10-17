@@ -877,6 +877,8 @@ public class LlmTask implements ILifecycleTask {
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
                         fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
+                        // Stored like every other fallback: the fallbackField-wrapped content.
+                        responseContent = fallbackServed.content();
                     }
                 }
             } catch (LifecycleException validationFailure) {
@@ -1844,6 +1846,8 @@ public class LlmTask implements ILifecycleTask {
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
                         fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
+                        // Stored like every other fallback: the fallbackField-wrapped content.
+                        responseContent = fallbackServed.content();
                     }
                 }
             } catch (LifecycleException validationFailure) {

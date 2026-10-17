@@ -454,6 +454,7 @@ class LlmTaskGuardrailsTest {
     @Test
     @DisplayName("an output block under convertToObject is wrapped under fallbackField, as postResponse expects")
     void outputBlock_convertToObject_isWrapped() throws Exception {
+        when(memory.getEventSink()).thenReturn(sink);
         var model = FaultInjectingChatModel.script(Step.text("{\"mail\":\"jane@example.org\"}"));
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
         var task = convertToObjectTask();
@@ -465,6 +466,30 @@ class LlmTaskGuardrailsTest {
 
         assertEquals(Map.of("reply", "Withheld."), templateData.get(TASK_ID));
         assertEquals("Withheld.", outputItem().getText());
+        // The raw output is stored like every other fallback's: the wrapped content.
+        verify(dataFactory).createData("langchain:openai:" + TASK_ID, "{\"reply\":\"Withheld.\"}");
+        // The stream still gets the message once, never the JSON wrapper.
+        verify(sink, times(1)).onToken("Withheld.");
+        verify(sink, never()).onToken("{\"reply\":\"Withheld.\"}");
+    }
+
+    @Test
+    @DisplayName("resume: an output block under convertToObject stores the wrapped content and streams only the message")
+    void resume_outputBlock_convertToObject_isWrapped() throws Exception {
+        when(memory.getEventSink()).thenReturn(sink);
+        resumeWith("{\"mail\":\"jane@example.org\"}", resumeTranscript());
+        var task = convertToObjectTask();
+        var cfg = guardrail("pii-redaction", "block");
+        cfg.setBlockMessage("Withheld.");
+        task.setOutputGuardrails(List.of(cfg));
+
+        run(task);
+
+        assertEquals(Map.of("reply", "Withheld."), templateData.get(TASK_ID));
+        assertEquals("Withheld.", outputItem().getText());
+        verify(dataFactory).createData("langchain:openai:" + TASK_ID, "{\"reply\":\"Withheld.\"}");
+        verify(sink, times(1)).onToken("Withheld.");
+        verify(sink, never()).onToken("{\"reply\":\"Withheld.\"}");
     }
 
     @Test
