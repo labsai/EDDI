@@ -69,7 +69,7 @@ class VaultHostAllowlistTest {
         @DisplayName("a scheme, a path, a wildcard, a blank or a bad port is refused by name")
         void refusesShapesThatAreNotAHost() {
             for (String bad : List.of("https://api.openai.com", "api.openai.com/v1", "*.openai.com", " ", "api.openai.com:0",
-                    "api.openai.com:70000", "api openai.com")) {
+                    "api.openai.com:70000", "api.openai.com:99999999999", "api openai.com")) {
                 var error = assertThrows(IllegalArgumentException.class, () -> VaultHostAllowlist.validatedHosts(List.of(bad)), bad);
                 assertTrue(error.getMessage().contains("allowedHosts"), error.getMessage());
             }

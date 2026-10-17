@@ -821,6 +821,7 @@ public class RestConnectionStore implements IRestConnectionStore {
         }
         if (connection.getStaticAuth() != null) {
             credentialReferenceResolver.requireVaultBacked(connection.getStaticAuth().getPasswordRef(), "staticAuth.passwordRef");
+            credentialReferenceResolver.requireAcceptableTemplate(connection.getStaticAuth().getValueTemplate(), "staticAuth.valueTemplate");
         }
     }
 

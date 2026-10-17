@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
@@ -52,6 +53,13 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    private static final String KIND = "mcpcalls";
 
     @Inject
     public RestMcpCallsStore(IMcpCallsStore mcpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -112,6 +120,8 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     public Response duplicateMcpCalls(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         McpCallsConfiguration config = restVersionInfo.read(id, version);
+        // A copy is a new resource authored by whoever duplicates it.
+        requireMayAuthorCallerToken(config);
         return restVersionInfo.create(config);
     }
 
@@ -136,11 +146,23 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
             // RestVersionInfo produces its own error for a missing body.
             return;
         }
+        requireMayAuthorCallerToken(mcpCallsConfiguration);
 
         try {
             mcpCallsConfiguration.validate();
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Refuses {@code ${caller:token}} from a caller who may not author it — see
+     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
+     * path treats a non-200 update as "create it directly instead".
+     */
+    private void requireMayAuthorCallerToken(Object configuration) {
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }
     }
 

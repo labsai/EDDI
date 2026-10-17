@@ -182,8 +182,8 @@ class AgentOrchestratorCoverageTest {
         lenient().when(memory.getAgentId()).thenReturn(null);
         lenient().when(memory.getAgentVersion()).thenReturn(null);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any()))
-                .thenAnswer(inv -> inv.getArgument(1));
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
         lenient()
@@ -803,21 +803,14 @@ class AgentOrchestratorCoverageTest {
     }
 
     /**
-     * D4: a stored config carrying only {@code maxBudgetPerConversation} — no
-     * {@code enforceBudget} — records cost but refuses nothing.
-     * <p>
-     * This is the deliberate opt-in default. Built-in tools priced at $0.00 until
-     * this release, so enforcing by default would make those ceilings bind for the
-     * first time and start refusing calls mid-conversation on upgrade. The cost of
-     * that choice is that an operator whose ceiling <em>was</em> working (http /
-     * MCP / A2A / dynamic tools dispatch under their configured name, so they were
-     * priced and refused before) loses it — which is why
-     * {@code warnAboutUnenforcedBudgets} names every such task in a WARN instead of
-     * letting it pass silently. The pairing of this test with
-     * {@link #toolCall_unenforcedCeilingIsWarnedAbout()} is the contract.
+     * M8: a stored config carrying only {@code maxBudgetPerConversation} — no
+     * {@code enforceBudget} — is enforced. Enforcement is the default since 6.6.0;
+     * {@code enforceBudget: false} (the sibling test above) is the opt-out, and
+     * {@link #toolCall_unenforcedCeilingIsWarnedAbout()} pins that opting out is
+     * named in a WARN.
      */
     @Test
-    void toolCall_budgetSetWithoutEnforceFlag_isNotEnforced() throws Exception {
+    void toolCall_budgetSetWithoutEnforceFlag_isEnforced() throws Exception {
         var task = calcOnlyTask();
         task.setMaxBudgetPerConversation(1.0);
         // deliberately no setEnforceBudget(...)
@@ -830,31 +823,29 @@ class AgentOrchestratorCoverageTest {
         when(chatModel.chat(any(ChatRequest.class)))
                 .thenReturn(toolBatch(calcReq))
                 .thenReturn(text("two"));
-        when(calculatorTool.calculate("1+1")).thenReturn("2");
 
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
-        assertEquals("two", result.response());
-        verify(calculatorTool).calculate("1+1");
-        // nullable(): conversationId is legally null on some paths and anyString()
-        // would not match it, which would make this verification vacuously true.
-        verify(costTracker, never()).isWithinBudget(nullable(String.class), anyDouble());
+        verify(calculatorTool, never()).calculate("1+1");
+        verify(costTracker).isWithinBudget(nullable(String.class), eq(1.0));
         assertTrue(result.trace().stream()
-                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "an unflagged ceiling must not refuse the call — enforcement is opt-in");
+                .anyMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an unflagged ceiling must refuse the call — enforcement is the default");
     }
 
     /**
-     * The other half of the opt-in contract: a ceiling that records but never
+     * The other half of the opt-out contract: a ceiling that records but never
      * refuses is exactly the "config that silently does nothing" this release set
-     * out to remove, so it must be reported. Asserting on the log keeps the warning
-     * load-bearing — without this, dropping the WARN would be invisible.
+     * out to remove, so opting out of enforcement must be reported. Asserting on
+     * the log keeps the warning load-bearing — without this, dropping the WARN
+     * would be invisible.
      */
     @Test
     void toolCall_unenforcedCeilingIsWarnedAbout() throws Exception {
         var task = calcOnlyTask();
         task.setId("budgeted-task");
         task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(false);
 
         var records = new CopyOnWriteArrayList<String>();
         var handler = new Handler() {
@@ -895,8 +886,46 @@ class AgentOrchestratorCoverageTest {
             julLogger.setLevel(previousLevel);
         }
 
-        assertTrue(records.stream().anyMatch(m -> m.contains("budgeted-task") && m.contains("enforceBudget")),
-                "an unenforced ceiling must be named in a WARN, not pass silently; saw: " + records);
+        assertTrue(records.stream().anyMatch(m -> m.contains("budgeted-task") && m.contains("\"enforceBudget\": false")),
+                "an opted-out ceiling must be named in a WARN, not pass silently; saw: " + records);
+    }
+
+    /** An enforced ceiling is the default and is not a WARN. */
+    @Test
+    void warnAboutUnenforcedBudgets_enforcedCeilingIsSilent() {
+        var task = calcOnlyTask();
+        task.setId("enforced-task");
+        task.setMaxBudgetPerConversation(1.0);
+        var records = new CopyOnWriteArrayList<String>();
+        var handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(MessageFormat.format(String.valueOf(record.getMessage()), record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        var julLogger = Logger.getLogger(AgentOrchestrator.class.getName());
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.WARNING);
+        julLogger.addHandler(handler);
+        try {
+            assertTrue(AgentOrchestrator.isBudgetEnforcedByDefault());
+            assertTrue(AgentOrchestrator.isBudgetEnforced(task));
+            AgentOrchestrator.warnAboutUnenforcedBudgets(task);
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        assertTrue(records.stream().noneMatch(m -> m.contains("enforced-task")), "no WARN for an enforced ceiling; saw: " + records);
     }
 
     @Test

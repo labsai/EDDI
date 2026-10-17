@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
+import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.configs.connections.names.InMemoryConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -109,6 +110,27 @@ class RestConnectionStoreVaultBackedVarsTest {
         rest.createConnection(oauthConnectionNamed("drive-2", "${vars:not-yet-created}"));
 
         verify(connectionStore, times(2)).create(any());
+    }
+
+    @Test
+    @DisplayName("a STATIC valueTemplate whose variable holds the key is a 400 naming the field")
+    void plaintextTemplateVariableRefused() throws Exception {
+        when(globalVariableResolver.resolveValue("Bearer ${vars:jira-token}")).thenReturn("Bearer " + PLAINTEXT_SECRET);
+        var connection = new ConnectionConfiguration();
+        connection.setName("jira");
+        connection.setAuthType(AuthType.STATIC);
+        connection.setBinding(Binding.SERVICE);
+        connection.setBaseUrlAllowlist(List.of("https://api.atlassian.com"));
+        var auth = new StaticAuth();
+        auth.setHeaderName("Authorization");
+        auth.setValueTemplate("Bearer ${vars:jira-token}");
+        connection.setStaticAuth(auth);
+
+        var error = assertThrows(BadRequestException.class, () -> rest.createConnection(connection));
+
+        assertTrue(error.getMessage().contains("staticAuth.valueTemplate"), error.getMessage());
+        assertFalse(error.getMessage().contains(PLAINTEXT_SECRET), error.getMessage());
+        verify(connectionStore, never()).create(any());
     }
 
     private static ConnectionConfiguration oauthConnectionNamed(String name, String clientSecret) {

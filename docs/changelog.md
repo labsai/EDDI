@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [October 2026](changelog/2026-10.md) | 34 | 156 KB |
+| [October 2026](changelog/2026-10.md) | 38 | 185 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1217 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
@@ -66,6 +66,28 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## 🐛 fix(monitoring): split the Kubernetes copy of the Full Metrics Reference (2026-10-13)
+
+**Repo:** EDDI (`fix/observability`)
+
+Merging `main` grew the Full Metrics Reference past what one ConfigMap can carry
+through a client-side `kubectl apply`: minified and escaped it reached 247,445 bytes
+against this PR's own 245,000-byte budget (the last-applied annotation is capped at
+262,144). [`sync-monitoring-assets.py`](../scripts/sync-monitoring-assets.py) now
+writes it to the monitoring component as two dashboards, split at the top-level row
+boundary that best balances their size (131 KB and 119 KB escaped). Part 1 keeps the
+uid `eddi-metrics-all`, so existing links and bookmarks still land; part 2 is
+`eddi-metrics-all-2`; each links to the other. `docs/monitoring/` keeps the single
+dashboard, which Compose and a manual import use.
+
+`DeploymentManifestsTest` checks that the parts' panels, concatenated, are the
+source's panels and that nothing else differs beyond title, uid and links (verified
+by dropping a panel from part 2: the test fails). Panel ids 174-177 were also each
+held by two panels, from parallel PRs taking the next free id; the later holders now
+have ids above the maximum.
 
 ---
 
@@ -93,6 +115,128 @@ bottom of this file and are never archived.
 - `main`'s role-aware navigation (`useMayOpenScreen`) is kept in the rebuilt sidebar and command palette; both PRs' stable-id section collapse state collapsed into the route-registry ids.
 
 **Design decision:** a router consults only the most recently registered blocker, so a per-page blocker lets any clean guard mounted later silently unprotect a dirty page. Regression tests in `use-unsaved-changes-guard.router.test.tsx` cover a clean sibling mounting after the dirty page and the browser Back button; they fail if each hook registers its own `useBlocker`.
+
+---
+
+## 🐛 fix(manager): agent detail saves on Save, not on every edit — with review, discard and Save & leave (2026-10-06)
+
+**Repo:** EDDI (`fix/manager-agent-detail-explicit-save`)
+
+### What changed and why
+
+**Agent detail no longer auto-saves.** Every toggle, select and (after a 600 ms
+debounce) every keystroke in the agent detail page's ten config sections —
+workflows, A2A, security, capabilities, user memory, memory policy, session
+management, conversation review, HITL, channels — PUT the whole agent document
+on its own. Each PUT creates a new agent version, so one sitting of edits made a
+dozen versions, there was no way to back out of a change, and the page behaved
+unlike every other editor in the Manager. It now works like the workflow and
+resource editors:
+
+- Sections edit one page-level **draft**; nothing reaches the backend until
+  **Save**, which writes it as one version and follows it ("Saved as version N").
+  **Discard** (confirmed) restores the stored version. Ctrl/Cmd+S saves.
+- **Seeing what changed:** an *Unsaved changes* badge in the header, a
+  **Modified** pill on every section whose fields differ from the stored
+  version, a floating bar at the bottom of the (long) page with the count,
+  Discard and Save, and **Review changes** — a diff of the draft against the
+  stored version (`ResourceDiffViewer`).
+- While there are edits, the version picker and Deploy/Undeploy are disabled
+  (deploying acts on the *saved* version; the tooltip says so).
+- A **409** keeps the edits, moves the page onto the newer version and re-applies
+  only the blocks the user changed (`applyChangedFields`), so another client's
+  change survives the next Save.
+- The debounce timers and the per-agent save queue that existed only to make
+  auto-save survivable are gone (`use-agent-section-save.ts` removed).
+- Merged with #967: Save shows its "Saved as vN — not live yet" toast with the
+  Deploy action (once per Save instead of once per edit); removing a workflow
+  no longer opens a confirmation, since it only changes the draft and Discard
+  restores it; #967's rename-in-place, live-version header, workflow names and
+  accessibility changes are kept.
+
+**Leaving with unsaved edits.** The app holds in-app navigation with one router
+blocker and one prompt (`NavigationGuardDialog`, #968); a page only calls
+`useUnsavedChangesGuard`. This adds an optional `onSave` to that hook: when every
+dirty page can save on demand, the prompt also offers **Save & leave** and lets the
+navigation through only once the save landed. Agent detail and the workflow
+editor pass it. (This branch first carried its own app-wide guard, written while
+the app was still on `<BrowserRouter>`, then a per-page prompt after #939; both
+were dropped as #939 and #968 landed.) While a placeholder document from the
+previous version is on screen (#939's `configPending`), the draft takes no edits.
+
+**Also:** the "compat. gen 1" badge left the monospace id line, where it
+inherited the code font and duplicated the version chip; it now sits beside the
+version picker at the same height as "Generation 1", with the explanation in
+its tooltip. The secret access ("Who may use …") dialog's body had no padding
+against the dialog border; it now has the `p-5` every other dialog body has.
+
+**Dependency:** `source-map-js` 1.2.1 → 1.2.2 in `ui/manager/.ds-sync/package-lock.json`
+(CVE-2026-93749, HIGH — `Trivy Filesystem Scan`). Edited by hand rather than via
+`npm install`, which on Windows prunes the Tailwind wasm dependencies from the lock.
+
+### Design decisions
+
+- One draft of the whole document rather than per-section drafts: one Save, one
+  version, one diff, and the same shape as the workflow editor.
+- Save & leave lives in the shared guard and prompt, not on the agent page, so
+  any editor whose save resolves to success can opt in with one argument.
+
+**Files:** [`agent-detail.tsx`](../ui/manager/src/pages/agent-detail.tsx),
+[`agent-config-sections.tsx`](../ui/manager/src/components/editors/agent-config-sections.tsx),
+[`agent-draft.ts`](../ui/manager/src/lib/agent-draft.ts),
+[`unsaved-changes-dialog.tsx`](../ui/manager/src/components/ui/unsaved-changes-dialog.tsx),
+[`use-unsaved-changes-guard.ts`](../ui/manager/src/hooks/use-unsaved-changes-guard.ts),
+[`navigation-guard-dialog.tsx`](../ui/manager/src/components/shared/navigation-guard-dialog.tsx),
+[`edit-grant-dialog.tsx`](../ui/manager/src/components/secrets/edit-grant-dialog.tsx),
+[`compatibility-generation-badge.tsx`](../ui/manager/src/components/agents/compatibility-generation-badge.tsx)
+
+---
+
+## feat(llm): recovery observability, resume-path parity and the resilience guide (2026-10-06)
+
+**Repo:** EDDI (`feat/llm-resilience-observability-docs`, the capstone of the LLM turn-resilience series, on top of `feat/llm-circuit-breaker` and `feat/turn-idempotency-structured-errors`)
+
+### What changed and why
+
+R11, R12 and R13 of the LLM turn-resilience plan ([`planning/llm-turn-resilience-plan.md`](../planning/llm-turn-resilience-plan.md)), and the plan's status block. The seven items before it each added a recovery; this one makes them readable and keeps the HITL resume path from being the one place they do not apply.
+
+**R11 - observability**
+
+- **Resolved model names.** `audit:model_name`, the cascade trace's `model` and the circuit-breaker key recorded the literal `${vars:gemini-model}` (the registry resolves global variables late, after the task has recorded its name). `LlmTask.resolveModelName(params, type, resolver)` and the cascade's `resolveVariables` now resolve `${vars:...}` through `GlobalVariableResolver` for everything that records or keys on the model, including the new `eddi.llm.failure` tag. An unresolvable reference (unknown variable, resolver error) keeps the configured text instead of failing the turn over a label. The raw template is not kept in a separate field (not trivial: the audit has one name slot).
+- **One structured line per recovery.** New `LlmRecoveryLog` (`modules/llm/impl`) writes `LLM recovery conversationId=... agentId=... class=... action=... outcome=... attempt=... durationMs=...` at INFO, once per repair, same-model re-ask, cascade escalation, skipped (open-circuit) model and served fallback. The call site that performs the action emits it; the failures that triggered it keep their own WARN/ERROR lines. The ad-hoc INFO lines it replaces: the `FormatRetryRunner` "Re-asking the same model" line (now written from `ReaskListener.onReaskDone`, where outcome and duration are known), the cascade's WARN for a skipped circuit and its INFO "escalating: confidence" line (kept at DEBUG, it carries the scores). Values are stripped of whitespace and control characters.
+- **Metrics gap-fill** (only what was missing): `eddi.llm.recovery` gains `action=repair` (a reply that parsed only after fence stripping or extraction), `action=circuit_skip`, and `action=escalate` for every escalation reason (`timeout`, `error`, `retryable_error`, `low_confidence`, besides the existing `invalid_output`); `eddi.llm.failure{class,model}` is now also counted for a failed single-model task (a cascade still counts per step, and its overall failure is not counted twice; the circuit's own refusal and control flow such as a HITL pause are not model failures). `eddi.llm.output` and `eddi.llm.turn.deadline.exceeded` already existed. The tag keys of `eddi.llm.recovery` stay `action, outcome, trigger` so Prometheus sees one consistent meter.
+
+**R12 - resume parity.** `LlmTask.executeResume` now applies, to the resumed final answer: the `onError: fallback` guard (the approved tools already ran exactly once through the journal, so only the answer is replaced), `responseValidation` actions (it applied none before), and the R5 same-model re-ask of an empty, invalid-JSON or schema-mismatch reply. The re-ask is one model call over the resumed transcript through `reaskFinalAnswer`; `ToolLoopResumer` records that transcript on a new `ExecutionResult.resumeTranscript` (the loop's final messages without the answer), so no tool can run twice. A task that may re-ask is buffered on resume, as on a live turn. **Not applied on resume, and why:** the circuit breaker (the resume pins the model whose loop paused and settles no ticket), the cascade (the escalation decision was made before the pause), truncation and context-too-long re-asks (the loop reports no finish reason; shrinking after tools ran would replay them), and a turn deadline (a resume starts a turn without one). A resume that recorded no transcript cannot re-ask and goes to `fallbackAction`. Parsing and shape validation (R3, R4) were already shared.
+
+**R13 - docs.** New [`docs/llm-resilience.md`](llm-resilience.md): failure taxonomy, recovery order, the full configuration surface with defaults (verified against the config classes), a complete `langchain.json` recipe for a JSON agent behind a 60-second caller, how to read step keys, trace, log line and metrics, the resume table and the known limits. [`langchain.md`](langchain.md), [`model-cascade.md`](model-cascade.md) (new "Cascade as failover") and [`metrics.md`](metrics.md) link to it and no longer say the resume path has no recovery. `docs/SUMMARY.md` lists it.
+
+**Platform Operator.** An admin will ask "why did my agent answer 'Sorry...'" and "why is model X skipped". The operator prompt's docs map now names `llm-resilience`, and its how-to-work section says which step keys to read (`llm:fallback`, `llm:error`, `llm:output:outcome|reason`, a trace status `circuit_open`) and that the log carries one `LLM recovery` line per recovery. No allow-list change (it can already read conversations, logs and the audit trail). `operator-revision.json` 2 to 3.
+
+**Plan status.** The status block of the plan now marks R1 to R16 implemented with the branch and PR of each, where the implementation differs from the plan text, and the known gaps below.
+
+### Review fixes on the stacked PR
+
+- **Fallback turns in the model's history.** The step-wide `llm:fallback` flag dropped the whole output of a step, including another LLM task's good answer in the same step. Now only output items marked `fallback: true` are dropped (`ConversationOutputExtractor.withoutFallbackItems`, both history paths); a flagged step with no marked item (a `postResponse`-rendered fallback) is still dropped whole, since nothing says which text it wrote.
+- **Configured `prompt` after a fallback turn** replaced the whole merged user message and lost the fallback turn's unanswered question; it now replaces only the current input's contents.
+- **Re-ask budget** now spends from the turn deadline (plain, cascade, tool-mode and resume re-asks): a re-ask no longer starts with less than `minAttemptMs` left. A cascade whose time left is already inside the reserve gives step 0 the remaining turn time instead of a 1 ms timeout.
+- **Interrupt on the deadline-bounded retry path** is restored on the thread and surfaces as `LifecycleInterruptedException` instead of being classified `UNKNOWN` (which let a cancelled step pay a second provider call).
+- Keyed streaming requests now forward `llm_retry`; dashboard panels in the cascade row no longer overlap and the circuit-transition series is a `rate`.
+- Not changed: the Manager editor's selectors still omit `retry` (types only, as documented): adding it is UI work with three i18n gates and is a follow-up.
+
+### Design decisions
+
+- One helper rather than six `LOGGER.infof` calls, so the line has one shape and tests can assert "exactly one line per recovery" through an observer hook (`LlmRecoveryLog.observer`, null in production).
+- The retry line is written by a `ReaskListener` default method (`onReaskDone`), not by `FormatRetryRunner`, because only the caller knows the conversation and agent ids.
+- `ExecutionResult` grew a fifth component rather than reusing `toolExchange`: the exchange is "tools only" by contract, the resume transcript is "everything the model saw".
+- `circuit_skip` is a fifth `action` value next to the plan's four: it is a recovery (the engine avoided a call) and an operator counting escalations should not have to subtract it.
+
+### Known gaps and follow-ups
+
+- The streaming path is still not bounded by the turn deadline and uses the plain backoff.
+- R15's `onInvalidJson: "retry"` with `maxRetries: 0` warning is not implemented, and its `onError` check still reads the field reflectively.
+- The R14 WireMock cascade IT was not written.
+- No dashboard panel dedicated to `action=repair` / `circuit_skip`; the full-metrics dashboard has pre-existing duplicate panel ids (158/159, 168 to 172) on `main` that this change leaves alone. Ids 174 to 181 (this series) are unique.
+- Manager UI has types only for the new task fields.
 
 ---
 
@@ -958,291 +1102,18 @@ Documented in `docs/scheduling.md` (one-time input zone).
 
 ---
 
-## fix(manager): save, version and deploy flows no longer lose edits or save nothing silently (2026-10-04)
-
-**Repo:** EDDI (`fix/manager-version-save-flows`) — Manager only, no backend change.
-
-### What changed and why
-
-A UX review of the Manager found flows that discarded work, wrote versions that
-changed nothing, or reported success while doing neither. Each is fixed at its
-cause.
-
-**Edits are no longer discarded silently**
-
-- Agent Studio: choosing another pipeline stage (or another workflow) replaced
-  the editor and dropped what was typed. The page now asks — Save, Discard or
-  Cancel — when the editor has unsaved edits. `ConfigEditorLayout` reports its
-  working copy (`onDraftChange`) and `StudioEditorPanel` registers a saver, so
-  "Save" in the prompt keeps the edit and stays on the stage if the save fails.
-- Workflow editor: Discard asks first, and offers to delete configs that "Add
-  Task → Create new" wrote during the edit and that the discarded workflow state
-  no longer references.
-- The config editor refuses an invalid-JSON save out loud (toast, inline error,
-  jump to the JSON tab) instead of doing nothing, for Save and Save & Test.
-
-**"Add step, then configure it" works**
-
-- A step added in this session is not in the saved workflow, so its resource
-  editor could not cascade into it (`workflowMissingResource`, after the resource
-  was already written). Such steps show "Not saved yet" and a "Save workflow &
-  edit" action instead of an Edit link; it saves (and repoints the agent), then
-  opens the resource against the new workflow version.
-- "Create new" asks for a name (required) and stores it; it no longer writes
-  unnamed orphan resources.
-- Edit links now carry the version the step references (`?version=`), and the
-  resource editor opens it, with a "Switch to latest" notice when it is not the
-  newest.
-
-**An agent pinned to an older workflow version**
-
-- Agent → workflow links carry the referenced version. The workflow page opens
-  that version and warns when the agent uses another one, with "Open version N"
-  and "Point agent at version M".
-- Save in an agent context now cascades into the agent like the resource editor
-  does (new agent version, "Saved as vN — not live yet" with a Deploy action).
-  Save and Save & Test read and check the agent first and refuse before writing
-  anything when it would not change (previously an unchanged agent version was
-  created and deployed).
-- The resource editor's "agent changed since this page was opened — reload"
-  error, which reloading could not fix, now says what is wrong and offers
-  "Update agent and save".
-
-**Studio test loop**
-
-- Studio gets Save & Test (save, deploy, wait for READY, open the chat beside the
-  editor on the new version) and the same "Saved as vN — not live yet" wording as
-  the resource editor. The chat panel is bound to the studio's agent instead of
-  whichever agent the global chat store last held. A workflow switcher appears
-  for agents with more than one workflow.
-
-**Agent page**
-
-- Section toggles (Security, Capabilities, Memory, A2A, ...) each write a whole
-  agent version with no feedback: they now toast "Saved as vN — not live yet" with
-  a Deploy action. The dead `saveMessage` path is gone.
-- The header badge no longer reads "Not deployed" while an older version is live:
-  "Live: v5 · Viewing v6 (not deployed)". Header Undeploy names production when
-  more than one environment is live. "Deploy & Chat" stops with an error when the
-  deployment never becomes ready. The duplicate "v1" is gone.
-- Removing a workflow asks first and has an accessible name; workflow rows show
-  names.
-- Collapsible sections expose `aria-expanded`/`aria-controls`, with the heading
-  wrapping the button (not the reverse); A2A skill "+" and the version selects
-  have names, A2A labels are tied to their inputs, and the Agent Card preview no
-  longer hard-codes the name and "6.0.0".
-- The Session Management note showed an unresolved placeholder in its endpoint
-  path (i18next read `{{id}}` as an interpolation); the locale strings now say
-  `:id`, and the dead disabled "Max Forks" field is removed.
-
-**Smaller**
-
-- Viewers (no EDIT level) get read-only editors on the resource and workflow
-  pages: no save/discard/add controls.
-- Agents, workflows and resources can be renamed in place (name and description
-  on the detail header, `EditableTitle`).
-- Workflow save errors show the real reason (`describeSaveError`) instead of a
-  generic message. Ctrl/Cmd+S saves in the config editor and the workflow editor.
-- The saved tick clears once there are unsaved edits again; the version picker
-  explains why it is locked while dirty; the resource editor keeps its tab,
-  scroll and state across a save (`placeholderData` on `useResource`).
-- Agent create requires a name, and a failed descriptor PATCH after the POST is
-  treated as created with a warning (no duplicate on retry).
-- Agents list: a name/version sort loads the remaining pages first (the API has
-  no sort parameter), with a hint while it does.
-
-### Design decisions
-
-- **Not-live feedback is one shared toast** (`lib/save-not-live-toast.ts`, a stable
-  toast id) for the workflow page, Studio and agent section saves. The resource
-  editor keeps its own inline copy of the same toast, unchanged.
-- **Unsaved steps are blocked, not auto-saved.** Auto-saving the workflow behind an
-  Edit click would write versions the user did not ask for.
-- **"Update agent and save"** reuses the cascade's existing `agentWorkflowVersion`
-  escape hatch (written for the partial-failure retry), so no new backend call.
-- Renames patch the descriptor of the newest version (the list reads it) and of the
-  viewed one when they differ.
-
-### Deliberately skipped / follow-ups
-
-- Server-side sort of the agents list: the descriptor API takes no sort
-  parameter, so the UI loads every page instead.
-- An older resource version opened from a pipeline link is editable but a save
-  from it 409s (the backend only accepts the current version); the notice offers
-  "Switch to latest" rather than blocking the editor.
-- Removing a just-created step (rather than discarding the whole edit) does not
-  offer to delete its resource.
-
-**Files:** [`workflow-detail.tsx`](../ui/manager/src/pages/workflow-detail.tsx),
-[`agent-studio.tsx`](../ui/manager/src/pages/agent-studio.tsx),
-[`agent-detail.tsx`](../ui/manager/src/pages/agent-detail.tsx),
-[`resource-detail.tsx`](../ui/manager/src/pages/resource-detail.tsx),
-[`config-editor-layout.tsx`](../ui/manager/src/components/editors/config-editor-layout.tsx),
-[`pipeline-builder.tsx`](../ui/manager/src/components/editors/pipeline-builder.tsx),
-[`workflow-step-links.ts`](../ui/manager/src/lib/workflow-step-links.ts),
-[`save-not-live-toast.ts`](../ui/manager/src/lib/save-not-live-toast.ts)
-
----
-
-## ✨ feat(a2a): A2A 1.0 conformance — honest task states, an in-flight bound, restart-safe tasks (2026-10-03)
-
-**Repo:** EDDI (`feat/a2a-spec-conformance`)
-
-### What changed and why
-
-The A2A surface spoke a pre-0.2 dialect no current SDK can parse — a bare-enum
-`status`, `type` instead of `kind`, and only `tasks/send` — so the official
-`a2a-sdk` client could neither resolve an EDDI Agent Card nor send to it. It
-also reported every turn as `completed`: a failing LLM, a HITL pause and a turn
-dropped behind a pause all came back `completed`, the last one with the
-*previous* turn's answer as its result. There was no bound on concurrent tasks,
-and tasks lived only in a node-local 1,000-entry cache.
-
-- **Pinned to A2A 1.0** (specification release v1.0.1). One endpoint serves
-  three dialects, chosen by method name and answered in kind:
-  `SendMessage` / `SendStreamingMessage` / `GetTask` / `CancelTask` (1.0),
-  `message/send` / `message/stream` / `tasks/get` / `tasks/cancel` (0.3), and
-  the deprecated `tasks/send`. Unimplemented spec methods get their spec error
-  codes (`-32003`, `-32004`, `-32007`); an unsupported `A2A-Version` gets
-  `-32009`. Rendering lives in the new `A2AWireFormat`; the task model is
-  dialect-neutral.
-- **Agent Card** at `/.well-known/agent-card.json` and
-  `/a2a/agents/{id}/.well-known/agent-card.json` (the old paths stay), readable
-  by 1.0 and 0.3 clients alike: `supportedInterfaces` for both versions,
-  1.0-shaped `securitySchemes`, the 0.3 connection fields, the real EDDI
-  version, `streaming: true`.
-- **Task states come from the task's own turn**: ERROR → `failed`, a HITL
-  pause → `input-required`, a turn dropped behind a pause → `input-required`,
-  dropped while busy → `rejected`, cancelled → `canceled`, still running when a
-  blocking send stops waiting → `working`. Each turn carries its task id in the
-  input context and an output is returned only if it carries that id, so a
-  stale previous answer can no longer be returned.
-- **A task queued behind a sibling's turn is not cancelable** (`-32002`)
-  until that turn settles: cancelling the conversation would have stopped the
-  sibling's turn instead. The in-flight bound's lease timer is cancelled on a
-  normal release rather than left queued for task timeout + 30 s.
-- **A reused legacy task id belongs to the newest send**: an earlier turn's
-  late outcome is no longer recorded over it. Streams write an SSE keepalive
-  comment every 15 s while idle, and calls to a disabled A2A surface are
-  counted in `eddi_a2a_requests_total` (`method="disabled"`).
-- **`CancelTask` cancels the turn**, not the conversation (it used to end the
-  whole context), and a terminal task answers `TaskNotCancelable`.
-- **In-flight bound** `eddi.a2a.max-concurrent-requests` (default 64): the
-  excess is refused with HTTP 503 + `Retry-After` before any conversation
-  starts. Meters `eddi_a2a_requests_total`, `eddi_a2a_tasks_total`,
-  `eddi_a2a_in_flight`, on the full-metrics dashboard.
-- **Tasks behind `IA2ATaskStore`** (default `CachedA2ATaskStore`, the same
-  node-local caches). Server-issued task ids are `<conversationId>_<random>`
-  and server-issued context ids are the conversation id, so `GetTask` and
-  context continuation re-derive from the conversation store after a restart
-  or on another node — peer-scoped by conversation ownership.
-- **Outbound client** (`A2AToolProviderManager`) reads the dialect off the
-  peer's card — `SendMessage` + `A2A-Version: 1.0`, `message/send`, or
-  `tasks/send` for a stock EDDI up to 6.5 — tries the well-known card paths,
-  reads results in all three shapes, and reports a failed, rejected,
-  input-required or still-working task to the model as such instead of as an
-  answer. The configured URL stays the endpoint; a card cannot redirect it (when the configured URL is the card document itself, the card's endpoint must be on the card's origin, since the credential is sent there).
-
-Verified live with the official `a2a-sdk` 1.2.1 Python client (1.0 transport
-and its 0.3 compatibility transport) against a jar of this branch, and compared
-with a stock `labsai/eddi:6.5.0`.
-
-### Compatibility
-
-`tasks/send` results are now the 0.3 task shape: `status` is an object
-(`status.state`), parts carry `kind` next to `type`. EDDI's own client up to
-6.5 reads only the artifacts and keeps working against this server; this
-branch's client keeps working against a 6.5 server.
-
-### Docs
-
-[`a2a-protocol.md`](a2a-protocol.md) (methods per dialect, state mapping,
-task store, streaming, the bound, deprecations; the disabled endpoint answers
-200 + a JSON-RPC error, which the page now says),
-[`configuration-reference.md`](configuration-reference.md),
-[`metrics.md`](metrics.md), [`security.md`](security.md).
-
-The Platform Operator holds no A2A endpoint and cannot change A2A settings, so
-its prompt and allow-list are unchanged.
-
-The two new card paths, `GET /.well-known/agent-card.json` and
-`GET /a2a/agents/{agentId}/.well-known/agent-card.json`, are added to the Manager's
-`ui/manager/src/test/mocks/openapi-operations.json`; without them the `OpenAPI Snapshot`
-and `Backend E2E` checks (and so `E2E Gate`) failed on this branch.
-
-**Files:** [`A2AModels.java`](../src/main/java/ai/labs/eddi/engine/a2a/A2AModels.java),
-[`A2AWireFormat.java`](../src/main/java/ai/labs/eddi/engine/a2a/A2AWireFormat.java),
-[`A2ATaskHandler.java`](../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskHandler.java),
-[`IA2ATaskStore.java`](../src/main/java/ai/labs/eddi/engine/a2a/IA2ATaskStore.java),
-[`CachedA2ATaskStore.java`](../src/main/java/ai/labs/eddi/engine/a2a/CachedA2ATaskStore.java),
-[`A2AInFlightLimiter.java`](../src/main/java/ai/labs/eddi/engine/a2a/A2AInFlightLimiter.java),
-[`RestA2AEndpoint.java`](../src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java),
-[`AgentCardService.java`](../src/main/java/ai/labs/eddi/engine/a2a/AgentCardService.java),
-[`A2AToolProviderManager.java`](../src/main/java/ai/labs/eddi/modules/llm/impl/A2AToolProviderManager.java)
-
-### What's next
-
-- A shared `IA2ATaskStore` for clustered deployments (owned by the NATS
-  cluster work); peer-chosen ids (legacy task ids, made-up context ids) are
-  the only ones that do not survive a restart today.
-- `ListTasks`, `SubscribeToTask` and push notifications are answered with
-  their spec errors, not implemented.
-- The outbound client does not poll a task that came back `working`.
-
----
-
-## 🐛 fix(chat-ui): embedded token hand-off works with auth on, designer images render, stale turns stay out (2026-10-03)
-
-**Repo:** EDDI (`fix/chat-ui-review`), the Chat UI findings of the 2026-10-02 review (report card "Chat UI", §4.11).
-
-### What changed and why
-
-**postMessage token hand-off (Medium).** The widget accepted `{type: "eddi-chat-token"}` from an allow-listed parent, but it started the conversation the moment it mounted, before any host could have answered. With OIDC on, that first `POST /agents/{id}/start` went out without a token, came back `401`, and was never retried. A token arriving a moment later was installed but never used, so an embedded widget showed "You are not allowed to start a conversation" for good. Tokens also expired after the realm's lifespan with no way to renew them. Reproduced live against `labsai/eddi:6.5.0`.
-
-The new [`embed-auth.ts`](../ui/chat/src/api/embed-auth.ts) is a small protocol:
-
-- **Ready.** The widget posts `eddi-chat-ready` to its parent once it is listening.
-- **Token requests.** It posts `eddi-chat-token-request` a minute before a JWT's `exp`, and again on any `401`.
-- **Retry.** [`http.ts`](../ui/chat/src/api/http.ts) gets one 401 hook: ask the host for a token, wait up to 10 s, repeat the request once.
-- **Exact targets.** Every outgoing message uses an exact `?tokenOrigin=` origin as its `targetOrigin`, never `*`.
-- **Strict acceptance.** A token is accepted only from `window.parent` at an allow-listed origin. The widget drops a wildcard, a path or `null` from the list.
-- **Memory only.** The token is never put in the URL or in storage.
-
-A `?token=` or `ChatConfig` token no longer clears a token that arrived by `postMessage`. The full contract, with a host-page example, is the new page [chat-ui-embedding.md](chat-ui-embedding.md).
-
-**CSP blocked designer image outputs (Low-Medium).** `/chat`'s `img-src 'self' data: blob:` refused every `image` output item hosted elsewhere. `img-src` now appends `eddi.chat.img-sources` (`EDDI_CHAT_IMG_SOURCES`), default `https:`. Markdown images in model text are still rendered as links, so a model still cannot pick a URL for the browser to fetch. The trade-off, and the strict alternatives (a host list or `'self'`), are in [configuration-reference.md](configuration-reference.md) and the embedding page. Only `/chat` changes: [`CspPolicyTest`](../src/test/java/ai/labs/eddi/configs/CspPolicyTest.java) pins both halves.
-
-**Low items.**
-
-- **Generation guard.** A send's 409/401/403 branches now bail when the user started a new conversation while the request was in flight. Before, they withdrew a bubble, restored a draft and posted a warning into the replacement. Item 4 of the review brief found the same gap in undo, redo, retry, cancel and stop, so those are guarded too, including their `finally` that lowered `isProcessing` under a newer turn.
-- **Attachment uploads across New conversation.** Found in review. An attachment upload that finished after New conversation was staged into the new conversation, so its next message carried a `storageRef` from the abandoned one. [`ChatInput.tsx`](../ui/chat/src/components/ChatInput.tsx) now drops such an upload and deletes it from the old conversation, which frees its quota. The ref that holds the current conversation id is updated in a layout effect: not during render, and not in a passive effect. A passive effect left a gap between the commit and the update, and an upload settling in that gap still staged its file into the new conversation (CodeRabbit on #948). The delete is a background cleanup, `discardAttachment`: one retry after a transient failure (network, 5xx, 429), no retry on a 4xx, a console warning when the file is still left, and no UI. What is left is removed with its conversation: on delete, by the ended-conversation retention sweep, or by GDPR erasure. The user's own chip removal now goes through the same path. The ref belongs to the `ChatProvider`, not to one `ChatInput` instance (CodeRabbit on #948, round 2). `ChatWidget` swaps the composer out for `SecretInput` while an agent's input field is open. With an instance-owned ref, an upload that settled meanwhile was judged against the dead instance's conversation, so when the composer came back for a new conversation the old file was staged into it. The ref is deliberately not cleared on unmount: if the composer returns to the same conversation, the file is still the user's and its chip is waiting.
-- **URL parameters.** `?theme=` accepts only `dark`, `light` or `system`. An unknown value used to be written into `data-theme` and left the widget unstyled. Each colour parameter must now be a plain colour, and `fontFamily` a plain font list. Before, any token sequence went into a CSS custom property, so a link could carry `url(...)`.
-- **Vite dev proxy.** It now proxies `/conversations`, so attachments work under `npm run dev`. A test checks that every path prefix the API layer calls is proxied.
-- **SSE parser.** It now yields a final frame that has no trailing blank line instead of dropping it. That frame is usually `done` or `error`.
-
-**Platform Operator.** The docs map names `chat-ui-embedding`, so "how do I embed the chat?" goes straight to the page. Revision 2 → 3.
-
-### Verification
-
-- **Chat UI checks:** `npm run typecheck`, `npm run lint` and `vitest` (417 tests, 45 of them new) all pass. 23 mutants were applied to the new behaviour and all 23 were killed.
-- **Backend:** `CspPolicyTest` and the repo guards pass. Removing the `img-src` append fails the new test.
-- **Live:** stock `labsai/eddi:6.5.0` compared with this branch's jar, both with Keycloak on, using a host page on another origin. Evidence is attached to the PR.
-
-**Files:** [`embed-auth.ts`](../ui/chat/src/api/embed-auth.ts), [`http.ts`](../ui/chat/src/api/http.ts), [`chat-api.ts`](../ui/chat/src/api/chat-api.ts), [`ChatWidget.tsx`](../ui/chat/src/components/ChatWidget.tsx), [`vite.config.ts`](../ui/chat/vite.config.ts), [`application.properties`](../src/main/resources/application.properties), [`chat-ui-embedding.md`](chat-ui-embedding.md).
-
-### Follow-ups
-
-- Helm has no `eddi.chat.imgSources` value yet. Set `EDDI_CHAT_IMG_SOURCES` through `extraEnv`; a chart value means a chart version bump, which is out of this PR's scope.
-- `?token=` remains a login-CSRF vector, as before. It is kept for compatibility, and the docs steer users to the hand-off.
-
----
-
 ## Decision Log
 
 _For recording decisions that come up during implementation that aren't in the plan._
 
 | Date       | Decision                                                              | Context                               | Alternative Considered                                      |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| 2026-10-13 | The Kubernetes copy of the Full Metrics Reference ships as two linked dashboards | Keeps plain client-side `kubectl apply -k` working; the source dashboard is unchanged | Requiring `kubectl apply --server-side` (changes every operator's apply command); raising the test's budget (removes the headroom that caught this) |
+| 2026-10-06 | Agent detail edits a draft saved by an explicit Save, with Save & leave on the app's one unsaved-changes prompt | Every inline edit created an agent version and could not be undone | Keeping auto-save with an undo stack; a second navigation guard beside the router's single blocker |
+| 2026-10-06 | One `LlmRecoveryLog` INFO line per recovery action, emitted by the call site that performs it | Six ad-hoc log lines had no shared shape and no conversation id; "one recovery, one line" needs a single place that formats it | Keeping each component's own log message and documenting them (not greppable as one family, no ids) |
+| 2026-10-06 | A HITL resume applies onError, responseValidation and the final-answer re-ask, but not the breaker, cascade, truncation/context re-asks or a deadline | The resume pins the paused model and must not replay tools; the breaker and cascade decisions were made before the pause | Re-running the cascade on resume (would re-enter the tool loop and replay approved tools) |
+| 2026-10-03 | HTTP latency panels chart mean and peak; http.server.requests publishes no histogram | The P50/P95/P99 panels queried _bucket series nobody publishes | A percentile histogram on every uri-tagged series (cardinality x ~70), and SLO buckets (still x ~10) |
+| 2026-10-03 | eddi_vault_errors_count_total no longer counts "no such key" | Agent signing probes a missing key every turn, so the counter could not be alerted on | Tagging the counter by kind (a second tag shape on an existing meter is dropped by the registry) |
 | 2026-10-06 | R8 circuit breaker is a new per-model class with half-open single-probe, not a generalisation of the MCP/A2A breakers | Those are private consecutive-failure counters with no half-open state or per-class window; an LLM model needs N-of-M by class and one concurrent probe | Rewriting both existing breakers onto a shared utility in the same change (behaviour-visible for MCP/A2A) |
 | 2026-10-06 | R5 recovery order: repair, same-model re-ask, then escalate | A format slip is usually fixed by the model that made it; escalating first pays a pricier model per hiccup | Escalating to the next cascade step first (pays a different, pricier model for every one-off format slip) |
 | 2026-10-04 | Manager imports send `X-EDDI-Space` | 6.6 scopes merge-import matching to the importing space; the raw-fetch import calls never sent the selected space | Leaving placement to the default space (merge would silently target a different copy than the one on screen) |
@@ -1447,6 +1318,7 @@ _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
 | ---- | ---------- | ----- | --- | ------ |
+| 2026-10-03 | Dashboards queried series that do not exist (`eddi_nats_dead_letter_count`, `http_server_requests_seconds_bucket`, a `skill` label, `jvm_info`) and read "No data" forever | The coverage test only substring-matched the Full dashboard against registered meters; nothing checked queries against what a scrape contains | Every dashboard parsed; every query's series checked against registered meters plus a verified built-in list | (this branch) |
 | 2026-10-03 | GDPR erasure kept SSNs in 6/6 audit rows and reported complete:true; fast erasures reported auditEntriesPseudonymized: 0 | Erasure only rewrote userId, store-side, while entries were still in the write queue | AuditLedgerService.eraseUser flushes, redacts and re-seals; IAuditStore.redactEntry | fix/gdpr-audit-memory |
 | 2026-10-03 | `maxToolCallsPerTurn` restarted from zero after a HITL resume | The resumed loop counted only its own trace; the pre-pause trace was merged in afterwards | `ToolLoopResumer` seeds the loop trace with `batch.getTraceSoFar()`; `AgentOrchestratorResumeToolLoopTest.perTurnCapCountsCallsMadeBeforeThePause` | `fix/llm-tool-execution` |
 | 2026-09-30 | `maximumLifeTimeOfIdleConversationsInDays=-1` ended every conversation five minutes after boot | `DAYS.between(date, today) >= -1` is always true | A limit below 1 disables idle-ending | fix/650-idle-negotiation |

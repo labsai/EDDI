@@ -206,15 +206,16 @@ public class ChatModelRegistry {
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
-     * name the configured endpoint.
+     * name a configured endpoint. Every endpoint key that is set is checked, not
+     * only the first: which key a builder reads depends on the provider, so a
+     * configuration carrying an allowed {@code baseUrl} and an attacker's
+     * {@code endpoint} must not pass on the strength of the one it does not use.
      *
      * @param params
      *            the builder parameters with global variables resolved and vault
      *            references still in place
      */
     private void requireSecretsAllowedAt(String type, Map<String, String> params) {
-        // Every key present, not the first: which one a builder reads differs by
-        // provider, and a config carrying two must not pass on the ignored one.
         for (String key : ENDPOINT_KEYS) {
             String endpoint = params.get(key);
             if (endpoint != null && !endpoint.isBlank()) {

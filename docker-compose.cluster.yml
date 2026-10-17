@@ -4,6 +4,7 @@
 # A WHOLE stack, not an overlay — run it on its own:
 #
 #   EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) \
+#   MONGO_PASSWORD=$(openssl rand -base64 24) \
 #   NATS_PASSWORD=$(openssl rand -base64 24) \
 #     docker compose -f docker-compose.cluster.yml up -d
 #
@@ -19,8 +20,11 @@
 #
 # NATS runs with a password (NATS_PASSWORD, required) and publishes no host
 # port; EDDI reaches it container-to-container. MongoDB publishes no host port
-# either. This file is a whole stack (it declares its own MongoDB), so do not
-# combine it with docker-compose.yml.
+# either, and its root password (MONGO_PASSWORD) is required the same way: it
+# used to default to `changeme`, a known credential on the database every
+# replica writes every conversation to. Keep it stable across runs — the mongo
+# image reads it at first init only. This file is a whole stack (it declares
+# its own MongoDB), so do not combine it with docker-compose.yml.
 
 x-nats: &nats
   restart: unless-stopped
@@ -36,7 +40,7 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: eddi
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-changeme}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}
     volumes:
       - cluster-mongodb:/data/db
     healthcheck:
@@ -82,7 +86,7 @@ services:
       replicas: 3
     environment:
       EDDI_VAULT_MASTER_KEY: ${EDDI_VAULT_MASTER_KEY:?set EDDI_VAULT_MASTER_KEY (openssl rand -base64 24)}
-      MONGODB_CONNECTIONSTRING: mongodb://eddi:${MONGO_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin
+      MONGODB_CONNECTIONSTRING: mongodb://eddi:${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}@mongodb:27017/eddi?authSource=admin
       # Authentication is off, as in the quick start (docker-compose.yml explains
       # the escape hatches); the load balancer binds to loopback by default.
       QUARKUS_OIDC_TENANT_ENABLED: ${QUARKUS_OIDC_TENANT_ENABLED:-false}

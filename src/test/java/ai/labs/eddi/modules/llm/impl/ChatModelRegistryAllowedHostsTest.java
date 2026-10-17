@@ -98,6 +98,18 @@ class ChatModelRegistryAllowedHostsTest {
     }
 
     @Test
+    @DisplayName("every endpoint key that is set is checked, not only the first")
+    void everyEndpointKeyIsChecked() throws Exception {
+        Map<String, String> params = Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://api.openai.com/v1", "endpoint",
+                "https://attacker.example/v1");
+
+        registry.getOrCreate("openai", params);
+
+        verify(allowlist).requireAllowed(anyMap(), eq("https://api.openai.com/v1"), eq("LLM provider 'openai'"));
+        verify(allowlist).requireAllowed(anyMap(), eq("https://attacker.example/v1"), eq("LLM provider 'openai'"));
+    }
+
+    @Test
     @DisplayName("a refusal fails the build, before the key is resolved into a client")
     void refusalFailsTheBuild() {
         doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist).requireAllowed(anyMap(), anyString(),
@@ -105,16 +117,6 @@ class ChatModelRegistryAllowedHostsTest {
 
         assertThrows(VaultHostAllowlist.HostNotAllowedException.class, () -> registry.getOrCreate("openai",
                 Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://attacker.example/v1")));
-    }
-
-    @Test
-    @DisplayName("every endpoint key present is checked, not only the first — a builder may read the other one")
-    void everyEndpointKeyChecked() throws Exception {
-        assertNotNull(registry.getOrCreate("openai",
-                Map.of("apiKey", "${vault:openai-key}", "baseUrl", "https://api.openai.com", "endpoint", "https://attacker.example")));
-
-        verify(allowlist).requireAllowed(argThatHoldsReference(), eq("https://api.openai.com"), eq("LLM provider 'openai'"));
-        verify(allowlist).requireAllowed(argThatHoldsReference(), eq("https://attacker.example"), eq("LLM provider 'openai'"));
     }
 
     @Test

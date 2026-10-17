@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -28,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * @author ginccc
@@ -55,6 +57,13 @@ public class RestLlmStore implements IRestLlmStore {
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    private static final String KIND = "langchain";
 
     @Inject
     public RestLlmStore(ILlmStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -123,6 +132,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
+        requireMayAuthorCallerToken(llmConfiguration);
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.update(id, version, llmConfiguration);
     }
@@ -130,7 +140,8 @@ public class RestLlmStore implements IRestLlmStore {
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
         return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, patched -> {
-            // The same pre-write check updateLlm runs.
+            // The same pre-write checks updateLlm runs.
+            requireMayAuthorCallerToken(patched);
             warnOnPlaintextSecrets(patched);
             return null;
         });
@@ -138,6 +149,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response createLlm(LlmConfiguration llmConfiguration) {
+        requireMayAuthorCallerToken(llmConfiguration);
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.create(llmConfiguration);
     }
@@ -193,12 +205,20 @@ public class RestLlmStore implements IRestLlmStore {
     }
 
     /**
+     * A reference ({@code ${vault:…}}, {@code ${vars:…}}, {@code ${connection:…}},
+     * …) or a Qute template ({@code {properties.key}}). Anchored to those shapes
+     * rather than to a brace: a literal such as {@code hunter{two} is a credential
+     * with a brace in it, not a template.
+     */
+    private static final Pattern REFERENCE_OR_TEMPLATE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}|\\{[A-Za-z_][^{}]*}");
+
+    /**
      * Whether one parameter is a credential by name holding a literal rather than a
      * reference or template.
      */
     private static boolean isPlaintextSecret(String name, String value) {
         return name != null && SECRET_PARAMETER_NAMES.contains(name.toLowerCase(Locale.ROOT)) && value != null && !value.isBlank()
-                && !value.contains("{");
+                && !REFERENCE_OR_TEMPLATE.matcher(value).find();
     }
 
     @Override
@@ -210,7 +230,20 @@ public class RestLlmStore implements IRestLlmStore {
     public Response duplicateLlm(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         LlmConfiguration llmConfiguration = restVersionInfo.read(id, version);
+        // A copy is a new resource authored by whoever duplicates it.
+        requireMayAuthorCallerToken(llmConfiguration);
         return restVersionInfo.create(llmConfiguration);
+    }
+
+    /**
+     * Refuses {@code ${caller:token}} from a caller who may not author it — see
+     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
+     * path treats a non-200 update as "create it directly instead".
+     */
+    private void requireMayAuthorCallerToken(Object configuration) {
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
+        }
     }
 
     @Override

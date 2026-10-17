@@ -342,8 +342,8 @@ class VaultKeySafetyTest {
         }
 
         @Test
-        @DisplayName("a new secret stored without a grant still defaults to every agent")
-        void newSecretDefaultsToWildcard() throws Exception {
+        @DisplayName("a new secret stored without a grant is refused; an explicit wildcard grant is kept")
+        void newSecretWithoutGrantIsRefused() throws Exception {
             // No default any more: a create names its grant, or it is refused.
             var provider = provider(MASTER);
             assertThrows(IllegalArgumentException.class, () -> provider.store(ref("acme", "fresh"), "v1", null, null));

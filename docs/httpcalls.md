@@ -116,6 +116,37 @@ headers are scrubbed before the request is recorded.
 
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
+### Who may write `${caller:token}`
+
+The rules above say *where* the token may go. They do not say *whose* token it
+is: always that of whoever is chatting, never that of whoever wrote the config.
+So a call written by one person runs with the privileges of another. An editor
+could save a call to `http://127.0.0.1:7070/administration/…` with
+`Bearer ${caller:token}`, fire it on `CONVERSATION_START`, and have the next
+administrator who opens that agent run an admin-only endpoint with their own
+token — the same-origin rule allows it, because EDDI's own address is an allowed
+target.
+
+That is why, with authorization on, only `eddi.caller-identity.author-roles`
+(default `eddi-admin`) may **save** a configuration containing
+`${caller:token}`. Create, update, patch and duplicate of httpcalls, mcpcalls and
+LLM configs are checked, and so are the httpcalls, mcpcalls and LLM configs an
+import or sync writes; anyone else gets **403** naming the property (an upgrade
+or sync reports it as that resource failing). A merge import is also refused
+when it would replace an existing version that carries the reference, because
+its rollback could not write that version back. The check covers the whole document, so an
+editor can neither add the reference nor edit a call that already carries it.
+`${caller:userId}` is a name, not a credential, and stays open to editors.
+
+The token is released only to a `${caller:token}` written **in the header
+itself**. A header whose `${vars:…}` or `${vault:…}` value resolves to the
+reference fails the call: the save-time check reads the configuration as
+written, and a variable can be changed after the configuration was saved.
+
+Widen the roles (`eddi.caller-identity.author-roles=eddi-admin,eddi-editor`) only
+when every editor is trusted with the privileges of every user who chats with
+their agents.
+
 The same reference works in an **MCP server's `apiKey`**, so a tool call reaches
 that server as the chatting user rather than as a standing service principal.
 Only the tool call carries the caller — the handshake and `tools/list` do not,
@@ -146,12 +177,20 @@ reflects what the caller actually addressed:
 ```properties
 quarkus.http.proxy.proxy-address-forwarding=true
 quarkus.http.proxy.enable-forwarded-host=true
+# The proxy's address(es) — only forwarded headers arriving FROM these are honoured
+quarkus.http.proxy.trusted-proxies=10.0.0.5,10.0.1.0/24
 ```
 
 This is deliberately **not** on by default. It makes EDDI trust `X-Forwarded-*`
 headers, which any client can send — safe when a trusted proxy overwrites them,
 wrong when EDDI is directly reachable. Turn it on only together with a proxy
-that sets those headers itself.
+that sets those headers itself, and **always set `trusted-proxies`** alongside:
+without it Quarkus honours forwarded headers from *every* source address, so a
+client that can reach EDDI directly (another pod, a host on the LAN, a port-forward)
+spoofs its own origin, which is exactly the check `${caller:token}` relies on. The
+value is a comma-separated list of the proxy's IPs or CIDRs (hostnames resolve
+once at startup; use addresses). With `trusted-proxies` set, a request whose
+peer address is not in the list has its forwarded headers ignored.
 
 ## HttpCalls Configuration
 
@@ -264,7 +303,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | Element                                                                     | Description                                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | targetServerUrl                                                             | (`String`) `root/context` path of the `httpCall` (e.g `http://example.com/api)`                                                                                                                                                  |
-| httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `{memory.current.httpCalls}`                                                                                                                                               |
+| httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `{memory.current.httpCalls}`. `true` requires a `responseObjectName`; saving a config that sets one without the other is refused with `400`, because the executor would have nothing to store the body under                                      |
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |
 | httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
