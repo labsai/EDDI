@@ -24,7 +24,8 @@ services:
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
       # While authentication is off EDDI answers only requests addressed to
-      # localhost, an IP address or a host listed here (UnauthenticatedRequestGuard
+      # localhost, an IP address, host.docker.internal (and its Podman/gateway
+      # siblings) or a host listed here (UnauthenticatedRequestGuard
       # — a DNS-rebinding page arrives with its own name), and refuses cross-site
       # POST/PUT/PATCH/DELETE. `eddi` is this service's name on the compose
       # network, which Prometheus (docker-compose.monitoring.yml) and other

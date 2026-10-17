@@ -126,6 +126,42 @@ class UnauthenticatedRequestGuardTest {
             assertEquals(Decision.MISDIRECTED_HOST, get(DEFAULTS, host));
         }
 
+        @ParameterizedTest(name = "container-host name {0} is answered")
+        @ValueSource(strings = {"host.docker.internal:7070", "host.docker.internal", "HOST.DOCKER.INTERNAL:7070",
+                "host.docker.internal.:7070", "gateway.docker.internal:7070", "host.containers.internal:7070"})
+        void answersContainerHostNames(String host) {
+            assertEquals(Decision.ALLOW, get(DEFAULTS, host));
+            assertEquals(Decision.ALLOW, post(DEFAULTS, host, null, null));
+        }
+
+        @ParameterizedTest(name = "look-alike {0} is refused")
+        @ValueSource(strings = {"host.docker.internal.evil.example:7070", "evil.host.docker.internal:7070", "docker.internal:7070",
+                "host-docker-internal:7070", "host.docker.internal.evil:7070", "containers.internal"})
+        void refusesContainerHostLookAlikes(String host) {
+            assertEquals(Decision.MISDIRECTED_HOST, get(DEFAULTS, host));
+        }
+
+        /**
+         * The three requests a live dev-mode test answered with 400. None of the 400s
+         * came from this filter: in dev and test mode Quarkus' HostValidationFilter
+         * (enabled because the server binds localhost) accepts only localhost,
+         * 127.0.0.1 and [::1] and ends anything else with an empty 400 — which is also
+         * why /q/health answered 400 there although this filter passes it. A container
+         * (0.0.0.0) answered all three with 200. This pins what THIS filter decides for
+         * them.
+         */
+        @Test
+        @DisplayName("*.localhost, a trailing-dot localhost and a foreign host on /q/health all pass this filter")
+        void liveTestCases() {
+            assertEquals(Decision.ALLOW, get(DEFAULTS, "eddi.localhost:7070"));
+            assertEquals(Decision.ALLOW, post(DEFAULTS, "eddi.localhost:7070", "http://eddi.localhost:7070", "same-origin"));
+            assertEquals(Decision.ALLOW, get(DEFAULTS, "localhost."));
+            assertEquals(Decision.ALLOW, get(DEFAULTS, "localhost.:7070"));
+            assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", "/q/health/live", "evil.example", null, null));
+            assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", "/q/health/live", "not a host", null, null),
+                    "a Host that does not even parse must not refuse an exempt path");
+        }
+
         @Test
         @DisplayName("applies to state-changing requests too, before the Origin is considered")
         void refusesRebindingWriteEvenWithMatchingOrigin() {
@@ -372,6 +408,9 @@ class UnauthenticatedRequestGuardTest {
             assertTrue(line.contains(UnauthenticatedRequestGuard.ALLOWED_HOSTS_PROPERTY), line);
             assertTrue(line.contains("eddi, [fd00::1]:7070"), line);
             assertTrue(line.contains("quarkus.http.cors.origins"), line);
+            for (String name : UnauthenticatedRequestGuard.CONTAINER_HOST_NAMES) {
+                assertTrue(line.contains(name), "the boot line must name " + name + ": " + line);
+            }
 
             String off = UnauthenticatedRequestGuard.describe(Policy.of(List.of("*"), List.of("*")));
             assertTrue(off.contains("Host check is OFF"), off);

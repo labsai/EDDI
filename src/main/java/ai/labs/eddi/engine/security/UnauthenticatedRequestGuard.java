@@ -46,7 +46,10 @@ import java.util.regex.PatternSyntaxException;
  * known by: {@code localhost} (and {@code *.localhost}), any IP literal — a
  * rebinding attack needs a DNS name the attacker controls, so an address can
  * never be the product of one, and kubelet probes, Prometheus scrapes and
- * {@code eddi.self.base-url} address EDDI that way — or an entry of
+ * {@code eddi.self.base-url} address EDDI that way — the container-host names
+ * {@link #CONTAINER_HOST_NAMES} (how a container reaches an EDDI running on the
+ * host; Docker's and Podman's own resolvers answer them, and {@code .internal}
+ * is reserved and never delegated in public DNS), or an entry of
  * {@code eddi.security.unauthenticated.allowed-hosts} ({@code host} or
  * {@code host:port}, comma-separated; a bare host matches any port; {@code *}
  * turns the check off);</li>
@@ -63,6 +66,14 @@ import java.util.regex.PatternSyntaxException;
  * not the forwarded host: a rebound page is same-origin and may set
  * {@code X-Forwarded-Host} itself.
  * <p>
+ * In dev and test mode Quarkus' own {@code HostValidationFilter} also runs: it
+ * is switched on because the server binds {@code localhost}, accepts only
+ * {@code localhost}, {@code 127.0.0.1} and {@code [::1]}, and answers anything
+ * else — a {@code *.localhost} name, a trailing dot, any host on
+ * {@code /q/health} — with an empty <b>400</b>. That is Quarkus, not this
+ * filter ({@code quarkus.http.host-validation.allowed-hosts} widens it); a
+ * container image binds {@code 0.0.0.0} and does not enable it.
+ * <p>
  * Nothing is registered while authentication is on — every endpoint then needs
  * a token, which a cross-site page does not have. Registered as a Vert.x route
  * filter, like {@link HttpMethodGuard}, so it also covers {@code /mcp}, the
@@ -77,6 +88,17 @@ public class UnauthenticatedRequestGuard {
     static final int PRIORITY = 19_500;
 
     static final String ALLOWED_HOSTS_PROPERTY = "eddi.security.unauthenticated.allowed-hosts";
+
+    /**
+     * Names a container uses to reach a service on its host — Docker Desktop's
+     * {@code host.docker.internal} and {@code gateway.docker.internal}, Podman's
+     * {@code host.containers.internal}. They are answered by the container
+     * runtime's resolver (or {@code extra_hosts}), and {@code .internal} is a
+     * reserved, never-delegated top-level domain, so a rebinding page cannot own
+     * one.
+     */
+    static final Set<String> CONTAINER_HOST_NAMES = Set.of("host.docker.internal", "gateway.docker.internal",
+            "host.containers.internal");
 
     /** Methods that may not change state and pass the cross-site check. */
     static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS");
@@ -196,7 +218,8 @@ public class UnauthenticatedRequestGuard {
 
     /** The one boot-time line that says what the filter enforces. */
     static String describe(Policy policy) {
-        StringBuilder hosts = new StringBuilder("localhost, *.localhost and IP addresses");
+        StringBuilder hosts = new StringBuilder(
+                "localhost, *.localhost, IP addresses, host.docker.internal, gateway.docker.internal, host.containers.internal");
         for (HostPort host : policy.allowedHosts()) {
             hosts.append(", ").append(format(host));
         }
@@ -224,7 +247,8 @@ public class UnauthenticatedRequestGuard {
             case MISDIRECTED_HOST -> {
                 logRefusedHost(host);
                 refuse(context, 421, "This EDDI instance runs without authentication and answers only requests addressed to"
-                        + " localhost, an IP address or a host listed in " + ALLOWED_HOSTS_PROPERTY + ".");
+                        + " localhost, an IP address, a container-host name (host.docker.internal and similar) or a host"
+                        + " listed in " + ALLOWED_HOSTS_PROPERTY + ".");
             }
             case CROSS_SITE -> refuse(context, 403, "Cross-site request refused: this EDDI instance runs without"
                     + " authentication and accepts state-changing requests only from its own origin and the origins in"
@@ -237,7 +261,7 @@ public class UnauthenticatedRequestGuard {
         String key = parsed == null ? "<malformed>" : format(parsed);
         if (loggedHosts.size() < MAX_LOGGED_HOSTS && loggedHosts.add(key)) {
             LOGGER.warnf("[SECURITY] Refused a request addressed to Host %s (421): authentication is off, so only localhost,"
-                    + " IP addresses and %s are answered. Add the host there if it is a legitimate name for this"
+                    + " IP addresses, container-host names and %s are answered. Add the host there if it is a legitimate name for this"
                     + " instance. (Logged once per host.)", key, ALLOWED_HOSTS_PROPERTY);
         }
     }
@@ -290,7 +314,8 @@ public class UnauthenticatedRequestGuard {
     }
 
     static boolean hostAllowed(Policy policy, HostPort host) {
-        if (host.ipLiteral() || host.host().equals("localhost") || host.host().endsWith(".localhost")) {
+        if (host.ipLiteral() || host.host().equals("localhost") || host.host().endsWith(".localhost")
+                || CONTAINER_HOST_NAMES.contains(host.host())) {
             return true;
         }
         for (HostPort allowed : policy.allowedHosts()) {

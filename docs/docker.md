@@ -152,7 +152,7 @@ docker run --name eddi \
 | `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` | `false`                      | Opt out of the production auth requirement. Required to boot with OIDC disabled |
 | `EDDI_MCP_ALLOW_UNAUTHENTICATED` | `false`                           | Knowingly expose `/mcp` without authentication. Required to boot with OIDC disabled |
 | `EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED` | `false`                   | Knowingly expose `/secretstore` without authentication. Required to boot with OIDC disabled |
-| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost` and IP addresses EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
+| `EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS` | *(unset; `eddi` in the compose stacks)* | With authentication off, the host names besides `localhost`, IP addresses and `host.docker.internal` / `gateway.docker.internal` / `host.containers.internal` EDDI answers to (`host` or `host:port`, comma-separated). Other hosts get `421` — the DNS-rebinding defence. See [Running without authentication](security.md#running-without-authentication) |
 
 > **Note:** `QUARKUS_OIDC_TENANT_ENABLED` is a **runtime** toggle. No rebuild needed to enable/disable auth.
 

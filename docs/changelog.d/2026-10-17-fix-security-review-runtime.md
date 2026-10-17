@@ -140,6 +140,20 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   Files: [`application.properties`](../../src/main/resources/application.properties),
   [`docker-compose.yml`](../../docker-compose.yml), [`docker.md`](../docker.md)
 
+- **M7 follow-up (live dev-mode test).** `host.docker.internal`,
+  `gateway.docker.internal` and `host.containers.internal` are now answered built in — that
+  is how a container reaches an EDDI on the host, the container runtime's resolver answers
+  them, and `.internal` is a reserved TLD public DNS never delegates. Three unexpected
+  `400`s from the live test (`Host: eddi.localhost:7070`, `Host: localhost.`, and
+  `/q/health/live` with `Host: evil.example`) were traced to Quarkus 3.40's own
+  `HostValidationFilter`, not this guard: it is switched on in dev and test mode because the
+  server binds `localhost`, accepts only `localhost`/`127.0.0.1`/`[::1]` and ends anything
+  else with an empty `400` (confirmed from its bytecode, and by the guard answering
+  `evil.example` with its own `421` on a non-exempt path of the same instance). The released
+  6.5.0 image (binds `0.0.0.0`, filter off) answers all three with `200`. The guard's own
+  decisions for the three are pinned in `UnauthenticatedRequestGuardTest`, and
+  `docs/security.md` explains the dev-mode `400`.
+
 ### Design decisions
 
 - `bind-guard` is duplicated into every base stack rather than moved to an overlay, and a

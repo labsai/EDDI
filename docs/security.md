@@ -138,12 +138,16 @@ So while authentication is off, `UnauthenticatedRequestGuard` (a Vert.x route
 filter, so it also covers `/mcp`, `/q/*` and static assets):
 
 - answers **421** to a request whose `Host` is not `localhost` (or a
-  `*.localhost` name), an IP address, or an entry of
-  `eddi.security.unauthenticated.allowed-hosts`
+  `*.localhost` name), an IP address, one of the container-host names
+  `host.docker.internal`, `gateway.docker.internal` and `host.containers.internal`
+  (Podman), or an entry of `eddi.security.unauthenticated.allowed-hosts`
   (`EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS`; `host` or `host:port`,
   comma-separated, a bare host matching any port). IP addresses pass because a
   rebinding attack needs a DNS name the attacker controls — and kubelet probes,
-  Prometheus scrapes and `eddi.self.base-url` address EDDI that way. The raw
+  Prometheus scrapes and `eddi.self.base-url` address EDDI that way. The
+  container-host names are how a container (Open WebUI, an MCP client) reaches an
+  EDDI running on the host; Docker's and Podman's own resolvers answer them, and
+  `.internal` is a reserved top-level domain that public DNS never delegates. The raw
   `Host` header is read, never a forwarded one: a rebound page is same-origin and
   may set `X-Forwarded-Host` itself. `*` turns the check off;
 - answers **403** to a `POST`, `PUT`, `PATCH` or `DELETE` a browser marks as
@@ -160,6 +164,14 @@ needs a token, which a cross-site page does not have. The compose stacks set the
 allow-list to `eddi`, their service name on the compose network; add the name you
 browse to when it is not `localhost`. The MCP endpoint's own `Origin` validation
 still applies on top.
+
+> **Dev mode answers 400 for more hosts — that is Quarkus.** Under
+> `./mvnw quarkus:dev` (and in tests) the server binds `localhost`, which switches on
+> Quarkus' own `HostValidationFilter`: it accepts only `localhost`, `127.0.0.1` and
+> `[::1]` and ends every other `Host` — `eddi.localhost`, `localhost.`, any name on
+> `/q/health` — with an empty `400`, before or after this filter. Widen it with
+> `quarkus.http.host-validation.allowed-hosts`. A container binds `0.0.0.0`, does not
+> enable it, and answers those requests as described above.
 
 ### Shipped realm hardening
 
