@@ -93,7 +93,7 @@ services:
     mem_limit: ${LOADTEST_EDDI_MEMORY:-2g}
     cpus: ${LOADTEST_EDDI_CPUS:-2}
     ports:
-      - "127.0.0.1:${LOADTEST_CLUSTER_NODE_PORTS:-7571-7578}:7070"
+      - "127.0.0.1:${LOADTEST_CLUSTER_NODE_PORTS:-7581-7599}:7070"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
       interval: 5s

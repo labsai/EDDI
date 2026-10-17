@@ -726,11 +726,11 @@ def cluster_report(results, args):
              f"MongoDB {env.get('LOADTEST_MONGO_CPUS')} CPUs, NATS 3 x {env.get('LOADTEST_NATS_CPUS')} CPU (R3). "
              f"Docker host: {ncpu} CPUs. Image `{first.get('image') or 'labsai/eddi:6.5.0'}`"
              f"{' with the local build mounted' if first.get('app') else ''}; commit `{git_head()}`.", "",
-             "| Nodes | Messaging | Conv. | OK turns | Turns/s | Efficiency | p50 ms | p95 ms | p99 ms | 409 | 503 | other err. | "
+             "| Run | Nodes | Messaging | Conv. | OK turns | Turns/s | Efficiency | p50 ms | p95 ms | p99 ms | 409 | 503 | other err. | "
              "Lease acquire: count · mean ms | Fence rejected | Mongo ops/turn | Mongo ops/s | Mongo CPU % mean/peak | "
              "NATS CPU % mean/peak (3 nodes) | NATS msgs/turn | EDDI CPU % mean per node | All containers CPU % mean (other stacks) | "
              "Host CPU % mean · time at >= 95 % |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         e, lat = r["errors"], r["latency_ms"]
         other = sum(v for k, v in e.items() if k not in ("turns_409", "turns_503"))
@@ -746,7 +746,7 @@ def cluster_report(results, args):
         nc, np_, _ = cpu(r, "nats")
         ec, _, en = cpu(r, "eddi")
         nm = r.get("nats_msgs_per_turn")
-        lines.append(f"| {r['nodes']} | {r['messaging']} | {r['vus']} | {r['turns_ok']:.0f} | {r['turns_per_s'] or 0:.1f} | {eff} | "
+        lines.append(f"| {r['label']} | {r['nodes']} | {r['messaging']} | {r['vus']} | {r['turns_ok']:.0f} | {r['turns_per_s'] or 0:.1f} | {eff} | "
                      f"{fmt(lat['med'])} | {fmt(lat['p(95)'])} | {fmt(lat['p(99)'])} | {e['turns_409']:.0f} | {e['turns_503']:.0f} | "
                      f"{other:.0f} | {lease_txt} | {sum(p['fence_rejected'] for p in r['per_node']):.0f} | "
                      f"{sum(r['mongo_ops_per_turn'].values()):.1f} | {r['mongo_ops_per_s'] or 0:.0f} | {mc:.0f}/{mp:.0f} | "
@@ -754,7 +754,7 @@ def cluster_report(results, args):
                      f"{ec / en if en else 0:.0f} | {r['docker']['total_mean']:.0f} ({r['docker']['foreign_mean']:.0f}) | {host_txt(r)} |")
     lines += ["", "## Per node", ""]
     for r in results:
-        lines += [f"**{r['nodes']} x {r['messaging']}**", "",
+        lines += [f"**{r['nodes']} x {r['messaging']}** (`{r['label']}`)", "",
                   "| Node | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | 409 | 503 | Peak in-flight turns | Peak leases held | CPU % mean |",
                   "|---|---|---|---|---|---|---|---|---|---|---|"]
         for p in r["per_node"]:

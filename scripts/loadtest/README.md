@@ -47,7 +47,7 @@ Streaming is not covered: k6 has no built-in SSE client.
 `docker-compose.cluster.yml` is the topology of the repository's `docker-compose.cluster.yml` and
 the [cluster demo](../cluster-demo/README.md) — N EDDI replicas with `eddi.messaging.type=nats`, a
 three-node NATS JetStream cluster (R3), one MongoDB, an nginx round-robin balancer with no affinity —
-plus the same WireMock LLM and k6. Its own ports (balancer `7570`, replicas `7571–7578`, MongoDB
+plus the same WireMock LLM and k6. Its own ports (balancer `7570`, replicas `7581–7599` (one port each; spares in case another stack takes one), MongoDB
 `27570`, WireMock `18570`; moved with `LOADTEST_CLUSTER_PORT`, `LOADTEST_CLUSTER_NODE_PORTS`,
 `LOADTEST_CLUSTER_MONGO_PORT`, `LOADTEST_CLUSTER_WIREMOCK_PORT`), so it can run next to the single-node stack.
 

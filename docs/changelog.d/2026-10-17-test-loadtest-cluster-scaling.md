@@ -41,9 +41,28 @@ shared bottleneck", were unverified.
 - **MongoDB gets `restart: on-failure`.** On a busy host the image's two-step first start can fail
   with exit 48 (address in use).
 
-### In progress
+### Results
 
-First measurements (2 CPUs per node, 3 s mock LLM) show a node CPU-bound at roughly 15–20 turns/s in
-both messaging modes, on a host already at 90 %+ CPU from parallel work. The `1,2,4,8` sweep was cut
-off when Docker Desktop stopped responding. The report `scripts/loadtest/results/cluster-scaling-<date>.md`
-follows once the sweep can run on a quiet host.
+[`scripts/loadtest/results/cluster-scaling-2026-10-18.md`](../../scripts/loadtest/results/cluster-scaling-2026-10-18.md).
+The setup was 100 conversations per node, a 3 s mock LLM and 2 CPUs per node. The host was saturated
+(85–99 % CPU, shared with other sessions' work), so the report measures overhead and shape, not true
+horizontal scaling.
+
+- **Errors:** none across 18k turns — no 409, no 503, no fence rejection.
+- **Overhead at N=1:** cluster mode ran 16.1 turns/s against 21.3 in memory (−24 %, +1.4 s p50). Every
+  turn paid an uncontended lease acquire of ~151 ms.
+- **Lease contention:** round-robin without affinity makes 13–32 % of acquires contended (0.5–2.6 s
+  extra) even with one sequential client per conversation. A turn holds its lease until persisted,
+  which is after the reply.
+- **Efficiency:** 1.11 at N=2 (a quiet re-run; the first N=2 run read 0.28), 0.65 at N=4, 0.40 at N=8.
+- **Where it saturated:** node CPU at N=4, then host CPU at N=8. MongoDB peaked at 1.2k ops/s
+  (23 ops/turn, flat in N, 2.25 of 4 CPUs) and NATS at 0.5 CPU per node, so neither was the limit.
+  The expected database knee is untested here.
+- **NATS cost:** about 14–22 ms of NATS CPU per turn across R3. That puts a 1-vCPU NATS node nearer
+  150–200 turns/s than the docs' "thousands", and needs a re-check on a quiet machine.
+
+### Follow-ups
+
+Profile the uncontended lease acquire. Decide between releasing the lease before post-reply
+persistence and routing by conversation in the reference nginx config. Re-measure NATS CPU and the
+database knee on separate machines.
