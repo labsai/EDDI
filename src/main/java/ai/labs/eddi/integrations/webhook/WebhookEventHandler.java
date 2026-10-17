@@ -420,6 +420,15 @@ public class WebhookEventHandler {
         }
     }
 
+    /**
+     * Records a refusal the endpoint answered before dispatch (401, 404, 413, 415,
+     * 400), so the outcome counter covers every response, not only the ones that
+     * reached the handler.
+     */
+    public void countRefused(int status) {
+        count("refused_" + status);
+    }
+
     private void count(String outcome) {
         if (meterRegistry != null) {
             meterRegistry.counter("eddi.webhook.events", "outcome", outcome).increment();

@@ -137,6 +137,15 @@ class WebhookSignatureVerifierTest {
         }
 
         @Test
+        void secondTimestampEntryIsMalformed() {
+            // t=X,t=T,v1=<valid MAC over T>: verification read T while the replay
+            // key read X, so every X minted a fresh dedup key for one signed request.
+            String header = eddiHeader(SECRET, NOW, BODY);
+            assertEquals(Result.MALFORMED_SIGNATURE, verify(verifier, settings, BODY, Map.of("X-Eddi-Signature", "t=1," + header)));
+            assertEquals(Result.MALFORMED_SIGNATURE, verify(verifier, settings, BODY, Map.of("X-Eddi-Signature", header + ",t=1")));
+        }
+
+        @Test
         void unresolvedSecretFailsClosed() {
             var unresolved = WebhookChannelSettings.from(Map.of("signingSecret", "${vault:missing}"));
             assertEquals(Result.NO_SECRET, verify(verifier, unresolved, BODY, Map.of("X-Eddi-Signature", eddiHeader("${vault:missing}", NOW, BODY))));

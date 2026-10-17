@@ -196,6 +196,7 @@ public class RestWebhookChannel {
     }
 
     private Response error(int status, String message) {
+        handler.countRefused(status);
         return Response.status(status).type(MediaType.APPLICATION_JSON).entity(json(Map.of("error", message))).build();
     }
 

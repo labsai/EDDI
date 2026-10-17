@@ -57,6 +57,7 @@ class RestWebhookChannelTest {
     private ChannelTargetRouter router;
     private IConversationService conversationService;
     private RestWebhookChannel endpoint;
+    private SimpleMeterRegistry meters;
     private ChannelIntegrationConfiguration integration;
 
     @BeforeEach
@@ -67,7 +68,7 @@ class RestWebhookChannelTest {
         when(cacheFactory.getCache(anyString(), any(Duration.class)))
                 .thenAnswer(inv -> new CacheImpl<>("dedup", Caffeine.newBuilder().build()));
         var handler = new WebhookEventHandler(router, conversationService, mock(IGroupConversationService.class),
-                mock(IUserConversationStore.class), mock(ITemplatingEngine.class), cacheFactory, new SimpleMeterRegistry());
+                mock(IUserConversationStore.class), mock(ITemplatingEngine.class), cacheFactory, meters = new SimpleMeterRegistry());
         endpoint = new RestWebhookChannel(router, new WebhookSignatureVerifier(), handler, new ObjectMapper(), 1024);
 
         var target = new ChannelTarget();
@@ -272,6 +273,33 @@ class RestWebhookChannelTest {
         assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-50"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
         assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(other, "d-51"), other.getBytes(StandardCharsets.UTF_8)).getStatus());
         verify(conversationService, times(2)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void replayWithAPrependedTimestampIsRefused() throws Exception {
+        integration.setPlatformConfig(Map.of("signingSecret", SECRET));
+        long t = Instant.now().getEpochSecond();
+        String header = "t=" + t + ",v1=" + HmacSignatures.hmacSha256Hex(SECRET, (t + ".").getBytes(StandardCharsets.UTF_8),
+                PUSH.getBytes(StandardCharsets.UTF_8));
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, new HashMap<>(Map.of("content-type", "application/json", "x-eddi-signature", header)),
+                PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+
+        for (int x = 1; x <= 3; x++) {
+            var replay = new HashMap<>(Map.of("content-type", "application/json", "x-eddi-signature", "t=" + x + "," + header));
+            assertEquals(401, endpoint.receive(INTEGRATION_ID, replay, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        }
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void refusalsBeforeDispatchAreCounted() {
+        Map<String, String> unsigned = githubHeaders(PUSH, "d-60");
+        unsigned.remove("x-hub-signature-256");
+        endpoint.receive(INTEGRATION_ID, unsigned, PUSH.getBytes(StandardCharsets.UTF_8));
+        endpoint.receive("ffffffffffffffffffffffff", githubHeaders(PUSH, "d-61"), PUSH.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_401").count());
+        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_404").count());
     }
 
     @Test

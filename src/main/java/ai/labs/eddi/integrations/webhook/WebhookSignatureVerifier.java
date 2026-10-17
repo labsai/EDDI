@@ -151,6 +151,12 @@ public class WebhookSignatureVerifier {
             String key = part.substring(0, eq).trim();
             String value = part.substring(eq + 1).trim();
             if ("t".equals(key)) {
+                if (timestamp != null) {
+                    // One timestamp, or none at all: with two, the MAC could be
+                    // checked against one while something else read the other
+                    // (the replay key did, so each junk t= minted a fresh key).
+                    return Result.MALFORMED_SIGNATURE;
+                }
                 timestamp = value;
             } else if ("v1".equals(key) && !value.isEmpty()) {
                 signatures.add(value.toLowerCase(Locale.ROOT));
