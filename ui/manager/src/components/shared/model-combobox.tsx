@@ -133,13 +133,6 @@ export function ModelCombobox({
           setHighlighted((h) => (h <= 0 ? flat.length - 1 : h - 1));
         }
         break;
-      case "Home":
-      case "End":
-        if (open && flat.length > 0 && !e.shiftKey) {
-          e.preventDefault();
-          setHighlighted(e.key === "Home" ? 0 : flat.length - 1);
-        }
-        break;
       case "Enter":
         if (open && highlighted >= 0 && highlighted < flat.length) {
           e.preventDefault();

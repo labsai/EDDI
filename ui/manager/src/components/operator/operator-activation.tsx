@@ -336,6 +336,7 @@ export function OperatorActivation({
                 value={model}
                 onChange={setModel}
                 suggestions={suggestions}
+                defaultModel={providerConfig?.defaultModel}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
                 id="operator-model"
                 testId="operator-model"

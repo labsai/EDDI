@@ -124,6 +124,22 @@ describe("ModelCombobox", () => {
     expect(input).toHaveValue("claude-haiku-4-5");
   });
 
+  /* Home and End belong to the text: the field is editable, so they move the
+     cursor even while the list is open (WAI-ARIA combobox pattern). */
+  it("leaves Home and End to the input while the list is open", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Host initial="claude-sonnet-5-5" />);
+    const input = screen.getByTestId("model") as HTMLInputElement;
+
+    await user.click(input);
+    const active = input.getAttribute("aria-activedescendant");
+    await user.keyboard("{Home}");
+
+    expect(input.selectionStart).toBe(0);
+    expect(input.getAttribute("aria-activedescendant")).toBe(active);
+    expect(screen.getByTestId("model-listbox")).toBeInTheDocument();
+  });
+
   it("offers no list on a read-only field", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Host initial="claude-sonnet-5-5" readOnly />);
