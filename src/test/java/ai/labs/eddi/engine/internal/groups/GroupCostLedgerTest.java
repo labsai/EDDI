@@ -268,10 +268,37 @@ class GroupCostLedgerTest {
     }
 
     @Test
-    void retireConversation_nothingRecorded_noOp() {
+    void lateCallbackBetweenRetirementAndReplacement_isNotLost() {
         var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
         GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
-        assertTrue(gc.getMemberCosts().isEmpty());
+
+        // The replacement's id is not published yet: the map still names the ended
+        // conversation when its late callback lands.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.40, "conv-ended"));
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05, "conv-new"));
+
+        assertEquals(0.40, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
+        assertEquals(0.45, gc.getTotalCost(), 1e-9, "the ended conversation's last spend must survive the replacement's first harvest");
+    }
+
+    @Test
+    void retireConversation_nothingRecordedYet_stillMarksTheConversationRetired() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+
+        assertEquals(0.0, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.0, gc.getTotalCost());
+
+        // Its first (and late) callback is routed to the retired entry, not the
+        // plain key the replacement will use.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.10, "conv-ended"));
+        assertEquals(0.10, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertNull(gc.getMemberCosts().get("agent-a"));
     }
 
     // =================================================================

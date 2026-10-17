@@ -50,6 +50,12 @@
   active one and routes a mismatch to `key:<thatConversationId>`. That entry
   keeps the larger value, so the callback and the retirement can run in either
   order without double-counting or overwriting the replacement's total.
+- **No window between retirement and replacement.** Retirement always leaves
+  a retired entry, $0 if nothing was spent yet. A callback decides where its
+  cost goes by whether that entry exists, and it reads and writes under the
+  same monitor retirement holds. A late callback therefore lands correctly
+  even before the replacement's id is published, while the member's
+  conversation map still names the ended conversation.
 
 ### Design decisions
 
@@ -78,4 +84,6 @@
   - summing only the projected steps;
   - dropping the `retireConversation` call;
   - removing the late-callback routing;
-  - recording a retired entry by plain replacement instead of the larger value.
+  - recording a retired entry by plain replacement instead of the larger value;
+  - routing by the conversation map alone;
+  - skipping the $0 retired entry.

@@ -91,13 +91,25 @@ public final class GroupCostLedger {
         // would overwrite the replacement conversation's total with the ended one's
         // (or be counted again beside its retired entry). The snapshot names the
         // conversation it came from, so route it to that conversation's retired key.
-        String activeConversationId = gc.getMemberConversationIds().get(attributionKey);
+        //
+        // Decided and written under the monitor retireConversation holds, keyed on
+        // the retired ENTRY rather than on memberConversationIds alone: between the
+        // retirement and the replacement's id being published, the map still names
+        // the ended conversation, and a callback judging by the map in that window
+        // wrote back to the plain key, where the replacement's first harvest then
+        // overwrote it.
         String conversationId = snapshot.getConversationId();
-        if (activeConversationId != null && conversationId != null && !activeConversationId.equals(conversationId)) {
-            recordRetired(gc, attributionKey + ":" + conversationId, cost);
-            return;
+        synchronized (gc.getMemberCosts()) {
+            String retiredKey = conversationId != null ? attributionKey + ":" + conversationId : null;
+            String activeConversationId = gc.getMemberConversationIds().get(attributionKey);
+            boolean retired = retiredKey != null && (gc.getMemberCosts().containsKey(retiredKey)
+                    || (activeConversationId != null && !activeConversationId.equals(conversationId)));
+            if (retired) {
+                recordRetired(gc, retiredKey, cost);
+            } else {
+                recordAndReSum(gc, attributionKey, cost);
+            }
         }
-        recordAndReSum(gc, attributionKey, cost);
     }
 
     /**
@@ -108,8 +120,12 @@ public final class GroupCostLedger {
      * Moving the ended conversation's entry to
      * {@code attributionKey:endedConversationId} — the same {@code key:child} shape
      * {@link #accumulateNestedGroupCost} uses, which per-member consumers already
-     * sum — leaves it in {@code totalCost}. A no-op when nothing was recorded under
-     * the key.
+     * sum — leaves it in {@code totalCost}.
+     * <p>
+     * The retired entry is written even when nothing was spent yet ($0): its
+     * presence is what tells {@link #accumulateMemberCost} that a late callback
+     * from the ended conversation belongs there, including one that lands before
+     * the replacement's id is published. Consumers already ignore $0 rows.
      */
     public static void retireConversation(GroupConversation gc, String attributionKey, String endedConversationId) {
         if (attributionKey == null || endedConversationId == null) {
@@ -117,9 +133,7 @@ public final class GroupCostLedger {
         }
         synchronized (gc.getMemberCosts()) {
             Double spent = gc.getMemberCosts().remove(attributionKey);
-            if (spent != null) {
-                recordRetired(gc, attributionKey + ":" + endedConversationId, spent);
-            }
+            recordRetired(gc, attributionKey + ":" + endedConversationId, spent != null ? spent : 0.0);
         }
     }
 
