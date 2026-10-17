@@ -163,6 +163,18 @@ credential on a follow-up call must have it passed explicitly, as a header (for
 example `Authorization`) or from a property. `Set-Cookie` is also never recorded
 in conversation memory.
 
+### Redirects
+
+With `eddi.security.ssrf-protection.enabled=false` (the default) a `GET`/`HEAD`
+call without a credential header follows redirects. Every hop is checked: the
+cloud metadata service is always refused, a `Location` without a host is
+refused, and a hop into a loopback or private address is followed only when the
+request that answered with the redirect was in that same address class — an
+internal API redirecting within its own network keeps working, but a public
+server cannot bounce a call onto `127.0.0.1` or an RFC 1918 host. A host listed in
+`eddi.security.ssrf-protection.allowed-hosts` is always followed. With protection
+on, redirects are not followed at all.
+
 ### Running behind a reverse proxy
 
 The origin is taken from the inbound request as EDDI sees it. Behind a

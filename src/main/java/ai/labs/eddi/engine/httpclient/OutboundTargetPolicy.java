@@ -194,7 +194,7 @@ public class OutboundTargetPolicy {
      * {@value #ALLOWED_HOSTS_KEY}, parsed as {@code ApiCallExecutor} parses it:
      * trimmed, lower-cased, empty entries dropped.
      */
-    static Set<String> parseAllowedHosts(String raw) {
+    public static Set<String> parseAllowedHosts(String raw) {
         Set<String> hosts = new HashSet<>();
         if (raw == null) {
             return hosts;
