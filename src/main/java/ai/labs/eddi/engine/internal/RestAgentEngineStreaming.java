@@ -163,7 +163,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // its owner's identity. Runs BEFORE the sink is touched so the denial
         // surfaces as a plain 403 rather than an SSE 'error' event on a 200 stream.
         // ConversationService re-checks: this layer is defence in depth.
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        // Owner or admin, plus the agent USE re-check every turn gets (L4).
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         // The input cap, before the sink for the same reason: an oversized input is the
         // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200

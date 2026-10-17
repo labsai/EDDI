@@ -231,8 +231,9 @@ public class McpConversationTools {
         try {
             // Driving someone else's conversation is a write — gate it exactly like
             // the REST say() does, or a viewer could inject turns into another
-            // user's conversation and read the agent's reply.
-            conversationAccessGuard.requireConversationOwner(conversationId);
+            // user's conversation and read the agent's reply. Like say(), this also
+            // re-checks USE on the conversation's agent (L4).
+            conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
             var snapshot = sendMessageAndWait(conversationId, message);
 
@@ -297,7 +298,7 @@ public class McpConversationTools {
                 ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
             } else {
-                conversationAccessGuard.requireConversationOwner(convId);
+                conversationAccessGuard.requireConversationTurnAccess(convId);
             }
 
             // Step 2: Send the message

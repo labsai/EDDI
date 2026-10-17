@@ -325,6 +325,11 @@ Three properties are worth knowing:
   any colleague's live agent.
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
+- **Every turn of an existing conversation** re-checks `USE` on its agent — `say`,
+  its streaming twin, a rerun, MCP `talk_to_agent` and `chat_with_agent` on an
+  existing conversation. Revoking a share or making an agent private stops the
+  owner's *next message*, not only their next conversation. (Up to 6.5 only the
+  start was checked.)
 - **Schedules and group membership** are checked when they are *authored*:
   creating or re-pointing one at an agent requires `USE` on that agent — for a
   group, on every member, the moderator and the facilitator, and again when a
