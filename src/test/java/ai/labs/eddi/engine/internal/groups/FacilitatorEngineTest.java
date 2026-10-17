@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -546,6 +547,39 @@ class FacilitatorEngineTest {
             assertEquals(FacilitatorAction.Kind.NONE, checkpoint(boundaryCtx()).kind());
             assertFalse(gc.getRecruitedAgentIds().contains("specialist"));
             assertTrue(facilitationEntries().get(0).content().contains("limit"));
+        }
+
+        @Test
+        void recruit_agentTheOwnerMayNotUse_isRejected_beforeTheDeploymentCheck() throws Exception {
+            // M3: the same USE check RecruitAgentTool applies (M-A1), asked for the
+            // discussion's owner — and before the deployment lookup, so a refusal does not
+            // say whether the private agent is deployed.
+            List<String> asked = new ArrayList<>();
+            engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry, (agentId, principal) -> {
+                asked.add(agentId + "@" + principal);
+                return false;
+            });
+            gc.setUserId("owner-1");
+            stubReply("{\"move\": \"RECRUIT\", \"args\": {\"agentId\": \"private-agent\"}}");
+
+            assertEquals(FacilitatorAction.Kind.NONE, checkpoint(boundaryCtx()).kind());
+            assertTrue(gc.getRecruitedAgentIds().isEmpty());
+            assertTrue(gc.getDynamicMembers().isEmpty());
+            assertEquals(List.of("private-agent@owner-1"), asked);
+            assertTrue(facilitationEntries().get(0).content().contains("not available"));
+            verify(deploymentStore, never()).readDeploymentInfos(any());
+        }
+
+        @Test
+        void recruit_agentTheOwnerMayUse_isAdded() {
+            engine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
+                    (agentId, principal) -> true);
+            stubDeployed("specialist");
+            stubReply("{\"move\": \"RECRUIT\", \"args\": {\"agentId\": \"specialist\"}}");
+
+            checkpoint(boundaryCtx());
+
+            assertTrue(gc.getRecruitedAgentIds().contains("specialist"));
         }
     }
 

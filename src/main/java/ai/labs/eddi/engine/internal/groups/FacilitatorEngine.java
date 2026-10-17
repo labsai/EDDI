@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -111,13 +112,33 @@ public class FacilitatorEngine {
     private final Supplier<IDeploymentStore> deploymentStore;
     private final AuditLedgerService auditLedgerService;
     private final MeterRegistry meterRegistry;
+    /**
+     * {@code (agentId, principal) -> may that principal use that agent}, asked for
+     * the discussion's owner before a RECRUIT — the check {@code RecruitAgentTool}
+     * applies (M-A1). {@code null} skips it.
+     */
+    private final BiPredicate<String, String> useCheck;
 
     public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry) {
+        this(memberTurnExecutor, deploymentStore, auditLedgerService, meterRegistry, null);
+    }
+
+    /**
+     * @param useCheck
+     *            {@code (agentId, principal) -> boolean}: whether the discussion's
+     *            owner may use a recruit. A recruit speaks as that owner and at
+     *            their cost, so without this a facilitator model could pull any
+     *            deployed agent in any workspace into the discussion by id.
+     *            {@code null} skips the check.
+     */
+    public FacilitatorEngine(MemberTurnExecutor memberTurnExecutor, Supplier<IDeploymentStore> deploymentStore,
+            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, BiPredicate<String, String> useCheck) {
         this.memberTurnExecutor = memberTurnExecutor;
         this.deploymentStore = deploymentStore;
         this.auditLedgerService = auditLedgerService;
         this.meterRegistry = meterRegistry;
+        this.useCheck = useCheck;
     }
 
     /**
@@ -431,6 +452,13 @@ public class FacilitatorEngine {
                 : new AgentGroupConfiguration.DynamicAgentConfig().getMaxRecruitedAgentsPerDiscussion();
         if (gc.getRecruitedAgentIds().size() >= cap) {
             return "recruit limit of " + cap + " reached";
+        }
+        // Before the deployment check, as in RecruitAgentTool: the other order would
+        // tell the model whether an agent it may not touch is deployed.
+        if (useCheck != null && !useCheck.test(agentId, gc.getUserId())) {
+            LOGGER.warnf("Facilitator recruitment of '%s' into group conversation %s refused: the discussion owner has no access to it",
+                    LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(gc.getId()));
+            return "agent '" + agentId + "' is not available to this discussion's owner";
         }
         if (!isDeployedAndReady(agentId)) {
             return "agent '" + agentId + "' is not deployed and ready";

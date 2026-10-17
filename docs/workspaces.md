@@ -326,9 +326,12 @@ Three properties are worth knowing:
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
 - **Schedules and group membership** are checked when they are *authored*:
-  creating or re-pointing one at an agent requires `USE` on that agent. The fire
-  (or the group's member turn) runs system-initiated and is deliberately not
-  re-checked — the vet happens where the human is.
+  creating or re-pointing one at an agent requires `USE` on that agent — for a
+  group, on every member, the moderator and the facilitator, and again when a
+  group is duplicated. A facilitator's `RECRUIT` move is checked against the
+  discussion owner the way the `recruit_agent` tool is. The fire (or the group's
+  member turn) runs system-initiated and is deliberately not re-checked — the vet
+  happens where the human is.
 - **Workflow references** are checked when a workflow is created, updated or
   duplicated: every configuration a step names (`config.uri`, and each
   extension's — a parser's dictionaries, for instance) requires `VIEW`, and an
