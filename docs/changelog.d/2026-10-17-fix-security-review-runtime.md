@@ -60,3 +60,53 @@ L7, L8 and the small L12/L13 items. One commit per finding.
 [`UnauthenticatedRequestGuardTest.java`](../../src/test/java/ai/labs/eddi/engine/security/UnauthenticatedRequestGuardTest.java),
 [`security.md`](../security.md#running-without-authentication),
 [`configuration-reference.md`](../configuration-reference.md)
+
+- **L7 — runtime defaults.** Done:
+  - **HSTS.** The GCP provisioner's nginx sends `Strict-Transport-Security: max-age=31536000`
+    on both https servers (no `includeSubDomains` — sslip.io names are not ours), and EDDI
+    gains an opt-in `HstsHeaderFilter` (`eddi.security.hsts.enabled`, default `false`;
+    `eddi.security.hsts.max-age`). The Helm chart sets it when `ingress.enabled` and
+    `ingress.tls` are both set.
+  - **`/q/health` detail.** The cluster readiness check reports its details (mode, NATS
+    state, node id, member count, drain state, `degradedSince`) only with the new
+    `eddi.health.verbose=true`; by default the public endpoint carries the status alone.
+    `GET /administration/cluster/overview` still has everything, authenticated. (Gated in
+    `ClusterHealthCheck` itself, so the readiness data is gone, not merely moved behind a
+    path.) `agentsInErrorCount` stays — it is a count, documented as deliberately public.
+  - **Keycloak realm** (all three copies, kept in step): `passwordPolicy` (`length(12) and
+    maxLength(128) and notUsername and notEmail and passwordHistory(3)` — the installers'
+    generated one-time passwords are 32 characters), login and admin events on (30 days,
+    admin event bodies off), `eddi-mcp` with `consentRequired: true` and
+    `fullScopeAllowed: false` plus a `scopeMappings` entry for exactly the `eddi-*` roles,
+    seeded users `emailVerified: false`. Verified by importing the realm into
+    `quay.io/keycloak/keycloak:26.8.0` and generating an example `eddi-mcp` access token
+    (roles and `aud` still present). Realm import is one-shot: existing realms keep their
+    old settings (documented in security.md).
+  - **GCP nginx** returns 404 for `/realms/master/` (the provisioner reaches it on
+    localhost:8180, not through nginx).
+  - **Kubernetes.** The production NetworkPolicy's ingress-controller rule is pinned to the
+    `ingress-nginx` namespace by `kubernetes.io/metadata.name` instead of admitting a
+    controller-labelled pod from any namespace. MongoDB, PostgreSQL and Keycloak pods (Helm,
+    kustomize overlays, quickstart) run as their image's own uid from the start
+    (Mongo 999, Postgres alpine 70 — Helm `postgres.runAsUser` — Keycloak 1000) with
+    `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` and the RuntimeDefault
+    seccomp profile; both databases were started that way in Docker
+    (`--user … --cap-drop ALL --security-opt no-new-privileges`) to confirm their
+    entrypoints still initialise.
+  - `quarkus.swagger-ui.oauth2-redirect-url` is no longer pinned to
+    `http://localhost:7070`; Swagger UI derives it from the page's origin.
+  - `docker-compose.yml`'s MongoDB healthcheck no longer carries the root password on its
+    command line (`docker inspect`, host process list): `ping` needs no authentication.
+
+  Deliberately **not** done here: Keycloak `start-dev` and the `admin/admin` compose fallback
+  (the installers and the GCP provisioner already generate one; a production Keycloak mode
+  needs a database and hostname design of its own), EDDI connecting to MongoDB as root,
+  plaintext service-to-service traffic, NATS without auth and the unauthenticated MongoDB in
+  the kustomize quickstart, and `quarkus.log.console.level=DEBUG` (the handler level only;
+  categories stay at INFO).
+
+**Files:** [`HstsHeaderFilter.java`](../../src/main/java/ai/labs/eddi/engine/security/HstsHeaderFilter.java),
+[`ClusterHealthCheck.java`](../../src/main/java/ai/labs/eddi/engine/cluster/ClusterHealthCheck.java),
+[`eddi-realm.json`](../../keycloak/eddi-realm.json),
+[`provision-vm.sh`](../../gcp/provision-vm.sh),
+[`network-policy.yaml`](../../k8s/overlays/production/network-policy.yaml)

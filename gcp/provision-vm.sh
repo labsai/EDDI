@@ -606,6 +606,10 @@ server {
 
     client_max_body_size 50m;
 
+    # Browsers that have seen this origin once refuse plain http to it for a
+    # year. No includeSubDomains: sslip.io names are not ours to bind.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
     location / {
         proxy_pass         http://localhost:__EDDI_PORT__;
         proxy_http_version 1.1;
@@ -644,6 +648,19 @@ server {
     location = /admin {
         return 404;
     }
+    # The master realm's endpoints too — its token endpoint is where the bootstrap
+    # admin password is tried. Nothing public needs it; this provisioner talks to
+    # it over localhost:8180, not through nginx.
+    location ^~ /realms/master/ {
+        return 404;
+    }
+    location = /realms/master {
+        return 404;
+    }
+
+    # Browsers that have seen this origin once refuse plain http to it for a
+    # year. No includeSubDomains: sslip.io names are not ours to bind.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     location / {
         proxy_pass         http://localhost:8180;

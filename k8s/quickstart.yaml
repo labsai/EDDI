@@ -178,11 +178,23 @@ spec:
     spec:
       # MongoDB never calls the Kubernetes API.
       automountServiceAccountToken: false
+      # Runs as the image's mongodb user from the start (uid/gid 999), so the
+      # entrypoint has no chown or gosu step and the container can drop every
+      # capability. Existing data directories are already owned by 999.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongodb
           image: mongo:7.0.43
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 27017
               name: mongo

@@ -185,6 +185,14 @@ data:
   EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
   {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
+  {{- /*
+    An ingress with tls serves EDDI's public origin over https, so tell browsers
+    to keep it that way (HstsHeaderFilter). Without tls the origin is plain http
+    and the header would promise something the deployment does not keep.
+  */}}
+  {{- if and .Values.ingress.enabled .Values.ingress.tls }}
+  EDDI_SECURITY_HSTS_ENABLED: "true"
+  {{- end }}
   {{- with .Values.eddi.tracing.otlpEndpoint }}
   QUARKUS_OTEL_SDK_DISABLED: "false"
   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: {{ . | quote }}

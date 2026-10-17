@@ -161,6 +161,18 @@ allow-list to `eddi`, their service name on the compose network; add the name yo
 browse to when it is not `localhost`. The MCP endpoint's own `Origin` validation
 still applies on top.
 
+### Shipped realm hardening
+
+`keycloak/eddi-realm.json` (and its copies under `helm/eddi/files/` and
+`k8s/overlays/auth/`) sets a password policy (`length(12) and maxLength(128) and
+notUsername and notEmail and passwordHistory(3)`), records login and admin events
+(30-day retention, admin event bodies off), requires consent on `eddi-mcp` and limits
+that client's tokens to the `eddi-*` realm roles (`fullScopeAllowed: false` plus a scope
+mapping), and seeds its three accounts with `emailVerified: false` — their placeholder
+addresses were never verified, and the user directory resolves shares by verified e-mail.
+Realm import is one-shot: a realm imported before these settings keeps its old ones until
+you change them in the admin console or re-provision it.
+
 ### The Token Must Name the User
 
 EDDI files conversations, memories and approvals under the principal name.
@@ -775,6 +787,14 @@ if no TLS certificate is detected.
 
 Configure your reverse proxy to terminate TLS and forward traffic to EDDI
 on `localhost:7070`. This is the standard production pattern.
+
+**HSTS.** Once the public origin is https only, set
+`eddi.security.hsts.enabled=true` (`EDDI_SECURITY_HSTS_ENABLED`): every response then
+carries `Strict-Transport-Security: max-age=31536000` (`eddi.security.hsts.max-age`), so
+a browser that has seen the origin once refuses plain http to it afterwards. It is off by
+default because EDDI usually serves plain http behind the proxy; the Helm chart turns it
+on when `ingress.tls` is set, and the GCP provisioner's nginx sends it itself. Add
+`includeSubDomains`/`preload` at the proxy if the whole domain is https-only.
 
 ### Option 2: TLS Directly in Quarkus
 

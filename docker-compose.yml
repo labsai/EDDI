@@ -114,7 +114,10 @@ services:
     volumes:
       - mongodb-db:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "-u", "${MONGO_INITDB_ROOT_USERNAME:-eddi}", "-p", "${MONGO_INITDB_ROOT_PASSWORD:-changeme}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      # `ping` needs no authentication, so the probe carries no credentials: a
+      # password here is interpolated into the container's healthcheck command,
+      # where `docker inspect` and the host's process list show it.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 5
