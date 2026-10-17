@@ -854,6 +854,44 @@ public interface IngestionStateStoreContract {
                 "embedding it again settles it");
     }
 
+    // === store fingerprint ===
+
+    @Test
+    @DisplayName("a source without a recorded store fingerprint reads as unknown")
+    default void storeFingerprintIsAbsentUntilRecorded() {
+        // Every source whose state predates the fingerprint is in this state, and the
+        // pipeline treats it as "unknown → re-embed" for an in-memory store.
+        String run = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, run);
+
+        assertTrue(store().storeFingerprint(SOURCE).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a recorded store fingerprint is read back, replaced by the next, and kept per source")
+    default void storeFingerprintIsRecordedPerSource() {
+        store().recordStoreFingerprint(SOURCE, "store-epoch=a");
+        store().recordStoreFingerprint(OTHER_SOURCE, "store-epoch=x");
+        assertEquals(Optional.of("store-epoch=a"), store().storeFingerprint(SOURCE));
+
+        store().recordStoreFingerprint(SOURCE, "store-epoch=b");
+
+        assertEquals(Optional.of("store-epoch=b"), store().storeFingerprint(SOURCE));
+        assertEquals(Optional.of("store-epoch=x"), store().storeFingerprint(OTHER_SOURCE));
+    }
+
+    @Test
+    @DisplayName("purging a source forgets its store fingerprint")
+    default void purgeForgetsTheStoreFingerprint() {
+        store().recordStoreFingerprint(SOURCE, "store-epoch=a");
+        store().recordStoreFingerprint(OTHER_SOURCE, "store-epoch=x");
+
+        store().purgeSource(SOURCE);
+
+        assertTrue(store().storeFingerprint(SOURCE).isEmpty());
+        assertEquals(Optional.of("store-epoch=x"), store().storeFingerprint(OTHER_SOURCE));
+    }
+
     // === purge ===
 
     @Test

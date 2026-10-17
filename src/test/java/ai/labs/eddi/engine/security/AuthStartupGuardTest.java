@@ -66,6 +66,39 @@ class AuthStartupGuardTest {
     }
 
     @Test
+    @DisplayName("SSRF protection off → a [SECURITY] warning naming the flag and the allow-list")
+    void ssrfDiagnostic_off_warns() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL);
+        setField(guard, "ssrfProtectionEnabled", false);
+
+        String warning = guard.ssrfDiagnostic().orElseThrow();
+        assertTrue(warning.startsWith("[SECURITY]"), warning);
+        assertTrue(warning.contains("EDDI_SECURITY_SSRF_PROTECTION_ENABLED"), warning);
+        assertTrue(warning.contains("EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS"), warning);
+    }
+
+    @Test
+    @DisplayName("SSRF protection on → no warning")
+    void ssrfDiagnostic_on_silent() throws Exception {
+        AuthStartupGuard guard = createGuard(true, false, LaunchMode.NORMAL);
+        setField(guard, "ssrfProtectionEnabled", true);
+
+        assertTrue(guard.ssrfDiagnostic().isEmpty());
+    }
+
+    @Test
+    @DisplayName("The SSRF warning is checked in production only, not in dev or test")
+    void ssrfDiagnostic_productionOnly() throws Exception {
+        AuthStartupGuard prod = createGuard(true, false, LaunchMode.NORMAL);
+        prod.onStart(new StartupEvent());
+        verify(prod).ssrfDiagnostic();
+
+        AuthStartupGuard dev = createGuard(true, false, LaunchMode.DEVELOPMENT);
+        dev.onStart(new StartupEvent());
+        verify(dev, never()).ssrfDiagnostic();
+    }
+
+    @Test
     @DisplayName("Dev mode + OIDC disabled → no exception")
     void devModeOidcDisabled_shouldNotThrow() throws Exception {
         AuthStartupGuard guard = createGuard(false, false, LaunchMode.DEVELOPMENT);

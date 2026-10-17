@@ -63,7 +63,7 @@ class ToolLoopRunnerGuardrailWiringTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
@@ -198,10 +198,10 @@ class ToolLoopRunnerGuardrailWiringTest {
 
         var budgets = new ArrayList<Integer>();
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
-            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(2);
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(3);
             budgets.add(applied == null ? null : applied.getDefaultMaxChars());
-            return invocation.getArgument(1);
+            return invocation.getArgument(2);
         });
         runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));

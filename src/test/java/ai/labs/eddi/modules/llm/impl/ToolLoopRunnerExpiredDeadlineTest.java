@@ -39,7 +39,7 @@ class ToolLoopRunnerExpiredDeadlineTest {
     void expiredDeadlineSkipsTheTool() {
         var service = mock(ToolExecutionService.class);
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         var runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
 
         var clock = new MutableTestClock();

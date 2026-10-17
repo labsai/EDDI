@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -48,15 +49,18 @@ public class RestRagStore implements IRestRagStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
     private final RagSourceIngestionService sourceIngestionService;
+    private final EmbeddingStoreFactory embeddingStoreFactory;
     private final KnowledgeBaseStorageGuard storageGuard;
 
     @Inject
     public RestRagStore(IRagStore ragStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            ResourceAccessGuard resourceAccessGuard, RagSourceIngestionService sourceIngestionService) {
+            ResourceAccessGuard resourceAccessGuard, RagSourceIngestionService sourceIngestionService,
+            EmbeddingStoreFactory embeddingStoreFactory) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, ragStore, documentDescriptorStore, resourceAccessGuard);
         this.ragStore = ragStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.sourceIngestionService = sourceIngestionService;
+        this.embeddingStoreFactory = embeddingStoreFactory;
         // Built here from collaborators this class already has, rather than injected,
         // so every way of constructing it applies the same storage rules.
         this.storageGuard = new KnowledgeBaseStorageGuard(ragStore, documentDescriptorStore, resourceAccessGuard);
@@ -94,12 +98,35 @@ public class RestRagStore implements IRestRagStore {
         storageGuard.prepareUpdate(id, previous, ragConfiguration);
         Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
+        releaseSupersededInMemoryStore(id, previous, ragConfiguration);
         forgetIngestionStateOnMove(id, previous, ragConfiguration);
         // Before the schedules, and only once the write succeeded: a source that is
         // gone from the document must not leave its documents answering questions.
         discardRemovedSources(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
         return response;
+    }
+
+    /**
+     * Frees the in-memory vector store an update leaves behind — moved to another
+     * key (a rename in the 6.5.0 name layout, a switch to {@code storeNamespace:
+     * "id"}), to another store type, or to another embedding model. Its documents
+     * are unreachable or meaningless from now on, and an in-memory store is never
+     * evicted on its own, so it would otherwise hold memory, and count against the
+     * deployment's in-memory segment cap, until the next restart. An update that
+     * keeps the store's key and the embedding configuration keeps the data.
+     * <p>
+     * Unlike the persistent stores, nothing is lost that the move rule below
+     * protects: an in-memory store does not survive a restart in any case, and the
+     * sources re-embed into the store the knowledge base now addresses.
+     */
+    private void releaseSupersededInMemoryStore(String id, RagConfiguration previous, RagConfiguration updated) {
+        try {
+            embeddingStoreFactory.dropSupersededInMemoryStore(id, previous, updated);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not release the in-memory vector store knowledge base %s no longer uses",
+                    LogSanitizer.sanitize(id));
+        }
     }
 
     /**
@@ -463,6 +490,14 @@ public class RestRagStore implements IRestRagStore {
                 sourceIngestionService.removeSchedules(id, deleted);
             } catch (RuntimeException e) {
                 LOGGER.errorf(e, "Could not remove ingestion schedules for knowledge base %s",
+                        LogSanitizer.sanitize(id));
+            }
+            // Same rule as the schedules: deleting an old version of a knowledge base
+            // that is still live at a newer one must not empty its in-memory store.
+            try {
+                embeddingStoreFactory.dropInMemoryStore(id, deleted);
+            } catch (RuntimeException e) {
+                LOGGER.errorf(e, "Could not release the in-memory vector store of deleted knowledge base %s",
                         LogSanitizer.sanitize(id));
             }
         }
