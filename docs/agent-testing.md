@@ -147,6 +147,8 @@ the runner with a catastrophically backtracking pattern.
 Checked when a suite is saved (400 naming the field): at most 200 cases, 50 turns
 per case, 20 repetitions, 500 mocks, and 2,000 turns per run in total (cases ×
 repetitions × turns). Invalid regexes, unknown modes and states are rejected too.
+Also: `maxCostPerRun` between 0 and 100 (USD), at most 20,000 characters per turn
+`input`, and `turnTimeoutSeconds` between 1 and 900.
 
 ## Tool mocking
 
@@ -182,6 +184,9 @@ Exceptions:
   suite says; in a live suite they are answered NOT_EXECUTED without failing the
   case.
 - `discover_tools` (LAZY tool loading) is not an outside call and always runs.
+- A tool call made on the start turn (`CONVERSATION_START`) has no turn result of
+  its own; an unmocked one still fails the attempt and is listed in the attempt's
+  `unmockedToolCalls`.
 - Mocked calls cost $0.
 - Listing an MCP server's tools to build an LLM's tool set still happens in a test
   (it reads a schema, it does not call a tool).

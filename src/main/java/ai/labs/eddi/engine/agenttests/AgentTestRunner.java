@@ -138,6 +138,15 @@ public class AgentTestRunner {
             runStore.update(finished);
         } catch (Exception e) {
             LOGGER.errorf(e, "Could not store the result of agent test run %s", sanitize(started.id()));
+            // Never leave a polling client waiting on RUNNING: store a terminal record
+            // without the per-case detail (an oversized document is the likely cause).
+            finished = finish(ctx, startNanos, AgentTestRun.Status.ERROR, List.of(), 0,
+                    "The run finished but its result could not be stored: " + e.getClass().getSimpleName());
+            try {
+                runStore.update(finished);
+            } catch (Exception fallback) {
+                LOGGER.errorf(fallback, "Could not store the fallback result of agent test run %s", sanitize(started.id()));
+            }
         }
         audit(finished);
         try {

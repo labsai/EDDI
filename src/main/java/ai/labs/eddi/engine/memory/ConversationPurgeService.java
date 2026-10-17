@@ -84,7 +84,10 @@ public class ConversationPurgeService {
         } catch (ResourceNotFoundException e) {
             return; // already gone
         }
-        String userId = snapshot != null ? snapshot.getUserId() : null;
+        if (snapshot == null) {
+            return; // the store answers null for a conversation that does not exist
+        }
+        String userId = snapshot.getUserId();
         String expectedPrefix = AgentTestConversations.USER_ID_PREFIX + runId + ":";
         if (userId == null || !userId.startsWith(expectedPrefix)) {
             throw new PurgeRefusedException("Conversation " + sanitize(conversationId) + " is not a conversation of agent test run "

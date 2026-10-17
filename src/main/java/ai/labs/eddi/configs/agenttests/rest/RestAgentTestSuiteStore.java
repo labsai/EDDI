@@ -18,8 +18,6 @@ import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 
-import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
-
 /**
  * REST implementation for agent test suite CRUD.
  *
@@ -44,12 +42,9 @@ public class RestAgentTestSuiteStore implements IRestAgentTestSuiteStore {
 
     @Override
     public AgentTestSuite readTestSuite(String id, Integer version) {
-        restVersionInfo.requireViewAccess(id);
-        try {
-            return suiteStore.read(id, version);
-        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
-            throw sneakyThrow(e);
-        }
+        // The shared read: view access, null/negative checks, and version 0 meaning
+        // "current" exactly as update and delete already treat it.
+        return restVersionInfo.read(id, version);
     }
 
     @Override

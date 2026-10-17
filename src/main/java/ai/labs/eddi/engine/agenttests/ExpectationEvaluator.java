@@ -58,13 +58,13 @@ public final class ExpectationEvaluator {
         }
 
         if (expect.outputContains() != null && !observed.output().contains(expect.outputContains())) {
-            failures.add(new ExpectationFailure("outputContains", expect.outputContains(), observed.output()));
+            failures.add(new ExpectationFailure("outputContains", expect.outputContains(), clip(observed.output())));
         }
         if (expect.outputMatches() != null) {
             var result = BoundedRegex.find(expect.outputMatches(), observed.output());
             if (result != BoundedRegex.Result.MATCH) {
                 failures.add(new ExpectationFailure("outputMatches", expect.outputMatches(),
-                        result == BoundedRegex.Result.TIMED_OUT ? "<regex timed out>" : observed.output()));
+                        result == BoundedRegex.Result.TIMED_OUT ? "<regex timed out>" : clip(observed.output())));
             }
         }
 
@@ -96,6 +96,16 @@ public final class ExpectationEvaluator {
             failures.add(new ExpectationFailure("conversationState", expect.conversationState(), observed.conversationState()));
         }
         return failures;
+    }
+
+    /**
+     * The output as a failure reports it: cut like the turn's own {@code output},
+     * so every failed turn of every repetition does not copy a full answer into the
+     * single run document.
+     */
+    static String clip(String text) {
+        int max = AgentTestRunner.MAX_OUTPUT_CHARS;
+        return text != null && text.length() > max ? text.substring(0, max) + "…" : text;
     }
 
     private static void checkProperty(String name, PropertyExpectation condition, Map<String, Object> properties,

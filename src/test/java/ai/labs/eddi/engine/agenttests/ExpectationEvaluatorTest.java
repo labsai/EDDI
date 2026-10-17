@@ -187,4 +187,19 @@ class ExpectationEvaluatorTest {
         assertFalse(ExpectationEvaluator.argumentsContain("{\"a\":{\"b\":1}}", Map.of("a", Map.of("b", 2))));
         assertFalse(ExpectationEvaluator.argumentsContain("not json", Map.of("a", 1)));
     }
+
+    @Test
+    @DisplayName("a failed output expectation records the output cut like the turn's own, not in full")
+    void failedOutputIsClipped() {
+        String longOutput = "x".repeat(AgentTestRunner.MAX_OUTPUT_CHARS + 500);
+        var observation = new TurnObservation(List.of(), Map.of(), longOutput, List.of(), 0, "READY", Set.of());
+
+        var failures = ExpectationEvaluator.evaluate(expect(null, null, null, "absent text", "^y", null, null, null, null, null),
+                observation);
+
+        assertEquals(2, failures.size());
+        for (var failure : failures) {
+            assertEquals(AgentTestRunner.MAX_OUTPUT_CHARS + 1, String.valueOf(failure.actual()).length(), failure.expectation());
+        }
+    }
 }

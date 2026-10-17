@@ -125,4 +125,13 @@ class ConversationPurgeServiceTest {
         verify(conversationService).endConversation(CONVERSATION_ID, "system:admin-end");
         verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
+
+    @Test
+    @DisplayName("the store's null for a missing conversation means already gone, not a refusal")
+    void aNullSnapshotIsANoOp() throws Exception {
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(null);
+
+        assertDoesNotThrow(() -> service.purgeAgentTestConversation(CONVERSATION_ID, RUN_ID));
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+    }
 }

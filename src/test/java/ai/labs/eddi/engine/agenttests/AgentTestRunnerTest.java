@@ -298,4 +298,19 @@ class AgentTestRunnerTest {
 
         assertEquals(AgentTestRun.Status.PASSED, run.status(), () -> String.valueOf(run.cases()));
     }
+
+    @Test
+    @DisplayName("if the result cannot be stored, a terminal ERROR record replaces RUNNING")
+    void storeFailureLeavesATerminalRecord() throws Exception {
+        doThrow(new IllegalStateException("document too large")).doNothing().when(runStore).update(any(AgentTestRun.class));
+
+        runner(engine(), 4).run(started(false), suite(null, null, happyPath()));
+
+        var captor = ArgumentCaptor.forClass(AgentTestRun.class);
+        verify(runStore, times(2)).update(captor.capture());
+        AgentTestRun fallback = captor.getAllValues().get(1);
+        assertEquals(AgentTestRun.Status.ERROR, fallback.status());
+        assertTrue(fallback.cases().isEmpty(), "the per-case detail is dropped");
+        assertTrue(fallback.error().contains("could not be stored"), fallback.error());
+    }
 }
