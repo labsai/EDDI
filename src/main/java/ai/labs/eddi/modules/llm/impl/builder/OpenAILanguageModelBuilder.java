@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -46,6 +47,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MODEL_NAME = "modelName";
@@ -107,12 +116,12 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
             Map<String, String> customQueryParams, Map<String, Object> customParameters) {
     }
 
-    private static Settings read(Map<String, String> p, Map<String, Object> providerCustomParameters) {
+    private static Settings read(Map<String, String> p, Map<String, Object> providerCustomParameters, OutboundTargetPolicy targetPolicy) {
         String baseUrl = null;
         if (!isNullOrEmpty(p.get(KEY_BASE_URL))) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(p.get(KEY_BASE_URL));
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(p.get(KEY_BASE_URL));
             baseUrl = p.get(KEY_BASE_URL);
         }
 
@@ -166,7 +175,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
      * {@link #build(Map, Map)}.
      */
     ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters, HttpClientBuilder httpClientBuilder) {
-        Settings s = read(parameters, customParameters);
+        Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = OpenAiChatModel.builder().httpClientBuilder(httpClientBuilder);
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
@@ -241,7 +250,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
-        Settings s = read(parameters, customParameters);
+        Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = OpenAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());

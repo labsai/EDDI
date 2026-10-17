@@ -335,7 +335,8 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     @Override
-    public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException {
+    public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents, List<String> allowedHosts)
+            throws SecretProviderException {
         ensureAvailable();
         storeCounter.increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -344,15 +345,20 @@ public class VaultSecretProvider implements ISecretProvider {
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
             Instant now = Instant.now();
+            if (existingOpt.isEmpty()) {
+                requireExplicitGrant(reference, allowedAgents);
+            }
 
-            // A null grant or description is passed through as null — "not supplied" —
-            // rather than defaulted here. The store keeps what the row already has on an
-            // update and writes the defaults only on an insert. Defaulting here reset a
-            // narrowed grant to ["*"] and wiped the description on every value rotation
-            // that did not restate them, and the whole-row write also reverted any grant
-            // edit that landed between the read above and the write below.
-            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, existingOpt.map(EncryptedSecret::getId).orElse(null),
-                    existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now), existingOpt.isPresent() ? now : null);
+            // A null grant, host list or description is passed through as null — "not
+            // supplied" — rather than defaulted here. The store keeps what the row
+            // already has on an update and writes the defaults only on an insert.
+            // Defaulting here reset a narrowed grant to ["*"] and wiped the description
+            // on every value rotation that did not restate them, and the whole-row write
+            // also reverted any grant edit that landed between the read above and the
+            // write below.
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, allowedHosts,
+                    existingOpt.map(EncryptedSecret::getId).orElse(null), existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now),
+                    existingOpt.isPresent() ? now : null);
 
             persistence.upsertSecret(secret);
             LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
@@ -377,10 +383,10 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             // No findSecret first: the existence check IS the insert. A read here would
             // reopen the window this method exists to close.
-            // An insert, so a missing grant takes the documented default here — the
-            // pass-through in store() exists to protect a row that already has one.
-            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents != null ? allowedAgents : List.of("*"), null,
-                    Instant.now(), null);
+            // Always an insert, so the grant is required outright — the pass-through
+            // in store() exists to protect a row that already has one.
+            requireExplicitGrant(reference, allowedAgents);
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, null, null, Instant.now(), null);
 
             boolean created = persistence.insertSecretIfAbsent(secret);
             if (created) {
@@ -401,11 +407,25 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     /**
+     * A new row needs a grant the caller chose. The persistence layer still carries
+     * a {@code ["*"]} default for rows written before grants existed, but no code
+     * path is allowed to reach it: the wildcard is an access-control decision, and
+     * every caller — the REST store, the setup wizard, auto-vaulting — writes it
+     * out ({@code List.of("*")}) where the reason can be read next to it.
+     */
+    private static void requireExplicitGrant(SecretReference reference, List<String> allowedAgents) {
+        if (allowedAgents == null) {
+            throw new IllegalArgumentException("Creating " + describe(reference) + " needs an allowedAgents list: the agent ids that may use "
+                    + "it, or [\"*\"] to say explicitly that every agent may. No default is applied.");
+        }
+    }
+
+    /**
      * Seals {@code plaintext} under the tenant's active DEK into the row both write
      * paths persist.
      */
-    private EncryptedSecret seal(SecretReference reference, String plaintext, String description, List<String> allowedAgents, String existingId,
-                                 Instant createdAt, Instant lastRotatedAt)
+    private EncryptedSecret seal(SecretReference reference, String plaintext, String description, List<String> allowedAgents,
+                                 List<String> allowedHosts, String existingId, Instant createdAt, Instant lastRotatedAt)
             throws SecretProviderException, EnvelopeCrypto.CryptoException {
         ActiveDek dek = activeDek(reference.tenantId());
 
@@ -421,8 +441,33 @@ public class VaultSecretProvider implements ISecretProvider {
         String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
 
         return new EncryptedSecret(existingId != null ? existingId : UUID.randomUUID().toString(), reference.tenantId(), reference.keyName(),
-                result.ciphertext(), result.iv(), dek.dekId(), checksum, description, allowedAgents,
+                result.ciphertext(), result.iv(), dek.dekId(), checksum, description, allowedAgents, allowedHosts,
                 createdAt, null, lastRotatedAt);
+    }
+
+    @Override
+    public SecretMetadata updateAllowedHosts(SecretReference reference, List<String> allowedHosts)
+            throws SecretNotFoundException, SecretProviderException {
+        ensureAvailable();
+        try {
+            List<String> hosts = allowedHosts == null ? List.of() : List.copyOf(allowedHosts);
+            // No DEK, no read of the value: the signature cannot touch it, as with
+            // updateGrant. The row is read first only to answer with its other fields.
+            var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
+            if (existingOpt.isEmpty() || !persistence.updateSecretAllowedHosts(reference.tenantId(), reference.keyName(), hosts)) {
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
+            }
+            EncryptedSecret existing = existingOpt.get();
+            // Hosts are not secrets; both lists are logged so a change in where a key
+            // may be sent can be reconstructed afterwards.
+            LOGGER.infof("Secret allowed hosts updated: %s (%s -> %s)", describe(reference), sanitize(String.valueOf(existing.getAllowedHosts())),
+                    sanitize(String.valueOf(hosts)));
+            return new SecretMetadata(existing.getTenantId(), existing.getKeyName(), existing.getCreatedAt(), existing.getLastAccessedAt(),
+                    existing.getLastRotatedAt(), existing.getChecksum(), existing.getDescription(), existing.getAllowedAgents(), hosts);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while updating the allowed hosts of " + describe(reference), e);
+        }
     }
 
     @Override
@@ -491,7 +536,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // are carried through unchanged — visible proof, in the response the
             // operator sees, that a grant edit did not touch the value.
             return new SecretMetadata(existing.getTenantId(), existing.getKeyName(), existing.getCreatedAt(), existing.getLastAccessedAt(),
-                    existing.getLastRotatedAt(), existing.getChecksum(), effectiveDescription, grant);
+                    existing.getLastRotatedAt(), existing.getChecksum(), effectiveDescription, grant, existing.getAllowedHosts());
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while updating the grant of " + describe(reference), e);
@@ -531,7 +576,7 @@ public class VaultSecretProvider implements ISecretProvider {
             }
             EncryptedSecret s = secretOpt.get();
             return new SecretMetadata(s.getTenantId(), s.getKeyName(), s.getCreatedAt(), s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(),
-                    s.getDescription(), s.getAllowedAgents());
+                    s.getDescription(), s.getAllowedAgents(), s.getAllowedHosts());
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while reading metadata for " + describe(reference),
@@ -544,7 +589,8 @@ public class VaultSecretProvider implements ISecretProvider {
         ensureAvailable();
         try {
             return persistence.listSecretsByTenant(tenantId).stream().map(s -> new SecretMetadata(s.getTenantId(), s.getKeyName(), s.getCreatedAt(),
-                    s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(), s.getDescription(), s.getAllowedAgents())).toList();
+                    s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(), s.getDescription(), s.getAllowedAgents(), s.getAllowedHosts()))
+                    .toList();
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while listing secrets for tenant " + sanitize(tenantId), e);

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -99,7 +100,7 @@ class ChatModelRegistryTest {
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
 
         Map<String, Provider<ILanguageModelBuilder>> uniqueBuilders = new HashMap<>();
         uniqueBuilders.put("openai", () -> new ILanguageModelBuilder() {
@@ -124,7 +125,7 @@ class ChatModelRegistryTest {
                 };
             }
         });
-        uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver, null);
+        uniqueRegistry = new ChatModelRegistry(uniqueBuilders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
     }
 
     /**
@@ -184,7 +185,7 @@ class ChatModelRegistryTest {
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        return new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+        return new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
     }
 
     @Nested
@@ -837,7 +838,7 @@ class ChatModelRegistryTest {
             when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
             GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
             when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
         }
 
         @Test

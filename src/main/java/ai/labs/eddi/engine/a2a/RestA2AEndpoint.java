@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.MethodRef;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.security.PermitAll;
@@ -105,6 +106,7 @@ public class RestA2AEndpoint {
     private final AgentCardService agentCardService;
     private final A2ATaskHandler taskHandler;
     private final CapabilityRegistryService capabilityRegistryService;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final boolean a2aEnabled;
     private final boolean capabilitiesPublic;
     private final ObjectMapper objectMapper;
@@ -120,13 +122,14 @@ public class RestA2AEndpoint {
 
     @Inject
     public RestA2AEndpoint(AgentCardService agentCardService, A2ATaskHandler taskHandler,
-            CapabilityRegistryService capabilityRegistryService,
+            CapabilityRegistryService capabilityRegistryService, ResourceAccessGuard resourceAccessGuard,
             @ConfigProperty(name = "eddi.a2a.enabled", defaultValue = "true") boolean a2aEnabled,
             @ConfigProperty(name = "eddi.a2a.capabilities.public", defaultValue = "false") boolean capabilitiesPublic,
             ObjectMapper objectMapper, MeterRegistry meterRegistry) {
         this.agentCardService = agentCardService;
         this.taskHandler = taskHandler;
         this.capabilityRegistryService = capabilityRegistryService;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.a2aEnabled = a2aEnabled;
         this.capabilitiesPublic = capabilitiesPublic;
         this.objectMapper = objectMapper;
@@ -337,6 +340,17 @@ public class RestA2AEndpoint {
             return jsonRpcError(request.id(), A2AModels.ERROR_VERSION_NOT_SUPPORTED,
                     "A2A protocol version not supported (supported: " + A2AModels.PROTOCOL_VERSION + ", "
                             + A2AModels.LEGACY_PROTOCOL_VERSION + ")");
+        }
+
+        if (method.operation() == A2AWireFormat.Operation.SEND || method.operation() == A2AWireFormat.Operation.STREAM) {
+            // The per-agent USE gate that POST /agents/{id}/start and the /v1 surface
+            // apply: under enforced workspaces a role alone does not entitle a peer to
+            // converse with every agent. Outside the try on purpose — the catch-all
+            // below would otherwise turn the 403 into a JSON-RPC "internal error" and
+            // the refusal would be indistinguishable from a crash. tasks/get and
+            // tasks/cancel stay principal-scoped: they only ever reach a task this
+            // peer created, which it could only do after passing this gate.
+            resourceAccessGuard.requireAgentUseAccess(agentId);
         }
 
         try {

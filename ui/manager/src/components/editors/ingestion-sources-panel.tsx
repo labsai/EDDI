@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertCircle,
-  CheckCircle2,
   ChevronDown,
   Clock,
   Eye,
@@ -24,9 +23,15 @@ import {
   useIngestionRuns,
   usePreviewIngestionSource,
   usePurgeIngestionSource,
+  useRefreshAfterRun,
   useRunIngestionSource,
+  useSourceFiles,
 } from "@/hooks/use-ingestion-sources";
 import { IngestionFilesPanel } from "@/components/editors/ingestion-files-panel";
+import { RunHistory, RunProgress } from "@/components/editors/ingestion-run-history";
+import { CronField, ScheduleStatus } from "@/components/editors/ingestion-schedule";
+import { SourceContents } from "@/components/editors/ingestion-source-contents";
+import { describeCron } from "@/lib/ingestion-schedule";
 import type { IngestionReport, IngestionSource } from "@/lib/api/ingestion-sources";
 
 export interface IngestionSourcesPanelProps {
@@ -43,6 +48,9 @@ export interface IngestionSourcesPanelProps {
    */
   hasUnsavedChanges?: boolean;
 }
+
+/** The server's default `settings.timeBudgetMinutes` (`IngestionSource.Settings`). */
+const DEFAULT_TIME_BUDGET_MINUTES = 10;
 
 const DEFAULT_SOURCE: IngestionSource = {
   name: "",
@@ -228,7 +236,18 @@ function SourceCard({
   const purgeMutation = usePurgeIngestionSource(kbId, version);
 
   const activeRun = runs.data?.find((run) => run.status === "RUNNING");
+  // The files an upload source holds are what its run will read, so their count is
+  // the progress bar's total. The files panel's own query, observed only while a
+  // run is in flight: observing it always would refetch the list every time the
+  // card is opened.
+  const sourceFiles = useSourceFiles(kbId, source.id, version, isSaved && isUpload && Boolean(activeRun));
   const lastRun = runs.data?.[0];
+  useRefreshAfterRun(kbId, source.id, version, lastRun ? `${lastRun.runId}:${lastRun.status}` : undefined);
+  // The newest finished run that covered the whole source: what it saw is the
+  // best estimate of what this one will.
+  const previousRun = runs.data?.find(
+    (run) => run.status === "COMPLETED" && run.stopReason !== "CANCELLED",
+  );
 
   return (
     <div className="rounded-lg border border-border bg-card/50 overflow-hidden" data-testid={testId}>
@@ -252,9 +271,9 @@ function SourceCard({
             <Badge variant="secondary">{t("ragEditor.sources.disabled", "Disabled")}</Badge>
           )}
           {source.cron && (
-            <Badge variant="outline" className="gap-1">
+            <Badge variant="outline" className="gap-1" title={source.cron} data-testid={`${testId}-cron-badge`}>
               <Clock className="h-3 w-3" />
-              {source.cron}
+              {describeCron(t, source.cron)}
             </Badge>
           )}
           {activeRun && (
@@ -336,25 +355,20 @@ function SourceCard({
                 data-testid={`${testId}-name`}
               />
             </Field>
-            <Field
-              label={t("ragEditor.sources.cron", "Schedule (cron)")}
+            <CronField
+              value={source.cron}
+              onChange={(cron) => onChange({ cron })}
+              disabled={readOnly}
               hint={
                 isUpload
                   ? t(
                       "ragEditor.sources.cronHintUpload",
                       "Leave empty — uploaded files are read when you run the source",
                     )
-                  : t("ragEditor.sources.cronHint", "Leave empty to run only by hand")
+                  : undefined
               }
-            >
-              <Input
-                value={source.cron ?? ""}
-                onChange={(e) => onChange({ cron: e.target.value || undefined })}
-                disabled={readOnly}
-                placeholder="0 2 * * *"
-                data-testid={`${testId}-cron`}
-              />
-            </Field>
+              testId={testId}
+            />
             {!isUpload && (
               <>
                 <Field label={t("ragEditor.sources.startUrl", "Start URL")}>
@@ -628,9 +642,9 @@ function SourceCard({
               {runMutation.isError && (
                 <StatusLine
                   tone="error"
-                  text={t(
-                    "ragEditor.sources.runFailed",
-                    "Could not start the run. A run may already be in flight.",
+                  text={withServerReason(
+                    t("ragEditor.sources.runFailed", "Could not start the run. A run may already be in flight."),
+                    runMutation.error,
                   )}
                   testId={`${testId}-run-error`}
                 />
@@ -639,7 +653,10 @@ function SourceCard({
               {purgeMutation.isError && (
                 <StatusLine
                   tone="error"
-                  text={t("ragEditor.sources.purgeFailed", "Could not purge the ingestion state.")}
+                  text={withServerReason(
+                    t("ragEditor.sources.purgeFailed", "Could not purge the ingestion state."),
+                    purgeMutation.error,
+                  )}
                   testId={`${testId}-purge-error`}
                 />
               )}
@@ -647,7 +664,10 @@ function SourceCard({
               {previewMutation.isError && (
                 <StatusLine
                   tone="error"
-                  text={t("ragEditor.sources.previewFailed", "Could not preview this source.")}
+                  text={withServerReason(
+                    t("ragEditor.sources.previewFailed", "Could not preview this source."),
+                    previewMutation.error,
+                  )}
                   testId={`${testId}-preview-error`}
                 />
               )}
@@ -667,10 +687,36 @@ function SourceCard({
                 <PreviewResult report={preview} onDismiss={() => setPreview(null)} testId={testId} />
               )}
 
-              <RunHistory
-                runs={runs.data ?? []}
-                isLoading={runs.isLoading}
-                lastRun={lastRun}
+              {activeRun && (
+                <RunProgress
+                  run={activeRun}
+                  expectedTotal={isUpload ? sourceFiles.data?.length : previousRun?.documentsSeen}
+                  expectedTotalIsEstimate={!isUpload}
+                  timeBudgetMinutes={source.settings?.timeBudgetMinutes ?? DEFAULT_TIME_BUDGET_MINUTES}
+                  testId={testId}
+                />
+              )}
+
+              {lastRun?.error && lastRun.status !== "RUNNING" && (
+                <StatusLine tone="error" text={lastRun.error} testId={`${testId}-last-error`} />
+              )}
+
+              <ScheduleStatus
+                kbId={kbId as string}
+                sourceId={source.id as string}
+                version={version}
+                hasCron={Boolean(source.cron?.trim()) && !hasUnsavedChanges}
+                enabled={source.enabled !== false}
+                isRunning={Boolean(activeRun)}
+                testId={testId}
+              />
+
+              <RunHistory runs={runs.data ?? []} isLoading={runs.isLoading} testId={testId} />
+
+              <SourceContents
+                kbId={kbId as string}
+                sourceId={source.id as string}
+                version={version}
                 testId={testId}
               />
             </>
@@ -784,68 +830,6 @@ function PreviewResult({
           )}
           testId={`${testId}-partial`}
         />
-      )}
-    </div>
-  );
-}
-
-function RunHistory({
-  runs,
-  isLoading,
-  lastRun,
-  testId,
-}: {
-  runs: { runId: string; status: string; startedAt?: string; documentsIngested: number; documentsUnchanged: number; documentsTombstoned: number; error?: string | null }[];
-  isLoading: boolean;
-  lastRun?: { status: string; error?: string | null };
-  testId: string;
-}) {
-  const { t } = useTranslation();
-
-  if (isLoading) {
-    return (
-      <p className="text-xs text-muted-foreground">{t("common.loading", "Loading…")}</p>
-    );
-  }
-  if (runs.length === 0) {
-    return (
-      <p className="text-xs italic text-muted-foreground" data-testid={`${testId}-no-runs`}>
-        {t("ragEditor.sources.noRuns", "This source has not run yet.")}
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-1" data-testid={`${testId}-runs`}>
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {t("ragEditor.sources.history", "Recent runs")}
-      </span>
-      {runs.slice(0, 5).map((run) => (
-        <div
-          key={run.runId}
-          className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-xs"
-          data-testid={`${testId}-run-${run.runId}`}
-        >
-          {run.status === "COMPLETED" ? (
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          ) : run.status === "RUNNING" ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-          ) : (
-            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
-          )}
-          <span className="text-muted-foreground">
-            {run.startedAt ? new Date(run.startedAt).toLocaleString() : "—"}
-          </span>
-          <span className="ms-auto text-muted-foreground">
-            {t("ragEditor.sources.runSummary", "{{ingested}} ingested · {{unchanged}} unchanged", {
-              ingested: run.documentsIngested,
-              unchanged: run.documentsUnchanged,
-            })}
-          </span>
-        </div>
-      ))}
-      {lastRun?.error && (
-        <StatusLine tone="error" text={lastRun.error} testId={`${testId}-last-error`} />
       )}
     </div>
   );
@@ -1035,4 +1019,14 @@ function megabytesOf(bytes: number | undefined): number | undefined {
 function bytesFromMegabytes(value: string): number | undefined {
   const megabytes = numberOrUndefined(value);
   return megabytes === undefined ? undefined : megabytes * 1024 * 1024;
+}
+
+/**
+ * A failure line that also says what the server answered. The generic sentence
+ * alone hid the real cause — "this source is disabled", a 429 from a busy
+ * preview, a database fault — behind "a run may already be in flight".
+ */
+function withServerReason(summary: string, error: unknown): string {
+  const reason = error instanceof Error ? error.message.trim() : "";
+  return reason && reason !== summary ? `${summary} ${reason}` : summary;
 }

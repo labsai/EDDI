@@ -162,9 +162,21 @@ class AutoApproveCopilotPolicyTest {
                 "ui/chat/package-lock.json", "ui/manager/scripts/check-i18n.mjs",
                 "ui/manager/vitest.config.ts", "ui/chat/vite.config.ts", "ui/manager/playwright.config.ts",
                 "ui/chat/eslint.config.js", "ui/manager/tsconfig.app.json", "ui/manager/stryker.config.json",
-                ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore");
+                ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore",
+                // The security-critical code: the guards, the vault, the outbound HTTP
+                // client, stored connections and the shipped defaults.
+                "src/main/java/ai/labs/eddi/engine/security/AuthStartupGuard.java",
+                "src/main/java/ai/labs/eddi/engine/security/CallerIdentityResolver.java",
+                "src/main/java/ai/labs/eddi/secrets/VaultSecretProvider.java",
+                "src/main/java/ai/labs/eddi/engine/httpclient/outbound/OutboundHttp.java",
+                "src/main/java/ai/labs/eddi/connections/ConnectionParameterGuard.java",
+                "src/main/resources/application.properties",
+                "src/main/java/ai/labs/eddi/engine/hitl/HitlAccessGuard.java",
+                "src/main/java/ai/labs/eddi/configs/rag/rest/KnowledgeBaseStorageGuard.java");
         List<String> ordinaryPaths = List.of(
-                "src/main/java/ai/labs/eddi/engine/Foo.java", "src/main/resources/application.properties",
+                "src/main/java/ai/labs/eddi/engine/Foo.java", "src/main/resources/application-test.properties",
+                "src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java",
+                "src/test/java/ai/labs/eddi/engine/security/CallerIdentityResolverTest.java",
                 "docs/changelog.d/2026-10-02-x.md", "docs/docker-compose-guide.md", "README.md",
                 "ui/manager/src/App.tsx", "ui/manager/src/lib/package.json", "ui/chat/src/main.tsx",
                 "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java",

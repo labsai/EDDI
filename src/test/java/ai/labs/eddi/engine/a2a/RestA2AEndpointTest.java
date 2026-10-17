@@ -27,8 +27,10 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.SendRequest;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
@@ -60,6 +62,7 @@ class RestA2AEndpointTest {
     private AgentCardService agentCardService;
     private A2ATaskHandler taskHandler;
     private CapabilityRegistryService capabilityRegistryService;
+    private ResourceAccessGuard resourceAccessGuard;
     private RestA2AEndpoint endpoint;
     private SimpleMeterRegistry meterRegistry;
 
@@ -68,11 +71,12 @@ class RestA2AEndpointTest {
         agentCardService = mock(AgentCardService.class);
         taskHandler = mock(A2ATaskHandler.class);
         capabilityRegistryService = mock(CapabilityRegistryService.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         meterRegistry = new SimpleMeterRegistry();
     }
 
     private RestA2AEndpoint createEndpoint(boolean a2aEnabled, boolean capabilitiesPublic) {
-        return new RestA2AEndpoint(agentCardService, taskHandler, capabilityRegistryService,
+        return new RestA2AEndpoint(agentCardService, taskHandler, capabilityRegistryService, resourceAccessGuard,
                 a2aEnabled, capabilitiesPublic, new ObjectMapper(), meterRegistry);
     }
 
@@ -303,6 +307,66 @@ class RestA2AEndpointTest {
     }
 
     // ==================== handleJsonRpc ====================
+
+    // M9 (security review 2026-10-15): the JSON-RPC surface starts conversations
+    // and so must apply the same per-agent USE gate as POST /agents/{id}/start.
+
+    @Test
+    void handleJsonRpc_send_deniedUseAccess_propagates403AndNeverReachesHandler() {
+        endpoint = createEndpoint(true, false);
+        doThrow(new ForbiddenException("Access denied")).when(resourceAccessGuard).requireAgentUseAccess(AGENT_ID);
+        var request = new JsonRpcRequest("2.0", "message/send",
+                Map.of("message", Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi")))), "req-1");
+
+        assertThrows(ForbiddenException.class, () -> endpoint.handleJsonRpc(AGENT_ID, null, request));
+
+        verifyNoInteractions(taskHandler);
+    }
+
+    @Test
+    void handleJsonRpc_stream_deniedUseAccess_propagates403AndNeverReachesHandler() {
+        endpoint = createEndpoint(true, false);
+        doThrow(new ForbiddenException("Access denied")).when(resourceAccessGuard).requireAgentUseAccess(AGENT_ID);
+        var request = new JsonRpcRequest("2.0", "message/stream",
+                Map.of("message", Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi")))), "req-1");
+
+        assertThrows(ForbiddenException.class, () -> endpoint.handleJsonRpc(AGENT_ID, null, request));
+
+        verifyNoInteractions(taskHandler);
+    }
+
+    @Test
+    void handleJsonRpc_send_checksUseAccessForTheAddressedAgent() throws Exception {
+        endpoint = createEndpoint(true, false);
+        when(taskHandler.send(eq(AGENT_ID), any(SendRequest.class))).thenReturn(completedTask("task-1"));
+        var request = new JsonRpcRequest("2.0", "message/send",
+                Map.of("message", Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi")))), "req-1");
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, request);
+
+        assertEquals(200, response.getStatus());
+        verify(resourceAccessGuard).requireAgentUseAccess(AGENT_ID);
+    }
+
+    @Test
+    void handleJsonRpc_tasksGet_isPrincipalScopedAndNotUseGated() {
+        endpoint = createEndpoint(true, false);
+        when(taskHandler.get(eq("task-1"), any())).thenReturn(null);
+        var request = new JsonRpcRequest("2.0", "tasks/get", Map.of("id", "task-1"), "req-1");
+
+        endpoint.handleJsonRpc(AGENT_ID, null, request);
+
+        verify(resourceAccessGuard, never()).requireAgentUseAccess(any());
+    }
+
+    @Test
+    void handleJsonRpc_disabled_doesNotConsultTheUseGate() {
+        endpoint = createEndpoint(false, false);
+
+        endpoint.handleJsonRpc(AGENT_ID, null, new JsonRpcRequest("2.0", "message/send", Map.of(), "req-1"));
+
+        verifyNoInteractions(resourceAccessGuard);
+    }
 
     private static A2ATask completedTask(String id) {
         return new A2ATask(id, "ctx-1", new TaskStatus(TaskState.completed, null, Instant.parse("2026-10-03T10:00:00Z")),

@@ -58,11 +58,32 @@ public interface ISecretProvider {
      *            human-readable description (nullable)
      * @param allowedAgents
      *            list of agent IDs allowed to use this secret, or {@code ["*"]} for
-     *            all agents (nullable → defaults to ["*"])
+     *            all agents. On an update {@code null} keeps the stored grant. On a
+     *            create it is <b>required</b>: the wildcard is a decision every
+     *            caller makes out loud ({@code List.of("*")}), never a default this
+     *            layer supplies
+     * @throws IllegalArgumentException
+     *             on a create without a grant
      * @throws SecretProviderException
      *             if storage fails
      */
-    void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException;
+    default void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+            throws SecretProviderException {
+        store(reference, plaintext, description, allowedAgents, null);
+    }
+
+    /**
+     * {@link #store(SecretReference, String, String, List)} with a destination
+     * allow-list.
+     *
+     * @param allowedHosts
+     *            exact {@code host[:port]} entries the secret may be sent to, or
+     *            {@code null} to keep the stored list on an update and to store
+     *            none (any destination) on a create. Enforced at resolution time by
+     *            {@link VaultHostAllowlist}
+     */
+    void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents, List<String> allowedHosts)
+            throws SecretProviderException;
 
     /**
      * Store a new secret only if none exists under {@code reference}.
@@ -74,13 +95,34 @@ public interface ISecretProvider {
      * {@link #store} lets two callers both see the key as absent and the later
      * write silently replace the earlier.
      *
+     * @param allowedAgents
+     *            <b>required</b>, as on a {@link #store} create: {@code ["*"]} is
+     *            said, not implied
      * @return {@code true} if this call created the secret, {@code false} if one
      *         already existed (left exactly as it was)
+     * @throws IllegalArgumentException
+     *             without a grant
      * @throws SecretProviderException
      *             if storage fails
      */
     boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
             throws SecretProviderException;
+
+    /**
+     * Replace which destinations an existing secret may be sent to, without
+     * touching its value — the host counterpart of {@link #updateGrant}, separate
+     * from {@link #store} for the same reason: once a key is vaulted the operator
+     * no longer has the plaintext.
+     *
+     * @param allowedHosts
+     *            the replacement list, validated by the caller; empty removes the
+     *            restriction
+     * @return the secret's metadata as it now stands
+     * @throws SecretNotFoundException
+     *             if the secret does not exist
+     */
+    SecretMetadata updateAllowedHosts(SecretReference reference, List<String> allowedHosts)
+            throws SecretNotFoundException, SecretProviderException;
 
     /**
      * Change which agents may use an existing secret, without touching its value.

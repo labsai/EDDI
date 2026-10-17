@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.connections.names.InMemoryConnectionNameClaimStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.connections.ConnectionRegistry;
+import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -65,7 +66,8 @@ class RestConnectionStoreGrantLifecycleTest {
 
     private RestConnectionStore rest() {
         return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), connectionRegistry,
-                grantStore, secretProvider, true, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore());
+                grantStore, secretProvider, true, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore(),
+                mock(CredentialReferenceResolver.class));
     }
 
     private static ConnectionConfiguration connection(String name, String tenantId) {
@@ -216,7 +218,8 @@ class RestConnectionStoreGrantLifecycleTest {
     @DisplayName("a PER_USER connection cannot be created where no identity is verified")
     void refusesPerUserWithoutAuthorization() {
         var rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore());
+                connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore(),
+                mock(CredentialReferenceResolver.class));
         var connection = connection("drive", "acme");
         connection.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
         connection.setBinding(Binding.PER_USER);

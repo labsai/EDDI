@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.engine.httpclient.bootstrap;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
@@ -116,7 +116,7 @@ public class HttpClientModule {
      * {@code Bearer}/{@code X-Api-Key}/{@code Cookie} in the config just as much as
      * a resolved
      * {@code ${vault:…}}/{@code ${connection:…}}/{@code ${caller:token}}. This
-     * scrubs {@link SafeHttpClient#SENSITIVE_HEADERS} on every hop whose origin
+     * scrubs {@link OutboundHttp#SENSITIVE_HEADERS} on every hop whose origin
      * differs from the request that produced it, so the fix does not depend on
      * knowing where the credential came from.
      */
@@ -137,19 +137,19 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every {@link SafeHttpClient#SENSITIVE_HEADERS} entry from
-     * {@code next} when it targets a different origin (scheme, host or effective
-     * port) than {@code original}. Same-origin hops keep their headers, so an
-     * in-service redirect still authenticates.
+     * Removes every {@link OutboundHttp#SENSITIVE_HEADERS} entry from {@code next}
+     * when it targets a different origin (scheme, host or effective port) than
+     * {@code original}. Same-origin hops keep their headers, so an in-service
+     * redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
         if (original == null) {
             // Cannot prove same-origin, so fail safe and strip.
-            SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
+            OutboundHttp.SENSITIVE_HEADERS.forEach(next::removeHeader);
             return;
         }
         if (!sameOrigin(original, next)) {
-            SafeHttpClient.SENSITIVE_HEADERS.forEach(next::removeHeader);
+            OutboundHttp.SENSITIVE_HEADERS.forEach(next::removeHeader);
         }
     }
 

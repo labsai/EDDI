@@ -76,7 +76,7 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 EDDI's security architecture is documented in [docs/security.md](security.md). Key threats and mitigations:
 
 - **T1: Prompt injection** — mitigated by template sandboxing, PathNavigator (no OGNL)
-- **T2: SSRF via tool execution** — mitigated by `SafeHttpClient`, URL validation
+- **T2: SSRF via tool execution** — mitigated by `OutboundHttp` (per-hop SSRF policy), URL validation
 - **T3: Secret exfiltration** — mitigated by vault encryption, property visibility scoping
 - **T4: Supply chain compromise** — mitigated by digest-pinned images, Cosign, SBOM, Dependabot
 - **T5: Unauthorized access** — mitigated by OIDC auth, `AuthStartupGuard`, role checks

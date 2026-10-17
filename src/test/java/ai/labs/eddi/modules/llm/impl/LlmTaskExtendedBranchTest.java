@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -95,7 +96,7 @@ class LlmTaskExtendedBranchTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
 
         mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());
@@ -461,7 +462,7 @@ class LlmTaskExtendedBranchTest {
             when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
             when(gvr.getTemplateData()).thenReturn(Map.of());
-            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver, null);
+            var chatModelRegistry = new ChatModelRegistry(jsonBuilders, gvr, secretResolver, null, mock(VaultHostAllowlist.class));
             var cws = new CounterweightService(mock(PromptSnippetService.class),
                     new SimpleMeterRegistry());
             cws.initMetrics();

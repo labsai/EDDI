@@ -9,7 +9,14 @@ import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.connections.ConnectionException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -18,8 +25,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -37,19 +42,16 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * and are tested differently: this one is about RFC 6749 wire format and
  * provider quirks, the service is about concurrency and storage.
  *
- * <h3>Every request goes through {@link SafeHttpClient}, and follows no
- * redirect</h3> This is the one new outbound path the connectors work
- * introduces, so it starts compliant rather than joining the four services that
- * already bypass it. It uses the client's <em>no-redirect</em> send
- * deliberately: the ordinary {@code sendValidated} re-implements redirect
- * following on top of {@code Redirect.NEVER}, preserving method and body on a
- * 307/308, and validates the target only against the SSRF rules — never against
- * the operator's credential-endpoint allowlist. A token request carries the
- * client secret in an {@code Authorization} header or the form body, and always
- * a refresh token or a code plus verifier in the body, so a followed redirect
- * would hand all of that to whatever host an allowlisted endpoint pointed at.
- * Any 3xx from a token endpoint is therefore answered as a transient failure
- * and never followed.
+ * <h3>Every request goes through {@link OutboundHttp}, and follows no
+ * redirect</h3> {@link RedirectPolicy#NEVER} is deliberate: ordinary redirect
+ * following preserves method and body on a 307/308, and validates the target
+ * only against the SSRF rules — never against the operator's
+ * credential-endpoint allowlist. A token request carries the client secret in
+ * an {@code Authorization} header or the form body, and always a refresh token
+ * or a code plus verifier in the body, so a followed redirect would hand all of
+ * that to whatever host an allowlisted endpoint pointed at. Any 3xx from a
+ * token endpoint is therefore answered as a transient failure and never
+ * followed.
  */
 @ApplicationScoped
 public class OAuthTokenClient {
@@ -74,6 +76,13 @@ public class OAuthTokenClient {
     static final Duration MAX_TIMEOUT = Duration.ofSeconds(45);
 
     /**
+     * Ceiling on a token endpoint's answer. A token response is a few hundred
+     * bytes; anything near this is not one, and is treated as the endpoint being
+     * unavailable.
+     */
+    static final long MAX_RESPONSE_BYTES = 1024L * 1024;
+
+    /**
      * OAuth errors that mean the grant is dead and the user must reconnect. Every
      * other error — and every transport failure — is treated as transient.
      * <p>
@@ -82,12 +91,12 @@ public class OAuthTokenClient {
      */
     private static final List<String> TERMINAL_ERRORS = List.of("invalid_grant", "unauthorized_client", "invalid_client");
 
-    private final SafeHttpClient httpClient;
+    private final OutboundHttp http;
     private final CredentialEndpointAllowlist endpointAllowlist;
 
     @Inject
-    public OAuthTokenClient(SafeHttpClient httpClient, CredentialEndpointAllowlist endpointAllowlist) {
-        this.httpClient = httpClient;
+    public OAuthTokenClient(OutboundHttp http, CredentialEndpointAllowlist endpointAllowlist) {
+        this.http = http;
         this.endpointAllowlist = endpointAllowlist;
     }
 
@@ -160,7 +169,11 @@ public class OAuthTokenClient {
                     + tokenUri.getHost());
         }
 
-        HttpRequest.Builder request = HttpRequest.newBuilder().uri(tokenUri)
+        // The allowlist above is the gate (it may name a private host the SSRF rules
+        // would refuse), and no redirect is ever followed.
+        OutboundRequest.Builder request = OutboundRequest.builder(Profile.DEFAULT, tokenUri)
+                .ssrf(SsrfPolicy.NONE)
+                .redirects(RedirectPolicy.NEVER)
                 .timeout(effectiveTimeout(connection))
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json");
 
@@ -175,10 +188,10 @@ public class OAuthTokenClient {
             request.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)));
         }
 
-        HttpResponse<String> response;
+        OutboundResponse<String> response;
         try {
-            response = httpClient.sendNoRedirect(request.POST(HttpRequest.BodyPublishers.ofString(encodeForm(body))).build(),
-                    HttpResponse.BodyHandlers.ofString());
+            response = http.send(request.method("POST", RequestBody.ofString(encodeForm(body))).build(),
+                    BodyMode.string(MAX_RESPONSE_BYTES, BodyMode.OnOverflow.FAIL));
         } catch (IOException e) {
             // Transport failure. NOT terminal: the grant stays usable and the next
             // request retries. Conflating this with invalid_grant logs every user of
@@ -193,19 +206,19 @@ public class OAuthTokenClient {
                     "Interrupted while contacting the token endpoint for connection '" + connection.getName() + "'.", e);
         }
 
-        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        if (response.status() >= 200 && response.status() < 300) {
             return parse(connection, response.body());
         }
-        if (response.statusCode() >= 300 && response.statusCode() < 400) {
+        if (response.status() >= 300 && response.status() < 400) {
             // Never followed. The request that produced this carried the client
             // secret and a refresh token or authorization code, and the only thing a
             // redirect can mean is "send them somewhere else" — to a host the operator
             // never approved for them. The grant is untouched: a provider migrating
             // its token endpoint is a configuration change, not a dead grant.
             LOGGER.warnf("Token endpoint for connection '%s' answered HTTP %d with a redirect, which is never followed",
-                    sanitize(connection.getName()), response.statusCode());
+                    sanitize(connection.getName()), response.status());
             throw new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
-                    + connection.getName() + "' answered HTTP " + response.statusCode()
+                    + connection.getName() + "' answered HTTP " + response.status()
                     + ". A token endpoint must not redirect: the request carries the client secret and the grant's refresh token, and "
                     + "following it would send them to a host the credential-endpoint allowlist never approved. Point oauth.tokenUrl at the "
                     + "endpoint's final address. The grant is unchanged.");
@@ -220,7 +233,7 @@ public class OAuthTokenClient {
      * is quoted back: a token endpoint's error body can echo request material, and
      * this message reaches logs and, for the callback, a browser.
      */
-    private static ConnectionException errorFor(ConnectionConfiguration connection, HttpResponse<String> response) {
+    private static ConnectionException errorFor(ConnectionConfiguration connection, OutboundResponse<String> response) {
         String errorCode = "unknown_error";
         try {
             JsonNode json = MAPPER.readTree(response.body());
@@ -231,7 +244,7 @@ public class OAuthTokenClient {
             // A non-JSON error body is itself only worth its status code.
         }
         boolean terminal = TERMINAL_ERRORS.contains(errorCode);
-        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", sanitize(connection.getName()), response.statusCode(),
+        LOGGER.warnf("Token endpoint for connection '%s' returned HTTP %d (%s)", sanitize(connection.getName()), response.status(),
                 sanitize(errorCode));
         if (terminal) {
             return new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The provider rejected the grant for connection '"
@@ -239,7 +252,7 @@ public class OAuthTokenClient {
         }
         // 5xx and rate limiting are the provider having a bad day, not a dead grant.
         return new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "Token endpoint for connection '"
-                + connection.getName() + "' returned HTTP " + response.statusCode() + " (" + errorCode + "). The grant is unchanged.");
+                + connection.getName() + "' returned HTTP " + response.status() + " (" + errorCode + "). The grant is unchanged.");
     }
 
     /**

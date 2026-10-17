@@ -1067,15 +1067,13 @@ class ToolLoopRunner {
 
         // Check per-conversation TOOL budget before executing tool.
         //
-        // Enforcement is opt-in: enforceBudget on the task wins, otherwise
-        // AgentOrchestrator.BUDGET_ENFORCE_DEFAULT (false unless
-        // eddi.tools.budget.enforce-by-default
-        // says so). Built-in tools priced at $0.00 until this release, so enforcing
-        // by default would make those ceilings bind for the first time on upgrade.
-        // A ceiling left unenforced is named once in a startup-style WARN rather
-        // than passing silently. Cost tracking itself is unaffected by the flag.
+        // Enforcement is opt-OUT: enforceBudget on the task wins, otherwise
+        // AgentOrchestrator.BUDGET_ENFORCE_DEFAULT (true unless
+        // eddi.tools.budget.enforce-by-default=false). A ceiling that has been
+        // opted out of is named once in a WARN rather than passing silently. Cost
+        // tracking itself is unaffected by the flag.
         AgentOrchestrator.warnAboutUnenforcedBudgets(task);
-        boolean enforceBudget = task.getEnforceBudget() != null ? task.getEnforceBudget() : AgentOrchestrator.BUDGET_ENFORCE_DEFAULT;
+        boolean enforceBudget = AgentOrchestrator.isBudgetEnforced(task);
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -1188,7 +1186,7 @@ class ToolLoopRunner {
         // truncator is reduced by the envelope's worst case. Otherwise a configured
         // ceiling is exceeded by every single result — small individually, kilobytes
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
-        toolResult = toolResponseTruncator.truncateIfNeeded(
+        toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
                 task.getType(), task.getParameters());
 

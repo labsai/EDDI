@@ -6,6 +6,8 @@ package ai.labs.eddi.configs.apicalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.apicalls.ApiCallsConfigurationValidator;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
@@ -19,6 +21,7 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.engine.mcp.OpenApiSpecFetcher;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -55,6 +58,19 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     @Inject
     ConfigJsonPatcher jsonPatcher;
 
+    // Fetches the spec at a discovery request's specUrl under the deployment's
+    // eddi.security.ssrf-protection.enabled setting (every redirect hop checked,
+    // body capped). Null outside CDI, where the protection-off fetcher is used.
+    @Inject
+    OpenApiSpecFetcher specFetcher;
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    private static final String KIND = "httpcalls";
+
     // Field-injected so the direct constructions in tests keep compiling; the
     // initializer is the property's own default.
     @ConfigProperty(name = ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY, defaultValue = "1000")
@@ -89,6 +105,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     @Override
     public Response updateApiCalls(String id, Integer version, ApiCallsConfiguration httpCallsConfiguration) {
+        requireMayAuthorCallerToken(httpCallsConfiguration);
         Response invalid = validateBatchLimits(httpCallsConfiguration);
         if (invalid != null) {
             return invalid;
@@ -99,11 +116,15 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     @Override
     public Response patchApiCalls(String id, Integer version, String jsonPatch) {
         // The same pre-write check updateApiCalls runs.
-        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, this::validateBatchLimits);
+        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, patched -> {
+            requireMayAuthorCallerToken(patched);
+            return validateBatchLimits(patched);
+        });
     }
 
     @Override
     public Response createApiCalls(ApiCallsConfiguration httpCallsConfiguration) {
+        requireMayAuthorCallerToken(httpCallsConfiguration);
         Response invalid = validateBatchLimits(httpCallsConfiguration);
         if (invalid != null) {
             return invalid;
@@ -126,6 +147,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         if (configuration == null || configuration.getHttpCalls() == null) {
             return null;
         }
+        String problem = ApiCallsConfigurationValidator.firstProblem(configuration);
+        if (problem != null) {
+            return badRequest(problem);
+        }
         for (ApiCall call : configuration.getHttpCalls()) {
             HttpPreRequest preRequest = call != null ? call.getPreRequest() : null;
             BatchRequestBuildingInstruction batch = preRequest != null ? preRequest.getBatchRequests() : null;
@@ -137,6 +162,17 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             }
         }
         return null;
+    }
+
+    /**
+     * Refuses {@code ${caller:token}} from a caller who may not author it — see
+     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
+     * path treats a non-200 update as "create it directly instead".
+     */
+    private void requireMayAuthorCallerToken(Object configuration) {
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
+        }
     }
 
     @Override
@@ -240,7 +276,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef, null,
+                    specFetcher != null ? specFetcher : OpenApiSpecFetcher.permissive());
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();

@@ -5,7 +5,12 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -31,7 +36,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -78,7 +82,7 @@ public class AttachmentForwarder {
     private final IAttachmentStore attachmentStore;
     private final ModelCapabilityService capabilityService;
     private final AttachmentTextExtractor textExtractor;
-    private final SafeHttpClient httpClient;
+    private final OutboundHttp http;
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
     private final Counter forwardedCounter;
@@ -89,7 +93,7 @@ public class AttachmentForwarder {
     public AttachmentForwarder(IAttachmentStore attachmentStore,
             ModelCapabilityService capabilityService,
             AttachmentTextExtractor textExtractor,
-            SafeHttpClient httpClient,
+            OutboundHttp http,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
                             defaultValue = "10485760") long maxForwardBytes,
@@ -98,7 +102,7 @@ public class AttachmentForwarder {
         this.attachmentStore = attachmentStore;
         this.capabilityService = capabilityService;
         this.textExtractor = textExtractor;
-        this.httpClient = httpClient;
+        this.http = http;
         this.forwardedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.forwarded") : null;
         // Separate from `forwarded`: a re-inline repeats every attachment-free
         // turn, so folding it into the first-time counter would quietly turn one
@@ -415,14 +419,14 @@ public class AttachmentForwarder {
     private byte[] download(String url, String name) throws ForwardSkipException {
         try {
             validateUrl(url);
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, URI.create(url)).ssrf(SsrfPolicy.STRICT).build();
             // Bounded at the per-file limit and read as it arrives, so an over-sized
             // or endlessly-streaming URL is aborted rather than buffered whole and
             // measured afterwards. A body that hits the cap comes back truncated,
             // which is the same outcome as exceeding the per-file limit.
-            SafeHttpClient.BoundedResponse response = httpClient.sendValidatedBounded(request, maxForwardBytes);
-            if (response.statusCode() != 200) {
-                throw new ForwardSkipException("Attachment '" + name + "' download failed: HTTP " + response.statusCode());
+            OutboundResponse<byte[]> response = http.send(request, BodyMode.bytes(maxForwardBytes, BodyMode.OnOverflow.TRUNCATE));
+            if (response.status() != 200) {
+                throw new ForwardSkipException("Attachment '" + name + "' download failed: HTTP " + response.status());
             }
             if (response.truncated()) {
                 throw new ForwardSkipException(("Attachment '%s' exceeds the per-file forward limit of %d bytes and was not sent. "
