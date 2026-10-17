@@ -20,7 +20,7 @@ EDDI had thousands of tests and none that asserted what an *agent* does. A confi
 - **Metrics.** `eddi_agent_tests_runs_total{status}`, `eddi_agent_tests_turns_total`, `eddi_agent_tests_run_duration_seconds`, charted in the Scheduling row of the Full Metrics Reference dashboard.
 - **Docs.** New [`agent-testing.md`](../agent-testing.md) (concepts, JSON reference, mocking rules, CI `curl` recipe, EU AI Act evidence note); `mcp-server.md`, `metrics.md`, `configuration-reference.md` (`eddi.agent-tests.*`), `SUMMARY.md`.
 - **Full-engine proof:** `AgentTestSuiteIT` (DevServices MongoDB) stores a suite over REST, starts a run against the deterministic rules-only `agentengine` fixture agent — the run deploys it to `test` itself — and reads back `PASSED` for a suite that holds and `FAILED` with the actual actions for one that does not. It found two defects the unit tests could not: MongoDB assigns a run's id only on its first write, and a turn's completion callback can run before the turn is stored, so a turn is now judged from the snapshot `say` completes with (detailed, current step) and only its internal `audit:cost`/model names — stripped from every client projection — are read from the stored step, waiting up to 5 s for it.
-- **Platform Operator.** May read suites and runs and start a run (a gated write — it deploys to `test`, like the deploy it already has); it may not write suites. Prompt explains reading results and `unmockedTool`. `operator-revision.json` → 17.
+- **Platform Operator.** May read suites and runs and start a run (a gated write — it deploys to `test`, like the deploy it already has); it may not write suites. Prompt explains reading results and `unmockedTool`. `operator-revision.json` → 18.
 
 ### Review fixes
 
