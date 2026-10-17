@@ -140,7 +140,7 @@ class ToolLoopRunner {
                 externalCount++;
             }
         }
-        LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
+        LOGGER.debugf("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
                 activeSpecs.size(), externalCount);
         return activeSpecs;
     }
@@ -1335,6 +1335,12 @@ class ToolLoopRunner {
     }
 
     /**
+     * Shared, because an ObjectMapper is expensive to build and was built anew for
+     * every discover_tools result; reading a tree is thread-safe.
+     */
+    private static final ObjectMapper DISCOVERY_MAPPER = new ObjectMapper();
+
+    /**
      * Parses the discover_tools JSON result and activates matching built-in tool
      * specs so the LLM can call them on subsequent iterations.
      */
@@ -1342,8 +1348,7 @@ class ToolLoopRunner {
                                         List<ToolSpecification> builtInSpecs,
                                         List<ToolSpecification> activeSpecs) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(discoverResult);
+            JsonNode root = DISCOVERY_MAPPER.readTree(discoverResult);
             JsonNode toolsNode = root.get("tools");
             if (toolsNode == null || !toolsNode.isArray()) {
                 return;
@@ -1370,7 +1375,7 @@ class ToolLoopRunner {
                 }
             }
 
-            LOGGER.infof("LAZY activation: %d tools activated from discovery (%s)",
+            LOGGER.debugf("LAZY activation: %d tools activated from discovery (%s)",
                     activated, discoveredNames);
         } catch (Exception e) {
             LOGGER.warnf("Failed to parse discover_tools result for LAZY activation: %s",
