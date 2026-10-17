@@ -84,6 +84,13 @@ name the finding so a later reader can find this entry.
   key straddling the cutoff cannot leave its first characters behind), which is public
   for that.
 
+- **Flaky test fixed at its cause.** `ClusterConversationCoordinatorTest.localDeadLettersPage`
+  failed CI on this branch (and passes or fails locally by chance): the local dead-letter id
+  was drawn outside the lock that appends the entry, so concurrent failures could append out
+  of id order, and the cursor paging over local entries — which skips by id number — then
+  dropped or repeated one. The id is now taken under the lock;
+  `InMemoryConversationCoordinatorTest.concurrentDeadLettersAreRecordedInIdOrder` pins it.
+
 **Files:** [`RestA2AEndpoint.java`](../../src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java),
 [`A2ATaskGdprParticipant.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskGdprParticipant.java),
 [`CachedA2ATaskStore.java`](../../src/main/java/ai/labs/eddi/engine/a2a/CachedA2ATaskStore.java),
