@@ -797,17 +797,26 @@ resolve_stack_passwords() {
     GRAFANA_ADMIN_PASSWORD=$(generate_password)
     GRAFANA_PASSWORD_GENERATED=true
   fi
+  # The PostgreSQL password: docker-compose.postgres-only.yml requires it (no
+  # `eddi`/`eddi` default any more), and the postgres image reads it at initdb
+  # only, so a stored value is carried forward for the same reason as the
+  # Keycloak one — a fresh value on a re-run would stop matching the volume.
+  [[ -n "${POSTGRES_PASSWORD:-}" ]] || POSTGRES_PASSWORD=$(env_file_value POSTGRES_PASSWORD)
+  if [[ "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ]]; then
+    POSTGRES_PASSWORD=$(generate_password)
+  fi
   # Written single-quoted into .env, where compose reads the value literally;
   # a single quote is the one character that cannot be carried that way.
   local value
-  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD"; do
+  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
     if [[ "$value" == *"'"* ]]; then
-      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
     fi
   done
   if [[ ( "$WITH_AUTH" == "true" && -z "$KC_BOOTSTRAP_ADMIN_PASSWORD" ) \
-     || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) ]]; then
-    fail "Could not generate an admin password (neither openssl nor /dev/urandom produced one)."
+     || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) \
+     || ( "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ) ]]; then
+    fail "Could not generate a password (neither openssl nor /dev/urandom produced one)."
   fi
 }
 
@@ -1171,6 +1180,19 @@ EOF
   if [[ -n "${EDDI_BIND:-}" ]]; then
     echo "EDDI_BIND=$EDDI_BIND" >> "$EDDI_DIR/.env"
   fi
+  # docker-compose.yml refuses a non-loopback EDDI_BIND while authentication is
+  # off (its bind-guard service) unless this acknowledgement is set — the GCP
+  # provisioner sets it for --i-understand-public. Persisted so `eddi restart`
+  # keeps the choice the operator made.
+  if [[ "${EDDI_I_UNDERSTAND_PUBLIC:-}" == "true" ]]; then
+    echo "EDDI_I_UNDERSTAND_PUBLIC=true" >> "$EDDI_DIR/.env"
+  fi
+  # The PostgreSQL password, which docker-compose.postgres-only.yml requires.
+  # Written whenever one is known (a stored value survives a re-run that picks
+  # MongoDB, so a later switch back finds the volume's password).
+  if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
+    echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'" >> "$EDDI_DIR/.env"
+  fi
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT
   # would otherwise outlive the overlay that used it.
@@ -1237,6 +1259,19 @@ start_eddi() {
   # remote install (e.g. the GCP provisioner) sets EDDI_BIND=0.0.0.0 so the VM's
   # own IP is reachable; it is persisted to .env below so `eddi restart` keeps it.
   export EDDI_BIND
+  # docker-compose.yml's bind-guard refuses a non-loopback EDDI_BIND while
+  # authentication is off. Say so here, before pulling images, with the same
+  # ways out the guard prints — unless the operator acknowledged it
+  # (EDDI_I_UNDERSTAND_PUBLIC=true, which --i-understand-public on the GCP
+  # provisioner sets).
+  case "${EDDI_BIND:-}" in
+    ""|127.0.0.1|localhost|::1|"[::1]") ;;
+    *)
+      if [[ "$WITH_AUTH" != "true" && "${EDDI_I_UNDERSTAND_PUBLIC:-}" != "true" ]]; then
+        fail "EDDI_BIND=${EDDI_BIND} would publish an UNAUTHENTICATED EDDI on the network: every API\n     endpoint — agents, conversations, the secrets vault, MCP — reachable without a token.\n     Re-run with --with-auth, keep EDDI_BIND unset (loopback only), or set\n     EDDI_I_UNDERSTAND_PUBLIC=true to expose an open instance on purpose."
+      fi
+      ;;
+  esac
 
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     echo "  Building local Docker image..."

@@ -24,6 +24,7 @@ import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
 import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
+import { RetrievalTester } from "@/components/editors/retrieval-tester";
 import type { IngestionSource } from "@/lib/api/ingestion-sources";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1359,6 +1360,29 @@ export function RagEditor({
         />
       </Section>
 
+      {/* ══════ Test Retrieval ══════ */}
+      <Section
+        label={t("ragEditor.retrieval.title", "Test Retrieval")}
+        icon={Search}
+        accent="text-violet-500"
+        defaultOpen={false}
+      >
+        {resourceId ? (
+          <RetrievalTester
+            kbId={resourceId}
+            version={version}
+            sources={data.sources ?? []}
+            defaultMaxResults={data.maxResults}
+            defaultMinScore={data.minScore}
+            hasUnsavedChanges={isDirty}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            {t("ragEditor.retrieval.saveFirst", "Save this knowledge base first to search it.")}
+          </p>
+        )}
+      </Section>
+
       {/* ══════ Document Ingestion ══════ */}
       <Section
         label={t("ragEditor.ingestion", "Document Ingestion")}
@@ -1366,6 +1390,18 @@ export function RagEditor({
         accent="text-rose-500"
         defaultOpen={false}
       >
+        {/* Pasted documents only ever accumulate: nothing lists them afterwards, and
+            nothing re-reads or removes them. A Files source does all three. */}
+        <p
+          className="mb-3 flex items-start gap-1.5 rounded-md bg-muted/40 p-2 text-[11px] text-muted-foreground"
+          data-testid="legacy-ingestion-note"
+        >
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          {t(
+            "ragEditor.legacyIngestionNote",
+            "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead.",
+          )}
+        </p>
         {resourceId ? (
           <IngestionPanel
             kbId={resourceId}

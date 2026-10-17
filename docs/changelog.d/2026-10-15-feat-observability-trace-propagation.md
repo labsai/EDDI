@@ -22,11 +22,17 @@ that gap (pillar 6, observability).
 - **W3C `traceparent`/`tracestate` on outbound calls**, via a new
   `TracePropagation` bean (`W3CTraceContextPropagator` only — never `baggage`):
   httpcalls (`HttpClientWrapper`, on a copy of the request so the memory record
-  and the HITL approval fingerprint do not change per send), `SafeHttpClient`
+  and the HITL approval fingerprint do not change per send), the `OutboundHttp`
+  facade — built-in tools, A2A, the RAG crawler, OAuth, Slack, remote sync
   (first hop and same-origin hops; dropped on cross-origin hops like
-  credentials — the Vert.x redirect handler now drops them too), A2A (card fetch
-  and task call) and MCP (`params._meta` per SEP-414 through langchain4j's
-  `metaSupplier`, plus the HTTP header).
+  credentials — the Vert.x redirect handler drops them too) — and MCP
+  (`params._meta` per SEP-414 through langchain4j's `metaSupplier`, plus the
+  HTTP header).
+- **Quarkus' Vert.x HTTP client tracer is off for the httpcalls client**
+  (`TracingPolicy.IGNORE`). With the default policy it re-injected a fresh
+  `traceparent` onto every redirect hop, including a cross-origin one the
+  redirect handler had just stripped. The explicit header still carries the
+  trace; the auto-instrumented client span for httpcalls is what is given up.
 - **Config:** `eddi.tracing.propagate-outbound` (default `true`). Inert while
   `quarkus.otel.sdk.disabled=true` — a no-op span has an invalid context and
   produces no header, never an all-zero one.
@@ -45,11 +51,10 @@ that gap (pillar 6, observability).
   parameters: they label the span and nothing else, `ToolInvocation`'s equality
   is a cost/cache identity, and a new overload would have broken the Mockito
   stubs of 17 test classes.
-- **Vert.x client.** Quarkus' Vert.x HTTP tracer may also be active on the
-  httpcalls client (it is built from the Quarkus `Vertx`); when it sees the
-  parent it replaces the header with its own client span, a child of
-  `execute_tool` — same trace. The explicit header is only added when absent, so
-  an author-configured `traceparent` is never overwritten.
+- **Merged onto the `OutboundHttp` facade (#1042/#1046).** `SafeHttpClient`
+  was retired on `main` while this branch was open; propagation moved into the
+  facade's `exchange`/`redirectHeaders`, so every caller of the facade gets it
+  and A2A no longer needs its own injection.
 - **Tracer:** lazily resolved `GlobalOpenTelemetry.getTracer("eddi.tools")`, same
   pattern as `LlmTelemetryListener`/`LifecycleManager`; package-private field so
   tests install an SDK tracer without mutating the JVM-wide global.
@@ -65,7 +70,7 @@ prompt line on tracing a slow tool (revision 17 → 18).
 **Files:** [`TracePropagation.java`](../../src/main/java/ai/labs/eddi/engine/tracing/TracePropagation.java),
 [`ToolExecutionService.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolExecutionService.java),
 [`ToolCallTrace.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolCallTrace.java),
-[`SafeHttpClient.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/SafeHttpClient.java),
+[`OutboundHttp.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/outbound/OutboundHttp.java),
 [`HttpClientWrapper.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/impl/HttpClientWrapper.java),
 [`HttpClientModule.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/bootstrap/HttpClientModule.java),
 [`McpToolProviderManager.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/McpToolProviderManager.java),

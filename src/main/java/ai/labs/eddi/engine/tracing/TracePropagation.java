@@ -12,7 +12,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-import java.net.http.HttpRequest;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -25,8 +24,8 @@ import java.util.function.Predicate;
  *
  * <p>
  * Used by every outbound stack that is not instrumented by Quarkus on its own:
- * the httpcalls client ({@code HttpClientWrapper}), {@code SafeHttpClient}
- * (built-in tools), the A2A client and the MCP transport (header and
+ * the httpcalls client ({@code HttpClientWrapper}), {@code OutboundHttp}
+ * (built-in tools, A2A, ingestion) and the MCP transport (header and
  * {@code params._meta}, SEP-414). They are four different HTTP stacks, so the
  * rules live here once:
  * </p>
@@ -144,16 +143,6 @@ public class TracePropagation {
             }
         }
         return headers;
-    }
-
-    /**
-     * Adds the current trace headers to a JDK request builder. For requests whose
-     * headers EDDI composes itself (A2A), where no author-configured trace header
-     * can exist.
-     */
-    public HttpRequest.Builder inject(HttpRequest.Builder builder) {
-        currentHeaders().forEach(builder::header);
-        return builder;
     }
 
     /**

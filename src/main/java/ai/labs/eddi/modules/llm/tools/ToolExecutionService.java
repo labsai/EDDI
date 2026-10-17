@@ -324,7 +324,7 @@ public class ToolExecutionService {
         }
 
         // One execute_tool span per call, CURRENT for the whole call: an outbound
-        // request the tool makes (httpcalls, SafeHttpClient, A2A, MCP) becomes its
+        // request the tool makes (httpcalls, OutboundHttp, A2A, MCP) becomes its
         // child, and the traceparent it propagates names this span. carryContext
         // below picks it up from Context.current() for a time-bounded call, so the
         // worker thread sees the same parent.

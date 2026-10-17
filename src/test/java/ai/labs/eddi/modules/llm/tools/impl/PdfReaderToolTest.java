@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.ZoneId;
@@ -15,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.net.http.HttpRequest;
 import java.io.IOException;
 import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
@@ -29,7 +30,7 @@ class PdfReaderToolTest {
 
     @BeforeEach
     void setUp() {
-        pdfReaderTool = new PdfReaderTool(new SafeHttpClient(10000), new AttachmentTextExtractor(10000));
+        pdfReaderTool = new PdfReaderTool(TestOutbound.standalone(), new AttachmentTextExtractor(10000));
     }
 
     // === SSRF Protection Tests ===
@@ -148,32 +149,29 @@ class PdfReaderToolTest {
         assertTrue(result.contains("Error"));
     }
 
-    // === HTTP error path tests (mocked SafeHttpClient) ===
+    // === HTTP error path tests (mocked OutboundHttp) ===
 
     @org.junit.jupiter.api.Nested
     @org.junit.jupiter.api.DisplayName("HTTP download error paths")
     class HttpErrorPathTests {
 
-        private SafeHttpClient mockedHttpClient;
+        private OutboundHttp mockedHttpClient;
         private PdfReaderTool mockedTool;
 
         @BeforeEach
         void setUpMocked() {
-            mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            mockedHttpClient = org.mockito.Mockito.mock(OutboundHttp.class);
             mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
         private void mockStatus(int status) throws Exception {
-            org.mockito.Mockito.doReturn(new SafeHttpClient.BoundedResponse(status, new byte[0], false))
-                    .when(mockedHttpClient).sendBounded(
-                            org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                            org.mockito.ArgumentMatchers.anyLong());
+            org.mockito.Mockito.doReturn(TestOutbound.response(status, new byte[0], false))
+                    .when(mockedHttpClient).send(org.mockito.ArgumentMatchers.any(OutboundRequest.class), org.mockito.ArgumentMatchers.any());
         }
 
         private void mockThrow(Throwable t) throws Exception {
-            org.mockito.Mockito.doThrow(t).when(mockedHttpClient).sendBounded(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.anyLong());
+            org.mockito.Mockito.doThrow(t).when(mockedHttpClient).send(org.mockito.ArgumentMatchers.any(OutboundRequest.class),
+                    org.mockito.ArgumentMatchers.any());
         }
 
         @Test
@@ -212,10 +210,8 @@ class PdfReaderToolTest {
         @Test
         @org.junit.jupiter.api.DisplayName("extractTextFromPdf — over-size download returns error")
         void extractText_oversize_returnsError() throws Exception {
-            org.mockito.Mockito.doReturn(new SafeHttpClient.BoundedResponse(200, new byte[0], true))
-                    .when(mockedHttpClient).sendBounded(
-                            org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                            org.mockito.ArgumentMatchers.anyLong());
+            org.mockito.Mockito.doReturn(TestOutbound.response(200, new byte[0], true))
+                    .when(mockedHttpClient).send(org.mockito.ArgumentMatchers.any(OutboundRequest.class), org.mockito.ArgumentMatchers.any());
 
             String result = textOf(() -> mockedTool.extractTextFromPdf("https://example.com/huge.pdf"));
 
@@ -273,12 +269,12 @@ class PdfReaderToolTest {
     @org.junit.jupiter.api.DisplayName("PDF content extraction with real PDFs")
     class PdfContentExtractionTests {
 
-        private SafeHttpClient mockedHttpClient;
+        private OutboundHttp mockedHttpClient;
         private PdfReaderTool mockedTool;
 
         @BeforeEach
         void setUpMocked() {
-            mockedHttpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            mockedHttpClient = org.mockito.Mockito.mock(OutboundHttp.class);
             mockedTool = new PdfReaderTool(mockedHttpClient, new AttachmentTextExtractor(10000));
         }
 
@@ -354,10 +350,9 @@ class PdfReaderToolTest {
             // hand back the PDF bytes in a BoundedResponse rather than staging a temp
             // file.
             byte[] pdfBytes = Files.readAllBytes(sourcePdf);
-            org.mockito.Mockito.when(mockedHttpClient.sendBounded(
-                    org.mockito.ArgumentMatchers.any(HttpRequest.class),
-                    org.mockito.ArgumentMatchers.anyLong()))
-                    .thenReturn(new SafeHttpClient.BoundedResponse(200, pdfBytes, false));
+            org.mockito.Mockito
+                    .when(mockedHttpClient.send(org.mockito.ArgumentMatchers.any(OutboundRequest.class), org.mockito.ArgumentMatchers.any()))
+                    .thenReturn(TestOutbound.response(200, pdfBytes, false));
         }
 
         @org.junit.jupiter.api.Test

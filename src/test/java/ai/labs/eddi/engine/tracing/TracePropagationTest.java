@@ -21,8 +21,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -109,18 +107,6 @@ class TracePropagationTest {
             assertTrue(propagation.headersMissingFrom("traceparent"::equals).isEmpty());
             assertTrue(propagation.headersMissingFrom("tracestate"::equals).isEmpty());
             assertFalse(propagation.headersMissingFrom(name -> false).isEmpty());
-        } finally {
-            span.end();
-        }
-    }
-
-    @Test
-    @DisplayName("inject adds the header to a JDK request builder")
-    void injectIntoJdkBuilder() {
-        Span span = tracer.spanBuilder("s").startSpan();
-        try (Scope ignored = span.makeCurrent()) {
-            HttpRequest request = new TracePropagation(true).inject(HttpRequest.newBuilder(URI.create("https://peer.example/a2a"))).build();
-            assertTrue(request.headers().firstValue("traceparent").orElseThrow().contains(span.getSpanContext().getSpanId()));
         } finally {
             span.end();
         }

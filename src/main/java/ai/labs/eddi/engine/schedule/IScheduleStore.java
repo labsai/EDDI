@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Store interface for schedule configurations and fire logs. Implementations
@@ -136,6 +137,14 @@ public interface IScheduleStore {
      * @return number of deleted schedules
      */
     int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * The schedule with the given name, for the system schedules whose name is
+     * their identity (an ingestion source's {@code rag-ingestion:<kb>:<source>}).
+     * When several share the name — which their writers prevent by deleting by name
+     * before creating — any one of them.
+     */
+    Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
      * Delete all schedules owned by a user (GDPR Art. 17 erasure).

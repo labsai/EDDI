@@ -34,9 +34,11 @@ describe("RAG ingestion sources", () => {
 
     const source = await screen.findByTestId("ingestion-source-0");
     expect(within(source).getByText("public-docs")).toBeInTheDocument();
-    // The cron is shown on the collapsed row, so a scheduled source is obvious
-    // without opening it.
-    expect(within(source).getByText("0 2 * * *")).toBeInTheDocument();
+    // The schedule is shown on the collapsed row, so a scheduled source is obvious
+    // without opening it — in words for a preset, with the raw cron on hover.
+    const badge = within(source).getByTestId("ingestion-source-0-cron-badge");
+    expect(badge).toHaveTextContent("Every day at 02:00 UTC");
+    expect(badge).toHaveAttribute("title", "0 2 * * *");
   });
 
   it("populates the crawl fields from the saved source", async () => {

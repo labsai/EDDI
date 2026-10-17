@@ -32,7 +32,7 @@
         <surefire-plugin.version>3.6.0</surefire-plugin.version>
         <failsafe-plugin.version>3.6.0</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
-        <quarkus-mcp-server.version>2.0.1</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>2.0.3</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
@@ -142,7 +142,7 @@
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
-                <version>42.7.13</version>
+                <version>42.7.14</version>
             </dependency>
             <!-- Override bcprov-lts8on to fix GHSA-mx76-r943-rf8g (native GCM chunking can throw
                  a bad-tag exception on decryption, 2.73.0–2.73.10). Pulled by io.nats:jnats at
@@ -555,7 +555,7 @@
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.26.3</version>
+            <version>2.26.4</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>

@@ -124,9 +124,19 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Conversation turns on {{ $labels.instance }} are waiting for a worker thread"
-          description: "For 5 minutes at least one turn was submitted to the worker pool and had to wait for a free thread. Every thread is busy: raise quarkus.thread-pool.max-threads or find what holds the threads (slow tools, slow LLM calls)."
+          summary: "Work on {{ $labels.instance }} is waiting for a worker thread"
+          description: "For 5 minutes work submitted to the worker pool (deploys, retention sweeps, the parser endpoint, blocking REST endpoints) had to wait for a free thread. Conversation turns run on virtual threads and no longer count here; their limit is EddiTurnCapacityReached. Find what holds the threads, or raise quarkus.thread-pool.max-threads."
           runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiexecutorsaturated"
+
+      - alert: EddiTurnCapacityReached
+        expr: sum by (job, instance) (increase(eddi_turn_rejected_total{reason="in_flight_limit"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} refuses conversation turns at its in-flight limit"
+          description: "For 5 minutes the node refused turns with 503 capacity_exceeded because eddi.conversation.max-in-flight-turns turns were already running. Add capacity, or find what keeps turns long (slow LLM calls, slow tools)."
+          runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#edditurncapacityreached"
 
       - alert: EddiApprovalWaitingLong
         expr: max by (job) (eddi_hitl_pending_oldest_age_seconds) > 86400

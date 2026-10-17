@@ -211,17 +211,19 @@ a downstream service that is itself traced joins the same trace:
 
 | Outbound path | Where the trace context goes |
 |---|---|
-| httpcalls (rule-triggered and LLM tools) | HTTP header on the request as sent. It is not written into the request record kept in conversation memory, so a human-approved call's fingerprint does not change. If Quarkus' Vert.x HTTP client instrumentation is also active, it replaces the header with its own client span — a child of the tool span, in the same trace |
-| Built-in tools (`SafeHttpClient`: web search, scraper, …) | HTTP header on the first hop and on same-origin redirect hops |
-| A2A peers | HTTP header on the Agent Card fetch and the task call |
+| httpcalls (rule-triggered and LLM tools) | HTTP header on the first request and on same-origin redirect hops. It is not written into the request record kept in conversation memory, so a human-approved call's fingerprint does not change. Quarkus' own Vert.x HTTP client instrumentation is switched off for this client (`TracingPolicy.IGNORE`), so it neither adds a client span nor rewrites the header — the parent `execute_tool` (or pipeline-task) span times the call |
+| Everything on the outbound HTTP facade (`OutboundHttp`): built-in tools (web search, scraper, PDF, weather), A2A peers, the RAG crawler, attachment downloads, OAuth token requests, Slack, remote agent sync | HTTP header on the first hop and on same-origin redirect hops. Outside a tool call the parent is whatever span is current — the REST request's server span, for example |
 | MCP servers | `params._meta.traceparent` / `tracestate` (SEP-414) **and** the HTTP header, on every request including discovery |
 
-Rules that apply to all four:
+Rules that apply to all of them:
 
 - **Only W3C trace context.** `baggage` is never sent — it is free-form and could
   carry user data to a third party.
-- **Never overwritten.** A `traceparent` header the agent author configured on an
-  httpcall is sent as configured.
+- **Never overwritten.** A `traceparent` or `tracestate` header already on the
+  request — one the agent author configured on an httpcall, say — is sent as
+  configured, and EDDI adds neither header to it. Nothing downstream in EDDI
+  rewrites it either: the Vert.x client's own tracer is off for httpcalls. (A
+  cross-origin redirect still drops it, per the next rule.)
 - **Not across origins.** A redirect to a different origin (scheme, host or port)
   drops the trace headers, as it drops credentials.
 - **Inert while OTel is off.** With `quarkus.otel.sdk.disabled=true` (the default) no
@@ -284,16 +286,19 @@ QUARKUS_OTEL_EXPORTER_OTLP_TRACES_HEADERS=<name>=<value>          # only where a
 |---|---|---|---|
 | **Jaeger** (2.x) | `http://<host>:4317` (gRPC) or `http://<host>:4318` (HTTP) | `grpc` or `http/protobuf` | none by default |
 | **Grafana Tempo** | `http://<distributor>:4317` (gRPC) or `http://<distributor>:4318` (HTTP) | `grpc` or `http/protobuf` | none by default; Grafana Cloud and gateways in front of Tempo add their own |
-| **Langfuse** | `https://cloud.langfuse.com/api/public/otel` (EU), `https://us.cloud.langfuse.com/api/public/otel` (US), `https://<your-host>/api/public/otel` (self-hosted, v3.22.0+) | `http/protobuf` only — Langfuse does not accept gRPC | `Authorization=Basic <base64 of public_key:secret_key>` |
+| **Langfuse** | `https://cloud.langfuse.com/api/public/otel` (EU), `https://us.cloud.langfuse.com/api/public/otel` (US), `https://<your-host>/api/public/otel` (self-hosted, v3.22.0+) | `http/protobuf` only — Langfuse does not accept gRPC | `Authorization=Basic <base64 of public_key:secret_key>` **plus** `x-langfuse-ingestion-version=4` for real-time ingestion (see below) |
 | **Arize Phoenix** (self-hosted) | `http://<host>:6006` (HTTP) or `http://<host>:4317` (gRPC) | `http/protobuf` or `grpc` | none unless auth is enabled; then `Authorization=Bearer <PHOENIX_API_KEY>` |
 
 Notes and caveats:
 
 - **Tempo's** OTLP receivers bind to `localhost` by default; configure the
   distributor to listen on an external interface, or EDDI cannot reach it.
-- **Langfuse** also documents a Japan region (`https://jp.cloud.langfuse.com/api/public/otel`)
-  and recommends the extra header `x-langfuse-ingestion-version=4`. Several headers go
-  in one comma-separated value: `Authorization=Basic …,x-langfuse-ingestion-version=4`.
+- **Langfuse: send `x-langfuse-ingestion-version=4` as well**, or traces show up with
+  a delay rather than in real time — that header is what selects Langfuse's real-time
+  ingestion path, and a trace that arrives minutes later is no use while you are
+  chasing a slow tool. Several headers go in one comma-separated value:
+  `QUARKUS_OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Basic <base64>,x-langfuse-ingestion-version=4`.
+  Langfuse also documents a Japan region (`https://jp.cloud.langfuse.com/api/public/otel`).
 - **Phoenix:** the Bearer header is what Phoenix's own OTel SDK sends for
   `PHOENIX_API_KEY`; its documentation does not spell the header out for every
   deployment, so confirm it against your instance. **Phoenix Cloud / Arize AX**
@@ -421,12 +426,26 @@ configuration (template, HTTP call target) or an unreachable dependency.
 
 ### EddiExecutorSaturated
 
-At least one conversation turn has been waiting for a worker thread for 5 minutes:
-every thread of the pool is busy. Find what holds them — long LLM calls, slow tools,
-a blocking HTTP call — on the **Turn executor load** panel and in a thread dump
-(`jcmd <pid> Thread.print`). Raise `quarkus.thread-pool.max-threads` only once the
-holders are understood; more threads also mean more concurrent load on the LLM
-provider and the datastore.
+Work submitted to the worker pool has been waiting for a thread for 5 minutes: every
+thread of the pool is busy. Conversation turns are no longer part of it: they run
+on virtual threads (`pool="turn"` on the **Turn executor load** panel) and are bounded
+by `eddi.conversation.max-in-flight-turns` instead, see
+[EddiTurnCapacityReached](#edditurncapacityreached). What still uses the pool:
+deploys and undeploys, retention sweeps, the semantic parser endpoint and blocking
+REST endpoints. Find what holds the threads in a thread dump
+(`jcmd <pid> Thread.print`) before raising `quarkus.thread-pool.max-threads`.
+
+### EddiTurnCapacityReached
+
+For 5 minutes the node refused conversation turns with **503** `capacity_exceeded`
+because it was already running `eddi.conversation.max-in-flight-turns` turns
+(`eddi_turn_rejected_total{reason="in_flight_limit"}`). Clients that retry on 503
+recover on their own. Check how long turns take
+(`eddi_conversation_processing_duration`, the LLM latency panels): a slow provider
+keeps turns in flight longer and fills the limit at the same arrival rate. Then add
+capacity: another node, or more heap with a higher limit. Raise the limit only
+together with the heap, because every in-flight turn holds its conversation memory,
+and keep the database pool in step (MongoDB `maxPoolSize`).
 
 ### EddiApprovalWaitingLong
 

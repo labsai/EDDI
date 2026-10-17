@@ -178,6 +178,23 @@ tests:
         exp_alerts:
           - exp_labels: { severity: warning, job: eddi, instance: a }
             exp_annotations:
-              description: "For 5 minutes at least one turn was submitted to the worker pool and had to wait for a free thread. Every thread is busy: raise quarkus.thread-pool.max-threads or find what holds the threads (slow tools, slow LLM calls)."
+              description: "For 5 minutes work submitted to the worker pool (deploys, retention sweeps, the parser endpoint, blocking REST endpoints) had to wait for a free thread. Conversation turns run on virtual threads and no longer count here; their limit is EddiTurnCapacityReached. Find what holds the threads, or raise quarkus.thread-pool.max-threads."
               runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#eddiexecutorsaturated"
-              summary: "Conversation turns on a are waiting for a worker thread"
+              summary: "Work on a is waiting for a worker thread"
+
+  - name: turns refused at the in-flight limit for five minutes means the node is at capacity
+    interval: 1m
+    input_series:
+      - series: 'eddi_turn_rejected_total{job="eddi", instance="a", reason="in_flight_limit"}'
+        values: '0+4x15'
+      - series: 'eddi_turn_rejected_total{job="eddi", instance="b", reason="in_flight_limit"}'
+        values: '7x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EddiTurnCapacityReached
+        exp_alerts:
+          - exp_labels: { severity: warning, job: eddi, instance: a }
+            exp_annotations:
+              description: "For 5 minutes the node refused turns with 503 capacity_exceeded because eddi.conversation.max-in-flight-turns turns were already running. Add capacity, or find what keeps turns long (slow LLM calls, slow tools)."
+              runbook_url: "https://github.com/labsai/EDDI/blob/main/docs/monitoring/monitoring-guide.md#edditurncapacityreached"
+              summary: "a refuses conversation turns at its in-flight limit"

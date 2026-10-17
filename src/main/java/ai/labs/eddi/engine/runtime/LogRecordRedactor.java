@@ -51,7 +51,7 @@ import java.util.logging.LogRecord;
  * {@link BoundedLogStore#capture} so that pass happens once per record rather
  * than twice.
  */
-final class LogRecordRedactor {
+public final class LogRecordRedactor {
 
     /** Stands in for a message that could not even be scanned. */
     private static final String REDACTION_FAILED = "<REDACTED: log redaction failed>";
@@ -69,7 +69,7 @@ final class LogRecordRedactor {
      * match, and the order that cannot surprise anyone is the one where each rule
      * sees text of the shape it was written against.
      */
-    static String rewrite(String text) {
+    public static String rewrite(String text) {
         if (text == null || text.isEmpty()) {
             return text;
         }

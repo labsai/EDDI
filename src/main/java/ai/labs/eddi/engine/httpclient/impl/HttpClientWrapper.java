@@ -114,12 +114,10 @@ public class HttpClientWrapper implements IHttpClient {
      * </p>
      *
      * <p>
-     * When the Quarkus OpenTelemetry SDK is enabled its Vert.x HTTP client tracer
-     * may also be active on this client (it is created from the Quarkus-managed
-     * {@code Vertx}). If it sees the parent span it opens a client span and
-     * <em>sets</em> {@code traceparent} to that span — a child of the
-     * {@code execute_tool} span, so the trace stays connected either way. This
-     * explicit header is what carries the trace when that tracer does not run.
+     * Quarkus' Vert.x HTTP client tracer is switched off for this client
+     * ({@code TracingPolicy.IGNORE} in {@code HttpClientModule}), so this explicit
+     * header is the only trace context the request carries: nothing re-injects one
+     * onto a cross-origin redirect hop after the redirect handler stripped it.
      * Called on the sending thread, where the tool's span is current.
      * </p>
      */

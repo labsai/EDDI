@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -40,6 +41,7 @@ import jakarta.ws.rs.NotFoundException;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.escapeJsonString;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.parseIntOrDefault;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
 
 /**
  * MCP tools for resolving Human-in-the-Loop (HITL) approval gates over the MCP
@@ -49,13 +51,15 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.parseIntOrDefault;
  *
  * <p>
  * MCP is a transport, not a new authority: authorization mirrors the REST
- * surface exactly (per-conversation owner/admin/approver via
- * {@link HitlAccessGuard}); a decision is always attributed to the
- * authenticated caller (prefixed {@code mcp:}, never taken from a tool
- * argument). Mutating tools additionally honour the
- * {@code eddi.mcp.hitl.mutations.enabled} kill-switch. These tools resolve both
- * {@code RULE} and {@code TOOL_CALL} pauses — both are {@code AWAITING_HUMAN}
- * and both are decided by a single verdict.
+ * surface exactly — first the {@link McpRoles#HITL} role tier, the same
+ * {@code @RolesAllowed} the REST HITL endpoints carry (so {@code eddi-viewer},
+ * which REST refuses at the door, is refused here too), then the
+ * per-conversation owner/admin/approver check in {@link HitlAccessGuard}; a
+ * decision is always attributed to the authenticated caller (prefixed
+ * {@code mcp:}, never taken from a tool argument). Mutating tools additionally
+ * honour the {@code eddi.mcp.hitl.mutations.enabled} kill-switch. These tools
+ * resolve both {@code RULE} and {@code TOOL_CALL} pauses — both are
+ * {@code AWAITING_HUMAN} and both are decided by a single verdict.
  */
 @ApplicationScoped
 @McpErrorResults
@@ -67,6 +71,7 @@ public class McpHitlTools {
     private final IGroupConversationService groupConversationService;
     private final HitlAccessGuard hitlAccessGuard;
     private final OwnershipValidator ownershipValidator;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final MeterRegistry meterRegistry;
@@ -78,6 +83,7 @@ public class McpHitlTools {
             IGroupConversationService groupConversationService,
             HitlAccessGuard hitlAccessGuard,
             OwnershipValidator ownershipValidator,
+            ResourceAccessGuard resourceAccessGuard,
             IJsonSerialization jsonSerialization,
             SecurityIdentity identity,
             MeterRegistry meterRegistry,
@@ -87,6 +93,7 @@ public class McpHitlTools {
         this.groupConversationService = groupConversationService;
         this.hitlAccessGuard = hitlAccessGuard;
         this.ownershipValidator = ownershipValidator;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.meterRegistry = meterRegistry;
@@ -141,6 +148,7 @@ public class McpHitlTools {
     public String listPendingApprovals(
                                        @ToolArg(description = "Max entries to return (default: 200, capped at 1000)", required = false,
                                                 defaultValue = "200") String limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         try {
             int effectiveLimit = parseIntOrDefault(limit, 200);
             var result = hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
@@ -167,6 +175,7 @@ public class McpHitlTools {
                                     @ToolArg(description = "Conversation ID") String conversationId,
                                     @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                              defaultValue = "summary") String detail) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         if (conversationId == null || conversationId.isBlank()) {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
@@ -235,6 +244,7 @@ public class McpHitlTools {
                                      @ToolArg(description = "Reviewer note, max 4096 chars (optional)", required = false) String note,
                                      @ToolArg(description = "pauseId from get_approval_status — the pause this decision is for",
                                               required = false) String pauseId) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -287,6 +297,7 @@ public class McpHitlTools {
           description = "Cancel a paused or running regular conversation. Attributed to the authenticated caller.")
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -295,9 +306,21 @@ public class McpHitlTools {
             return errorJson("conversationId is required", "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireConversationHitlAccess(conversationId);
-            var outcome = conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, principalWithMcpPrefix());
+            String ownerId = hitlAccessGuard.requireConversationHitlAccess(conversationId);
+            IConversationService.CancelOutcome outcome;
+            if (hitlAccessGuard.mayCancelExecuting(ownerId)) {
+                outcome = conversationService.cancelConversation(conversationId,
+                        ControlSignal.CANCEL_GRACEFUL, principalWithMcpPrefix());
+            } else {
+                // Approver-only caller: the same paused-only compare-and-set the REST
+                // surface uses (L9 of the 2026-10-15 security review), so an approver
+                // cannot stop another user's executing turn over MCP either.
+                outcome = conversationService.cancelPausedConversation(conversationId, principalWithMcpPrefix());
+                if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL) {
+                    return errorJson("Access denied: an approver may only cancel a conversation that is awaiting a human decision",
+                            "FORBIDDEN", null);
+                }
+            }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "regular").increment();
             return switch (outcome) {
                 case CANCELLED -> "{\"status\":\"CANCELLED\"}";
@@ -325,6 +348,7 @@ public class McpHitlTools {
                                             @ToolArg(description = "Group ID") String groupId,
                                             @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                      defaultValue = "100") String limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         if (groupId == null || groupId.isBlank()) {
             return errorJson("groupId is required", "BAD_REQUEST", null);
         }
@@ -344,6 +368,7 @@ public class McpHitlTools {
     public String listAllGroupPendingApprovals(
                                                @ToolArg(description = "Max entries to return (default: 100)", required = false,
                                                         defaultValue = "100") String limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         try {
             var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
             meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
@@ -363,6 +388,7 @@ public class McpHitlTools {
                                          @ToolArg(description = "Group conversation ID") String conversationId,
                                          @ToolArg(description = "'summary' or 'full' (default: summary)", required = false,
                                                   defaultValue = "summary") String detail) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
@@ -455,6 +481,7 @@ public class McpHitlTools {
                                              required = false) String taskApprovalsJson,
                                     @ToolArg(description = "pauseId from get_group_approval_status — the pause this decision is for",
                                              required = false) String pauseId) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -495,6 +522,14 @@ public class McpHitlTools {
         }
         try {
             hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            // The USE gate REST's approve endpoint applies (requireResumeUseAccess): an
+            // approval resumes the run — every remaining member turn, at the group
+            // owner's cost — so an owner whose access to the group was revoked while
+            // it was paused must not drive it to completion. Admins and designated
+            // approvers decide by role, independently of group access.
+            if (!ownershipValidator.isAdmin(identity) && !ownershipValidator.isApprover(identity)) {
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            }
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(parsed);
             decision.setNote(note);
@@ -540,6 +575,7 @@ public class McpHitlTools {
                                         @ToolArg(description = "Group conversation ID") String conversationId,
                                         @ToolArg(description = "The pending HUMAN member's id (their principal id)") String memberId,
                                         @ToolArg(description = "The member's response text") String content) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
@@ -580,6 +616,7 @@ public class McpHitlTools {
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
+        requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;

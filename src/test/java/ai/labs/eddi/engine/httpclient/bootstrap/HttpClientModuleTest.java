@@ -12,6 +12,7 @@ import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.RequestOptions;
+import io.vertx.core.tracing.TracingPolicy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
@@ -26,6 +27,7 @@ import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -197,6 +199,17 @@ class HttpClientModuleTest {
         assertNull(next.getHeaders().get("X-Api-Key"), "a custom credential header must not be replayed to another host");
         assertNull(next.getHeaders().get("Cookie"), "Cookie must not be replayed to another host");
         assertTrue(next.getHeaders().contains("Accept"), "a non-credential header stays");
+    }
+
+    @Test
+    @DisplayName("Quarkus' Vert.x client tracer is kept off the httpcalls client, so nothing re-injects a stripped traceparent")
+    void tracerIgnoresTheHttpcallsClient() {
+        // With PROPAGATE (the Vert.x default) Quarkus' tracer writes a traceparent
+        // onto every request the redirect handler issues — after
+        // stripCredentialsIfCrossOrigin removed it from a cross-origin hop.
+        // HttpClientWrapper adds the header itself, so propagation does not depend
+        // on the tracer; the auto client span for httpcalls is what is given up.
+        assertEquals(TracingPolicy.IGNORE, HttpClientModule.clientOptions(5, 5, 0, 5000).getTracingPolicy());
     }
 
     @Test

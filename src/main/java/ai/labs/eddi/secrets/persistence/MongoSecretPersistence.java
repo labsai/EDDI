@@ -65,6 +65,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
     private static final String FIELD_CHECKSUM = "checksum";
     private static final String FIELD_DESCRIPTION = "description";
     private static final String FIELD_ALLOWED_AGENTS = "allowedAgents";
+    private static final String FIELD_ALLOWED_HOSTS = "allowedHosts";
     private static final String FIELD_CREATED_AT = "createdAt";
     private static final String FIELD_LAST_ACCESSED_AT = "lastAccessedAt";
     private static final String FIELD_LAST_ROTATED_AT = "lastRotatedAt";
@@ -170,6 +171,11 @@ public class MongoSecretPersistence implements ISecretPersistence {
             updates.add(secret.getAllowedAgents() != null
                     ? Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
                     : Updates.setOnInsert(FIELD_ALLOWED_AGENTS, List.of(SecretMetadata.WILDCARD_AGENT)));
+            // Same contract: null is "not supplied". An insert without a host list gets
+            // none, which means any destination — the shape every pre-existing row has.
+            if (secret.getAllowedHosts() != null) {
+                updates.add(Updates.set(FIELD_ALLOWED_HOSTS, secret.getAllowedHosts()));
+            }
             var update = Updates.combine(updates);
 
             secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
@@ -186,6 +192,7 @@ public class MongoSecretPersistence implements ISecretPersistence {
                     .append(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()).append(FIELD_IV, secret.getIv())
                     .append(FIELD_DEK_ID, secret.getDekId()).append(FIELD_CHECKSUM, secret.getChecksum())
                     .append(FIELD_DESCRIPTION, secret.getDescription()).append(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
+                    .append(FIELD_ALLOWED_HOSTS, secret.getAllowedHosts())
                     .append(FIELD_CREATED_AT, instantToString(secret.getCreatedAt()))
                     .append(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt()))
                     .append(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())));
@@ -288,6 +295,18 @@ public class MongoSecretPersistence implements ISecretPersistence {
             return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
         } catch (MongoException e) {
             throw new PersistenceException("Failed to update the grant of secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
+    public boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts) {
+        try {
+            var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName));
+            // One field, no upsert — see updateSecretGrant for why.
+            var update = Updates.set(FIELD_ALLOWED_HOSTS, allowedHosts == null ? List.of() : allowedHosts);
+            return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to update the allowed hosts of secret " + tenantId + "/" + keyName, e);
         }
     }
 
@@ -525,6 +544,9 @@ public class MongoSecretPersistence implements ISecretPersistence {
         secret.setChecksum(doc.getString(FIELD_CHECKSUM));
         secret.setDescription(doc.getString(FIELD_DESCRIPTION));
         secret.setAllowedAgents(doc.getList(FIELD_ALLOWED_AGENTS, String.class, List.of("*")));
+        // The two-argument form: an absent field reads as null ("any destination"),
+        // and getList refuses a null default.
+        secret.setAllowedHosts(doc.getList(FIELD_ALLOWED_HOSTS, String.class));
         secret.setCreatedAt(parseInstant(doc.getString(FIELD_CREATED_AT)));
         secret.setLastAccessedAt(parseInstant(doc.getString(FIELD_LAST_ACCESSED_AT)));
         secret.setLastRotatedAt(parseInstant(doc.getString(FIELD_LAST_ROTATED_AT)));

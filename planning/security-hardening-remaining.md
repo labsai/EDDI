@@ -7,7 +7,7 @@
 1. [`docs/changelog.md`](../docs/changelog.md) — Sprint 1 and Sprint 2 entries describe what was already done
 2. [`AGENTS.md`](../AGENTS.md) — §4.4 "Tool Security" for URL validation patterns
 3. Key files to understand:
-   - [`SafeHttpClient.java`](../src/main/java/ai/labs/eddi/engine/httpclient/SafeHttpClient.java) — centralized SSRF-safe HTTP
+   - `SafeHttpClient.java` (retired; see `engine/httpclient/outbound/OutboundHttp.java`) — centralized SSRF-safe HTTP
    - [`UrlValidationUtils.java`](../src/main/java/ai/labs/eddi/modules/llm/tools/UrlValidationUtils.java) — SSRF IP validation
    - [`VaultSaltManager.java`](../src/main/java/ai/labs/eddi/secrets/crypto/VaultSaltManager.java) — per-deployment KEK salt
    - [`AuthStartupGuard.java`](../src/main/java/ai/labs/eddi/engine/security/AuthStartupGuard.java) — production auth enforcement
