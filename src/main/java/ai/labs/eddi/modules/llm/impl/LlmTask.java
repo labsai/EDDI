@@ -876,7 +876,7 @@ public class LlmTask implements ILifecycleTask {
                     accumulateCost(currentStep, screened.costUsd());
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
-                        fallbackServed = guardrailBlock(screened.text());
+                        fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
                     }
                 }
             } catch (LifecycleException validationFailure) {
@@ -1843,7 +1843,7 @@ public class LlmTask implements ILifecycleTask {
                     accumulateCost(currentStep, screened.costUsd());
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
-                        fallbackServed = guardrailBlock(screened.text());
+                        fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
                     }
                 }
             } catch (LifecycleException validationFailure) {
@@ -2453,15 +2453,17 @@ public class LlmTask implements ILifecycleTask {
      * task's response — stored, visible to output templates under the response
      * object name, shown and streamed unless {@code addToOutput} is explicitly
      * false. The model is not called; neither {@code preRequest} nor
-     * {@code postResponse} runs. The output item is marked as engine text
-     * ({@code fallback}), so later turns' history leaves it out.
+     * {@code postResponse} runs. It is served as a fallback: the step's
+     * {@code llm:fallback:<taskId>} flag keeps it out of later turns' history, and
+     * a {@code convertToObject} task gets it wrapped under {@code fallbackField}.
      */
     private void answerInputBlocked(IConversationMemory memory, IWritableConversationStep currentStep, Task task, Map<String, String> processedParams,
                                     Map<String, Object> templateDataObjects, String blockMessage) {
-        currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), blockMessage));
+        var served = guardrailBlock(task, currentStep, blockMessage, Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)));
+        currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), served.content()));
         String responseObjectName = isNullOrEmpty(task.getResponseObjectName()) ? task.getId() : task.getResponseObjectName();
         if (responseObjectName != null) {
-            templateDataObjects.put(responseObjectName, blockMessage);
+            templateDataObjects.put(responseObjectName, served.object());
         }
         if ("false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
             return;
@@ -2488,12 +2490,14 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * An output guardrail's block, served like a fallback: the engine's text, not
-     * parsed as JSON, not recorded as what the model said, left out of later
-     * history.
+     * A guardrail's block, served as a fallback: the engine's text, not parsed as
+     * JSON, not recorded as what the model said, flagged on the step so later
+     * history leaves it out, and wrapped under {@code fallbackField} for a
+     * {@code convertToObject} task.
      */
-    private static LlmFallbackHandler.Fallback guardrailBlock(String blockMessage) {
-        return new LlmFallbackHandler.Fallback(blockMessage, blockMessage, blockMessage);
+    private LlmFallbackHandler.Fallback guardrailBlock(Task task, IWritableConversationStep currentStep, String blockMessage,
+                                                       boolean convertObject) {
+        return fallbackHandler.serveText(task, currentStep, blockMessage, convertObject);
     }
 
     /**

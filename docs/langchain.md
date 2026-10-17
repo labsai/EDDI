@@ -994,6 +994,8 @@ A task can screen the **user's message before the model is called** (`inputGuard
 | `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
 | `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
 
+A block message is served the way an [`onError` fallback](#fallback-answers-and-onerror) is: the turn is flagged as a fallback, so later turns' history keeps the user's question but not the block message, and a `convertToObject` task with `responseValidation.fallbackField` gets it wrapped as `{"<fallbackField>": "<block message>"}` — the shape its `postResponse` reads. Because the history builder merges a fallback turn's question into the next user message, input guardrails treat only that message's last text part as the current turn; the earlier parts are screened as history.
+
 **When a guardrail fails.** A guardrail that throws, or returns no verdict, could not check the text. What happens then is its `failMode`:
 
 | `failMode` | Effect | Default for |
