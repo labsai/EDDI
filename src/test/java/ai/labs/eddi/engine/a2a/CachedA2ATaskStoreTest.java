@@ -99,6 +99,37 @@ class CachedA2ATaskStoreTest {
     }
 
     @Test
+    @DisplayName("once erasure began, the principal's writes are dropped — including one that lands after the sweep")
+    void writesDuringAndAfterErasureAreDropped() {
+        store.saveTask("alice", record("t1", "before"));
+        store.beginErasure("alice");
+
+        store.saveTask("alice", record("t2", "during the cascade"));
+        store.bindContext("alice", "ctx-late", "conv-late");
+        assertTrue(store.findTask("alice", "t2").isEmpty());
+        assertTrue(store.findContextConversation("alice", "ctx-late").isEmpty());
+
+        assertEquals(1, store.eraseForPrincipal("alice"));
+        store.saveTask("alice", record("t3", "after the sweep"));
+        assertTrue(store.tasksOf("alice").isEmpty(), "a write after the sweep must not survive it");
+
+        store.saveTask("bob", record("t1", "unaffected"));
+        assertTrue(store.findTask("bob", "t1").isPresent(), "another principal's writes are unaffected");
+    }
+
+    @Test
+    @DisplayName("the participant's stop phase closes the store to the principal before the sweep")
+    void participantStopPhaseClosesTheStore() throws Exception {
+        var participant = new A2ATaskGdprParticipant(store);
+
+        assertEquals(0, participant.stopInFlightWork("alice"));
+        store.saveTask("alice", record("t1", "late"));
+
+        assertTrue(store.tasksOf("alice").isEmpty());
+        assertEquals("a2aTasks", participant.erasureStepName());
+    }
+
+    @Test
     @DisplayName("the GDPR participant erases through the store and exports null when nothing is held")
     void participantDelegatesToTheStore() throws Exception {
         store.saveTask("alice", record("t1", "alice one"));

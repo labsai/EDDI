@@ -351,9 +351,15 @@ and reduce them to the minimum necessary for your use case.
 
 ## What erasure and export do not reach
 
-Erasure and export cover every store EDDI keys by a user. Four classes of data
-sit outside that boundary, each for a different reason; a controller's record of
-processing should name them and the measure that bounds each one.
+Erasure covers every store EDDI keys by a user — the fourteen steps and the
+participants listed above. Export is narrower: it is the bundle described under
+[Right of Access](#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100),
+and what it leaves out — group conversation transcripts, shared artifacts,
+schedules and HITL journal entries among them — is named in its
+`omittedCategories`, so an export must not be handed over as complete without
+reading that field. Beyond both, four classes of data sit outside EDDI's reach
+altogether, each for a different reason; a controller's record of processing
+should name them and the measure that bounds each one.
 
 | Data | Why it is out of scope | What bounds it |
 | --- | --- | --- |

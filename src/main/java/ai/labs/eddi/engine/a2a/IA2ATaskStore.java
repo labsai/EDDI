@@ -61,4 +61,13 @@ public interface IA2ATaskStore {
      * @return how many tasks and bindings were removed
      */
     long eraseForPrincipal(String principal);
+
+    /**
+     * Marks {@code principal} as being erased: from now on, and for a while after
+     * {@link #eraseForPrincipal} ran, {@link #saveTask} and {@link #bindContext}
+     * for that principal are dropped rather than stored. The GDPR cascade calls
+     * this in its stop phase, before anything is deleted, so a request the
+     * principal's peer sends while the cascade runs cannot leave a task behind.
+     */
+    void beginErasure(String principal);
 }

@@ -19,6 +19,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -139,6 +143,66 @@ class ObservableStreamingChatModelTest {
 
     private static ChatRequest request() {
         return ChatRequest.builder().messages(UserMessage.from("hi")).build();
+    }
+
+    /**
+     * L12 of the 2026-10-15 security review: the request line is DEBUG and redacted
+     * before truncation, so a key straddling the 200-character cutoff leaves none
+     * of its characters in the log.
+     */
+    @Test
+    @DisplayName("a credential straddling the request-line cutoff is redacted, and the line is DEBUG")
+    void requestLineIsDebugAndRedactedBeforeTruncation() {
+        String secret = "sk-abcdefghijklmnopqrstuvwxyz0123456789";
+        var request = ChatRequest.builder().messages(UserMessage.from("x".repeat(190) + " api_key=" + secret)).build();
+        var wrapped = ObservableStreamingChatModel.wrap(emitting("a"), "openai", "true", "false", null);
+        List<LogRecord> records = new ArrayList<>();
+        var handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(record);
+            }
+
+            @Override
+            public void flush() {
+                // nothing is buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        var logger = Logger.getLogger(ObservableStreamingChatModel.class.getName());
+        var previousLevel = logger.getLevel();
+        boolean previousUseParentHandlers = logger.getUseParentHandlers();
+        logger.setLevel(Level.ALL);
+        logger.setUseParentHandlers(false);
+        logger.addHandler(handler);
+        try {
+            wrapped.chat(request, new StreamingChatResponseHandler() {
+                @Override
+                public void onPartialResponse(String partialResponse) {
+                }
+
+                @Override
+                public void onCompleteResponse(ChatResponse completeResponse) {
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                }
+            });
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+            logger.setUseParentHandlers(previousUseParentHandlers);
+        }
+
+        var record = records.stream().filter(r -> String.valueOf(r.getMessage()).contains("Streaming chat request")).findFirst().orElseThrow();
+        String line = record.getParameters() == null ? record.getMessage() : String.format(record.getMessage(), record.getParameters());
+        assertTrue(line.indexOf(secret.substring(0, 8)) < 0, "no prefix of the key may survive the cutoff: " + line);
+        assertEquals(Level.FINE.intValue(), record.getLevel().intValue(), "the request line is DEBUG");
     }
 
     @Test

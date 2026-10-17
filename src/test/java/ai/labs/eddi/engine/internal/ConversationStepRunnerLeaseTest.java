@@ -288,6 +288,40 @@ class ConversationStepRunnerLeaseTest {
         assertEquals("en", context.get("lang").getValue());
         assertTrue(new DeadLetterEntry("4", ID, "e", 1, "{}", turn).isReplayable());
     }
+
+    @Test
+    @DisplayName("a context entry marked secret, or under a credential-named key, is dropped; structured values are redacted inside")
+    void sensitiveContextEntriesAreDroppedOrRedactedInside() throws Exception {
+        ConversationService service = describingService();
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        var flagged = new Context(Context.ContextType.string, "plain-looking-but-flagged");
+        flagged.setSecret(true);
+        var nested = new Context(Context.ContextType.object, Map.of(
+                "password", "correct horse battery staple",
+                "note", "token=sk-abcdefghijklmnopqrstuvwxyz0123456789 ok",
+                "items", List.of("fine", "api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789")));
+        var input = new InputData("hello", Map.of(
+                "flagged", flagged,
+                "password", new Context(Context.ContextType.string, "hunter2hunter2"),
+                "profile", nested,
+                "lang", new Context(Context.ContextType.string, "en")));
+
+        Map<String, Object> turn = service.describeTurn(Environment.production, turnMemory, ID, input, false, agentExpectingSecrets(false));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Context> context = (Map<String, Context>) turn.get("context");
+        assertFalse(context.containsKey("flagged"), "an entry the client marked secret is not captured");
+        assertFalse(context.containsKey("password"), "an entry under a credential-named key is not captured");
+        assertEquals("en", context.get("lang").getValue());
+        String profile = String.valueOf(context.get("profile").getValue());
+        assertFalse(profile.contains("correct horse"), "a credential-named key inside an object value is masked: " + profile);
+        assertFalse(profile.contains("abcdefghijklmnopqrstuvwxyz0123456789"), "string leaves inside an object value are redacted: " + profile);
+        assertTrue(profile.contains("fine"), "ordinary leaves are kept: " + profile);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> original = (Map<String, Object>) nested.getValue();
+        assertEquals("correct horse battery staple", original.get("password"), "the live turn's context is not rewritten");
+    }
     private ConversationService.ProcessingTurn processingTurn() throws Exception {
         Constructor<ConversationService.ProcessingTurn> ctor = ConversationService.ProcessingTurn.class.getDeclaredConstructor(AtomicInteger.class);
         ctor.setAccessible(true);

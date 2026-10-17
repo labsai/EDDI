@@ -94,7 +94,7 @@ class ObservableStreamingChatModel implements StreamingChatModel {
             var messages = request.messages();
             var lastMsg = messages.isEmpty() ? "<empty>" : messages.getLast().toString();
             LOGGER.debugf("[%s] Streaming chat request: %d messages, last: \"%s\"", modelType, messages.size(),
-                    LogRecordRedactor.rewrite(truncate(lastMsg, 200)));
+                    truncate(LogRecordRedactor.rewrite(lastMsg), 200));
         }
     }
 
@@ -120,7 +120,7 @@ class ObservableStreamingChatModel implements StreamingChatModel {
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
                 LOGGER.infof("[%s] Streaming chat response (%dms): \"%s\"", modelType,
-                        System.currentTimeMillis() - startMs, LogRecordRedactor.rewrite(truncate(snapshot(), 500)));
+                        System.currentTimeMillis() - startMs, truncate(LogRecordRedactor.rewrite(snapshot()), 500));
                 handler.onCompleteResponse(completeResponse);
             }
 

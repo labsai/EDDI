@@ -22,14 +22,18 @@ name the finding so a later reader can find this entry.
   erasure until the cache expired. `IA2ATaskStore` gains `tasksOf` and
   `eraseForPrincipal` (the length-prefixed key makes a principal's prefix exact), and
   `A2ATaskGdprParticipant` registers both with `GdprComplianceService` as step
-  `a2aTasks`. [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
+  `a2aTasks`. It also joins the cascade's stop phase: `beginErasure` closes the store
+  to the principal's writes for five minutes, so a peer request admitted while the
+  cascade runs cannot leave a task behind the sweep. [`gdpr-compliance.md`](../gdpr-compliance.md) lists it and now has a
   section naming what erasure does **not** reach — RAG knowledge bases, application
   log files, telemetry exports and LLM-provider retention — with why, and what bounds
   each.
 - **L6 — dead letters kept the raw turn input for seven days.** `describeTurn` runs
   before the pipeline, so the `scope: secret` scrub could not help, and only a client
   that set `context.secretInput` was spared. The captured input and its string
-  context values now pass through `SecretRedactionFilter`, and a turn addressed to an
+  context values now pass through `SecretRedactionFilter` — string leaves inside
+  object values included, with credential-named keys masked — an entry the client
+  marked `secret` or whose key names a credential is dropped, and a turn addressed to an
   agent whose workflows carry any `scope: secret` property instruction is recorded as
   `secretInput: true` without input or context, like a client-flagged one. The fact is
   computed once at deployment: `PropertySetterConfiguration.hasSecretInstructions()`,
@@ -45,8 +49,10 @@ name the finding so a later reader can find this entry.
   any authenticated caller to a legacy record with no owner; they use
   `requireOwnerOrAdminStrict`, as delete and close already did. And an `eddi-approver`
   could cancel any user's *executing* turn through `POST /agents/{id}/cancel`: a caller
-  who is only an approver is now limited to conversations in `AWAITING_HUMAN`
-  (documented in [`hitl.md`](../hitl.md#who-may-decide)); owner and admin are unchanged.
+  who is only an approver now goes through `cancelPausedConversation`, a single
+  compare-and-set on `AWAITING_HUMAN` that never signals an executing turn, so the
+  entitlement check and the cancel are one atomic operation (any other state is a 403;
+  documented in [`hitl.md`](../hitl.md#who-may-decide)); owner and admin are unchanged.
 - **L10 — unbounded listings and unbounded per-user attachments.**
   `?limit=2147483647` returned every descriptor in one response (verified live on
   `/agentstore/agents/descriptors`). `PageBounds` applies one ceiling —
@@ -64,7 +70,9 @@ name the finding so a later reader can find this entry.
   was first adopted, where before there was one WARN per boot. A persisted or migrated
   salt clears the record. `logRequests` on the LLM decorators wrote 200 characters of
   the last message — the user's own text — at INFO; the line is now DEBUG and both it
-  and the `logResponses` line run through `LogRecordRedactor`, which is public for that.
+  and the `logResponses` line run through `LogRecordRedactor` (before truncation, so a
+  key straddling the cutoff cannot leave its first characters behind), which is public
+  for that.
 
 **Files:** [`RestA2AEndpoint.java`](../../src/main/java/ai/labs/eddi/engine/a2a/RestA2AEndpoint.java),
 [`A2ATaskGdprParticipant.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskGdprParticipant.java),

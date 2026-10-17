@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.engine.a2a.A2AModels.A2ATaskRecord;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
+import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -22,9 +23,12 @@ import java.util.List;
  * <p>
  * Registering it as a bean is what enrols it: {@code GdprComplianceService}
  * discovers every {@link IGdprParticipant} and runs it after the named stores.
+ * It is a {@link UserErasureParticipant} too: in the cascade's stop phase,
+ * before anything is deleted, it closes the store to the principal's writes, so
+ * a peer request admitted while the cascade runs cannot leave a task behind.
  */
 @ApplicationScoped
-public class A2ATaskGdprParticipant implements IGdprParticipant {
+public class A2ATaskGdprParticipant implements IGdprParticipant, UserErasureParticipant {
 
     private final IA2ATaskStore taskStore;
 
@@ -36,6 +40,17 @@ public class A2ATaskGdprParticipant implements IGdprParticipant {
     @Override
     public String name() {
         return "a2aTasks";
+    }
+
+    @Override
+    public String erasureStepName() {
+        return name();
+    }
+
+    @Override
+    public int stopInFlightWork(String userId) {
+        taskStore.beginErasure(userId);
+        return 0;
     }
 
     @Override

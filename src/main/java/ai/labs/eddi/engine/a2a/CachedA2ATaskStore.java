@@ -13,6 +13,7 @@ import jakarta.inject.Inject;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The default {@link IA2ATaskStore}: two {@code ICacheFactory} caches, bounded
@@ -28,14 +29,23 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     static final String TASK_CACHE = "a2aTaskMapping";
     static final String CONTEXT_CACHE = "a2aTaskMapping:context";
+    static final String ERASING_CACHE = "a2aTaskMapping:erasing";
+    /**
+     * How long writes for a principal stay refused after its erasure began — long
+     * enough for the cascade, and for a request admitted just before it, to finish;
+     * short enough that a person who comes back is not locked out.
+     */
+    static final long ERASURE_WINDOW_MINUTES = 5;
 
     private final ICache<String, A2ATaskRecord> tasks;
     private final ICache<String, String> contexts;
+    private final ICache<String, Boolean> erasing;
 
     @Inject
     public CachedA2ATaskStore(ICacheFactory cacheFactory) {
         this.tasks = cacheFactory.getCache(TASK_CACHE);
         this.contexts = cacheFactory.getCache(CONTEXT_CACHE);
+        this.erasing = cacheFactory.getCache(ERASING_CACHE);
     }
 
     @Override
@@ -45,6 +55,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public void saveTask(String principal, A2ATaskRecord record) {
+        if (erasing.containsKey(principal)) {
+            return;
+        }
         tasks.put(scopedKey(principal, record.taskId()), record);
     }
 
@@ -55,7 +68,15 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public void bindContext(String principal, String contextId, String conversationId) {
+        if (erasing.containsKey(principal)) {
+            return;
+        }
         contexts.put(scopedKey(principal, contextId), conversationId);
+    }
+
+    @Override
+    public void beginErasure(String principal) {
+        erasing.put(principal, Boolean.TRUE, ERASURE_WINDOW_MINUTES, TimeUnit.MINUTES);
     }
 
     @Override
@@ -69,6 +90,9 @@ public class CachedA2ATaskStore implements IA2ATaskStore {
 
     @Override
     public long eraseForPrincipal(String principal) {
+        // Refuse new writes first, then collect: a task written after the key
+        // collection would otherwise survive the sweep.
+        beginErasure(principal);
         String prefix = principalPrefix(principal);
         long removed = 0;
         // Both maps are ConcurrentMaps: collect first, then remove, so the removal

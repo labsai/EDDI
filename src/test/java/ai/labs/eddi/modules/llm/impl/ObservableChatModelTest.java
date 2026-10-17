@@ -126,6 +126,37 @@ class ObservableChatModelTest {
             assertFalse(rendered(requestLines.get(0)).contains(SECRET), "the credential must be redacted: " + rendered(requestLines.get(0)));
         }
 
+        /**
+         * The filter recognises a key only when it sees it whole: truncating first left
+         * up to 19 characters of a key straddling the cutoff in the log.
+         */
+        @Test
+        void credentialStraddlingTheRequestCutoffIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            String straddling = "x".repeat(190) + " api_key=" + SECRET;
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from(straddling))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "true", "false", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            String line = rendered(records.stream().filter(r -> rendered(r).contains("Chat request")).findFirst().orElseThrow());
+            assertFalse(line.contains(SECRET.substring(0, 8)), "no prefix of the key may survive the cutoff: " + line);
+        }
+
+        @Test
+        void credentialStraddlingTheResponseCutoffIsRedacted() {
+            ChatModel delegate = providerLikeMock();
+            when(delegate.chat(any(ChatRequest.class)))
+                    .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("y".repeat(490) + " token=" + SECRET)).build());
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.ALL);
+
+            String line = rendered(records.stream().filter(r -> rendered(r).contains("Chat response")).findFirst().orElseThrow());
+            assertFalse(line.contains(SECRET.substring(0, 8)), "no prefix of the key may survive the cutoff: " + line);
+        }
+
         @Test
         void requestLineIsNotWrittenAtInfo() {
             ChatModel delegate = providerLikeMock();

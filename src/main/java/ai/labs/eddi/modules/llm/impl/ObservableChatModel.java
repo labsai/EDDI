@@ -132,7 +132,7 @@ public class ObservableChatModel implements ChatModel {
             var messages = chatRequest.messages();
             var lastMsg = messages.isEmpty() ? "<empty>" : messages.getLast().toString();
             LOGGER.debugf("[%s] Chat request: %d messages, last: \"%s\"", modelType, messages.size(),
-                    LogRecordRedactor.rewrite(truncate(lastMsg, 200)));
+                    truncate(LogRecordRedactor.rewrite(lastMsg), 200));
         }
 
         long startMs = System.currentTimeMillis();
@@ -148,7 +148,7 @@ public class ObservableChatModel implements ChatModel {
 
         if (logResponses) {
             var text = response.aiMessage() != null ? response.aiMessage().text() : "<null>";
-            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, LogRecordRedactor.rewrite(truncate(text, 500)));
+            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(LogRecordRedactor.rewrite(text), 500));
         }
 
         return response;
@@ -227,6 +227,11 @@ public class ObservableChatModel implements ChatModel {
         }
     }
 
+    /**
+     * Redaction runs on the whole text first, truncation after: a credential that
+     * straddles the cutoff would otherwise leave its first characters in the log,
+     * because the filter only recognises a key it can see whole.
+     */
     private static String truncate(String text, int maxLen) {
         if (text == null)
             return "<null>";

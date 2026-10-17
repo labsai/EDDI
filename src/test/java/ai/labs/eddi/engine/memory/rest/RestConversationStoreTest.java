@@ -1371,16 +1371,12 @@ class RestConversationStoreTest {
         }
 
         @Test
-        @DisplayName("should clamp negative index to 0")
+        @DisplayName("L10: a negative index is refused with 400, not normalised to 0")
         void negativeIndex() throws Exception {
-            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any()))
-                    .thenReturn(List.of());
+            assertThrows(BadRequestException.class, () -> restConversationStore.readConversationDescriptors(
+                    -5, 10, null, null, null, null, null, null));
 
-            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
-                    -5, 10, null, null, null, null, null, null);
-
-            assertNotNull(result);
-            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(10), anyBoolean(), any());
+            verify(conversationDescriptorStore, never()).readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean(), any());
         }
 
         @Test

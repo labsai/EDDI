@@ -492,18 +492,33 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response cancelConversation(String conversationId) {
         String ownerId = validateConversationOwnership(conversationId, true);
-        requireApproverCancelsOnlyPausedConversations(conversationId, ownerId);
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-            // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
-            // REST contract (IRestAgentEngine#cancelConversation) takes no mode
-            // parameter and documents a graceful cancel, so there is no caller
-            // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
-            // no implementation at all — ConversationService silently degrades it to
-            // graceful — which is why it is not, and must not be, reachable from
-            // this API until it either does something or is deleted from the enum.
-            var outcome = conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+            IConversationService.CancelOutcome outcome;
+            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId)) {
+                // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
+                // REST contract (IRestAgentEngine#cancelConversation) takes no mode
+                // parameter and documents a graceful cancel, so there is no caller
+                // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
+                // no implementation at all — ConversationService silently degrades it to
+                // graceful — which is why it is not, and must not be, reachable from
+                // this API until it either does something or is deleted from the enum.
+                outcome = conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+            } else {
+                // A caller who is only an approver (L9 of the 2026-10-15 security
+                // review): the role exists to decide pauses, and a cancel of an
+                // executing turn is the owner's or an admin's to make. The paused-only
+                // cancel is one compare-and-set on AWAITING_HUMAN, so the entitlement
+                // check and the cancel are the same operation — a resume that lands in
+                // between cannot turn this into a stop of another user's running turn.
+                outcome = conversationService.cancelPausedConversation(conversationId, cancelledBy);
+                if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL) {
+                    LOGGER.warnf("Cancel of conversation %s refused: the caller holds only the approver role and the conversation is "
+                            + "not awaiting a decision", sanitize(conversationId));
+                    throw new ForbiddenException(
+                            "Access denied: an approver may only cancel a conversation that is awaiting a human decision");
+                }
+            }
             // Plain-text, curated bodies: never reflect the raw conversationId (it is
             // a caller-supplied path param — echoing it is a reflected-XSS vector) and
             // never leak internal exception detail to the client.
@@ -827,31 +842,6 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     private void validateConversationOwnership(String conversationId) {
         validateConversationOwnership(conversationId, false);
-    }
-
-    /**
-     * The approver role exists to decide pauses, and a cancel is one of the
-     * decisions it may take — on a conversation that is <em>waiting</em> for one.
-     * The same endpoint also stops a turn that is executing, and the HITL ownership
-     * check admits an approver to every conversation, so an approver could cancel
-     * any user's running turn, paused or not (L9 of the 2026-10-15 security
-     * review). A caller who is only an approver — neither the owner nor an admin —
-     * is therefore limited to conversations in
-     * {@link ConversationState#AWAITING_HUMAN}; for anything else the request is
-     * refused with 403, exactly as it would be without the role. The state read
-     * races the pause like any other decision: a cancel that loses the race is
-     * arbitrated downstream, as before.
-     */
-    private void requireApproverCancelsOnlyPausedConversations(String conversationId, String ownerId) {
-        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId)) {
-            return;
-        }
-        ConversationState state = conversationMemoryStore.getConversationState(conversationId);
-        if (state != ConversationState.AWAITING_HUMAN) {
-            LOGGER.warnf("Cancel of conversation %s refused: the caller holds only the approver role and the conversation is %s, "
-                    + "not awaiting a decision", sanitize(conversationId), state);
-            throw new ForbiddenException("Access denied: an approver may only cancel a conversation that is awaiting a human decision");
-        }
     }
 
     /**

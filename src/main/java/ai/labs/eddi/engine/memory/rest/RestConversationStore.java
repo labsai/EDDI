@@ -250,17 +250,19 @@ public class RestConversationStore implements IRestConversationStore {
     public List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter, String conversationId,
                                                                     String agentId, Integer agentVersion, ConversationState conversationState,
                                                                     ConversationDescriptor.ViewState viewState) {
+        // A negative index or a limit above the deployment-wide page ceiling is
+        // refused, not normalised (this used to clamp the limit silently at 100 and
+        // turn a negative index into 0): a client that asked for more than a page can
+        // hold must not mistake the truncated page for the whole. Checked on the
+        // caller's values, before the defaults below fill in what was left out.
+        PageBounds.require(index, limit);
         // Sanitize pagination parameters to prevent overflow (CodeQL: integer-overflow)
-        if (index == null || index < 0) {
+        if (index == null) {
             index = 0;
         }
         if (limit == null || limit < 1) {
             limit = 20;
         }
-        // Above the deployment-wide page ceiling the request is refused, not clamped
-        // (this used to clamp silently at 100): a client that asked for more than a
-        // page can hold must not mistake the truncated page for the whole.
-        PageBounds.requireLimit(limit);
         if ((long) index * limit > MAX_RESULT_OFFSET) {
             throw new BadRequestException(format("index * limit must not exceed %d. To reach older conversations, narrow the "
                     + "listing with agentId, conversationState or filter.", MAX_RESULT_OFFSET));

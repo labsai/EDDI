@@ -2261,26 +2261,75 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
-     * The turn's context with every string value run through
-     * {@link SecretRedactionFilter}. Values that did not change are kept as they
-     * are; a redacted one is a copy, so the live turn is never touched.
+     * The turn's context, fit for a dead letter. An entry the client marked
+     * {@code secret}, or whose key names a credential ({@code password},
+     * {@code token}, …), is dropped outright: the filter sees only the value and an
+     * ordinary password has no shape it can recognise. Every other entry has its
+     * string leaves — including those inside a structured (object) value — run
+     * through {@link SecretRedactionFilter}, with the same credential-key rule
+     * applied inside maps. The live turn is never touched: a changed entry is a
+     * copy.
      */
     private static Map<String, Context> redactContext(Map<String, Context> context) {
         Map<String, Context> redacted = new LinkedHashMap<>();
         context.forEach((key, value) -> {
-            if (value != null && value.getValue() instanceof String text) {
-                String clean = SecretRedactionFilter.redact(text);
-                if (!clean.equals(text)) {
-                    Context copy = new Context(value.getType(), clean);
-                    copy.setServerGenerated(value.isServerGenerated());
-                    copy.setSecret(value.getSecret());
-                    redacted.put(key, copy);
-                    return;
-                }
+            if (value == null) {
+                redacted.put(key, null);
+                return;
             }
-            redacted.put(key, value);
+            if (Boolean.TRUE.equals(value.getSecret()) || SecretRedactionFilter.isCredentialFieldName(key)) {
+                return;
+            }
+            Object clean = redactValue(value.getValue());
+            if (clean == value.getValue()) {
+                redacted.put(key, value);
+            } else {
+                Context copy = new Context(value.getType(), clean);
+                copy.setServerGenerated(value.isServerGenerated());
+                copy.setSecret(value.getSecret());
+                redacted.put(key, copy);
+            }
         });
         return redacted;
+    }
+
+    /**
+     * Redacts the string leaves of a context value, structured or not. Returns the
+     * very same object when nothing changed, so the caller can tell a copy from the
+     * original without comparing contents.
+     */
+    private static Object redactValue(Object value) {
+        if (value instanceof String text) {
+            String clean = SecretRedactionFilter.redact(text);
+            return clean.equals(text) ? value : clean;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            boolean changed = false;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                Object entryValue = entry.getValue();
+                Object clean;
+                if (entry.getKey() instanceof String name && SecretRedactionFilter.isCredentialFieldName(name)) {
+                    clean = SecretRedactionFilter.REDACTED;
+                } else {
+                    clean = redactValue(entryValue);
+                }
+                changed |= clean != entryValue;
+                copy.put(entry.getKey(), clean);
+            }
+            return changed ? copy : value;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            boolean changed = false;
+            for (Object element : list) {
+                Object clean = redactValue(element);
+                changed |= clean != element;
+                copy.add(clean);
+            }
+            return changed ? copy : value;
+        }
+        return value;
     }
 
     /**
@@ -2423,6 +2472,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                                             String cancelledBy)
             throws ResourceStoreException {
         return conversationHitlService.cancelConversation(conversationId, mode, cancelledBy);
+    }
+
+    @Override
+    public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException {
+        return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy);
     }
 
     @Override
