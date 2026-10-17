@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
@@ -317,7 +318,7 @@ class ExtensionSourceKeyContractTest {
         }).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
 
         return new RemoteApiResourceSource("https://source.example.com", SOURCE_AGENT_ID, 1,
-                "Bearer token", jsonSerialization, httpClient);
+                "Bearer token", jsonSerialization, JdkClientEngine.facade(httpClient));
     }
 
     private static String bodyFor(String uri) {

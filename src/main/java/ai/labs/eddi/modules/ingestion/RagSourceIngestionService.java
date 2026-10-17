@@ -12,9 +12,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
+import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.runtime.ShutdownEvent;
@@ -27,6 +29,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -144,6 +147,15 @@ public class RagSourceIngestionService {
      */
     public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
                                      Consumer<IngestionReport> onFinished) {
+        return runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.MANUAL, onFinished);
+    }
+
+    /**
+     * As above, recording what started the run so the history can tell a cron's
+     * runs from an operator's.
+     */
+    public Optional<String> runAsync(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
+                                     IngestionRun.Trigger trigger, Consumer<IngestionReport> onFinished) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         // Reserved here, not inside the worker: two requests arriving together both
         // used to be answered "started", and whichever worker lost the claim crawled
@@ -161,7 +173,7 @@ public class RagSourceIngestionService {
         // closed. Throwable rather than RuntimeException so an Error is logged instead
         // of disappearing into a dead thread.
         try {
-            startWorker(ragConfigId, knowledgeBase, source, sourceKey, runId, onFinished);
+            startWorker(ragConfigId, knowledgeBase, source, sourceKey, runId, trigger, onFinished);
         } catch (RuntimeException e) {
             // The reservation is claimed but nothing will work on it, and a claimed run
             // blocks the source until it is reaped.
@@ -172,12 +184,13 @@ public class RagSourceIngestionService {
     }
 
     private void startWorker(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
-                             String sourceKey, String runId, Consumer<IngestionReport> onFinished) {
+                             String sourceKey, String runId, IngestionRun.Trigger trigger,
+                             Consumer<IngestionReport> onFinished) {
 
         Thread worker = Thread.ofVirtual().name("rag-ingestion-" + sourceKey).unstarted(() -> {
             IngestionReport report = null;
             try {
-                report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST, runId);
+                report = pipeline.run(ragConfigId, knowledgeBase, source, Mode.INGEST, runId, trigger);
                 LOGGER.infof("Ingestion of source '%s' finished: %s, %d ingested, %d unchanged, %d tombstoned",
                         LogSanitizer.sanitize(source.getName()), report.outcome(),
                         report.documentsIngested(), report.documentsUnchanged(), report.documentsTombstoned());
@@ -232,9 +245,21 @@ public class RagSourceIngestionService {
         int cancelled = 0;
         for (var run : Map.copyOf(inFlight).entrySet()) {
             try {
-                stateStore.finishRun(new IngestionRun(run.getKey(), run.getValue().sourceKey(),
-                        IngestionRun.Status.CANCELLED, null, Instant.now(), 0, 0, 0, 0, 0, 0, 0.0,
-                        "Stopped because the server shut down"));
+                // Closed with the counters its last progress write recorded, so the
+                // history says how far the run got rather than showing zeroes.
+                String runId = run.getKey();
+                IngestionRun progress = stateStore.activeRun(run.getValue().sourceKey())
+                        .filter(active -> runId.equals(active.runId()))
+                        .orElse(null);
+                stateStore.finishRun(progress == null
+                        ? new IngestionRun(runId, run.getValue().sourceKey(), IngestionRun.Status.CANCELLED, null,
+                                Instant.now(), 0, 0, 0, 0, 0, 0, 0.0, "Stopped because the server shut down")
+                        : new IngestionRun(runId, progress.sourceId(), IngestionRun.Status.CANCELLED, null,
+                                Instant.now(), progress.documentsSeen(), progress.documentsIngested(),
+                                progress.documentsUnchanged(), progress.documentsFailed(),
+                                progress.documentsTombstoned(), progress.segmentsStored(), progress.costUsd(),
+                                "Stopped because the server shut down", progress.documentsSkipped(),
+                                WebCrawler.StopReason.CANCELLED.name(), progress.trigger()));
                 cancelled++;
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Could not close ingestion run %s at shutdown; it will be reaped",
@@ -340,6 +365,81 @@ public class RagSourceIngestionService {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         reapAbandoned(sourceKey, source);
         return stateStore.activeRun(sourceKey);
+    }
+
+    /** How many past fires {@link #scheduleStatus} reports. */
+    static final int RECENT_FIRES = 5;
+
+    /**
+     * What the scheduler holds for a source: whether its cron is armed, when it
+     * fires next, and how its last fires went.
+     *
+     * @param schedule
+     *            the source's schedule row; null when nothing is scheduled — no
+     *            cron, a disabled source, or a cron the deployment refused
+     * @param recentFires
+     *            newest first; empty when nothing is scheduled
+     */
+    public record SourceSchedule(ScheduleConfiguration schedule, List<ScheduleFireLog> recentFires) {
+    }
+
+    /**
+     * The scheduler's view of one source. The source card showed only the cron
+     * string, so a schedule that had never been armed, kept failing or had been
+     * dead-lettered looked exactly like a healthy one.
+     */
+    public SourceSchedule scheduleStatus(String ragConfigId, IngestionSource source)
+            throws IResourceStore.ResourceStoreException {
+        String name = RagIngestionSchedules.scheduleName(ragConfigId, sourceIdOf(source));
+        Optional<ScheduleConfiguration> schedule = scheduleStore.readScheduleByName(name);
+        if (schedule.isEmpty()) {
+            return new SourceSchedule(null, List.of());
+        }
+        return new SourceSchedule(schedule.get(), scheduleStore.readFireLogs(schedule.get().getId(), RECENT_FIRES));
+    }
+
+    /**
+     * Whether a cron would be accepted for an ingestion source, and when it would
+     * fire.
+     *
+     * @param error
+     *            why it would be refused; null when it would be accepted
+     * @param nextFires
+     *            the next fire times, in UTC; empty when refused
+     */
+    public record CronPreview(String cron, String error, List<Instant> nextFires, String zone) {
+    }
+
+    /**
+     * Previews a cron with the same checks a save applies — parseable, able to
+     * match a real date, and no more frequent than this deployment allows — so the
+     * editor can answer while the operator types instead of on save.
+     */
+    public CronPreview previewCron(String cron, int count) {
+        String zone = RagIngestionSchedules.ZONE.getId();
+        if (cron == null || cron.isBlank()) {
+            return new CronPreview(cron, "No cron expression was given", List.of(), zone);
+        }
+        try {
+            CronParser.validate(cron);
+            List<Instant> fires = new ArrayList<>();
+            Instant after = Instant.now();
+            for (int i = 0; i < Math.max(1, Math.min(count, 10)); i++) {
+                after = CronParser.computeNextFire(cron, after, RagIngestionSchedules.ZONE);
+                fires.add(after);
+            }
+            var probe = new IngestionSource();
+            probe.setCron(cron);
+            String tooFrequent = intervalRefusal(probe);
+            if (tooFrequent != null) {
+                return new CronPreview(cron, "This schedule would be refused: " + tooFrequent, List.of(), zone);
+            }
+            return new CronPreview(cron, null, fires, zone);
+        } catch (IllegalStateException e) {
+            return new CronPreview(cron, "This cron never matches a date within the next two years", List.of(), zone);
+        } catch (IllegalArgumentException e) {
+            return new CronPreview(cron, e.getMessage(), List.of(), zone);
+        }
     }
 
     /**
@@ -513,7 +613,7 @@ public class RagSourceIngestionService {
         } catch (IllegalArgumentException e) {
             return IngestionReport.failed(null, source.effectiveId(), e.getMessage());
         }
-        return runAsync(ragConfigId, knowledgeBase, source, onFinished)
+        return runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.SCHEDULED, onFinished)
                 .map(runId -> IngestionReport.started(runId, source.effectiveId()))
                 .orElseGet(() -> IngestionReport.alreadyRunning(source.effectiveId()));
     }

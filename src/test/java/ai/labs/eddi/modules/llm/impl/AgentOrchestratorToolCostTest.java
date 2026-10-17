@@ -169,8 +169,8 @@ class AgentOrchestratorToolCostTest {
 
         lenient().when(memory.getConversationId()).thenReturn(CONVERSATION_ID);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any()))
-                .thenAnswer(inv -> inv.getArgument(1));
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         lenient().when(tenantQuotaService.checkCostBudget(any()))
                 .thenReturn(QuotaCheckResult.OK);
@@ -264,20 +264,14 @@ class AgentOrchestratorToolCostTest {
     }
 
     /**
-     * D4: the same ceiling with no {@code enforceBudget} refuses nothing, against
-     * real accumulated cost.
-     * <p>
-     * Enforcement is opt-in because built-in tools priced at $0.00 until this
-     * release — the sibling test above proves the ceiling genuinely binds once the
-     * flag is set, so what this pins is that an upgrade does not start refusing
-     * calls on its own. The operator whose ceiling <em>was</em> live (tools
-     * dispatching under a priced name) is told so by the WARN, not by a surprise
-     * refusal; see
-     * {@code AgentOrchestratorCoverageTest.toolCall_unenforcedCeilingIsWarnedAbout}.
+     * M8: the same ceiling with no {@code enforceBudget} is enforced, against real
+     * accumulated cost — enforcement is the default and {@code false} is the
+     * opt-out. (Until 6.6.0 this test pinned the opposite: an unflagged ceiling
+     * refused nothing, so every stored ceiling was advisory.)
      */
     @Test
-    @DisplayName("a ceiling with no enforceBudget flag refuses nothing")
-    void ceilingWithoutFlagIsNotEnforced() throws Exception {
+    @DisplayName("a ceiling with no enforceBudget flag is enforced by default")
+    void ceilingWithoutFlagIsEnforced() throws Exception {
         var task = webSearchTask();
         task.setMaxBudgetPerConversation(0.0015);
         task.setMaxToolIterations(5);
@@ -289,10 +283,11 @@ class AgentOrchestratorToolCostTest {
         var result = orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory);
 
         assertNotNull(result);
-        verify(webSearchTool, times(5)).searchWeb("eddi", 3);
+        verify(webSearchTool, times(2)).searchWeb("eddi", 3);
         assertTrue(result.trace().stream()
-                .noneMatch(e -> String.valueOf(e.get("error")).contains("Budget exceeded")),
-                "an unflagged ceiling must refuse nothing — enforcement is opt-in");
+                .anyMatch(e -> "tool_error".equals(e.get("type"))
+                        && String.valueOf(e.get("error")).contains("Budget exceeded")),
+                "an unflagged ceiling must refuse the third call — enforcement is the default");
     }
 
     /**

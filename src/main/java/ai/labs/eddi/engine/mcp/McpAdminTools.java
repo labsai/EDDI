@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
+import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import io.quarkiverse.mcp.server.Tool;
@@ -139,6 +140,9 @@ public class McpAdminTools {
             result.put("version", ver);
             result.put("environment", env.name());
             result.put("httpStatus", httpStatus);
+            // Whether a maxBudgetPerConversation on this agent's LLM tasks refuses
+            // calls when the task does not set enforceBudget (M8).
+            result.put("toolBudgetEnforcedByDefault", ToolBudgetEnforcement.isEnforcedByDefault());
 
             if (httpStatus == 200) {
                 // Read actual deployment status from response body

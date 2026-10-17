@@ -165,7 +165,7 @@ class RestConnectionAuthorizationCallbackTest {
 
         doReturn(principal).when(securityIdentity).getPrincipal();
         doReturn(PRINCIPAL).when(principal).getName();
-        doReturn(CLIENT_SECRET).when(credentialReferenceResolver).resolveRequired(anyString(), anyString(), anyString());
+        doReturn(CLIENT_SECRET).when(credentialReferenceResolver).resolveVaultBacked(anyString(), anyString(), anyString());
         // Stubbed permissively so a wrong argument shows up as a failed verify below
         // rather than as a NullPointerException three frames away.
         doAnswer(invocation -> {

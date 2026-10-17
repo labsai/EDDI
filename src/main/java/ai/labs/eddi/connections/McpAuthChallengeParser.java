@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * <ul>
  * <li>the metadata URL must share an origin with the MCP server that returned
  * it — a server may not redirect discovery to a host of its choosing;</li>
- * <li>the fetch itself goes through {@code SafeHttpClient} (the caller's job,
+ * <li>the fetch itself goes through {@code OutboundHttp} (the caller's job,
  * documented at the call site);</li>
  * <li>any authorization server it names must already be on the operator's
  * credential-endpoint allowlist. Discovery may <em>select</em> among

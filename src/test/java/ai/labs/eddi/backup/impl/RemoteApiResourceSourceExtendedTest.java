@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -166,16 +168,16 @@ class RemoteApiResourceSourceExtendedTest {
 
             // We can't inject the mock HttpClient into the static method, so test the
             // error case
-            assertThrows(RuntimeException.class, () -> RemoteApiResourceSource.listRemoteAgentDescriptors(
-                    "ftp://invalid", null, jsonSerialization));
+            assertThrows(RuntimeException.class,
+                    () -> RemoteApiResourceSource.listRemoteAgentDescriptors(TestOutbound.standalone(), "ftp://invalid", null, jsonSerialization));
         }
 
         @Test
         @DisplayName("non-200 status throws RuntimeException")
         void non200Status() {
             // Invalid URL triggers an error before even trying HTTP
-            assertThrows(RuntimeException.class, () -> RemoteApiResourceSource.listRemoteAgentDescriptors(
-                    "ftp://invalid", null, jsonSerialization));
+            assertThrows(RuntimeException.class,
+                    () -> RemoteApiResourceSource.listRemoteAgentDescriptors(TestOutbound.standalone(), "ftp://invalid", null, jsonSerialization));
         }
     }
 
@@ -294,30 +296,9 @@ class RemoteApiResourceSourceExtendedTest {
     class CloseableTests {
 
         /**
-         * The client this class builds for itself owns a selector thread and an
-         * executor. Callers already wrap every source in try-with-resources, so
-         * inheriting {@link IResourceSource}'s no-op {@code close()} left one live
-         * client per agent behind on every batch sync.
-         * <p>
-         * This replaces a test whose only assertion was
-         * {@code assertDoesNotThrow(source::close)} driven through the
-         * <em>borrowed</em>-client constructor — a guaranteed no-op that passed just as
-         * happily with the whole override deleted.
+         * Every source shares the application's outbound facade; closing one must not
+         * take that down for the next agent of the same batch.
          */
-        @Test
-        @DisplayName("close() shuts down the HTTP client this source created")
-        void closeShutsDownTheClientItCreated() throws Exception {
-            // The ownership flag is what the public constructor sets; it is passed
-            // explicitly here because building a real client opens a selector, and
-            // that needs a loopback socket a sandboxed build does not have.
-            var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, 1, "Bearer test-token", jsonSerialization, mockHttpClient, true);
-
-            source.close();
-
-            verify(mockHttpClient).close();
-        }
-
         @Test
         @DisplayName("close() leaves a client it was handed alone")
         void closeLeavesABorrowedClientOpen() throws Exception {
@@ -335,7 +316,7 @@ class RemoteApiResourceSourceExtendedTest {
 
     private RemoteApiResourceSource createSource(String agentId, Integer version) {
         return new RemoteApiResourceSource(
-                BASE_URL, agentId, version, "Bearer test-token", jsonSerialization, mockHttpClient);
+                BASE_URL, agentId, version, "Bearer test-token", jsonSerialization, JdkClientEngine.facade(mockHttpClient));
     }
 
     @SuppressWarnings("unchecked")

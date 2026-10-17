@@ -1072,15 +1072,34 @@ class DeploymentManifestsTest {
                                 + "reading when they hit it");
             }
 
-            String bootstrapPassword = read(HELM_KEYCLOAK).lines()
+            // Helm: the env var is a secretKeyRef (the Secret it names is rendered by
+            // the same template, under `required`), never a `value:` in the pod spec —
+            // a pod-spec value shows the master-realm superuser password in every
+            // `kubectl get sts -o yaml`, in the release manifest and in audit logs.
+            List<String> helmEnv = read(HELM_KEYCLOAK).lines()
                     .dropWhile(line -> !line.contains("- name: KC_BOOTSTRAP_ADMIN_PASSWORD"))
-                    .filter(line -> line.contains("value:"))
+                    .skip(1)
+                    .takeWhile(line -> !line.strip().startsWith("- name:"))
+                    .map(String::strip)
+                    .filter(line -> !line.startsWith("#"))
+                    .toList();
+            assertTrue(helmEnv.stream().anyMatch(line -> line.equals("secretKeyRef:")),
+                    HELM_KEYCLOAK + " must read KC_BOOTSTRAP_ADMIN_PASSWORD through a secretKeyRef; it renders: " + helmEnv);
+            assertTrue(helmEnv.stream().noneMatch(line -> line.startsWith("value:")),
+                    HELM_KEYCLOAK + " still renders KC_BOOTSTRAP_ADMIN_PASSWORD as a pod-spec `value:` — the "
+                            + "password then shows in `kubectl get sts -o yaml`, the release manifest and every "
+                            + "audit log. It belongs in a Secret, read through secretKeyRef: " + helmEnv);
+            assertTrue(helmEnv.stream().noneMatch(line -> line.startsWith("optional:")),
+                    HELM_KEYCLOAK + " marks the Keycloak password reference optional, so a missing Secret boots "
+                            + "Keycloak with no bootstrap admin instead of failing closed: " + helmEnv);
+            String helmSecretPassword = read(HELM_KEYCLOAK).lines()
+                    .filter(line -> line.strip().startsWith("password:"))
                     .findFirst()
                     .orElse("");
-            assertTrue(bootstrapPassword.contains("required "),
-                    HELM_KEYCLOAK + " renders KC_BOOTSTRAP_ADMIN_PASSWORD without `required`, so a chart "
+            assertTrue(helmSecretPassword.contains("required "),
+                    HELM_KEYCLOAK + " renders the Keycloak Secret's `password` without `required`, so a chart "
                             + "installed without keycloak.adminPassword templates an empty password rather "
-                            + "than refusing. Rendered as: " + bootstrapPassword.strip());
+                            + "than refusing. Rendered as: " + helmSecretPassword.strip());
             assertEquals("", YAML.readTree(HELM.resolve("values.yaml").toFile())
                     .path("keycloak").path("adminPassword").asText(),
                     HELM.resolve("values.yaml") + " gives keycloak.adminPassword a default, which is what "
@@ -2962,7 +2981,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.7.0";
+        private static final String EXPECTED_CHART_VERSION = "2.8.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and

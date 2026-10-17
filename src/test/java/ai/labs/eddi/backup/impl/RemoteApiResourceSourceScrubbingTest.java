@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.backup.IResourceSource.ExtensionSourceData;
 import ai.labs.eddi.backup.IResourceSource.SnippetSourceData;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -96,8 +97,8 @@ class RemoteApiResourceSourceScrubbingTest {
     }
 
     private RemoteApiResourceSource source() {
-        return new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, httpClient, false,
-                secretScrubber::scrubJson);
+        return new RemoteApiResourceSource(BASE_URL, AGENT_ID, 1, null, jsonSerialization, secretScrubber::scrubJson,
+                JdkClientEngine.facade(httpClient));
     }
 
     @Test

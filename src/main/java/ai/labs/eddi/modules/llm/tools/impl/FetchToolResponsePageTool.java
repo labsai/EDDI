@@ -21,6 +21,11 @@ import java.util.Map;
  * the truncation strategy is {@code paginate}, only the first page is returned
  * inline with a {@code responseId}. The LLM can then call this tool to fetch
  * remaining pages.
+ * <p>
+ * The catalog bean is unbound; {@code BuiltinToolsProvider} hands each turn a
+ * copy {@linkplain #boundTo bound} to its conversation, so a page is only ever
+ * fetched from the conversation that paginated it (L13). The unbound bean
+ * itself refuses every fetch.
  *
  * @since 6.0.0
  */
@@ -31,6 +36,25 @@ public class FetchToolResponsePageTool {
 
     @Inject
     PaginatedResponseStore paginatedResponseStore;
+
+    /** The conversation this instance serves; null on the unbound catalog bean. */
+    private String conversationId;
+
+    /** A copy of this tool that fetches pages for {@code conversationId} only. */
+    public FetchToolResponsePageTool boundTo(String conversationId) {
+        if (conversationId == null || conversationId.isBlank()) {
+            return this;
+        }
+        FetchToolResponsePageTool bound = new FetchToolResponsePageTool();
+        bound.paginatedResponseStore = this.paginatedResponseStore;
+        bound.conversationId = conversationId;
+        return bound;
+    }
+
+    /** The conversation this instance is bound to, or null. */
+    public String conversationId() {
+        return conversationId;
+    }
 
     @Tool(name = "fetch_tool_response_page", value = "Retrieve a specific page of a previously paginated tool response. " +
             "Use this when a tool result was truncated and a responseId was provided.")
@@ -46,7 +70,11 @@ public class FetchToolResponsePageTool {
             return toJson(Map.of("error", "pageNumber must be >= 1"));
         }
 
-        PaginatedResponseStore.PageResult result = paginatedResponseStore.getPage(responseId, pageNumber);
+        if (conversationId == null) {
+            return toJson(Map.of("error", "Paginated responses can only be fetched from within the conversation that produced them."));
+        }
+
+        PaginatedResponseStore.PageResult result = paginatedResponseStore.getPage(conversationId, responseId, pageNumber);
 
         if (result == null) {
             return toJson(Map.of("error", "Response not found. It may have expired (15 minute TTL)."));

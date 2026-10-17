@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.Request;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
@@ -391,6 +392,26 @@ class ApiCallsTaskTest {
 
             assertNotNull(result);
             assertEquals("http://example.com/api", ((ApiCallsConfiguration) result).getTargetServerUrl());
+        }
+
+        @Test
+        @DisplayName("throws when the executor refuses a templated host, in targetServerUrl or a full-URL path")
+        void templatedHostRefusedAtDeploy() throws Exception {
+            ApiCallsConfiguration apiConfig = new ApiCallsConfiguration();
+            apiConfig.setTargetServerUrl("http://example.com");
+            var call = new ApiCall();
+            var request = new Request();
+            request.setPath(" http://{properties.host}/x");
+            call.setRequest(request);
+            apiConfig.setHttpCalls(List.of(call));
+            when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(apiConfig);
+            doThrow(new IllegalArgumentException("templated host refused")).when(httpCallExecutor)
+                    .rejectTemplatedAuthority("http://{properties.host}/x");
+
+            Map<String, Object> config = Map.of("uri", "eddi://config/123");
+            var refused = assertThrows(WorkflowConfigurationException.class, () -> task.configure(config, Map.of()));
+            assertTrue(refused.getMessage().contains("templated host refused"), refused.getMessage());
+            verify(httpCallExecutor).rejectTemplatedAuthority("http://example.com");
         }
 
         @Test

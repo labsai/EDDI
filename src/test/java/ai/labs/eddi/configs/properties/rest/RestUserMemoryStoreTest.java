@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.utils.PageBounds;
+import jakarta.ws.rs.BadRequestException;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -59,6 +61,14 @@ class RestUserMemoryStoreTest {
                 () -> rest.getVisibleMemories("user-1", "agent-1", List.of("other-team"), "most_recent", 50));
 
         verify(store, never()).getVisibleEntries(any(), any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void getVisibleMemories_limitAboveTheCeiling_isRefusedBeforeTheStoreIsRead() throws Exception {
+        assertThrows(BadRequestException.class,
+                () -> rest.getVisibleMemories("user-1", "agent-1", List.of(), "most_recent", PageBounds.maxLimit() + 1));
+
+        verify(store, never()).getVisibleEntries(anyString(), anyString(), anyList(), anyString(), anyInt());
     }
 
     @Test

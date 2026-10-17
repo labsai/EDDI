@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
@@ -72,7 +73,7 @@ class RestRagIngestionFilesTest {
         ingestedFileService = mock(IngestedFileService.class);
         accessGuard = mock(ResourceAccessGuard.class);
         rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class), sourceIngestionService,
-                ingestedFileService, accessGuard);
+                ingestedFileService, mock(KnowledgeBaseInspector.class), accessGuard);
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBase());
         when(sourceIngestionService.activeRun(anyString(), any())).thenReturn(Optional.empty());

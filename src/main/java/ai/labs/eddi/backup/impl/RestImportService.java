@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IRestImportService;
 import ai.labs.eddi.backup.impl.SourceUrlValidator.SyncSourcePolicy;
@@ -47,6 +48,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
@@ -100,6 +102,7 @@ import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import java.io.*;
+import java.time.Duration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.net.URI;
@@ -186,6 +189,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
+     * Who may write {@code ${caller:token}}. Null when built outside the container,
+     * where the check is skipped. Updates go through the REST stores, which apply
+     * it themselves; the direct creates below bypass them, so they apply it here.
+     */
+    private CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    @Inject
+    void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
+        this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
      * Applies the knowledge-base storage rules to imported knowledge bases. Null
      * when built outside the container, where an import still gets the per-id
      * layout but the explicit-location check is skipped.
@@ -195,6 +210,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useKnowledgeBaseStorageGuard(KnowledgeBaseStorageGuard guard) {
         this.knowledgeBaseStorageGuard = guard;
+    }
+
+    /**
+     * The outbound HTTP facade a live sync reaches the source instance through.
+     * Null until injected; an instance built outside the container gets a
+     * standalone one on its first sync, so construction never opens a selector.
+     */
+    private volatile OutboundHttp outboundHttp;
+
+    @Inject
+    void useOutboundHttp(OutboundHttp outboundHttp) {
+        this.outboundHttp = outboundHttp;
+    }
+
+    private OutboundHttp outbound() {
+        OutboundHttp current = outboundHttp;
+        if (current == null) {
+            synchronized (this) {
+                current = outboundHttp;
+                if (current == null) {
+                    current = OutboundHttp.standalone(Duration.ofSeconds(10));
+                    outboundHttp = current;
+                }
+            }
+        }
+        return current;
     }
 
     /**
@@ -1271,6 +1312,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         DocumentDescriptor previousDescriptor = null;
         if (tracked == null) {
             previous = readForRollback(storeClass, localId, localVersion);
+            if (callerTokenAuthorPolicy != null) {
+                // The compensation below writes `previous` back through the same store,
+                // which refuses ${caller:token} from a non-author: refuse now instead
+                // of leaving a rollback that cannot run.
+                callerTokenAuthorPolicy.requireMayRestore(previous, "resource '" + localId + "'");
+            }
             previousDescriptor = readCurrentDescriptorForRollback(localId);
             if (previousDescriptor == null) {
                 LOGGER.warnf("Merge updates %s '%s' without a readable descriptor; a failed import restores its content but not its name",
@@ -1413,6 +1460,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * failure can delete it again.
      */
     private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
+        if (callerTokenAuthorPolicy != null) {
+            // Outside the try: a 403 must fail the import (and roll it back), not be
+            // reported as a store failure.
+            callerTokenAuthorPolicy.requireMayAuthor(document, "imported");
+        }
         try {
             IResourceStore<T> store = resolveStore(storeClass);
             IResourceId resourceId = store.create(document);
@@ -3365,7 +3417,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     public List<DocumentDescriptor> listRemoteAgents(String sourceUrl, String sourceAuth) {
         validateSourceUrl(sourceUrl);
         try {
-            return RemoteApiResourceSource.listRemoteAgentDescriptors(sourceUrl, sourceAuth, jsonSerialization);
+            return RemoteApiResourceSource.listRemoteAgentDescriptors(outbound(), sourceUrl, sourceAuth, jsonSerialization);
         } catch (Exception e) {
             LOGGER.errorf("Failed to list remote agents from %s: %s",
                     LogSanitizer.sanitize(sourceUrl), LogSanitizer.sanitize(e.getMessage()));
@@ -3378,7 +3430,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                      String targetAgentId, String sourceAuth, Boolean createNew) {
         validateSourceUrl(sourceUrl);
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization,
-                remoteSecretScrubber)) {
+                remoteSecretScrubber, outbound())) {
             return previewOnto(source, sourceAgentId, targetAgentId, createNew);
         } catch (WebApplicationException e) {
             // An unreadable target agent is a 404 the operator can act on.
@@ -3401,7 +3453,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         for (SyncMapping mapping : mappings) {
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
-                    sourceAuth, jsonSerialization, remoteSecretScrubber)) {
+                    sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
                 previews.add(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew()));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch preview failed for agent %s", LogSanitizer.sanitize(mapping.sourceAgentId()));
@@ -3435,7 +3487,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         targetAgentId = resolvedTarget;
 
         try (var source = new RemoteApiResourceSource(
-                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber)) {
+                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
             List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
             return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
@@ -3482,7 +3534,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         metrics.upgradeAttempted();
         byte[] archive;
         try {
-            archive = RemoteApiResourceSource.exportAgentArchive(sourceUrl, sourceAgentId, sourceVersion, sourceAuth);
+            archive = RemoteApiResourceSource.exportAgentArchive(outbound(), sourceUrl, sourceAgentId, sourceVersion, sourceAuth);
         } catch (Exception e) {
             metrics.upgradeFailed();
             LOGGER.errorf(e, "Could not fetch agent %s from %s for a first-time sync",
@@ -3656,7 +3708,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
         try (var source = new RemoteApiResourceSource(
                 sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
-                sourceAuth, jsonSerialization, remoteSecretScrubber)) {
+                sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
             return upgradeExecutor.executeUpgrade(source, targetAgentId,
                     request.selectedResources(), request.workflowOrder());
         }
