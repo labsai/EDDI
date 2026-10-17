@@ -429,7 +429,8 @@ public class SecretScrubber {
         if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
             String document = scrubEmbeddedJson(trimmed);
             if (document != null) {
-                return document;
+                // an unchanged document keeps its surrounding whitespace as well
+                return document.equals(trimmed) ? textValue : document;
             }
         }
         if (textValue.startsWith("/") && textValue.indexOf('?') > 0) {

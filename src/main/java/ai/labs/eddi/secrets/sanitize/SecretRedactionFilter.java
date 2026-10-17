@@ -96,11 +96,13 @@ public final class SecretRedactionFilter {
             // key inside a gated tool call's arguments sailed through "redacted" and
             // rendered clear-text on the approval card. Ordered before the generic
             // sk- rule so the replacement keeps the sk-ant- prefix.
-            new RedactionRule(Pattern.compile("sk-ant-[a-zA-Z0-9_\\-]{20,}+"), "sk-ant-" + REDACTED),
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_])sk-ant-[a-zA-Z0-9_\\-]{20,}+"), "sk-ant-" + REDACTED),
 
             // OpenAI API keys: sk-... (at least 20 chars). Underscores and hyphens
-            // included — sk-proj-... keys carry both.
-            new RedactionRule(Pattern.compile("sk-[a-zA-Z0-9_\\-]{20,}+"), "sk-" + REDACTED),
+            // included — sk-proj-... keys carry both. Both sk- rules start at a word
+            // boundary: without one, "risk-assessment-workflow-handler" lost everything
+            // after "ri" once these rules ran over prose (export, instance sync).
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_])sk-[a-zA-Z0-9_\\-]{20,}+"), "sk-" + REDACTED),
 
             // Bearer tokens — JWTs AND opaque tokens. A single possessive character
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only

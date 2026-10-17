@@ -18,6 +18,13 @@ One commit per finding of the 2026-10-17 security review (M8–M11, L13–L16). 
 - **L16 — templated JSON bodies.** Documented that a runtime value in a JSON body must go through `{json:serialize(...)}` without quotes of its own, and deployment now WARNs per httpCall whose JSON body has a `{…}` expression inside a string literal. [`ApiCallsTask.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallsTask.java), [httpcalls.md](../httpcalls.md#values-in-a-json-body-are-not-escaped)
 - **L13 (partial) — LLM provider response size.** The OpenAI, Anthropic, Gemini, Mistral and Ollama builders use `BoundedJdkHttpClient`: the langchain4j `JdkHttpClient` built from an `HttpClient.Builder` whose client wraps every body subscriber with a byte cap (`eddi.llm.max-response-bytes`, 32 MB; over the whole stream for streaming). Not capped: MCP responses (`StreamableHttpMcpTransport` builds its own `HttpClient` and exposes no hook), Azure OpenAI and other SDK-based providers, and Jlama's Hugging Face download. [`BoundedJdkHttpClient.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/builder/BoundedJdkHttpClient.java)
 
+### Review fixes (PR #1083)
+
+- `SecretRedactionFilter`'s two `sk-` shape rules now start at a word boundary (`(?<![A-Za-z0-9_])`, the convention `EXPORT_CREDENTIAL_SHAPES` already used). Unanchored, `redactCredentialShapes` — which M8 made run over every exported prose string — turned `risk-assessment-workflow-handler` into `risk-<REDACTED>`; log redaction keeps its coverage since real keys start at a boundary.
+- `SecretScrubber.scrubStructuredText` returns the original string, whitespace included, when an embedded JSON document comes back unchanged; it returned the trimmed text, so a body template ending in a newline exported trimmed and `containsCredential` reported it.
+- `LifecycleManager`'s `StackOverflowError` fallback digest carries `taskType` and `errorType: stack_overflow` like the regular digest, so `TurnError.fromTaskError` keeps the task metadata. `LifecycleManagerFailureReportFallbackTest` drives it with an exception whose `getResponse()` overflows inside `LlmFailureClassifier.classify`.
+- The scrubber test fixture uses AWS's documented example key `AKIAIOSFODNN7EXAMPLE` (gitleaks allowlists it) instead of a made-up `AKIA…` that Secret Scanning flagged.
+
 ### Not done / open
 
 - M9.3 and M8 re-check rather than pin: the facade and the Vert.x client resolve names themselves, so a window remains between the guard's lookup and the client's (normally served by the same JVM address cache).

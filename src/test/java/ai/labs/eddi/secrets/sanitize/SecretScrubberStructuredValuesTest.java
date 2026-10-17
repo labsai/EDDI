@@ -148,4 +148,26 @@ class SecretScrubberStructuredValuesTest {
         String expected = json.replace("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789", "sk-" + SecretRedactionFilter.REDACTED);
         assertEquals(expected, scrubber.scrubJson(json));
     }
+
+    @Test
+    @DisplayName("kebab-case prose containing sk- inside a word round-trips byte-identical")
+    void kebabCaseProseIsNotAKey() throws Exception {
+        var config = mapper.createObjectNode();
+        config.put("description", "the risk-assessment-workflow-handler calls task-dispatch-and-reconcile-loop twice");
+        String json = mapper.writeValueAsString(config);
+
+        assertEquals(json, scrubber.scrubJson(json));
+        assertFalse(scrubber.containsCredential(json));
+    }
+
+    @Test
+    @DisplayName("an unchanged embedded document keeps its surrounding whitespace")
+    void unchangedEmbeddedDocumentKeepsItsWhitespace() throws Exception {
+        var config = mapper.createObjectNode();
+        config.putObject("request").put("body", "  {\n  \"q\": \"{memory.current.input}\"\n}\n");
+        String json = mapper.writeValueAsString(config);
+
+        assertEquals(json, scrubber.scrubJson(json));
+        assertFalse(scrubber.containsCredential(json));
+    }
 }

@@ -1046,6 +1046,8 @@ public class LifecycleManager implements ILifecycleManager {
             var errorOutput = new LinkedHashMap<String, Object>();
             errorOutput.put("type", "errorDigest");
             errorOutput.put("taskId", task.getId().name());
+            errorOutput.put("taskType", task.getType());
+            errorOutput.put("errorType", "stack_overflow");
             errorOutput.put("text", digestText);
             step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
             return digestText;
