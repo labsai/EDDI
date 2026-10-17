@@ -3,6 +3,7 @@
    ────────────────────────────────────────────── */
 
 import { ArrowDown } from "lucide-react";
+import { t } from "@/i18n";
 
 interface ScrollToBottomProps {
   visible: boolean;
@@ -16,7 +17,7 @@ export function ScrollToBottom({ visible, onClick }: ScrollToBottomProps) {
     <button
       className="scroll-to-bottom"
       onClick={onClick}
-      aria-label="Scroll to bottom"
+      aria-label={t("scroll.bottom")}
       data-testid="scroll-to-bottom"
     >
       <ArrowDown size="1em" />

@@ -12,7 +12,7 @@ import {
   type PreflightGrantIssue,
 } from "@/lib/api/agents";
 import { getErrorMessage } from "@/lib/api-client";
-import { agentKeys } from "@/lib/query-keys";
+import { agentDeploymentQueries } from "@/lib/query-keys";
 
 /* ─── The grant decision, shared with the one mounted dialog ─── */
 
@@ -410,7 +410,7 @@ export function useDeployWithGrants() {
       setIsRunning(true);
       try {
         const result = await runDeployWithGrants(options);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries(agentDeploymentQueries([options.agentId]));
         void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
         return result;
       } finally {
@@ -427,7 +427,7 @@ export function useDeployWithGrants() {
       setIsRunning(true);
       try {
         const result = await runDeployManyWithGrants(options);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries(agentDeploymentQueries(options.targets.map((t) => t.agentId)));
         void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
         return result;
       } finally {

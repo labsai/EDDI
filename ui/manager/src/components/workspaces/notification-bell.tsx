@@ -73,8 +73,37 @@ function NotificationBellInner() {
 
   const markRead = useMutation({
     mutationFn: (ids?: string[]) => markNotificationsRead(ids),
-    onSuccess: refresh,
-    onError: (e) => toast.error(getErrorMessage(e)),
+    // Mark the items read and drop the badge at once; the server catches up
+    // behind it. Without ids it is "mark all read".
+    onMutate: async (ids) => {
+      const keys = [NOTIFICATION_KEYS.list, NOTIFICATION_KEYS.count];
+      await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+      const prevList = queryClient.getQueryData<WorkspaceNotification[]>(NOTIFICATION_KEYS.list);
+      const prevCount = queryClient.getQueryData<number>(NOTIFICATION_KEYS.count);
+      const hit = (n: WorkspaceNotification) => !ids || ids.includes(n.id);
+      const now = new Date().toISOString();
+      if (prevList) {
+        queryClient.setQueryData<WorkspaceNotification[]>(
+          NOTIFICATION_KEYS.list,
+          prevList.map((n) => (hit(n) && !n.readAt ? { ...n, readAt: now } : n)),
+        );
+      }
+      if (typeof prevCount === "number") {
+        const cleared = ids
+          ? (prevList ?? []).filter((n) => hit(n) && !n.readAt).length
+          : prevCount;
+        queryClient.setQueryData<number>(NOTIFICATION_KEYS.count, Math.max(0, prevCount - cleared));
+      }
+      return { prevList, prevCount };
+    },
+    onError: (e, _ids, ctx) => {
+      if (ctx) {
+        queryClient.setQueryData(NOTIFICATION_KEYS.list, ctx.prevList);
+        queryClient.setQueryData(NOTIFICATION_KEYS.count, ctx.prevCount);
+      }
+      toast.error(getErrorMessage(e));
+    },
+    onSettled: refresh,
   });
 
   const grant = useMutation({
@@ -151,7 +180,9 @@ function NotificationBellInner() {
               <NotificationItem
                 key={n.id}
                 notification={n}
-                busy={grant.isPending || markRead.isPending}
+                // Only the item whose grant is in flight; dismissing is
+                // optimistic and never blocks the list.
+                busy={grant.isPending && grant.variables?.id === n.id}
                 onGrant={() => grant.mutate(n)}
                 onDismiss={() => markRead.mutate([n.id])}
                 onNavigate={() => {

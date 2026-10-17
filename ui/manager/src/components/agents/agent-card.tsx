@@ -33,6 +33,7 @@ import { useState, useCallback, useId, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { agentDeploymentQueries } from "@/lib/query-keys";
 
 interface AgentCardProps {
   agent: AgentDescriptor & { id: string; version: number };
@@ -102,7 +103,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
     deployWithGrants(options)
       .then((outcome) =>
         reportDeployOutcome(outcome, options, t, undefined, () => {
-          void queryClient.invalidateQueries({ queryKey: ["agents"] });
+          void queryClient.invalidateQueries(agentDeploymentQueries([agent.id]));
         }),
       )
       .catch((err) => toast.error(getErrorMessage(err) || t("agents.deployError", "Deploy failed")));
@@ -183,7 +184,7 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport, onShare }: A
           <button
             ref={menuTriggerRef}
             onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100 group-focus-within:opacity-100"
+            className="reveal-on-touch rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:p-2"
             data-testid={`agent-menu-${agent.id}`}
             aria-label={t("common.moreActions", "More actions")}
             aria-haspopup="true"
