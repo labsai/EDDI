@@ -703,6 +703,7 @@ Inline `data` is stored in the blob store owned by the group conversation, so it
 
 - The per-turn forwarding cap (`eddi.attachments.max-per-turn`, default 5) applies to each member turn. A discussion sharing more than that will have the surplus dropped for that turn, reported in the member's `attachments:errors` — visible in that member's conversation, **not** in the group transcript.
 - `url`-only attachments are not blob-backed and are not re-hydrated after a HITL resume; blob-backed ones are.
+- Inline files are held to the 1:1 limits — `eddi.attachments.max-size-bytes` per file, `max-per-conversation` and `max-total-bytes-per-conversation` per discussion, and the owner's per-user quotas — and a refusal answers `400` before the discussion runs. Deleting the discussion deletes its blobs.
 
 ## Nested Groups (Group-of-Groups)
 

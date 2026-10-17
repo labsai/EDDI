@@ -804,8 +804,10 @@ public class MemberTurnExecutor {
             Double remainingBudget = protocol.maxCostPerDiscussion() == null
                     ? null
                     : Math.max(0.0, protocol.maxCostPerDiscussion() - gc.getTotalCost());
+            // gc.getId() names where the shared attachments' storageRefs came from: the
+            // child accepts a reference only if this discussion can read it.
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget);
+                    gc.getAttachments(), remainingBudget, gc.getId());
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets

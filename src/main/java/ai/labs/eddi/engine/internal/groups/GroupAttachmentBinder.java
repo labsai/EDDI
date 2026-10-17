@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentQuotaExceededException;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -15,6 +16,8 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Materializes, re-hydrates and grants a group discussion's shared attachments.
@@ -36,17 +39,50 @@ public class GroupAttachmentBinder {
     }
 
     /**
+     * Materialize discussion attachments that arrived from a client. Equivalent to
+     * {@link #materializeAttachments(GroupConversation, List, String)} with no
+     * trusted source conversation, so every {@code storageRef}-only attachment is
+     * refused.
+     */
+    public void materializeAttachments(GroupConversation gc, List<Attachment> incoming)
+            throws AttachmentQuotaExceededException {
+        materializeAttachments(gc, incoming, null);
+    }
+
+    /**
      * Materialize discussion attachments and bind them to the group conversation.
      * Inline base64 files are stored in the blob store owned by {@code gc.getId()}
-     * (so they can be granted to members and reaped with the conversation); hosted
-     * {@code url} references and pre-stored {@code storageRef}s pass through. The
-     * resulting list is stashed on the {@link GroupConversation} for fan-out.
+     * (so they can be granted to members and reaped with the conversation) and
+     * counted against {@code gc.getUserId()}, so the per-user quotas
+     * ({@code eddi.attachments.max-per-user}, {@code max-total-bytes-per-user})
+     * apply to a group upload exactly as to a 1:1 one. Hosted {@code url}
+     * references pass through. The resulting list is stashed on the
+     * {@link GroupConversation} for fan-out.
+     * <p>
+     * <strong>A {@code storageRef} is a capability, not a name.</strong> Passed
+     * through unchecked, {@link #grantAndInjectAttachments} would grant every
+     * member conversation read access to whatever blob the reference names. One is
+     * therefore accepted only when {@code trustedSourceConversationId} — the
+     * conversation server code took the reference from (the parent discussion, for
+     * a nested group) — can read that blob, and {@code gc} is then granted access
+     * too, so the next nesting level can make the same check against it. A
+     * reference that arrived any other way is dropped with a warning.
+     *
+     * @param trustedSourceConversationId
+     *            the conversation server code took the references from, or
+     *            {@code null} when the attachments came from a client
+     * @throws AttachmentQuotaExceededException
+     *             when an inline file would exceed a per-conversation or per-user
+     *             quota. Blobs this call had already stored are removed first, so a
+     *             refused request leaves nothing behind
      */
-    public void materializeAttachments(GroupConversation gc, List<Attachment> incoming) {
+    public void materializeAttachments(GroupConversation gc, List<Attachment> incoming, String trustedSourceConversationId)
+            throws AttachmentQuotaExceededException {
         if (incoming == null || incoming.isEmpty()) {
             return;
         }
         List<Attachment> materialized = new ArrayList<>();
+        List<String> storedByThisCall = new ArrayList<>();
         for (Attachment a : incoming) {
             try {
                 if (a.getUrl() != null && !a.getUrl().isBlank()) {
@@ -58,18 +94,63 @@ public class GroupAttachmentBinder {
                         continue;
                     }
                     byte[] bytes = Base64.getDecoder().decode(a.getBase64Data());
-                    var stored = attachmentStore.store(bytes, a.getMimeType(), a.getFileName(), gc.getId(), defaultTenantId);
+                    // The 6-argument overload: with the 5-argument one the blob had no
+                    // owning user, so no per-user quota counted it and nothing keyed on
+                    // the user (erasure, export) could find it.
+                    var stored = attachmentStore.store(bytes, a.getMimeType(), a.getFileName(), gc.getId(), defaultTenantId,
+                            gc.getUserId());
+                    storedByThisCall.add(stored.storageRef());
                     materialized.add(new Attachment(stored.mimeType(), stored.filename(), stored.sizeBytes(), stored.storageRef()));
-                } else if (a.getStorageRef() != null && !a.getStorageRef().isBlank()) {
+                } else if (a.getStorageRef() != null && !a.getStorageRef().isBlank()
+                        && mayPassThrough(a.getStorageRef(), gc, trustedSourceConversationId)) {
                     materialized.add(a);
                 }
+            } catch (AttachmentQuotaExceededException e) {
+                rollBack(storedByThisCall, gc.getId());
+                LOGGER.warnf("Group attachment '%s' refused for group conversation '%s': the %s quota is exhausted",
+                        sanitize(a.getFileName()), gc.getId(), e.getScope());
+                throw e;
             } catch (Exception e) {
-                LOGGER.warnf("Failed to materialize group attachment '%s': %s", a.getFileName(), e.getMessage());
+                LOGGER.warnf("Failed to materialize group attachment '%s': %s", sanitize(a.getFileName()), e.getMessage());
             }
         }
         if (!materialized.isEmpty()) {
             gc.setAttachments(materialized);
             LOGGER.infof("Group conversation '%s' has %d shared attachment(s)", gc.getId(), materialized.size());
+        }
+    }
+
+    /**
+     * Whether a pre-stored reference may be shared with {@code gc}'s members: only
+     * when server code took it from {@code trustedSourceConversationId} and that
+     * conversation can read the blob (as owner or grantee). On success {@code gc}
+     * is granted read access as well.
+     */
+    private boolean mayPassThrough(String storageRef, GroupConversation gc, String trustedSourceConversationId) {
+        if (trustedSourceConversationId == null || trustedSourceConversationId.isBlank() || attachmentStore == null) {
+            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': only references taken from the "
+                    + "caller's own conversation are shared", gc.getId());
+            return false;
+        }
+        try {
+            attachmentStore.getMetadata(storageRef, trustedSourceConversationId);
+            attachmentStore.grantAccess(storageRef, gc.getId());
+            return true;
+        } catch (Exception e) {
+            LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': its source conversation '%s' "
+                    + "cannot read it (%s)", gc.getId(), trustedSourceConversationId, e.getMessage());
+            return false;
+        }
+    }
+
+    private void rollBack(List<String> storageRefs, String ownerConversationId) {
+        for (String ref : storageRefs) {
+            try {
+                attachmentStore.delete(ref, ownerConversationId);
+            } catch (Exception e) {
+                LOGGER.warnf("Could not remove attachment '%s' of refused group request '%s': %s", ref, ownerConversationId,
+                        e.getMessage());
+            }
         }
     }
 

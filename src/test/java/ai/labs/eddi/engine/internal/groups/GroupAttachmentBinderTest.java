@@ -42,8 +42,10 @@ class GroupAttachmentBinderTest {
         // eq(decoded bytes), not any(): with any() in the payload position, replacing
         // the Base64 decode with getBytes(UTF_8) — persisting every inline attachment
         // as its base64 TEXT rather than the file — passed this test.
+        // The userId argument is the M4 fix: with the 5-argument overload the blob had
+        // no owner, so the per-user quota never counted a group upload.
         when(store.store(eq("png".getBytes(java.nio.charset.StandardCharsets.UTF_8)), eq("image/png"), eq("a.png"), eq("gc-1"),
-                eq(DEFAULT_TENANT)))
+                eq(DEFAULT_TENANT), eq("user-1")))
                 .thenReturn(new IAttachmentStore.Attachment("ref-1", "a.png", "image/png", 3, "gc-1"));
 
         var inline = new Attachment();
@@ -51,6 +53,7 @@ class GroupAttachmentBinderTest {
         inline.setFileName("a.png");
         inline.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
         var gc = gc("gc-1");
+        gc.setUserId("user-1");
 
         binder.materializeAttachments(gc, List.of(inline));
 
@@ -59,7 +62,97 @@ class GroupAttachmentBinderTest {
     }
 
     @Test
-    void materialize_url_passesThrough() {
+    void materialize_inlineFile_isCountedAgainstTheDiscussionsUser() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        when(store.store(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new IAttachmentStore.Attachment("ref-1", "a.png", "image/png", 3, "gc-1"));
+        var gc = gc("gc-1");
+        gc.setUserId("alice");
+
+        binder.materializeAttachments(gc, List.of(inline("a.png")));
+
+        verify(store).store(any(), eq("image/png"), eq("a.png"), eq("gc-1"), eq(DEFAULT_TENANT), eq("alice"));
+        // The ownerless overload must not be used at all — it skips the per-user quota.
+        verify(store, never()).store(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void materialize_quotaExceeded_rollsBackWhatThisCallStoredAndRethrows() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        when(store.store(any(), any(), eq("first.png"), any(), any(), any()))
+                .thenReturn(new IAttachmentStore.Attachment("ref-1", "first.png", "image/png", 3, "gc-1"));
+        when(store.store(any(), any(), eq("second.png"), any(), any(), any()))
+                .thenThrow(new IAttachmentStore.AttachmentQuotaExceededException(
+                        IAttachmentStore.AttachmentQuotaExceededException.SCOPE_USER, "user quota"));
+        var gc = gc("gc-1");
+        gc.setUserId("alice");
+
+        var thrown = assertThrows(IAttachmentStore.AttachmentQuotaExceededException.class,
+                () -> binder.materializeAttachments(gc, List.of(inline("first.png"), inline("second.png"))));
+
+        assertEquals(IAttachmentStore.AttachmentQuotaExceededException.SCOPE_USER, thrown.getScope());
+        // A refused request leaves nothing behind: the blob stored before the refusal
+        // is removed again, and nothing is bound to the discussion.
+        verify(store).delete("ref-1", "gc-1");
+        assertNull(gc.getAttachments());
+    }
+
+    @Test
+    void materialize_clientSuppliedStorageRef_isRefused() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        var gc = gc("gc-1");
+        gc.setUserId("mallory");
+
+        // A storageRef naming someone else's blob, with no server-side source: passed
+        // through, grantAndInjectAttachments would have granted every member access.
+        binder.materializeAttachments(gc, List.of(new Attachment("application/pdf", "victim.pdf", 10, "victims-ref")));
+
+        assertNull(gc.getAttachments());
+        verify(store, never()).grantAccess(any(), any());
+    }
+
+    @Test
+    void materialize_storageRefFromTrustedSource_thatCanReadIt_passesAndIsGrantedToTheChild() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        when(store.getMetadata("parent-ref", "parent-gc"))
+                .thenReturn(new IAttachmentStore.Attachment("parent-ref", "doc.pdf", "application/pdf", 10, "parent-gc"));
+        var child = gc("child-gc");
+
+        binder.materializeAttachments(child, List.of(new Attachment("application/pdf", "doc.pdf", 10, "parent-ref")), "parent-gc");
+
+        assertEquals(1, child.getAttachments().size());
+        assertEquals("parent-ref", child.getAttachments().get(0).getStorageRef());
+        verify(store).grantAccess("parent-ref", "child-gc");
+    }
+
+    @Test
+    void materialize_storageRefTheSourceCannotRead_isRefused() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        var binder = new GroupAttachmentBinder(store, DEFAULT_TENANT);
+        when(store.getMetadata("foreign-ref", "parent-gc"))
+                .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException("not owner, no grant"));
+        var child = gc("child-gc");
+
+        binder.materializeAttachments(child, List.of(new Attachment("application/pdf", "x.pdf", 10, "foreign-ref")), "parent-gc");
+
+        assertNull(child.getAttachments());
+        verify(store, never()).grantAccess(any(), any());
+    }
+
+    private static Attachment inline(String fileName) {
+        var a = new Attachment();
+        a.setMimeType("image/png");
+        a.setFileName(fileName);
+        a.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
+        return a;
+    }
+
+    @Test
+    void materialize_url_passesThrough() throws Exception {
         var binder = new GroupAttachmentBinder(mock(IAttachmentStore.class), DEFAULT_TENANT);
         var url = new Attachment();
         url.setMimeType("image/png");
@@ -72,7 +165,7 @@ class GroupAttachmentBinderTest {
     }
 
     @Test
-    void materialize_noStore_dropsInlineButKeepsUrl() {
+    void materialize_noStore_dropsInlineButKeepsUrl() throws Exception {
         var binder = new GroupAttachmentBinder(null, DEFAULT_TENANT);
         var inline = new Attachment();
         inline.setBase64Data("x");
@@ -89,7 +182,7 @@ class GroupAttachmentBinderTest {
     }
 
     @Test
-    void materialize_nullOrEmpty_noop() {
+    void materialize_nullOrEmpty_noop() throws Exception {
         var binder = new GroupAttachmentBinder(mock(IAttachmentStore.class), DEFAULT_TENANT);
         var gc = gc("gc-1");
         binder.materializeAttachments(gc, null);
