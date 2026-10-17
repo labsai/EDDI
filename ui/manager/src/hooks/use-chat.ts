@@ -1162,6 +1162,10 @@ function handleSSEEvent(
                       content: snapshotText,
                       timestamp: prev.timestamp,
                       isStreaming: prev.isStreaming,
+                      // A blocked or rewritten answer often arrives with no token
+                      // at all: this back-fill is its only text, and the notice
+                      // that explains it must survive the replacement.
+                      guardrails: prev.guardrails,
                     };
                   }
                   return { messages: updated };

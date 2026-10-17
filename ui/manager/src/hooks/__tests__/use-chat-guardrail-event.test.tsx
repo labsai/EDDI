@@ -73,6 +73,24 @@ describe("use-chat — guardrail_triggered", () => {
     expect(agent.content).toBe("still streaming");
   });
 
+  it("keeps the notice when the done snapshot back-fills the answer text", async () => {
+    // A blocked turn can carry no token at all: the snapshot is its only text.
+    h.frames = [
+      { type: "guardrail_triggered", data: JSON.stringify({ type: "prompt-injection", phase: "input", action: "block", taskId: "t1" }) },
+      {
+        type: "done",
+        data: JSON.stringify({
+          conversationState: "READY",
+          conversationOutputs: [{ output: [{ type: "text", text: "I can't process that request." }] }],
+        }),
+      },
+    ];
+    await send();
+    const agent = lastAgent();
+    expect(agent.content).toBe("I can't process that request.");
+    expect(agent.guardrails).toEqual([{ type: "prompt-injection", phase: "input", action: "block" }]);
+  });
+
   it("ignores a malformed payload", async () => {
     h.frames = [
       { type: "guardrail_triggered", data: "not json" },

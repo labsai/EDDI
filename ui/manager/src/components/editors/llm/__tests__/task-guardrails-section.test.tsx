@@ -302,6 +302,7 @@ describe("TaskGuardrailsSection", () => {
     });
 
     it("offers retrieved-context only on the output side", () => {
+      const spy = vi.fn();
       show(
         <Harness
           initial={{
@@ -309,6 +310,7 @@ describe("TaskGuardrailsSection", () => {
             inputGuardrails: [{ type: "classifier", parameters: { provider: "ollama" } }],
             outputGuardrails: [{ type: "classifier", parameters: { provider: "ollama" } }],
           }}
+          onChangeSpy={spy}
         />,
       );
       fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
@@ -316,6 +318,7 @@ describe("TaskGuardrailsSection", () => {
       fireEvent.click(screen.getByTestId("guardrail-sheet-close"));
       fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
       fireEvent.click(screen.getByTestId("guardrail-clf-context"));
+      expect(last(spy).outputGuardrails![0]!.parameters?.includeRetrievedContext).toBe("true");
     });
 
     it("writes the free-text and numeric parameters verbatim as strings", () => {
@@ -347,6 +350,20 @@ describe("TaskGuardrailsSection", () => {
       fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
       expect(screen.getByTestId("guardrail-action")).toBeDisabled();
     });
+  });
+
+  it("keeps Tab inside the sheet, wrapping at both ends", () => {
+    show(<Harness initial={{ ...base, inputGuardrails: [{ type: "prompt-injection" }] }} />);
+    fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
+    const sheet = screen.getByTestId("guardrail-sheet");
+    const focusable = sheet.querySelectorAll<HTMLElement>("button, input, select, textarea");
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 
   it("closes the sheet on Escape", () => {

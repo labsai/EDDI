@@ -115,6 +115,25 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Keep Tab inside the sheet: it is modal, so controls behind the backdrop must
+  // not take focus.
+  const trapTab = (e: React.KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const focusable = sheetRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
   const known = isKnownGuardrailType(value.type);
   const params = value.parameters ?? {};
   const action = effectiveAction(value);
@@ -171,6 +190,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        onKeyDown={trapTab}
         className="fixed bottom-0 end-0 top-0 z-50 flex w-[480px] max-w-full flex-col border-s border-border bg-card shadow-2xl"
         data-testid="guardrail-sheet"
       >
