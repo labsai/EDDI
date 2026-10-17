@@ -342,8 +342,8 @@ class MemberTurnExecutorTest {
         doAnswer(inv -> {
             ConversationResponseHandler handler = inv.getArgument(8, ConversationResponseHandler.class);
             seenHandler[0] = handler;
-            if (handler.toolCallObserver() != null) {
-                handler.toolCallObserver().accept(tool);
+            if (handler instanceof IConversationService.ToolCallObserving observing) {
+                observing.toolCallObserver().accept(tool);
             }
             handler.onComplete(snapshot);
             return null;
@@ -385,7 +385,7 @@ class MemberTurnExecutorTest {
 
         assertDoesNotThrow(() -> executor.executeAgentTurn(member(), newGc(), "input", protocol(MemberFailurePolicy.SKIP), 0,
                 phase(PhaseType.OPINION), null, null, null));
-        assertNull(handler[0].toolCallObserver(), "no listener: the turn must not carry an observer");
+        assertFalse(handler[0] instanceof IConversationService.ToolCallObserving, "no listener: the turn must not carry an observer");
     }
 
     @Test

@@ -425,65 +425,60 @@ public class MemberTurnExecutor {
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
-                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, new ConversationResponseHandler() {
-                    @Override
-                    public Consumer<String> toolCallObserver() {
-                        return listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
+                Consumer<String> toolObserver = listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
+                ConversationResponseHandler memberHandler = snapshot -> {
+                    if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        memberPaused[0] = true;
+                        pausedSnapshot[0] = snapshot;
                     }
 
-                    @Override
-                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                        if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                            memberPaused[0] = true;
-                            pausedSnapshot[0] = snapshot;
-                        }
-
-                        String response = contextBuilder.extractResponse(snapshot);
-                        // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
-                        // returns empty because there are no output keys — only pipeline metadata.
-                        // Surface the failure as explicit content so the transcript entry is not empty.
-                        if ((response == null || response.isEmpty()) && snapshot != null
-                                && snapshot.getConversationState() == ConversationState.ERROR) {
-                            response = "[Agent failed to produce output — conversation entered ERROR state]";
-                        }
-
-                        // This callback runs on a COORDINATOR thread, not the member-turn
-                        // thread (conversationService.say hands the turn to
-                        // conversationCoordinator.submitInOrder), so it can fire long after
-                        // the orchestrator gave up on this speaker while the loop is
-                        // serializing the same GroupConversation.
-                        //
-                        // The CME that used to cause is now prevented by the COLLECTIONS —
-                        // createdAgentIds/recruitedAgentIds/dynamicMembers are
-                        // CopyOnWriteArrayList, memberCosts and memberDisplayNames are
-                        // concurrent maps — NOT by skipping the work. An earlier attempt
-                        // returned early here on cancellation; that was over-correction and
-                        // lost two things that are not "abandoned bookkeeping":
-                        // propagateDynamicAgentTracking is the ONLY writer of
-                        // createdAgentIds, which teardown iterates to undeploy — dropping it
-                        // LEAKS a real production deployment the member created — and
-                        // accumulateMemberCost is the sole feed for the totals I1's ceiling
-                        // bounds, so a member that burned its full timeout budget would
-                        // report $0.
-                        // Propagate dynamic agent tracking data from the member's conversation
-                        // memory to the GroupConversation for lifecycle cleanup.
-                        GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
-
-                        // Wave 0, F5: harvest this member's tracked cost so far.
-                        // Attributed under the CONVERSATION key, not the agent id: costs
-                        // are per-conversation (AUDIT_COST is that conversation's running
-                        // total), and GroupCostLedger replaces rather than adds. A turn in
-                        // a separate conversation attributed to the agent's own key would
-                        // overwrite that agent's real accumulated cost with this
-                        // conversation's smaller one — silently shrinking totalCost and
-                        // loosening I1's ceiling.
-                        GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
-                        // Outside the ledger's monitor by construction — see announceCost.
-                        announceCost(gc, convKey, member.displayName(), listener);
-
-                        responseFuture.complete(response);
+                    String response = contextBuilder.extractResponse(snapshot);
+                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
+                    // returns empty because there are no output keys — only pipeline metadata.
+                    // Surface the failure as explicit content so the transcript entry is not empty.
+                    if ((response == null || response.isEmpty()) && snapshot != null
+                            && snapshot.getConversationState() == ConversationState.ERROR) {
+                        response = "[Agent failed to produce output — conversation entered ERROR state]";
                     }
-                });
+
+                    // This callback runs on a COORDINATOR thread, not the member-turn
+                    // thread (conversationService.say hands the turn to
+                    // conversationCoordinator.submitInOrder), so it can fire long after
+                    // the orchestrator gave up on this speaker while the loop is
+                    // serializing the same GroupConversation.
+                    //
+                    // The CME that used to cause is now prevented by the COLLECTIONS —
+                    // createdAgentIds/recruitedAgentIds/dynamicMembers are
+                    // CopyOnWriteArrayList, memberCosts and memberDisplayNames are
+                    // concurrent maps — NOT by skipping the work. An earlier attempt
+                    // returned early here on cancellation; that was over-correction and
+                    // lost two things that are not "abandoned bookkeeping":
+                    // propagateDynamicAgentTracking is the ONLY writer of
+                    // createdAgentIds, which teardown iterates to undeploy — dropping it
+                    // LEAKS a real production deployment the member created — and
+                    // accumulateMemberCost is the sole feed for the totals I1's ceiling
+                    // bounds, so a member that burned its full timeout budget would
+                    // report $0.
+                    // Propagate dynamic agent tracking data from the member's conversation
+                    // memory to the GroupConversation for lifecycle cleanup.
+                    GroupConversationService.propagateDynamicAgentTracking(snapshot, gc);
+
+                    // Wave 0, F5: harvest this member's tracked cost so far.
+                    // Attributed under the CONVERSATION key, not the agent id: costs
+                    // are per-conversation (AUDIT_COST is that conversation's running
+                    // total), and GroupCostLedger replaces rather than adds. A turn in
+                    // a separate conversation attributed to the agent's own key would
+                    // overwrite that agent's real accumulated cost with this
+                    // conversation's smaller one — silently shrinking totalCost and
+                    // loosening I1's ceiling.
+                    GroupCostLedger.accumulateMemberCost(gc, convKey, snapshot);
+                    // Outside the ledger's monitor by construction — see announceCost.
+                    announceCost(gc, convKey, member.displayName(), listener);
+
+                    responseFuture.complete(response);
+                };
+                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false,
+                        toolObserver == null ? memberHandler : IConversationService.observing(toolObserver, memberHandler));
 
                 // The only await point of a member turn — and therefore the lever for
                 // cancelling it. Registering the future means an aborting orchestrator

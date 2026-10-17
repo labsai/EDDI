@@ -901,7 +901,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
                     @Override
                     public Consumer<String> toolCallObserver() {
-                        return responseHandler.toolCallObserver();
+                        return responseHandler instanceof ToolCallObserving observing ? observing.toolCallObserver() : null;
                     }
                 });
     }

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
@@ -150,16 +151,8 @@ class ConversationServiceToolCallObserverTest {
     void handlerObserverIsInstalled() throws Exception {
         Consumer<String> observer = name -> {
         };
-        var handler = new ConversationResponseHandler() {
-            @Override
-            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-            }
-
-            @Override
-            public Consumer<String> toolCallObserver() {
-                return observer;
-            }
-        };
+        var handler = IConversationService.observing(observer, snapshot -> {
+        });
 
         IConversationMemory memory = driveSay(handler);
 
