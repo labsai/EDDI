@@ -25,6 +25,14 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Pages are stored in a Caffeine cache with a 15-minute TTL — long enough for a
  * multi-turn tool-calling loop but short enough to prevent memory leaks.
+ * <p>
+ * Entries are keyed by {@code (conversationId, responseId)}, and a page is
+ * served only to the conversation that stored it. The store is one process-wide
+ * cache shared by every conversation, and a bare UUID key let any conversation
+ * read any other's paginated tool output — a model that guessed or was fed a
+ * {@code responseId} would get another user's data (security review 2026-10-15,
+ * finding L13). The UUID stays unguessable; the conversation is what makes it
+ * <em>unreachable</em>.
  *
  * @since 6.0.0
  */
@@ -47,41 +55,51 @@ public class PaginatedResponseStore {
     }
 
     /**
-     * Split a tool response into pages and store them.
+     * Split a tool response into pages and store them for one conversation.
      *
+     * @param conversationId
+     *            the conversation the response belongs to — the only one that may
+     *            read its pages back; blank means "cannot be scoped" and nothing is
+     *            stored
      * @param toolName
      *            name of the tool that produced the response
      * @param fullResponse
      *            the complete tool response string
      * @param pageSize
      *            maximum characters per page
-     * @return a responseId that can be used to retrieve pages
+     * @return a responseId that can be used to retrieve pages, or null when nothing
+     *         was stored
      */
-    public String store(String toolName, String fullResponse, int pageSize) {
-        if (fullResponse == null || fullResponse.isEmpty() || pageSize <= 0) {
+    public String store(String conversationId, String toolName, String fullResponse, int pageSize) {
+        if (conversationId == null || conversationId.isBlank() || fullResponse == null || fullResponse.isEmpty() || pageSize <= 0) {
             return null;
         }
 
         String responseId = UUID.randomUUID().toString();
         List<String> pages = splitIntoPages(fullResponse, pageSize);
 
-        cache.put(responseId, new PaginatedResponse(toolName, pages, fullResponse.length()), PAGE_TTL_SECONDS, TimeUnit.SECONDS);
+        cache.put(key(conversationId, responseId), new PaginatedResponse(toolName, pages, fullResponse.length()), PAGE_TTL_SECONDS,
+                TimeUnit.SECONDS);
         LOGGER.debugf("Stored %d pages for tool '%s' (responseId=%s, totalChars=%d)", pages.size(), toolName, responseId, fullResponse.length());
 
         return responseId;
     }
 
     /**
-     * Retrieve a specific page of a paginated response.
+     * Retrieve a specific page of a paginated response, for the conversation that
+     * stored it.
      *
+     * @param conversationId
+     *            the conversation asking; another conversation's responseId is not
+     *            found
      * @param responseId
      *            the ID returned by {@link #store}
      * @param pageNumber
      *            1-indexed page number
      * @return the page content, or null if not found
      */
-    public PageResult getPage(String responseId, int pageNumber) {
-        PaginatedResponse response = cache.get(responseId);
+    public PageResult getPage(String conversationId, String responseId, int pageNumber) {
+        PaginatedResponse response = lookup(conversationId, responseId);
         if (response == null) {
             return null;
         }
@@ -95,11 +113,28 @@ public class PaginatedResponseStore {
     }
 
     /**
-     * Get the total number of pages for a response.
+     * Get the total number of pages for a response, for the conversation that
+     * stored it.
      */
-    public int getPageCount(String responseId) {
-        PaginatedResponse response = cache.get(responseId);
+    public int getPageCount(String conversationId, String responseId) {
+        PaginatedResponse response = lookup(conversationId, responseId);
         return response != null ? response.pages().size() : 0;
+    }
+
+    private PaginatedResponse lookup(String conversationId, String responseId) {
+        if (conversationId == null || conversationId.isBlank() || responseId == null || responseId.isBlank()) {
+            return null;
+        }
+        return cache.get(key(conversationId, responseId));
+    }
+
+    /**
+     * {@code <conversationId>/<responseId>}: a UUID carries no {@code /}, and a
+     * conversation id is a hex object id, so the key cannot be forged by a
+     * responseId that embeds another conversation's prefix.
+     */
+    static String key(String conversationId, String responseId) {
+        return conversationId + "/" + responseId;
     }
 
     private List<String> splitIntoPages(String text, int pageSize) {

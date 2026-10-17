@@ -148,6 +148,14 @@ class ToolLoopResumer {
         // before any tool runs; this is the same contract.
         double toolCostBefore = toolLoopRunner.conversationToolCost(conversationId);
 
+        // What this batch's approved calls may not write to (L13): the agent, its
+        // workflows and their extension resources, read from the stores once here.
+        // A mocked orchestrator answers null; the agent id alone is then the gate.
+        SelfUngatingGuard.Protection protection = orchestrator.protectionFor(memory);
+        if (protection == null) {
+            protection = SelfUngatingGuard.Protection.ofAgent(memory.getAgentId());
+        }
+
         // Step 2 (tooling rebuilt via the shared setup, SAME as the live path) is the
         // caller's job: AgentOrchestrator#resumeToolLoop calls buildToolSetup and
         // hands the result down. Resolving it here through the back-reference instead
@@ -263,7 +271,7 @@ class ToolLoopResumer {
             // reason as the check above — the Manager's self-guard/gate-guard only
             // govern the Manager, while Slack, MCP resume_conversation and REST
             // /resume all execute the approved call here.
-            String selfUngating = selfUngating(c, amended, setup.toolRequestResolvers(), memory.getAgentId());
+            String selfUngating = selfUngating(c, amended, setup.toolRequestResolvers(), protection);
             if (selfUngating != null) {
                 auditRequestChanged(memory, c, selfUngating);
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
@@ -286,7 +294,7 @@ class ToolLoopResumer {
                 // ApprovedCallScope: the self-ungating rule is also applied to the request
                 // as finally built and sent (ApiCallExecutor), not only to the preview
                 // checked above, which preRequest property instructions can change.
-                String result = ApprovedCallScope.run(memory.getAgentId(),
+                String result = ApprovedCallScope.run(protection,
                         () -> CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
                                 toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)));
@@ -732,13 +740,22 @@ class ToolLoopResumer {
      */
     String selfUngating(PendingToolCallBatch.PendingToolCall c, String amendedArguments, Map<String, ToolRequestResolver> resolvers,
                         String actingAgentId) {
+        return selfUngating(c, amendedArguments, resolvers, SelfUngatingGuard.Protection.ofAgent(actingAgentId));
+    }
+
+    /**
+     * As above, with the agent's own resources resolved into {@code protection}
+     * (L13).
+     */
+    String selfUngating(PendingToolCallBatch.PendingToolCall c, String amendedArguments, Map<String, ToolRequestResolver> resolvers,
+                        SelfUngatingGuard.Protection protection) {
         String args = amendedArguments != null ? amendedArguments : c.getArgumentsRaw();
         var resolver = resolvers != null ? resolvers.get(c.getToolName()) : null;
         if (resolver != null) {
             try {
                 ResolvedRequest resolved = resolver.resolve(rebuiltRequest(c, args));
                 if (resolved != null) {
-                    return SelfUngatingGuard.refusal(resolved.method(), resolved.uri(), resolved.body(), actingAgentId);
+                    return SelfUngatingGuard.refusal(resolved.method(), resolved.uri(), resolved.body(), protection);
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Could not resolve the request for tool '%s' (%s); "
@@ -746,7 +763,7 @@ class ToolLoopResumer {
                         e.getClass().getSimpleName());
             }
         }
-        return SelfUngatingGuard.refusalFromArguments(args, actingAgentId);
+        return SelfUngatingGuard.refusalFromArguments(args, protection);
     }
 
     @FunctionalInterface

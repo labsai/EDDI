@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -121,26 +122,26 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     /**
      * Deployment-wide fallback for {@code LlmConfiguration.Task#getEnforceBudget()}
-     * ({@code eddi.tools.budget.enforce-by-default}, default {@code false}).
+     * ({@code eddi.tools.budget.enforce-by-default}, default {@code true}).
      * <p>
-     * Enforcement is <em>opt-in</em>. Until this release every built-in tool priced
-     * at $0.00 (the cost table was keyed on config slugs while the live path passed
-     * {@code @Tool} method names), so a {@code maxBudgetPerConversation} on a
-     * built-in-only agent has never once refused a call. Now that pricing works,
-     * defaulting the gate to on would make those ceilings bind for the first time
-     * and start refusing tool calls mid-conversation on upgrade.
+     * A configured {@code maxBudgetPerConversation} is <em>enforced</em> unless
+     * somebody says otherwise. It used to be the other way round — the ceiling
+     * recorded cost and refused nothing until {@code enforceBudget: true} was
+     * added, and the deployment-wide key was not even declared in
+     * {@code application.properties} — so a ceiling an operator had written down
+     * was advisory everywhere (security review 2026-10-15, finding M8). The
+     * original reason for the opt-in (built-in tools priced at $0.00 until their
+     * pricing was repaired, so a default-on gate would have bound for the first
+     * time on upgrade) has passed: pricing has been correct for several releases
+     * and the one-time startup WARN that named every unenforced ceiling has run on
+     * every deployment since.
      * <p>
-     * That is <em>not</em> the whole story, and the other half is why
-     * {@link #warnAboutUnenforcedBudgets} exists: http/MCP/A2A/dynamic tools
-     * dispatch under their configured name, so an agent with a tool called
-     * {@code websearch}, {@code webscraper} or {@code pdfreader} WAS priced and WAS
-     * refused on the previous release. For those agents an opt-in default silently
-     * removes a cost cap that was working. Silence is the unacceptable part, not
-     * the default — so every stored task carrying a ceiling without an explicit
-     * {@code enforceBudget} is named in a startup WARN.
-     * <p>
-     * Turn enforcement on per task with {@code "enforceBudget": true}, or
-     * deployment-wide with {@code eddi.tools.budget.enforce-by-default=true}.
+     * Opting <em>out</em> is still possible and is now the thing that gets named:
+     * {@code "enforceBudget": false} on a task, or
+     * {@code eddi.tools.budget.enforce-by-default=false} for the deployment, keeps
+     * cost tracking and reporting and turns the refusal off —
+     * {@link #warnAboutUnenforcedBudgets} says so once per task so an advisory
+     * ceiling is a visible decision, never a default.
      * <p>
      * Read through {@link ConfigProvider} rather than {@code @ConfigProperty}
      * because the value is {@code static final}: CDI injects into instance fields,
@@ -155,38 +156,56 @@ class AgentOrchestrator implements IAgentOrchestrator {
         try {
             return ConfigProvider.getConfig()
                     .getOptionalValue("eddi.tools.budget.enforce-by-default", Boolean.class)
-                    .orElse(false);
+                    .orElse(true);
         } catch (Exception e) {
             // No MicroProfile config available (plain unit test JVM): fall back to the
             // documented default so a test JVM and a deployment agree.
-            return false;
+            return true;
         }
     }
 
     /**
+     * Whether a {@code maxBudgetPerConversation} ceiling is refused against on this
+     * deployment when the task does not say. Surfaced by the MCP {@code get_agent}
+     * and {@code deploy_agent} tools so an operator reading an agent sees the
+     * effective state, not just the stored ceiling.
+     */
+    public static boolean isBudgetEnforcedByDefault() {
+        return BUDGET_ENFORCE_DEFAULT;
+    }
+
+    /**
+     * The effective enforcement state of one task's ceiling: the task's own
+     * {@code enforceBudget} when set, else {@link #BUDGET_ENFORCE_DEFAULT}.
+     */
+    public static boolean isBudgetEnforced(LlmConfiguration.Task task) {
+        return task.getEnforceBudget() != null ? task.getEnforceBudget() : BUDGET_ENFORCE_DEFAULT;
+    }
+
+    /**
      * Warns, once per configured task, that a {@code maxBudgetPerConversation}
-     * ceiling is present but not enforced.
+     * ceiling is present but has been opted out of enforcement — on the task
+     * ({@code enforceBudget: false}) or deployment-wide
+     * ({@code eddi.tools.budget.enforce-by-default=false}).
      * <p>
-     * The cost of an opt-in default (see {@link #BUDGET_ENFORCE_DEFAULT}) is that
-     * an operator who genuinely had a working ceiling — one on http/MCP/A2A/dynamic
-     * tools, which were priced by their configured name before this release — loses
-     * it without noticing. This makes that loss loud instead of silent: a ceiling
-     * that records but never refuses is exactly the "config that silently does
-     * nothing" this release set out to remove.
+     * A ceiling that records but never refuses is exactly the "config that silently
+     * does nothing" that made this an opt-out: whoever reads the logs must be able
+     * to tell an enforced ceiling from an advisory one without opening the task.
      *
      * @param task
      *            the configured LLM task about to run
      */
     static void warnAboutUnenforcedBudgets(LlmConfiguration.Task task) {
-        if (task.getMaxBudgetPerConversation() == null || task.getEnforceBudget() != null || BUDGET_ENFORCE_DEFAULT) {
+        if (task.getMaxBudgetPerConversation() == null || isBudgetEnforced(task)) {
             return;
         }
         if (UNENFORCED_BUDGET_WARNED.add(String.valueOf(task.getId()))) {
-            LOGGER.warnf("LLM task '%s' sets maxBudgetPerConversation=%s but enforceBudget is unset, "
-                    + "so the ceiling records cost without ever refusing a tool call. Tool pricing was "
-                    + "repaired in this release; set \"enforceBudget\": true on the task (or "
-                    + "eddi.tools.budget.enforce-by-default=true) to enforce it.",
-                    sanitize(String.valueOf(task.getId())), task.getMaxBudgetPerConversation());
+            String optOut = task.getEnforceBudget() != null
+                    ? "the task opts out with \"enforceBudget\": false"
+                    : "this deployment opts out with eddi.tools.budget.enforce-by-default=false";
+            LOGGER.warnf("LLM task '%s' sets maxBudgetPerConversation=%s but %s, so the ceiling records cost "
+                    + "without ever refusing a tool call. Remove the opt-out to enforce it.",
+                    sanitize(String.valueOf(task.getId())), task.getMaxBudgetPerConversation(), optOut);
         }
     }
 
@@ -240,6 +259,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private final IConversationService conversationService;
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
+    private final IWorkflowStore workflowStore;
 
     // Injected by the container after construction, past the constructor's
     // final-field freeze; `volatile` publishes these write-once fields to the
@@ -419,6 +439,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
+        this.workflowStore = workflowStore;
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
@@ -1088,6 +1109,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * providers resolving it independently could disagree if the step data changed
      * between reads.
      */
+    /**
+     * What an approved tool call of this conversation must not write to: the acting
+     * agent, its workflows and their extension resources, resolved from the stores
+     * now (L13). See {@link ActingAgentResources}.
+     */
+    SelfUngatingGuard.Protection protectionFor(IConversationMemory memory) {
+        return ActingAgentResources.resolve(agentStore, workflowStore, memory.getAgentId(), memory.getAgentVersion());
+    }
+
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
         return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
                 DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),

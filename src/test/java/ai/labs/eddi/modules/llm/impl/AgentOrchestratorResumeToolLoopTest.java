@@ -148,8 +148,8 @@ class AgentOrchestratorResumeToolLoopTest {
         when(memory.getAgentId()).thenReturn(null);
         when(memory.getAgentVersion()).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
-        when(toolResponseTruncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any()))
-                .thenAnswer(inv -> inv.getArgument(1));
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(2));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
         when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(), any(Supplier.class),
