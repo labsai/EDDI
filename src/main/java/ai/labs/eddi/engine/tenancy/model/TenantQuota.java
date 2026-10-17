@@ -20,14 +20,16 @@ package ai.labs.eddi.engine.tenancy.model;
  *            what all three stores implement, so a burst spanning a minute
  *            boundary can consume two windows worth of allowance.
  * @param maxMonthlyCostUsd
- *            max monthly tool cost budget (-1 = unlimited). <strong>Not
- *            enforced yet.</strong> The gate exists
- *            ({@code TenantQuotaService.checkCostBudget}) but the accumulator
- *            it reads is only written by {@code recordCost}, which has no
- *            production caller — so the recorded cost is always 0 and the gate
- *            always allows. A tenant can be configured with a budget and spend
- *            past it; {@code PUT /administration/quotas/&#123;id&#125;} logs a
- *            warning saying so rather than pretending otherwise.
+ *            max priced spend per UTC calendar month, in USD (-1 = unlimited).
+ *            Every settled conversation turn charges its {@code audit:cost} —
+ *            LLM tokens at the configured
+ *            {@code inputPricePer1M}/{@code outputPricePer1M} (or cascade
+ *            prices) plus tracked tool cost — and Dream consolidation charges
+ *            its priced calls. Once the month's total reaches the limit, LLM
+ *            tasks serve their fallback answer instead of calling the model and
+ *            tool calls are refused. Only <em>priced</em> spend counts: an
+ *            unpriced model meters $0. See {@code docs/tenant-quotas.md} for
+ *            the call classes that are not metered.
  * @param enabled
  *            whether quota enforcement is active for this tenant
  */

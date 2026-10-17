@@ -24,10 +24,55 @@ Windows are **calendar-aligned, not sliding**. The daily counter resets at the s
 the store's clock, the per-minute counter at the start of the minute, and the cost counter at the
 start of the month.
 
-> **`maxMonthlyCostUsd` is not enforced today.** The limit is stored and returned, and the gate
-> that would read it exists, but nothing records cost against it yet, so the counter stays at zero
-> and the gate never trips. Writing a non-negative value logs a WARN saying so. Treat it as a
-> declaration of intent, not a control.
+## The monthly cost budget
+
+`maxMonthlyCostUsd` is enforced. It works in two halves:
+
+- **Metering (after the spend).** Every settled conversation turn charges its priced cost to the
+  tenant's monthly counter — on a normal or streamed `say`, a rerun, the `CONVERSATION_START` turn
+  and a HITL resume. Group member turns and sub-agent conversations are conversations of their own
+  and are metered the same way, once. A turn's cost is the step's `audit:cost`: every LLM call of
+  the turn priced at its configured prices plus tracked tool cost. Each step remembers what it has
+  already been charged (`audit:metered_cost`), so a turn paused for human approval and resumed is
+  charged once in total. Dream memory consolidation runs outside conversations and charges its
+  priced calls directly.
+- **Gating (before the next spend).** Once the month's total reaches the limit, every LLM task
+  skips its model call and serves its configured fallback answer (`responseValidation.fallbackMessage`,
+  or the default sentence), recording `llm:spend_refused:<taskId>` on the step; tool calls are
+  refused with an error result; and Dream stops consolidating. Nothing already running is cut
+  short, so the turn that crosses the limit finishes and the total can end a little above it.
+
+A turn that crosses the limit is never failed over it, and neither is a turn whose cost could not
+be recorded because the quota store was down — the spend already happened. Its cost is not lost:
+the turn's step records it as `audit:pending_cost`, and the conversation's next settle charges it
+together with its own cost (the pending amount carries forward until a charge succeeds). A store
+outage at the *gate* refuses the model call (fail closed), as below.
+
+### Only priced spend counts
+
+There is no built-in provider price table. A model call is metered only when its configuration
+carries `inputPricePer1M` / `outputPricePer1M` (on the LLM task, a cascade step, a cascade judge, or
+the Dream config). An unpriced model meters **$0** in token cost, so its model calls alone never
+reach the budget — but the priced tools a turn calls are charged to the same counter and can.
+Set prices on every model you want the budget to bound — see [LLM Configuration](langchain.md).
+
+These calls are **not** metered today, priced or not:
+
+| Call | Why |
+|---|---|
+| Rolling conversation summary (`conversationSummary`) | The summarizer reports no token usage back to the task |
+| Tool-response summarization (`toolResponseLimits.summarizerModel`) | Same |
+| Group transcript window summaries and stance summaries | Group-level calls outside any member conversation |
+| Embeddings (RAG retrieval, knowledge-base ingestion) | Embedding calls are not priced anywhere |
+| The model calls of an LLM task before it paused for a **tool-call** approval | That segment's usage is lost when the pause unwinds the tool loop (the audit ledger has the same gap); calls of earlier tasks in the same turn are metered |
+| A turn stopped by **lease loss** in cluster mode | Nothing of the turn is stored; the node that took the conversation over runs it again and meters that run |
+
+A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
+metered again.
+
+To bound one conversation rather than the whole tenant, set the agent-level
+`maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost
+ceiling](langchain.md#per-conversation-llm-cost-ceiling).
 
 ## Failing closed
 
