@@ -135,7 +135,7 @@ function TargetCard({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
+            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{eventTriggers ? t("webhook.triggerLabel", "Event types") : t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
             <p className="text-xs text-muted-foreground">{eventTriggers ? t("webhook.triggerHint", 'Event types routed to this target — exact, or a prefix ending in "*" (e.g. com.github.*)') : t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
             <div className="flex gap-1.5 flex-wrap">
               {target.triggers.map((tr) => (

@@ -46,4 +46,22 @@ describe("webhook settings", () => {
     await userEvent.setup().clear(screen.getByTestId("webhook-input-template"));
     expect(onChange).toHaveBeenLastCalledWith({ signingSecret: "${vault:k}" });
   });
+
+  it("explains the chosen scheme and labels the generic-hmac fields", () => {
+    const { rerender } = renderWithProviders(<WebhookPlatformFields draft={draft({})} onChange={vi.fn()} />);
+    expect(screen.getByTestId("webhook-scheme-hint")).toHaveTextContent("X-Eddi-Signature");
+    expect(screen.queryByLabelText("Signature header")).toBeNull();
+
+    rerender(<WebhookPlatformFields draft={draft({ signatureScheme: "generic-hmac" })} onChange={vi.fn()} />);
+    expect(screen.getByTestId("webhook-scheme-hint")).toHaveTextContent("header you name below");
+    expect(screen.getByLabelText("Signature header")).toBeInTheDocument();
+    expect(screen.getByLabelText("Signature encoding")).toBeInTheDocument();
+    expect(screen.getByLabelText("Signature prefix")).toBeInTheDocument();
+  });
+
+  it("labels the event type fields", () => {
+    renderWithProviders(<WebhookPlatformFields draft={draft({})} onChange={vi.fn()} />);
+    expect(screen.getByLabelText("Event type header")).toBeInTheDocument();
+    expect(screen.getByLabelText("Event type JSON pointer")).toBeInTheDocument();
+  });
 });

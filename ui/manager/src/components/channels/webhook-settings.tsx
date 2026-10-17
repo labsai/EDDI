@@ -12,6 +12,18 @@ const selectClass =
  * is required (and only as a vault reference — the backend refuses anything
  * else); every other field has a backend default when left empty.
  */
+/** One-line explanation of the chosen signature scheme, shown under the picker. */
+export function SchemeHint({ scheme, className, testId }: { scheme: string; className: string; testId: string }) {
+  const { t } = useTranslation();
+  const text =
+    scheme === "github"
+      ? t("webhook.schemeHintGithub", "GitHub's X-Hub-Signature-256 header (sha256=<hex>). Use it to receive GitHub webhooks as they are.")
+      : scheme === "generic-hmac"
+        ? t("webhook.schemeHintGenericHmac", "A plain HMAC-SHA256 of the body in a header you name below — for senders that sign their own way.")
+        : t("webhook.schemeHintEddi", "EDDI's timestamped signature (X-Eddi-Signature). Stale requests are refused, which protects against replays.");
+  return <p className={className} data-testid={testId}>{text}</p>;
+}
+
 export function WebhookPlatformFields({
   draft,
   onChange,
@@ -38,12 +50,13 @@ export function WebhookPlatformFields({
         <SecretKeyPicker id={`${uid}-signing`} referenceOnly testId="webhook-signing-secret" value={pc.signingSecret ?? ""} onChange={(v) => set("signingSecret", v)} placeholder="${vault:webhook-signing-secret}" />
         <p className="text-[10px] text-muted-foreground">{t("webhook.signingSecretHint", "Required. The shared HMAC secret, stored in the secrets vault and referenced as ${vault:…}.")}</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1">
           <label htmlFor={`${uid}-scheme`} className="text-xs font-medium">{t("webhook.signatureScheme", "Signature scheme")}</label>
           <select id={`${uid}-scheme`} data-testid="webhook-scheme-select" className={selectClass} value={scheme} onChange={(e) => set("signatureScheme", e.target.value)}>
             {WEBHOOK_SIGNATURE_SCHEMES.map((s) => (<option key={s} value={s}>{s}</option>))}
           </select>
+          <SchemeHint scheme={scheme} className="text-[10px] text-muted-foreground" testId="webhook-scheme-hint" />
         </div>
         <div className="space-y-1">
           <label htmlFor={`${uid}-strategy`} className="text-xs font-medium">{t("webhook.conversationStrategy", "Conversation strategy")}</label>
@@ -51,16 +64,30 @@ export function WebhookPlatformFields({
             <option value="new">new</option>
             <option value="correlate">correlate</option>
           </select>
+          <p className="text-[10px] text-muted-foreground">
+            {strategy === "correlate"
+              ? t("webhook.strategyHintCorrelate", "Events with the same correlation key continue one conversation.")
+              : t("webhook.strategyHintNew", "Every event starts a new conversation.")}
+          </p>
         </div>
       </div>
       {scheme === "generic-hmac" && (
-        <div className="grid grid-cols-3 gap-3">
-          <Input aria-label="signatureHeader" value={pc.signatureHeader ?? ""} onChange={(e) => set("signatureHeader", e.target.value)} placeholder="X-Signature" />
-          <select aria-label="signatureEncoding" className={selectClass} value={pc.signatureEncoding || "hex"} onChange={(e) => set("signatureEncoding", e.target.value)}>
-            <option value="hex">hex</option>
-            <option value="base64">base64</option>
-          </select>
-          <Input aria-label="signaturePrefix" value={pc.signaturePrefix ?? ""} onChange={(e) => set("signaturePrefix", e.target.value)} placeholder="sha256=" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-sig-header`} className="text-xs font-medium">{t("webhook.signatureHeaderLabel", "Signature header")}</label>
+            <Input id={`${uid}-sig-header`} value={pc.signatureHeader ?? ""} onChange={(e) => set("signatureHeader", e.target.value)} placeholder="X-Signature" />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-sig-encoding`} className="text-xs font-medium">{t("webhook.signatureEncodingLabel", "Signature encoding")}</label>
+            <select id={`${uid}-sig-encoding`} className={selectClass} value={pc.signatureEncoding || "hex"} onChange={(e) => set("signatureEncoding", e.target.value)}>
+              <option value="hex">hex</option>
+              <option value="base64">base64</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-sig-prefix`} className="text-xs font-medium">{t("webhook.signaturePrefixLabel", "Signature prefix")}</label>
+            <Input id={`${uid}-sig-prefix`} value={pc.signaturePrefix ?? ""} onChange={(e) => set("signaturePrefix", e.target.value)} placeholder="sha256=" />
+          </div>
         </div>
       )}
       {strategy === "correlate" && (
@@ -74,9 +101,15 @@ export function WebhookPlatformFields({
         <Input id={`${uid}-template`} data-testid="webhook-input-template" value={pc.inputTemplate ?? ""} onChange={(e) => set("inputTemplate", e.target.value)} placeholder="New {event.type} from {event.source}" />
         <p className="text-[10px] text-muted-foreground">{t("webhook.inputTemplateHint", "The turn's input text. Defaults to event:<type>. The full event is available to the agent as {context.event}.")}</p>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Input aria-label="eventTypeHeader" value={pc.eventTypeHeader ?? ""} onChange={(e) => set("eventTypeHeader", e.target.value)} placeholder={t("webhook.eventTypeHeader", "Event type header (e.g. X-GitHub-Event)")} />
-        <Input aria-label="eventTypePath" value={pc.eventTypePath ?? ""} onChange={(e) => set("eventTypePath", e.target.value)} placeholder={t("webhook.eventTypePath", "Event type JSON pointer (e.g. /action)")} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-1">
+          <label htmlFor={`${uid}-evt-header`} className="text-xs font-medium">{t("webhook.eventTypeHeaderLabel", "Event type header")}</label>
+          <Input id={`${uid}-evt-header`} value={pc.eventTypeHeader ?? ""} onChange={(e) => set("eventTypeHeader", e.target.value)} placeholder={t("webhook.eventTypeHeader", "Event type header (e.g. X-GitHub-Event)")} />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor={`${uid}-evt-path`} className="text-xs font-medium">{t("webhook.eventTypePathLabel", "Event type JSON pointer")}</label>
+          <Input id={`${uid}-evt-path`} value={pc.eventTypePath ?? ""} onChange={(e) => set("eventTypePath", e.target.value)} placeholder={t("webhook.eventTypePath", "Event type JSON pointer (e.g. /action)")} />
+        </div>
       </div>
     </div>
   );

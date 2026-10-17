@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SchemeHint } from "./webhook-settings";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { isEmptyOrReference } from "@/lib/channel-secrets";
 import { StepDots } from "@/components/shared/step-dots";
@@ -176,6 +177,7 @@ export function CreateChannelDialog({
                 >
                   {WEBHOOK_SIGNATURE_SCHEMES.map((s) => (<option key={s} value={s}>{s}</option>))}
                 </select>
+                <SchemeHint scheme={signatureScheme} className="text-xs text-muted-foreground" testId="create-webhook-scheme-hint" />
               </div>
             </>
           )}
@@ -208,7 +210,9 @@ export function CreateChannelDialog({
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-700 dark:text-amber-300">
-                    {t("channels.defaultTargetHint", "The default target handles all messages that don't match a trigger keyword. You can add more targets after creation.")}
+                    {isWebhook
+                      ? t("webhook.defaultTargetHint", "The default target handles every event that no other target's event type matches. You can add more targets after creation.")
+                      : t("channels.defaultTargetHint", "The default target handles all messages that don't match a trigger keyword. You can add more targets after creation.")}
                   </p>
                 </div>
               </div>
