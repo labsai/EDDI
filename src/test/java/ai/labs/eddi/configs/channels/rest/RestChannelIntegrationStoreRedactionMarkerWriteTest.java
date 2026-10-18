@@ -55,7 +55,7 @@ class RestChannelIntegrationStoreRedactionMarkerWriteTest {
     @Test
     @DisplayName("an editor's read-then-save round trip is refused and nothing is written")
     void editorRoundTripIsRefused() throws Exception {
-        when(store.read(ID, 1)).thenReturn(config("xoxb-1234-5678-abcdef"));
+        when(store.read(ID, 1)).thenReturn(config("xoxb-fixturefixturefixture"));
         ChannelIntegrationConfiguration seen = rest.readChannel(ID, 1);
 
         assertRefusedNaming("platformConfig.botToken", () -> rest.updateChannel(ID, 1, seen));

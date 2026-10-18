@@ -59,7 +59,7 @@ class RestChannelIntegrationStoreReadRedactionTest {
     @DisplayName("an editor reads botToken, signingSecret and appToken redacted; ids and references stay legible")
     void editorReadsRedacted() throws Exception {
         ChannelIntegrationConfiguration stored = config(
-                Map.of("botToken", "xoxb-1234-5678-abcdef", "signingSecret", "8f14e45fceea167a5a36dedd4bea2543",
+                Map.of("botToken", "xoxb-fixturefixturefixture", "signingSecret", "fixturefixturefixture",
                         "appToken", "${vault:slack-app}", "teamId", "T0123", "channelId", "C0456"));
 
         Map<String, String> seen = read(stored, false).getPlatformConfig();
@@ -69,13 +69,13 @@ class RestChannelIntegrationStoreReadRedactionTest {
         assertEquals("${vault:slack-app}", seen.get("appToken"));
         assertEquals("T0123", seen.get("teamId"));
         assertEquals("C0456", seen.get("channelId"));
-        assertEquals("xoxb-1234-5678-abcdef", stored.getPlatformConfig().get("botToken"), "the stored object is never touched");
+        assertEquals("xoxb-fixturefixturefixture", stored.getPlatformConfig().get("botToken"), "the stored object is never touched");
     }
 
     @Test
     @DisplayName("an administrator reads the document as stored")
     void adminReadsRaw() throws Exception {
-        ChannelIntegrationConfiguration stored = config(Map.of("botToken", "xoxb-1234-5678-abcdef"));
+        ChannelIntegrationConfiguration stored = config(Map.of("botToken", "xoxb-fixturefixturefixture"));
         assertSame(stored, read(stored, true));
     }
 }

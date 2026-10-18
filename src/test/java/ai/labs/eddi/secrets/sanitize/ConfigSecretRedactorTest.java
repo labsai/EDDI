@@ -38,6 +38,9 @@ class ConfigSecretRedactorTest {
     }
 
     private static Map<String, Object> map(Object... keyValues) {
+        if (keyValues.length % 2 != 0) {
+            throw new IllegalArgumentException("map() takes key/value pairs, got " + keyValues.length + " arguments");
+        }
         var map = new LinkedHashMap<String, Object>();
         for (int i = 0; i < keyValues.length; i += 2) {
             map.put((String) keyValues[i], keyValues[i + 1]);
@@ -199,8 +202,8 @@ class ConfigSecretRedactorTest {
         @Test
         @DisplayName("a form-encoded client secret in a body is replaced")
         void formBody() {
-            String seen = (String) redact(map("body", "grant_type=client_credentials&client_secret=abcd1234efgh")).get("body");
-            assertFalse(seen.contains("abcd1234efgh"), seen);
+            String seen = (String) redact(map("body", "grant_type=client_credentials&client_secret=fixturefixture")).get("body");
+            assertFalse(seen.contains("fixturefixture"), seen);
         }
 
         @Test

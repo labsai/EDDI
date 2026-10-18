@@ -165,3 +165,17 @@ a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:83
 775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:84
 775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:85
+
+# PR #1094 (fix/security-review-secrets-redaction): three stand-in credentials in
+# two read-redaction tests -- a Slack bot token and a signing secret in
+# RestChannelIntegrationStoreReadRedactionTest, a form-encoded client secret in
+# ConfigSecretRedactorTest -- written as realistic-looking literals next to the
+# field names the tests exist to redact, which is exactly what generic-api-key
+# matches. Replaced in a follow-up commit of the same PR with repeated-word values
+# (same shape for the redactor, nothing for the scanner to weigh), but gitleaks
+# scans the PR's whole commit range, so the commit that introduced them stays in
+# it and still needs these entries. Never credentials: the redactor is exercised
+# in-process and nothing authenticates against anything.
+208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStoreReadRedactionTest.java:generic-api-key:62
+208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStoreReadRedactionTest.java:generic-api-key:78
+208f94acb767db40428b106dd20a3e1116a19471:src/test/java/ai/labs/eddi/secrets/sanitize/ConfigSecretRedactorTest.java:generic-api-key:202
