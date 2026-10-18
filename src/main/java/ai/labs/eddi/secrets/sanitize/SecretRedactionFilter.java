@@ -9,6 +9,8 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -611,7 +613,7 @@ public final class SecretRedactionFilter {
             return message;
         }
 
-        String result = message;
+        String result = redactDigestCredentials(message);
         for (RedactionRule rule : SHAPE_RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
@@ -619,7 +621,176 @@ public final class SecretRedactionFilter {
         for (RedactionRule rule : RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
-        return result;
+        return redactBareBasicCredentials(result);
+    }
+
+    /**
+     * {@code Authorization: Digest} with its directive list behind it. The scheme
+     * rule in {@link #SHAPE_RULES} takes one unquoted token after the scheme word,
+     * which on a Digest header is {@code username=} — and left {@code response=},
+     * the credential proper, legible. Only the scheme is found by pattern; the
+     * directives are walked by hand in {@link #endOfDigestDirectives}, because a
+     * pattern would have to quantify a group once per directive and a directive
+     * list is caller-sized (see the note above {@link #SHAPE_RULES}).
+     */
+    private static final Pattern DIGEST_SCHEME = Pattern.compile("(?i)authorization[\"']?+\\s*+[:=]\\s*+[\"']?+digest\\s++");
+
+    private static String redactDigestCredentials(String text) {
+        Matcher matcher = DIGEST_SCHEME.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int from = 0;
+        while (from <= text.length() && matcher.find(from)) {
+            int start = matcher.end();
+            int end = endOfDigestDirectives(text, start);
+            if (end > start) {
+                out.append(text, copied, start).append(REDACTED);
+                copied = end;
+            }
+            // A bare token after the scheme word (no directive list) is the scheme
+            // rule's job; move on either way.
+            from = Math.max(end, start);
+        }
+        if (copied == 0) {
+            return text;
+        }
+        out.append(text, copied, text.length());
+        return out.toString();
+    }
+
+    /**
+     * The end of the directive list starting at {@code from}, or {@code from} when
+     * none starts there. A directive is a name, {@code =} and a value — quoted as
+     * {@code "…"} in plain text or as {@code \"…\"} when the carrier is itself a
+     * JSON string, or an unquoted token — and directives are separated by a comma
+     * with optional whitespace. The walk stops before anything else, so a JSON
+     * carrier's closing quote and the fields after it stay where they were. One
+     * forward pass, linear in the input.
+     */
+    private static int endOfDigestDirectives(String text, int from) {
+        int length = text.length();
+        int end = from;
+        int pos = from;
+        while (true) {
+            int nameEnd = pos;
+            while (nameEnd < length && isDirectiveNameChar(text.charAt(nameEnd))) {
+                nameEnd++;
+            }
+            if (nameEnd == pos || nameEnd >= length || text.charAt(nameEnd) != '=') {
+                break;
+            }
+            int valueEnd = endOfDirectiveValue(text, nameEnd + 1);
+            if (valueEnd < 0) {
+                break;
+            }
+            end = valueEnd;
+            int next = valueEnd;
+            while (next < length && Character.isWhitespace(text.charAt(next))) {
+                next++;
+            }
+            if (next >= length || text.charAt(next) != ',') {
+                break;
+            }
+            next++;
+            while (next < length && Character.isWhitespace(text.charAt(next))) {
+                next++;
+            }
+            pos = next;
+        }
+        return end;
+    }
+
+    /**
+     * The index after the directive value starting at {@code from}, or -1 when
+     * there is none.
+     */
+    private static int endOfDirectiveValue(String text, int from) {
+        int length = text.length();
+        if (from >= length) {
+            return -1;
+        }
+        char first = text.charAt(from);
+        if (first == '"') {
+            int i = from + 1;
+            while (i < length) {
+                char c = text.charAt(i);
+                if (c == '\\') {
+                    i += 2;
+                } else if (c == '"') {
+                    return i + 1;
+                } else {
+                    i++;
+                }
+            }
+            return -1;
+        }
+        if (first == '\\' && from + 1 < length && text.charAt(from + 1) == '"') {
+            // The directive's quotes as a JSON string carries them; the value runs to
+            // the next escaped quote.
+            int close = text.indexOf("\\\"", from + 2);
+            return close < 0 ? -1 : close + 2;
+        }
+        int i = from;
+        while (i < length && isDirectiveTokenChar(text.charAt(i))) {
+            i++;
+        }
+        return i == from ? -1 : i;
+    }
+
+    private static boolean isDirectiveNameChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    }
+
+    private static boolean isDirectiveTokenChar(char c) {
+        return isDirectiveNameChar(c) || c == '+' || c == '/' || c == '.' || c == '~' || c == '=';
+    }
+
+    /**
+     * {@code Basic <base64>} with no {@code Authorization} name in front of it — a
+     * header value logged on its own, or an argument whose key was lost. The word
+     * is ordinary English and {@code configuration} is base64 alphabet too, so the
+     * shape alone is not enough: the token is decoded, and taken for a credential
+     * only when it reads as {@code user:password} — printable text around a colon,
+     * which is what RFC 7617 puts there and prose never is.
+     */
+    private static final Pattern BARE_BASIC = Pattern.compile("(?i)(?<![A-Za-z0-9])(basic)\\s++([A-Za-z0-9+/]{8,}+={0,2}+)(?![A-Za-z0-9+/=])");
+
+    private static String redactBareBasicCredentials(String text) {
+        Matcher matcher = BARE_BASIC.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        do {
+            String replacement = decodesToUserinfo(matcher.group(2)) ? matcher.group(1) + " " + REDACTED : matcher.group();
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        } while (matcher.find());
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static boolean decodesToUserinfo(String base64) {
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        String decoded = new String(bytes, StandardCharsets.UTF_8);
+        if (decoded.indexOf(':') <= 0) {
+            return false;
+        }
+        for (int i = 0; i < decoded.length(); i++) {
+            char c = decoded.charAt(i);
+            // control characters, DEL, or the replacement character of an invalid byte
+            if (c < ' ' || c == 0x7f || c == 0xFFFD) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

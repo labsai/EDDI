@@ -147,7 +147,7 @@ class UnrestrictedSecretsCheckTest {
     }
 
     @Test
-    @DisplayName("an unreadable configuration is skipped, not fatal")
+    @DisplayName("an unreadable configuration is skipped, not fatal — and the scan is not published as complete")
     void unreadableConfigIsSkipped() throws Exception {
         when(llmStore.read(eq(LLM_ID), anyInt())).thenThrow(new IllegalStateException("db down"));
 
@@ -155,5 +155,7 @@ class UnrestrictedSecretsCheckTest {
 
         assertEquals(List.of(new UnrestrictedSecret(new SecretReference("default", "setup.victim.apiKey"), List.of(CHANNEL_URI.toString())),
                 new UnrestrictedSecret(new SecretReference("acme", "slack-bot"), List.of(CHANNEL_URI.toString()))), found);
+        assertEquals(Optional.empty(), check.referencedBy(new SecretReference("acme", "slack-bot")),
+                "a partial map would read as 'none reference it' for the unread configuration; the listing says unknown instead");
     }
 }

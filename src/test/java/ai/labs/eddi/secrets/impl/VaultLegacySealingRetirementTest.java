@@ -125,4 +125,15 @@ class VaultLegacySealingRetirementTest {
         assertDoesNotThrow(() -> EnvelopeCrypto.decrypt(persistence.secrets.get("acme/flaky").getEncryptedValue(),
                 persistence.secrets.get("acme/flaky").getIv(), rawDek), "the row stays legacy and readable");
     }
+
+    @Test
+    @DisplayName("an unchecked store failure (a driver or pool error the store did not wrap) does not fail the read either")
+    void uncheckedWriteBackFailureDoesNotFailTheRead() throws Exception {
+        seedLegacy("flakier", "flakier-value");
+        persistence.beforeResealInPlace = () -> {
+            throw new IllegalStateException("pool exhausted");
+        };
+
+        assertEquals("flakier-value", provider.resolve(new SecretReference("acme", "flakier")));
+    }
 }

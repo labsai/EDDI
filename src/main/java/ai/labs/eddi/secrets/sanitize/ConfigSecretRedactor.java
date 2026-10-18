@@ -57,8 +57,8 @@ import java.util.regex.Pattern;
  * {@link SecretRedactionFilter}, the same scan approval cards and logs
  * use.</li>
  * </ul>
- * In-string replacements use {@link SecretRedactionFilter#REDACTED} so the
- * surrounding URL or body stays readable.
+ * In-string replacements use {@link #IN_STRING_REDACTED} so the surrounding URL
+ * or body stays readable and a write that echoes it is still refused.
  * <p>
  * <h3>What is never redacted</h3> A reference — {@code ${vault:…}},
  * {@code ${vars:…}}, {@code ${connection:…}}, {@code ${caller:…}} — and a
@@ -200,6 +200,37 @@ public final class ConfigSecretRedactor {
     /** {@link #redact(Object, Class, Set)} with nothing skipped. */
     public static <T> T redact(T config, Class<T> type) {
         return redact(config, type, Set.of());
+    }
+
+    /**
+     * {@link #redact(Object, Class, Set)} for a document held as a JSON string —
+     * the content of an upgrade or sync preview. Returns {@code json} itself when
+     * nothing in it is a credential, and keeps its indentation otherwise. Text that
+     * is not a JSON document is shape-scanned by {@link SecretRedactionFilter}
+     * instead; it is never returned as it came.
+     */
+    public static String redactJson(String json, Set<String> skippedPaths) {
+        if (json == null || json.isBlank()) {
+            return json;
+        }
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (JsonProcessingException e) {
+            return SecretRedactionFilter.redact(json);
+        }
+        List<String> found = new ArrayList<>();
+        walk(tree, "", "", null, skippedPaths == null ? Set.of() : skippedPaths, found, true);
+        if (found.isEmpty()) {
+            return json;
+        }
+        try {
+            return json.indexOf('\n') >= 0
+                    ? MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(tree)
+                    : MAPPER.writeValueAsString(tree);
+        } catch (JsonProcessingException e) {
+            return tree.toString();
+        }
     }
 
     /**

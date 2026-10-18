@@ -277,6 +277,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public ImportPreview previewImport(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        return redactForCaller(buildImportPreview(zippedAgentConfigFiles, targetAgentId));
+    }
+
+    /**
+     * A preview as the caller may see it. {@link StructuralMatcher} reads targets
+     * unredacted so that an upgrade restores the target's own credentials; an
+     * administrator sees that content, anyone else the redacted copy — see
+     * {@link PreviewRedaction}.
+     */
+    private ImportPreview redactForCaller(ImportPreview preview) {
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin() ? preview : PreviewRedaction.forNonAdmin(preview);
+    }
+
+    private ImportPreview buildImportPreview(InputStream zippedAgentConfigFiles, String targetAgentId) {
         // When targetAgentId is provided, use the new structural matching pipeline
         if (targetAgentId != null && !targetAgentId.isBlank()) {
             return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
@@ -3436,7 +3450,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         validateSourceUrl(sourceUrl);
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization,
                 remoteSecretScrubber, outbound())) {
-            return previewOnto(source, sourceAgentId, targetAgentId, createNew);
+            return redactForCaller(previewOnto(source, sourceAgentId, targetAgentId, createNew));
         } catch (WebApplicationException e) {
             // An unreadable target agent is a 404 the operator can act on.
             throw withErrorBody(e);
@@ -3459,7 +3473,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
                     sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
-                previews.add(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew()));
+                previews.add(redactForCaller(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew())));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch preview failed for agent %s", LogSanitizer.sanitize(mapping.sourceAgentId()));
                 // Report the failure in its own field. Prefixing the agent NAME with

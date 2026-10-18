@@ -124,8 +124,9 @@ public class UnrestrictedSecretsCheck {
      */
     public List<UnrestrictedSecret> scan() {
         Map<SecretReference, Set<String>> references = new LinkedHashMap<>();
+        boolean complete = true;
         for (ScannedType type : scannedTypes) {
-            collectReferences(type, references);
+            complete &= collectReferences(type, references);
         }
         Map<SecretReference, List<String>> scanned = new LinkedHashMap<>();
         List<UnrestrictedSecret> unrestricted = new ArrayList<>();
@@ -147,13 +148,24 @@ public class UnrestrictedSecretsCheck {
                 unrestricted.add(new UnrestrictedSecret(entry.getKey(), configs));
             }
         }
-        lastScan = scanned;
+        if (complete) {
+            lastScan = scanned;
+        } else {
+            // A partial map would be read as "none reference it" for every
+            // configuration that could not be read. Say so once, and keep the
+            // listing's referencedBy absent rather than wrong.
+            LOGGER.warn("[SECURITY] The vault destination check could not read every configuration (the debug log names them), so the "
+                    + "list below may be incomplete, and GET /secretstore/secrets/{tenantId} carries no referencedBy until a scan reads "
+                    + "everything.");
+        }
         return unrestricted;
     }
 
     /**
-     * The configurations the last scan found referencing {@code secret}, or empty
-     * when no scan has completed yet. An empty list after a scan means none.
+     * The configurations the last <em>complete</em> scan found referencing
+     * {@code secret}, or empty when none has completed yet — also after a scan that
+     * could not read every configuration. An empty list after a complete scan means
+     * none.
      */
     public Optional<List<String>> referencedBy(SecretReference secret) {
         Map<SecretReference, List<String>> scan = lastScan;
@@ -163,37 +175,44 @@ public class UnrestrictedSecretsCheck {
         return Optional.of(scan.getOrDefault(secret, List.of()));
     }
 
-    private void collectReferences(ScannedType type, Map<SecretReference, Set<String>> sink) {
+    /** Whether every configuration of {@code type} was listed and read. */
+    private boolean collectReferences(ScannedType type, Map<SecretReference, Set<String>> sink) {
+        boolean complete = true;
         for (int page = 0; page < MAX_PAGES; page++) {
             List<DocumentDescriptor> descriptors;
             try {
                 descriptors = descriptorStore.readDescriptors(type.descriptorType(), "", page, IDescriptorStore.NO_LIMIT, false);
             } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
                 LOGGER.debugf("Could not list %s configurations: %s", type.descriptorType(), sanitize(e.getMessage()));
-                return;
+                return false;
             }
             if (descriptors == null || descriptors.isEmpty()) {
-                return;
+                return complete;
             }
             for (DocumentDescriptor descriptor : descriptors) {
-                scanOne(type, descriptor, sink);
+                complete &= scanOne(type, descriptor, sink);
             }
         }
+        return complete;
     }
 
-    private void scanOne(ScannedType type, DocumentDescriptor descriptor, Map<SecretReference, Set<String>> sink) {
+    /**
+     * Whether the configuration was read (a descriptor with nothing to read counts
+     * as read).
+     */
+    private boolean scanOne(ScannedType type, DocumentDescriptor descriptor, Map<SecretReference, Set<String>> sink) {
         if (descriptor == null || descriptor.getResource() == null) {
-            return;
+            return true;
         }
         String resource = descriptor.getResource().toString();
         try {
             IResourceStore.IResourceId id = RestUtilities.extractResourceId(descriptor.getResource());
             if (id == null || id.getId() == null) {
-                return;
+                return true;
             }
             Object config = type.store().read(id.getId(), id.getVersion());
             if (config == null) {
-                return;
+                return true;
             }
             Matcher matcher = SecretReference.compiledPattern().matcher(MAPPER.writeValueAsString(config));
             while (matcher.find()) {
@@ -202,8 +221,10 @@ public class UnrestrictedSecretsCheck {
                     sink.computeIfAbsent(reference, r -> new LinkedHashSet<>()).add(resource);
                 }
             }
+            return true;
         } catch (Exception e) {
             LOGGER.debugf("Could not read %s while checking vault destinations: %s", sanitize(resource), sanitize(e.getMessage()));
+            return false;
         }
     }
 

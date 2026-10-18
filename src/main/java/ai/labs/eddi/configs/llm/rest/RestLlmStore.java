@@ -44,7 +44,7 @@ public class RestLlmStore implements IRestLlmStore {
      * Maps keyed by tool names rather than parameter names: a tool called
      * {@code get_token} is not a credential field.
      */
-    static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes");
+    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes");
 
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;

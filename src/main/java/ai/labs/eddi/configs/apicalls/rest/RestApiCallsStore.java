@@ -123,7 +123,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
      * Containers in an httpcalls document that hold descriptions rather than
      * configuration.
      */
-    static final Set<String> NOT_CONFIGURATION = Set.of("httpCalls[].parameters");
+    public static final Set<String> NOT_CONFIGURATION = Set.of("httpCalls[].parameters");
 
     /**
      * {@link #readApiCalls} without the read-redaction, for server-side work an

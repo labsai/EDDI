@@ -2146,7 +2146,10 @@ public class VaultSecretProvider implements ISecretProvider {
                             + "re-seals every such row.", sanitize(id));
                 }
             }
-        } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
+        } catch (RuntimeException e) {
+            // PersistenceException, CryptoException, or an unchecked error a store did
+            // not wrap (a driver or pool exception): the write-back is best effort and
+            // the plaintext is already in hand, so none of them may fail the read.
             if (legacySealingLogged.add(id)) {
                 LOGGER.warnf("[VAULT] Secret '%s' was sealed before row binding (no AAD) and could not be re-sealed on read: %s. "
                         + "POST /secretstore/secrets/{tenantId}/rotate-dek re-seals every such row.", sanitize(id), sanitize(e.getMessage()));

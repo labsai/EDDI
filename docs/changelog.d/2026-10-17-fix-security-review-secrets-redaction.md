@@ -28,7 +28,7 @@ and literal `Authorization` headers and keys in an httpcall's `request.path` and
 - `RestLlmStore`'s write-time warning now uses the same detection, so it warns about
   exactly what an editor cannot read back.
 - `RestRagIngestion` reads the knowledge base through the new
-  `RestRagStore.readRagForIngestion` (same access check, no redaction): ingestion
+  `RestRagStore.readUnredacted` (same access check, no redaction): ingestion
   builds the embedding model from that document and must not send the marker.
 
 **Design decision:** no merge-back of the stored literal when an editor saves a
@@ -36,9 +36,8 @@ redacted document — the marker is saved and fails at the provider. Merging it 
 would let an editor move the marker next to a host of their choosing (H1 with extra
 steps).
 
-**Known consequence:** an editor-run upgrade import (`UpgradeExecutor`) reads the
-target through the same REST stores, so a target literal it restores is the marker.
-This was already so for LLM task parameters since L12; admins are unaffected.
+Upgrade and sync read their targets unredacted, and the previews an editor sees
+are redacted at the REST boundary — see the last entry below.
 
 **Files:** [`ConfigSecretRedactor.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/ConfigSecretRedactor.java),
 [`RestLlmStore.java`](../../src/main/java/ai/labs/eddi/configs/llm/rest/RestLlmStore.java),
@@ -87,7 +86,10 @@ the LLM configuration at their own host.
   and the `PUT /secretstore/secrets/{tenantId}/{keyName}/grant` call that narrows it.
 - `GET /secretstore/secrets/{tenantId}` (admin-only) now returns `SecretListing` entries:
   the same metadata fields as before plus `unrestrictedDestination` (live: `allowedHosts`
-  empty) and `referencedBy` (from the last scan; absent before it).
+  empty) and `referencedBy` (from the last complete scan; absent before one).
+- The scan says when it could not read every configuration: one `[SECURITY]` WARN, and
+  `referencedBy` stays absent rather than claiming that nothing references a secret the
+  unread configuration may use.
 
 **Design decision:** no automatic migration. Only the admin knows which host a key
 belongs to; a wrong guess would break a working agent. `AgentSetupService` and
@@ -121,6 +123,13 @@ admits no quote, backslash or brace, so a match cannot cross a JSON string or ea
 so a lookbehind admits a start only where a token run begins — without it `eyJ` repeated
 60,000 times is quadratic (the mutation check timed out at 30 s).
 
+Two gaps found in review: a `Digest` header lost only `username=` — the scheme rule
+took one unquoted token and left `response=`, the credential proper, legible — and now
+loses its whole directive list, walked by hand rather than by a pattern, since a
+quantified group recurses once per directive; and a bare `Basic <base64>` with no
+header name in front is redacted when the token decodes to `user:password`, so
+`Basic configuration` stays prose.
+
 **Files:** [`SecretRedactionFilter.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilter.java),
 [`SecretRedactionFilterProviderShapesTest.java`](../../src/test/java/ai/labs/eddi/secrets/sanitize/SecretRedactionFilterProviderShapesTest.java),
 [`secrets-vault.md`](../secrets-vault.md#log-redaction)
@@ -142,8 +151,9 @@ forever.
   row was read with: a dekId guard cannot see a concurrent `store` under the same
   generation and would write the old value back over the new one. A lost guard, a
   failure or an implementation without the method (the interface default writes nothing)
-  leaves the row legacy and readable; the read never fails because of it. Logged once
-  per key per node.
+  leaves the row legacy and readable; the read never fails because of it — the write-back
+  catches every `RuntimeException`, so a driver or pool error a store did not wrap cannot
+  fail it either. Logged once per key per node.
 - `openSealedData` (OAuth grants and other participant-owned sealed data) cannot write
   back — the provider does not own those rows — so it logs once per tenant that
   `POST /secretstore/secrets/{tenantId}/rotate-dek` re-seals them bound.
@@ -183,14 +193,22 @@ Follow-up to the M1 read-redaction above, so it can never turn into stored corru
   target's own key.
 - A sync **source** read from a peer through a non-admin credential carries the peer's
   marker; such resources are now refused rather than stored.
+- **Previews are redacted for editors.** The matcher's unredacted target content is
+  also what the upgrade and sync previews return, and those endpoints admit
+  `eddi-editor`, so `RestImportService` redacts `sourceContent` and `targetContent`
+  for every caller who is not `eddi-admin` (`PreviewRedaction`, with the stores'
+  redactor and skipped paths) before a preview leaves the server. The upgrade itself
+  still writes from the unredacted read. (Review finding on the PR.)
 
 **Tests:** a `*RedactionMarkerWriteTest` per store, a marker case in
-`RestImportServiceCallerTokenTest`, and `EditorUpgradeKeepsTargetCredentialTest` (an
+`RestImportServiceCallerTokenTest`, `EditorUpgradeKeepsTargetCredentialTest` (an
 editor-run upgrade of an agent whose LLM config holds a plaintext key keeps it and is
-not refused); each mutation-checked.
+not refused), `PreviewRedactionTest` and `RestImportServicePreviewRedactionTest`; each
+mutation-checked.
 
 **Files:** [`RedactionMarkerGuard.java`](../../src/main/java/ai/labs/eddi/configs/rest/RedactionMarkerGuard.java),
 [`ConfigSecretRedactor.java`](../../src/main/java/ai/labs/eddi/secrets/sanitize/ConfigSecretRedactor.java),
+[`PreviewRedaction.java`](../../src/main/java/ai/labs/eddi/backup/impl/PreviewRedaction.java),
 [`StructuralMatcher.java`](../../src/main/java/ai/labs/eddi/backup/impl/StructuralMatcher.java),
 [`UpgradeExecutor.java`](../../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java),
 [`RestImportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
