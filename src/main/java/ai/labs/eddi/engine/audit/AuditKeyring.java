@@ -7,7 +7,6 @@ package ai.labs.eddi.engine.audit;
 import ai.labs.eddi.engine.audit.AuditHmac.SigningKey;
 import ai.labs.eddi.secrets.ISecretProvider;
 import io.quarkus.runtime.StartupEvent;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -137,10 +136,40 @@ public class AuditKeyring {
     }
 
     /**
-     * Derives every configured key. PBKDF2 at 600,000 iterations per key, so this
-     * runs once.
+     * Starts deriving the keys on a virtual thread, ahead of the vault's own
+     * startup observer.
+     * <p>
+     * Both derivations are 600,000-iteration PBKDF2 — this one and the vault's KEK
+     * in {@code VaultSecretProvider} — and they used to run one after the other on
+     * the main thread, a few hundred milliseconds each. They share no input, so the
+     * audit keys are derived while the vault loads its salt and derives the KEK.
+     * Nothing about the keys changes: the same {@link #initialize()} runs, only on
+     * another thread. {@link #onStartup} joins it before readiness by calling
+     * {@link #initialize()}, which waits on this object's monitor until the
+     * derivation holding it is done. A derivation that fails here is not lost:
+     * {@code initialized} stays false, and the next caller derives again on its own
+     * thread and sees the failure.
      */
-    @PostConstruct
+    void deriveEarly(@Observes
+    @Priority(Interceptor.Priority.APPLICATION - 100) StartupEvent event) {
+        if (initialized) {
+            return;
+        }
+        Thread.ofVirtual().name("audit-keyring-derive").start(() -> {
+            try {
+                initialize();
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Audit Ledger: early key derivation failed, retried on first use: %s", e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Derives every configured key. PBKDF2 at 600,000 iterations per key, so this
+     * runs once. Every method that reads a key calls it first; it is deliberately
+     * not a {@code @PostConstruct}, which would run the derivation on whichever
+     * thread first touched the bean — {@link #deriveEarly}'s, the main one.
+     */
     void initialize() {
         // Volatile fast path: this is reached for every audit entry signed, and must
         // not take a lock once the keys exist.
