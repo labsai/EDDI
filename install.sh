@@ -967,8 +967,18 @@ fi
 # release, or a tampered file, does not get installed. A ref with no SHA256SUMS
 # (main, a branch, a release older than the asset) is installed as before, with a
 # warning that only TLS vouches for it.
+#
+# The list itself is signed: the release job signs SHA256SUMS with cosign keyless
+# and publishes the Sigstore bundle as SHA256SUMS.sigstore.json. When cosign is on
+# PATH, the list is verified before any hash in it is trusted — the certificate
+# must name THIS repository's release workflow at THIS tag, issued by GitHub
+# Actions' OIDC provider — and a list that fails is refused. Without cosign the
+# checksums still catch a moved tag or a changed file, but not a replaced
+# SHA256SUMS, and one warning line says so.
 RELEASE_CHECKSUMS=""
 RELEASE_CHECKSUMS_LOADED=false
+RELEASE_SIGNER_IDENTITY_PREFIX="https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+RELEASE_SIGNER_ISSUER="https://token.actions.githubusercontent.com"
 
 sha256_of() {
   if command -v sha256sum &>/dev/null; then
@@ -977,6 +987,35 @@ sha256_of() {
     shasum -a 256 "$1" | cut -d' ' -f1
   else
     return 1
+  fi
+}
+
+# verify_release_checksums_signature <SHA256SUMS file>: checks the release's
+# cosign bundle when cosign is installed; refuses (fail) a list whose signature
+# does not verify. A release published before the bundle existed has none, and is
+# used unsigned with a warning, as is any release when cosign is not installed.
+verify_release_checksums_signature() {
+  local sums="$1" bundle
+  if ! command -v cosign &>/dev/null; then
+    warn "cosign is not installed — the SHA256SUMS of release ${EDDI_BRANCH} is used without checking its signature."
+    return 0
+  fi
+  bundle=$(mktemp "${TMPDIR:-/tmp}/eddi-sums-bundle.XXXXXX")
+  if ! curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS.sigstore.json" -o "$bundle" 2>/dev/null \
+      || [[ ! -s "$bundle" ]]; then
+    rm -f "$bundle"
+    warn "Release ${EDDI_BRANCH} publishes no signature for its SHA256SUMS — its checksums are used unsigned."
+    return 0
+  fi
+  if cosign verify-blob --bundle "$bundle" \
+      --certificate-identity "${RELEASE_SIGNER_IDENTITY_PREFIX}${EDDI_BRANCH}" \
+      --certificate-oidc-issuer "$RELEASE_SIGNER_ISSUER" \
+      "$sums" >/dev/null 2>&1; then
+    rm -f "$bundle"
+    info "SHA256SUMS signature verified: signed by the EDDI release workflow at ${EDDI_BRANCH}"
+  else
+    rm -f "$bundle" "$sums"
+    fail "The SHA256SUMS of release ${EDDI_BRANCH} is not signed by the EDDI release workflow at that tag (cosign verify-blob failed).\n     Nothing was downloaded. Retry later; if it persists, report it."
   fi
 }
 
@@ -995,6 +1034,7 @@ load_release_checksums() {
   sums=$(mktemp "${TMPDIR:-/tmp}/eddi-sums.XXXXXX")
   if curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS" -o "$sums" 2>/dev/null \
       && [[ -s "$sums" ]]; then
+    verify_release_checksums_signature "$sums"
     RELEASE_CHECKSUMS="$sums"
     info "Verifying downloads against the SHA256SUMS of release ${EDDI_BRANCH}"
   else

@@ -902,6 +902,27 @@ fetch `install.sh` from a release tag rather than `main` for a pinned install. T
 newest stable release instead of `main`, falling back to `main` with a warning when the
 lookup fails.
 
+The checksum list is signed too. A `SHA256SUMS` on its own proves only that the files
+match whatever list the release carries; whoever could replace one release asset could
+replace both. The release job therefore signs it with cosign **keyless**, the same way the
+Docker image is signed: GitHub Actions' OIDC token gets a short-lived Fulcio certificate
+naming the workflow that ran, and the signature is logged in the public Rekor transparency
+log. The Sigstore bundle is attached as `SHA256SUMS.sigstore.json`, after the job has
+verified it against the identity below. When `cosign` is on `PATH`, both installers verify
+the list before they trust any hash in it and refuse to install from a list that does not
+verify. The certificate must name `https://github.com/labsai/EDDI/.github/workflows/ci.yml`
+at `refs/tags/<the release tag>`, issued by `https://token.actions.githubusercontent.com`.
+Without `cosign` they print one warning line and go on with the unsigned list. A release
+published before the bundle existed is also used unsigned, with a warning. To check a
+release by hand:
+
+```bash
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/<tag> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
 ### Fuzz Testing
 
 Security-critical input parsers are tested with [Jazzer](https://github.com/CodeIntelligenceTesting/jazzer) coverage-guided fuzzing:

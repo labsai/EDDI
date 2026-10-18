@@ -2610,6 +2610,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write  # Required for creating GitHub Releases
+      id-token: write  # Sigstore cosign keyless signing of SHA256SUMS (OIDC → Fulcio)
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2627,10 +2628,33 @@ jobs:
           grep -Eq ' [ *]keycloak/eddi-realm\.json$' SHA256SUMS
           cat SHA256SUMS
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Without a signature the list only proves that the files match whatever
+      # SHA256SUMS the release carries — anyone able to replace one asset could
+      # replace both. Keyless, like the image: the Fulcio certificate names this
+      # workflow at this tag, and the Rekor entry is public. install.sh and
+      # install.ps1 verify the bundle against exactly that identity when cosign is
+      # installed, so it is verified here the same way before it is published.
+      - name: Sign SHA256SUMS (keyless)
+        env:
+          SIGNER_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@${{ github.ref }}
+        run: |
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+          cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+            --certificate-identity "$SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            SHA256SUMS
+          echo "### 🔏 SHA256SUMS signed (Sigstore cosign, keyless)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verify: \`cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity ${SIGNER_IDENTITY} --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          files: SHA256SUMS
+          files: |
+            SHA256SUMS
+            SHA256SUMS.sigstore.json
           generate_release_notes: true
           # A tag with a pre-release suffix (6.4.0-RC1) is published as a GitHub
           # pre-release and does NOT become the repository's "Latest" release;

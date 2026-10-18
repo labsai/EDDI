@@ -26,6 +26,34 @@ same reason). The installers and
 - Verified by hand with `docker compose run keycloak-guard` against loopback, `0.0.0.0` with no
   password, with `admin`, with an empty one and with a real one.
 
+### 3. The release signs `SHA256SUMS`, and the installers verify it
+
+PR #1088 made the release publish a `SHA256SUMS` that `install.sh` / `install.ps1` check every
+download against, but the list itself was unsigned, so whoever could replace one release asset
+could replace both. The `release` job in [`ci.yml`](../../.github/workflows/ci.yml) now gets
+`id-token: write`, installs cosign with the same pinned installer as the image job, signs the
+list keyless (`cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS`), verifies
+the bundle against the exact identity the installers demand, and attaches it to the release.
+
+Both installers, when `cosign` is on `PATH`, fetch the bundle from the same release and run
+`cosign verify-blob` with `--certificate-identity
+https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/<tag>` (exact, not a regexp:
+the certificate must name this release's own tag) and `--certificate-oidc-issuer
+https://token.actions.githubusercontent.com`, BEFORE any hash in the list is trusted. A list that
+fails stops the install. Without cosign they print one warning line, and a release from before
+the bundle existed is used unsigned with a warning. Releases cut before this change keep working.
+
+- Tests: `InstallerReleaseRefTest.checksumListIsSignedAndVerified` checks the release job and both
+  installers as text, including that verification precedes trust.
+  `shellVerifiesTheChecksumSignature` runs install.sh's own functions with a stub curl and a stub
+  cosign: one warning without cosign; the exact identity, issuer and bundle URL with it; refusal on
+  a failed verification; the unsigned fallback when there is no bundle. It was mutation-checked
+  by forcing verification to pass. The PowerShell function was run the same way by hand, with a
+  stub `cosign.cmd`, in all four cases.
+- Not verified end to end: keyless signing needs the GitHub OIDC token, so the first real
+  signature appears on the next release tag. The job verifies it before publishing.
+- Docs: `docs/security.md`, "Installer Downloads", with the manual `cosign verify-blob` command.
+
 ### 4. `read_audit_trail` no longer shows a USE-only owner the agent's prompt
 
 Finding: yes, it did. `LlmTask` writes `audit:compiled_prompt` as the compiled system message,
