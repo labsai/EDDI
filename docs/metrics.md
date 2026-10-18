@@ -432,7 +432,9 @@ away. A conversation with more than
 next one with `reason="conversation_queue"`. Under load the MongoDB pool is
 where a turn's time goes; `eddi_datastore_pool_wait_seconds` shows how long
 operations wait for a connection, and `eddi_datastore_pool_wait_timeouts_total`
-how many gave up after `eddi.mongodb.max-wait-time-ms`.
+how many gave up at the effective pool-wait limit: `waitQueueTimeoutMS` when the
+connection string sets it, otherwise `eddi.mongodb.max-wait-time-ms` (10 s by
+default; `0` leaves the driver's own 120 s).
 
 ### Pipeline Metrics
 
