@@ -6,7 +6,10 @@ package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Write-once, append-only contract for the immutable audit ledger.
@@ -244,5 +247,26 @@ public interface IAuditStore {
      */
     default long maxSequence(String conversationId) {
         return AuditEntry.UNSEQUENCED;
+    }
+
+    /**
+     * {@link #maxSequence} for several conversations in one round trip.
+     * <p>
+     * {@code AuditLedgerService.detectForeignSequenceAllocation} asks after every
+     * flush for every conversation in the batch; one query per conversation was
+     * about one read per turn under load. Backends override this with a single
+     * query; the default asks per conversation, as before.
+     *
+     * @param conversationIds
+     *            the conversations to ask about
+     * @return the highest stored sequence per conversation — every requested id is
+     *         a key, with {@link AuditEntry#UNSEQUENCED} where none is stored
+     */
+    default Map<String, Long> maxSequences(Collection<String> conversationIds) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        for (String conversationId : conversationIds) {
+            result.put(conversationId, maxSequence(conversationId));
+        }
+        return result;
     }
 }

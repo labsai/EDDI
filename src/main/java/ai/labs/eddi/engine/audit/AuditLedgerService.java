@@ -1007,10 +1007,12 @@ public class AuditLedgerService implements UserErasureParticipant {
      * nothing is skipped — and it keeps a permanently misconfigured deployment from
      * re-reporting the same conversation on every flush.
      * <p>
-     * Cost: one indexed {@code MAX(sequence)} read per conversation in the batch,
-     * on the writer thread, never on the pipeline thread. Skipped entirely for
-     * stores that do not sequence, during shutdown, and for conversations whose
-     * counter has been evicted (the next entry re-seeds from the store anyway).
+     * Cost: one {@link IAuditStore#maxSequences} round trip per flush for all
+     * conversations in the batch (index probes), on the writer thread, never on the
+     * pipeline thread — it shares the connection pool with the turns, which is why
+     * it is not one query per conversation. Skipped entirely for stores that do not
+     * sequence, during shutdown, and for conversations whose counter has been
+     * evicted (the next entry re-seeds from the store anyway).
      */
     private void detectForeignSequenceAllocation(List<AuditEntry> batch) {
         if (shuttingDown || conversationSequences.isEmpty() || !auditStore.supportsSequence()) {
@@ -1018,22 +1020,29 @@ public class AuditLedgerService implements UserErasureParticipant {
         }
         var conversationIds = new LinkedHashSet<String>();
         collectConversationIds(batch, conversationIds);
+        conversationIds.removeIf(id -> !conversationSequences.containsKey(id));
+        if (conversationIds.isEmpty()) {
+            return;
+        }
+        Map<String, Long> storedMaxima;
+        try {
+            // One round trip for the whole batch — it used to be one per conversation,
+            // i.e. about one read per turn competing with the turns for connections.
+            storedMaxima = auditStore.maxSequences(conversationIds);
+        } catch (Exception e) {
+            // A store that cannot answer is the flush's problem, not this
+            // check's: it has already been reported by the append above.
+            LOGGER.debugv("Could not read the stored audit sequences of {0} conversation(s): {1}", conversationIds.size(), e.getMessage());
+            return;
+        }
         for (String conversationId : conversationIds) {
             AtomicLong counter = conversationSequences.get(conversationId);
-            if (counter == null) {
+            Long stored = storedMaxima.get(conversationId);
+            if (counter == null || stored == null) {
                 continue;
             }
             long nextFree = counter.get();
-            long storedMax;
-            try {
-                storedMax = auditStore.maxSequence(conversationId);
-            } catch (Exception e) {
-                // A store that cannot answer is the flush's problem, not this
-                // check's: it has already been reported by the append above.
-                LOGGER.debugv("Could not read the stored audit sequence for conversation {0}: {1}",
-                        sanitize(conversationId), e.getMessage());
-                continue;
-            }
+            long storedMax = stored;
             if (storedMax < nextFree) {
                 continue;
             }

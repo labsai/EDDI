@@ -418,6 +418,33 @@ public class PostgresAuditStore implements IAuditStore {
     }
 
     @Override
+    public Map<String, Long> maxSequences(Collection<String> conversationIds) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        if (conversationIds.isEmpty()) {
+            return result;
+        }
+        ensureSchema();
+        // One correlated MAX per id: each is an index probe on idx_audit_conv_seq,
+        // where MAX ... GROUP BY over the whole batch would read every entry.
+        String sql = "SELECT c.id, (SELECT MAX(a.sequence) FROM audit_ledger a WHERE a.conversation_id = c.id) "
+                + "FROM unnest(?::text[]) AS c(id)";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setArray(1, conn.createArrayOf("text", conversationIds.toArray()));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    // getObject, not getLong + wasNull: the scalar subquery's NULL (no row
+                    // for the conversation) must stay distinguishable from position 0.
+                    Object max = rs.getObject(2);
+                    result.put(rs.getString(1), max instanceof Number n ? n.longValue() : AuditEntry.UNSEQUENCED);
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read max audit sequences", e);
+        }
+    }
+
+    @Override
     public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
         ensureSchema();
         String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"

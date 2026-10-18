@@ -228,6 +228,24 @@ public class AuditStore implements IAuditStore {
                 .first();
         return highest == null ? AuditEntry.UNSEQUENCED : readSequence(highest);
     }
+
+    @Override
+    public Map<String, Long> maxSequences(Collection<String> conversationIds) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        if (conversationIds.isEmpty()) {
+            return result;
+        }
+        conversationIds.forEach(id -> result.put(id, AuditEntry.UNSEQUENCED));
+        // $sort on the (conversationId, sequence desc) index followed by $group/$first
+        // is answered from the index (one key per conversation), unlike $max, which
+        // would read every entry of every conversation in the batch.
+        collection.aggregate(List.of(
+                new Document("$match", new Document(F_CONVERSATION_ID, new Document("$in", new ArrayList<>(conversationIds)))),
+                new Document("$sort", new Document(F_CONVERSATION_ID, 1).append(F_SEQUENCE, -1)),
+                new Document("$group", new Document("_id", "$" + F_CONVERSATION_ID).append(F_SEQUENCE, new Document("$first", "$" + F_SEQUENCE)))))
+                .forEach(doc -> result.put(doc.getString("_id"), readSequence(doc)));
+        return result;
+    }
     // ==================== Private Helpers ====================
 
     private List<AuditEntry> query(Document filter, int skip, int limit) {
