@@ -35,11 +35,11 @@ class StartupKeyDerivationTest {
     private static final String CONFIGURED = "master-key-two-0987654321";
 
     /** PBKDF2-SHA256(MASTER, "eddi-audit-hmac-v1", 600,000, 32 bytes). */
-    private static final String AUDIT_KEY_MASTER = "47c7aaeb3ca9ec55f44ad5fbdcc87f621ae4bccf6bd3846353f8b4856ab35723";
+    private static final String AUDIT_DERIVED_FROM_MASTER = "47c7aaeb3ca9ec55f44ad5fbdcc87f621ae4bccf6bd3846353f8b4856ab35723";
     /** PBKDF2-SHA256(CONFIGURED, "eddi-audit-hmac-v1", 600,000, 32 bytes). */
-    private static final String AUDIT_KEY_CONFIGURED = "a967995bdd4ca987b24749f4d59b46fa8450c7b0443605d2084b67c0fe934e0b";
+    private static final String AUDIT_DERIVED_FROM_CONFIGURED = "a967995bdd4ca987b24749f4d59b46fa8450c7b0443605d2084b67c0fe934e0b";
     /** PBKDF2-SHA256(MASTER, bytes 0x00..0x0f, 600,000, 32 bytes). */
-    private static final String VAULT_KEK = "6fd4b90df734b39b03d5bb458f70e1f5dbe32decc6a1aa3702815df3bfa9d5ae";
+    private static final String VAULT_KEK_DERIVED = "6fd4b90df734b39b03d5bb458f70e1f5dbe32decc6a1aa3702815df3bfa9d5ae";
 
     private static byte[] hex(String value) {
         return HexFormat.of().parseHex(value);
@@ -48,7 +48,7 @@ class StartupKeyDerivationTest {
     @Test
     @DisplayName("the audit HMAC key derivation matches its known answer")
     void auditKeyKnownAnswer() {
-        assertArrayEquals(hex(AUDIT_KEY_MASTER), AuditHmac.deriveHmacKey(MASTER));
+        assertArrayEquals(hex(AUDIT_DERIVED_FROM_MASTER), AuditHmac.deriveHmacKey(MASTER));
     }
 
     @Test
@@ -58,7 +58,7 @@ class StartupKeyDerivationTest {
         for (int i = 0; i < salt.length; i++) {
             salt[i] = (byte) i;
         }
-        assertArrayEquals(hex(VAULT_KEK), EnvelopeCrypto.deriveKeyFromString(MASTER, salt));
+        assertArrayEquals(hex(VAULT_KEK_DERIVED), EnvelopeCrypto.deriveKeyFromString(MASTER, salt));
     }
 
     @Test
@@ -69,14 +69,14 @@ class StartupKeyDerivationTest {
 
         // What onStartup and every key accessor do: wait for the derivation to finish.
         var signing = early.signingKey();
-        assertArrayEquals(hex(AUDIT_KEY_CONFIGURED), signing.hmacKey());
-        assertEquals(AuditHmac.signingKey(hex(AUDIT_KEY_CONFIGURED)).id(), signing.id());
+        assertArrayEquals(hex(AUDIT_DERIVED_FROM_CONFIGURED), signing.hmacKey());
+        assertEquals(AuditHmac.signingKey(hex(AUDIT_DERIVED_FROM_CONFIGURED)).id(), signing.id());
 
         var direct = new AuditKeyring(Optional.of(MASTER), Optional.of(CONFIGURED), Optional.empty(), null);
         direct.initialize();
         assertEquals(direct.verificationKeys().stream().map(AuditHmac.SigningKey::id).toList(),
                 early.verificationKeys().stream().map(AuditHmac.SigningKey::id).toList());
-        assertTrue(early.verificationKeys().stream().anyMatch(key -> Arrays.equals(hex(AUDIT_KEY_MASTER), key.hmacKey())),
+        assertTrue(early.verificationKeys().stream().anyMatch(key -> Arrays.equals(hex(AUDIT_DERIVED_FROM_MASTER), key.hmacKey())),
                 "the master-derived key still verifies");
     }
 
