@@ -6,6 +6,7 @@ package ai.labs.eddi;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -479,7 +480,7 @@ class ComposeStackTest {
     @DisplayName("bundled admin passwords come from overridable variables with a dev default")
     void adminPasswordsAreOverridable() {
         List<String> offenders = new ArrayList<>();
-        int checked = 0;
+        Set<String> found = new TreeSet<>();
         for (Path file : composeFiles()) {
             for (var entry : services(file).entrySet()) {
                 JsonNode environment = entry.getValue().path("environment");
@@ -497,20 +498,102 @@ class ComposeStackTest {
                     if (value == null) {
                         continue;
                     }
-                    checked++;
+                    found.add(variable);
                     if (!value.matches("^\\$\\{[A-Z_]+:-[^}]*\\}$")) {
                         offenders.add(name(file) + " sets " + variable + " on `" + entry.getKey() + "` to `" + value + "`");
                     }
                 }
             }
         }
-        assertEquals(ADMIN_PASSWORD_VARIABLES.size(), checked,
-                "expected each of " + ADMIN_PASSWORD_VARIABLES + " exactly once across the compose files — a renamed"
+        assertEquals(new TreeSet<>(ADMIN_PASSWORD_VARIABLES), found,
+                "expected each of " + ADMIN_PASSWORD_VARIABLES + " somewhere in the compose files — a renamed"
                         + " variable would otherwise leave this sweep checking nothing");
         assertEquals(List.of(), offenders,
                 "an administrator password is a literal or a required variable. Use ${SOME_VARIABLE:-admin}, so the"
                         + " installers can supply a generated value through .env and a bare `docker compose up` still"
                         + " starts.");
+    }
+
+    private static final Path AUTH_OVERLAY = Path.of("docker-compose.auth.yml");
+
+    /**
+     * {@code KC_BOOTSTRAP_ADMIN_PASSWORD} falls back to {@code admin} so the
+     * loopback quick start needs no .env — which was acceptable only while
+     * {@code KEYCLOAK_BIND} stayed on loopback, and nothing enforced that. The auth
+     * overlay's {@code keycloak-guard} now does, the way docker-compose.yml's
+     * {@code bind-guard} does for EDDI: Keycloak waits for it to complete
+     * successfully, and it reads both values from its own environment with the same
+     * defaults the keycloak service interpolates.
+     */
+    @Test
+    @DisplayName("Keycloak cannot start off loopback with the admin/admin bootstrap fallback")
+    void keycloakWaitsForItsDefaultPasswordGuard() {
+        TreeMap<String, JsonNode> services = services(AUTH_OVERLAY);
+        JsonNode keycloak = services.get("keycloak");
+        JsonNode guard = services.get("keycloak-guard");
+        assertTrue(keycloak != null && guard != null, "docker-compose.auth.yml must declare keycloak and keycloak-guard");
+
+        assertEquals("service_completed_successfully",
+                keycloak.path("depends_on").path("keycloak-guard").path("condition").asText(),
+                "keycloak must wait for keycloak-guard to EXIT 0, or a refusing guard is only a log line");
+
+        assertEquals(keycloak.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                guard.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                "the guard must judge the same password Keycloak will be given");
+        String bind = guard.path("environment").path("KEYCLOAK_BIND").asText();
+        assertEquals("${KEYCLOAK_BIND:-127.0.0.1}", bind, "the guard must read KEYCLOAK_BIND with the ports' default");
+        assertTrue(keycloak.path("ports").get(0).asText().startsWith(bind + ":"),
+                "keycloak's port must be published on the same KEYCLOAK_BIND the guard checks");
+    }
+
+    /**
+     * Runs the guard's script itself, so the decision table is exercised and not
+     * just the wiring. Needs a POSIX {@code sh} — always there on the Linux CI
+     * runner, skipped where there is none.
+     */
+    @Test
+    @DisplayName("the Keycloak guard refuses exactly a non-loopback bind with the default password")
+    void keycloakGuardScriptDecides() throws Exception {
+        Assumptions.assumeTrue(shellAvailable(), "no POSIX sh on PATH");
+        String script = services(AUTH_OVERLAY).get("keycloak-guard").path("command").get(0).asText()
+                // compose's escape: `$$` reaches the shell as `$`
+                .replace("$$", "$");
+
+        assertEquals(0, runGuard(script, "127.0.0.1", "admin"), "loopback with the dev default must start");
+        assertEquals(0, runGuard(script, "::1", "admin"), "IPv6 loopback with the dev default must start");
+        assertEquals(1, runGuard(script, "0.0.0.0", "admin"), "0.0.0.0 with admin/admin must be refused");
+        assertEquals(1, runGuard(script, "192.0.2.10", ""), "an empty password must be refused off loopback");
+        assertEquals(0, runGuard(script, "0.0.0.0", "a-generated-secret"), "a real password may leave loopback");
+    }
+
+    private static boolean shellAvailable() {
+        try {
+            return new ProcessBuilder("sh", "-c", "exit 0").start().waitFor() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * The script goes through a file, not {@code sh -c}: Windows re-quotes a
+     * command-line argument, which mangles the script's own {@code ""} patterns.
+     */
+    private static int runGuard(String script, String bind, String password) throws Exception {
+        Path file = Files.createTempFile("keycloak-guard", ".sh");
+        try {
+            Files.writeString(file, script, StandardCharsets.UTF_8);
+            ProcessBuilder builder = new ProcessBuilder("sh", file.toAbsolutePath().toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            builder.environment().put("KEYCLOAK_BIND", bind);
+            builder.environment().put("KC_BOOTSTRAP_ADMIN_PASSWORD", password);
+            return builder.start().waitFor();
+        } finally {
+            Files.deleteIfExists(file);
+        }
     }
 
     /**
