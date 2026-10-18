@@ -9,7 +9,12 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
+import ai.labs.eddi.engine.runtime.internal.AgentFactory;
+import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -189,10 +194,77 @@ class WorkflowTraversalCacheTest {
         verify(agentStore, times(2)).read(anyString(), anyInt());
     }
 
+    /**
+     * WS1: the traversal of an immutable agent version is not re-read with time.
+     * The 2 s TTL this replaces re-read the agent, its workflows and their
+     * extensions on practically every turn, since turns are rarely 2 s apart.
+     */
     @Test
-    @DisplayName("the TTL is short enough that a redeploy between turns is picked up")
-    void ttlIsShort() {
-        assertEquals(2_000L, WorkflowTraversal.CACHE_TTL_MILLIS,
-                "a long TTL would trade the F12 fix for stale agent configuration");
+    @DisplayName("a traversal is not re-read as time passes — the configs it holds are immutable")
+    void traversalDoesNotExpireWithTime() throws Exception {
+        long now = 1_000_000L;
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary, now);
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary, now + 10_000L);
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary, now + 3_600_000L);
+
+        verify(agentStore, times(1)).read(anyString(), anyInt());
+        verify(workflowStore, times(1)).read(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("deploying or undeploying the agent drops its traversals, and only its own")
+    void invalidateAgentDropsOnlyThatAgent() throws Exception {
+        var otherMemory = mock(IConversationMemory.class);
+        String otherAgentId = UUID.randomUUID().toString().replace("-", "");
+        when(otherMemory.getAgentId()).thenReturn(otherAgentId);
+        when(otherMemory.getAgentVersion()).thenReturn(1);
+
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+        WorkflowTraversal.discoverConfigs(otherMemory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        WorkflowTraversal.invalidateAgent(agentId);
+
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+        WorkflowTraversal.discoverConfigs(otherMemory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        verify(agentStore, times(2)).read(eq(agentId), anyInt());
+        verify(agentStore, times(1)).read(eq(otherAgentId), anyInt());
+    }
+
+    /**
+     * The hook #1055 added for AgentConfigurationCache drops the traversals too.
+     */
+    @Test
+    @DisplayName("undeploying the agent through AgentFactory drops its traversals")
+    void agentFactoryUndeployDropsTraversals() throws Exception {
+        var factory = new AgentFactory(mock(IAgentStoreClientLibrary.class), mock(IDeploymentListener.class), new SimpleMeterRegistry());
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        factory.undeployAgent(Deployment.Environment.production, agentId, 1);
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        verify(agentStore, times(2)).read(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("an incomplete traversal is not cached, however long it lives")
+    void degradedTraversalIsNotCached() throws Exception {
+        when(workflowStore.read(anyString(), anyInt())).thenThrow(new RuntimeException("store blip"));
+
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+        WorkflowTraversal.discoverConfigs(memory, "eddi://ai.labs.httpcalls", Object.class,
+                agentStore, workflowStore, resourceClientLibrary);
+
+        verify(agentStore, times(2)).read(anyString(), anyInt());
     }
 }
