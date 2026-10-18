@@ -17,6 +17,8 @@ import ai.labs.eddi.datastore.postgres.PostgresTestBase;
 import ai.labs.eddi.datastore.postgres.PostgresUserMemoryStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -116,6 +118,7 @@ class DatastoreParityTest extends MongoTestBase {
         for (String id : FOREIGN_OR_MALFORMED_IDS) {
             assertNull(store.loadConversationMemorySnapshot(id), backend + " load " + id);
             assertNull(store.getConversationState(id), backend + " state " + id);
+            assertEquals(new IConversationMemoryStore.StateAndRevision(null, null), store.getStateAndRevision(id), backend + " state+revision " + id);
             store.deleteConversationMemorySnapshot(id);
         }
     }

@@ -804,6 +804,21 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public StateAndRevision getStateAndRevision(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return new StateAndRevision(null, null);
+        }
+        Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(KEY_CONVERSATION_STATE, 1).append(KEY_REVISION, 1)).first();
+        if (stored == null) {
+            return new StateAndRevision(null, null);
+        }
+        Object state = stored.get(KEY_CONVERSATION_STATE);
+        return new StateAndRevision(state != null ? ConversationState.valueOf(state.toString()) : null,
+                longOrUnversioned(stored.get(KEY_REVISION)));
+    }
+
+    @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         // Plan §10(a): AWAITING_HUMAN conversations do not count as active — with
         // the default WAIT_INDEFINITELY policy a single forgotten approval would
