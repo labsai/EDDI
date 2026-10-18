@@ -79,7 +79,7 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 | 2026-04-17 | Code review remediation | Post-review fixes from security audit |
 | 2026-04-22 | CI security scanning hardening | Trivy, Gitleaks, dependency review pipeline |
 | 2026-04-23 | Fuzzing + SLSA provenance | ClusterFuzzLite, Jazzer targets, build attestation |
-| 2026-10-15 | Full-stack review of `main` | Templated SSRF hosts, caller-token confused deputy, A2A/ownership gaps |
+| 2026-10-15 | Full-stack review of `main` | Templated SSRF hosts; the caller-identity confused deputy; A2A and ownership gaps |
 | 2026-10-17 | Full-stack review of `main` + live probe | Vaulted-key exfiltration, metadata-guard parser bypass, LLM-output ReDoS — see `planning/security-review-2026-10-17.md` |
 
 ## Threat Model
