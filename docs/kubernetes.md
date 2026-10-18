@@ -80,19 +80,24 @@ git clone https://github.com/labsai/EDDI.git && cd EDDI
 # Generate vault key + create K8s secret
 bash k8s/create-secrets.sh
 
-# MongoDB runs with authentication — create its Secret too (one password, the
-# root user for mongod and the connection string EDDI mounts as a file). The
-# Secret IS the stored copy of the password: run this once, never on an upgrade.
+# MongoDB runs with authentication — create its Secret too: the root user for
+# mongod, EDDI's own least-privilege user (readWrite + dbAdmin on `eddi`, which
+# the ensure-mongodb-user init container creates) and the connection string EDDI
+# mounts as a file — for that user, never root. The Secret IS the stored copy of
+# the root password: run this once, never on an upgrade.
 # A fresh password over an initialised database locks EDDI out — mongod keeps
 # the user it created at first start. The guard refuses when one exists.
 if kubectl get secret mongodb-secrets -n eddi >/dev/null 2>&1; then
   echo "mongodb-secrets already exists — keeping it" >&2
 else
 pw=$(openssl rand -hex 24)
+apppw=$(openssl rand -hex 24)
 kubectl create secret generic mongodb-secrets -n eddi \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
-  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+  --from-literal=MONGO_APP_USERNAME=eddi_app \
+  --from-literal=MONGO_APP_PASSWORD="$apppw" \
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi_app:${apppw}@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 fi
 
 # Deploy with MongoDB
@@ -111,10 +116,13 @@ pwsh -File .\k8s\create-secrets.ps1
 # Once, never on an upgrade — see the bash note above. kubectl create refuses
 # with AlreadyExists when the Secret is there.
 $pw = [Security.Cryptography.RandomNumberGenerator]::GetHexString(48, $true)
+$apppw = [Security.Cryptography.RandomNumberGenerator]::GetHexString(48, $true)
 kubectl create secret generic mongodb-secrets -n eddi `
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi `
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" `
-  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+  --from-literal=MONGO_APP_USERNAME=eddi_app `
+  --from-literal=MONGO_APP_PASSWORD="$apppw" `
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi_app:${apppw}@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 kubectl apply -k k8s\overlays\mongodb\
 ```
 
@@ -249,19 +257,24 @@ kubectl create secret generic keycloak-admin -n eddi \
 kubectl create secret generic grafana-admin -n eddi \
   --from-literal=password="$(openssl rand -base64 24)"
 
-# MongoDB runs with authentication — create its Secret too (one password, the
-# root user for mongod and the connection string EDDI mounts as a file). The
-# Secret IS the stored copy of the password: run this once, never on an upgrade.
+# MongoDB runs with authentication — create its Secret too: the root user for
+# mongod, EDDI's own least-privilege user (readWrite + dbAdmin on `eddi`, which
+# the ensure-mongodb-user init container creates) and the connection string EDDI
+# mounts as a file — for that user, never root. The Secret IS the stored copy of
+# the root password: run this once, never on an upgrade.
 # A fresh password over an initialised database locks EDDI out — mongod keeps
 # the user it created at first start. The guard refuses when one exists.
 if kubectl get secret mongodb-secrets -n eddi >/dev/null 2>&1; then
   echo "mongodb-secrets already exists — keeping it" >&2
 else
 pw=$(openssl rand -hex 24)
+apppw=$(openssl rand -hex 24)
 kubectl create secret generic mongodb-secrets -n eddi \
   --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
   --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
-  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+  --from-literal=MONGO_APP_USERNAME=eddi_app \
+  --from-literal=MONGO_APP_PASSWORD="$apppw" \
+  --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi_app:${apppw}@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
 fi
 
 # MongoDB + Keycloak auth + Monitoring
@@ -569,6 +582,18 @@ agent, conversation and the audit ledger. Now:
   [Upgrading to an authenticated MongoDB](#upgrading-to-an-authenticated-mongodb)).
   With `networkPolicy.enabled=true` the chart also admits only the EDDI pod to
   MongoDB, PostgreSQL, NATS and Keycloak.
+- **EDDI connects as its own MongoDB user, not as root.** Helm and
+  `overlays/mongodb` give EDDI a user with `readWrite` and `dbAdmin` on the
+  `eddi` database and no role anywhere else (Helm: `mongodb.appUsername`,
+  `mongodb.appPassword`, which defaults to a value derived from
+  `mongodb.rootPassword`). An `ensure-mongodb-user` init container in the EDDI
+  pod creates the user, or resets its password and roles, before every start,
+  with the root credentials the `eddi` container itself never receives. It runs
+  every time rather than as a `/docker-entrypoint-initdb.d` script because the
+  mongo image runs those only on an empty volume, so existing releases are
+  migrated by the upgrade itself. A kustomize Secret created before this change
+  has no `MONGO_APP_*` keys; the init container then does nothing and EDDI keeps
+  connecting as root until you add them ([Upgrading from 6.5](upgrading-from-6.5.md#mongodb-least-privilege-user)).
 - **Kustomize** `overlays/mongodb` runs MongoDB with authentication from the
   `mongodb-secrets` Secret you create (see Option B), and `overlays/mongodb` and
   `overlays/postgres` each ship a NetworkPolicy admitting only EDDI.

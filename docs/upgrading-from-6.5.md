@@ -100,3 +100,71 @@ defaults are published as the schema `default`. Clients that sent every argument
 Two defaults changed meaning: `get_agent`, `read_workflow`, `read_resource` and
 `list_agent_resources` without a `version` read the **latest** version (they read version 1),
 and `create_group` with an unknown `style` is refused instead of becoming `ROUND_TABLE`.
+
+---
+
+## MongoDB least-privilege user
+
+EDDI no longer connects to the bundled MongoDB as its root user. It connects as `eddi_app`, a
+user defined in the `eddi` database with `readWrite` and `dbAdmin` there and no role on any other
+database (`dbAdmin` because EDDI uses `collMod` to un-hide an index, which `readWrite` alone does
+not allow). The root credentials stay with MongoDB and with one helper that creates the user:
+
+- **Docker Compose** (`docker-compose.yml`, `docker-compose.openwebui.yml`,
+  `docker-compose.cluster.yml`): a one-shot `mongodb-app-user` service runs before `eddi` on
+  every `up`, creates the user or resets its password, and exits.
+- **Helm and `k8s/overlays/mongodb`**: an `ensure-mongodb-user` init container in the EDDI pod
+  does the same before every start.
+
+A script in `/docker-entrypoint-initdb.d` would run only when MongoDB initialises an **empty**
+volume, so an existing deployment would have been left connecting as a user that does not
+exist. Because the helper runs every time, **an existing volume needs no manual step** for
+Compose or Helm: pull, `up` (or `helm upgrade`), and the user is created against the data you
+already have.
+
+What to check:
+
+- **Compose:** `MONGO_APP_PASSWORD` (and `MONGO_APP_USERNAME`, default `eddi_app`) are new. Left
+  unset, the password falls back to `MONGO_INITDB_ROOT_PASSWORD`, so an existing `.env` keeps
+  working. Set a distinct one, or EDDI's credential is still the root password under another
+  name. It goes into `MONGODB_CONNECTIONSTRING` unencoded, so use URL-safe characters
+  (`openssl rand -hex 24`). Changing it later is a rotation: the next `up` applies it.
+- **Compose healthcheck:** `ping` needs no authentication, so the `mongodb` healthcheck no longer
+  carries the root credentials.
+- **Helm:** `mongodb.appUsername` (default `eddi_app`) and `mongodb.appPassword` are new. Left
+  empty, the password is derived from `mongodb.rootPassword` with SHA-256: stable across renders,
+  but not the root password itself. With `mongodb.existingSecret` nothing changes: your
+  `eddi.existingSecret` still carries EDDI's connection string, and choosing its user is up to
+  you.
+- **Kustomize `overlays/mongodb`:** the `mongodb-secrets` Secret you created by hand has no
+  `MONGO_APP_*` keys. The init container then does nothing and EDDI keeps connecting as root.
+  Add the keys and the new connection string in one patch, then restart EDDI:
+
+  ```bash
+  apppw=$(openssl rand -hex 24)
+  kubectl patch secret mongodb-secrets -n eddi --type merge -p "{\"stringData\": {
+    \"MONGO_APP_USERNAME\": \"eddi_app\", \"MONGO_APP_PASSWORD\": \"$apppw\",
+    \"mongodb-secrets.properties\": \"mongodb.connectionString=mongodb://eddi_app:$apppw@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000\"}}"
+  kubectl rollout restart deployment/eddi -n eddi
+  ```
+
+- **Your own MongoDB** (an external connection string): nothing changes automatically. If EDDI
+  connects as a root or `readWriteAnyDatabase` user, create one like the above and switch to it:
+
+  ```javascript
+  db.getSiblingDB("eddi").createUser({ user: "eddi_app", pwd: passwordPrompt(),
+    roles: [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }] })
+  ```
+
+  and connect with `authSource=eddi`. If you changed `mongodb.database`, use that name instead
+  of `eddi` throughout.
+
+## Keycloak admin password off loopback
+
+`docker-compose.auth.yml` now refuses to start Keycloak when `KEYCLOAK_BIND` is not a loopback
+address and `KC_BOOTSTRAP_ADMIN_PASSWORD` is unset or `admin`. Its one-shot `keycloak-guard`
+service exits 1 with the fix in its message. Installs made by `install.sh` / `install.ps1
+--with-auth` or the GCP provisioner already have a generated password in `.env` and are
+unaffected. If your Keycloak volume predates that and you changed the console password by hand,
+put that password in `.env` as `KC_BOOTSTRAP_ADMIN_PASSWORD`: Keycloak reads it only on first
+boot, and the guard only needs to see that it is not the default.

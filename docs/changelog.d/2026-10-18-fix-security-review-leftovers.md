@@ -46,3 +46,46 @@ model's reply stay; the access lookup is made once per agent per call and skippe
 with no prompt. Tests in `McpConversationToolsOwnershipTest` pin both halves (USE-only owner gets
 the marker and no prompt text; VIEW passes the entry through untouched), mutation-checked by
 reverting the call.
+
+### 2. EDDI connects to MongoDB as its own user, not as root
+
+Compose, Helm and the kustomize MongoDB overlay connected EDDI as the MongoDB root user with
+`authSource=admin`, so anything that could read EDDI's connection string held the whole server.
+EDDI now connects as `eddi_app`, defined in the `eddi` database with `readWrite` and `dbAdmin`
+there and nothing elsewhere (`dbAdmin` because `MongoResourceStorage` un-hides an index with
+`collMod`, which `readWrite` lacks).
+
+- **Not an initdb script, deliberately.** The mongo image runs `/docker-entrypoint-initdb.d`
+  only on an empty volume, so every existing deployment would have pointed EDDI at a user that
+  does not exist. Instead a helper with the root credentials creates the user, or resets its
+  password and roles, on every start: a one-shot `mongodb-app-user` service that `eddi` waits for
+  in [`docker-compose.yml`](../../docker-compose.yml), `docker-compose.openwebui.yml` and
+  `docker-compose.cluster.yml`, and an `ensure-mongodb-user` init container (restricted-PSS
+  security context, bounded wait for MongoDB) in the Helm Deployment and in
+  `k8s/overlays/mongodb`. Existing Compose and Helm installs migrate on the next `up` /
+  `helm upgrade`, and changing the app password rotates it.
+- **Defaults that do not break an existing install.** Compose's `MONGO_APP_PASSWORD` falls back to
+  the root password (documented as "set a distinct one"). Helm's `mongodb.appPassword` falls back
+  to `sha256("eddi-app:" + rootPassword)`: stable across renders without `lookup`, distinct from
+  and not reversible to the root password. Kustomize's operator-created Secret gets two new keys
+  in the documented command; for an old Secret the `MONGO_APP_*` references are optional and the
+  init container does nothing, so EDDI keeps working as root until the documented patch is
+  applied.
+- The `mongodb` healthchecks no longer carry the root password (`ping` needs no auth).
+- Helm chart `2.9.0` → `2.10.0` (new values `mongodb.appUsername`, `mongodb.appPassword`).
+- Docs: `docs/upgrading-from-6.5.md` (new "MongoDB least-privilege user" section, plus the
+  Keycloak guard from item 1), `docs/docker.md`, `docs/kubernetes.md`, `docs/troubleshooting.md`,
+  `.env.example`.
+- Tests: `ComposeStackTest.eddiDoesNotConnectAsMongoRoot` and
+  `DeploymentManifestsTest.helmEddiDoesNotConnectAsMongoRoot` / `kustomizeEddiDoesNotConnectAsMongoRoot`
+  (both mutation-checked); the CI manifest-lint step now checks the app password is URL-encoded
+  and that the root password never reaches EDDI's connection string.
+- Verified in Docker with `labsai/eddi:6.5.0`: a volume written by the old root-connected stack,
+  restarted on the new compose file, keeps its data, EDDI writes as `eddi_app`, a second `up`
+  updates rather than fails, `eddi_app` is refused on `admin`, and a fresh volume works. The init
+  container's script was run as uid 185 on a read-only root filesystem with all capabilities
+  dropped, against a MongoDB still starting up. `helm template`/`helm lint` (default,
+  `existingSecret`, PostgreSQL-only, special-character password) and `kubectl kustomize` of every
+  overlay and example render.
+- Not changed: `scripts/loadtest/docker-compose.loadtest.yml` (a load-test harness, still root) and
+  `k8s/quickstart.yaml` (its MongoDB runs without authentication at all).

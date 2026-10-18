@@ -49,6 +49,29 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: creates (or updates) EDDI's readWrite + dbAdmin user on `eddi`
+  # with the root credentials, so the replicas never hold them. See
+  # docker-compose.yml for why this is a service and not an init script.
+  mongodb-app-user:
+    image: mongo:7.0.43
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      MONGO_ROOT_USERNAME: eddi
+      MONGO_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:-eddi_app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}}
+    command:
+      - |
+        exec mongosh --quiet --host mongodb -u "$$MONGO_ROOT_USERNAME" -p "$$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval '
+          const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
+          const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
+          const eddi = db.getSiblingDB("eddi");
+          if (eddi.getUser(user)) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }
+          else { eddi.createUser({ user: user, pwd: pwd, roles: roles }); print("created MongoDB user " + user); }'
+
   nats-1:
     <<: *nats
     image: nats:2.11-alpine
@@ -86,7 +109,9 @@ services:
       replicas: 3
     environment:
       EDDI_VAULT_MASTER_KEY: ${EDDI_VAULT_MASTER_KEY:?set EDDI_VAULT_MASTER_KEY (openssl rand -base64 24)}
-      MONGODB_CONNECTIONSTRING: mongodb://eddi:${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}@mongodb:27017/eddi?authSource=admin
+      # Least-privilege user on `eddi`, created by mongodb-app-user; see
+      # docker-compose.yml. MONGO_APP_PASSWORD falls back to MONGO_PASSWORD.
+      MONGODB_CONNECTIONSTRING: mongodb://${MONGO_APP_USERNAME:-eddi_app}:${MONGO_APP_PASSWORD:-${MONGO_PASSWORD:?set MONGO_PASSWORD (openssl rand -base64 24)}}@mongodb:27017/eddi?authSource=eddi
       # Authentication is off, as in the quick start (docker-compose.yml explains
       # the escape hatches); the load balancer binds to loopback by default.
       QUARKUS_OIDC_TENANT_ENABLED: ${QUARKUS_OIDC_TENANT_ENABLED:-false}
@@ -111,6 +136,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongodb-app-user:
+        condition: service_completed_successfully
       nats-1:
         condition: service_healthy
       nats-2:

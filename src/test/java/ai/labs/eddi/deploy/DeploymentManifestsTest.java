@@ -3087,7 +3087,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.9.0";
+        private static final String EXPECTED_CHART_VERSION = "2.10.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -3570,6 +3570,66 @@ class DeploymentManifestsTest {
     class Datastores {
 
         private static final Path KUSTOMIZE_MONGO = K8S.resolve("overlays/mongodb");
+
+        /**
+         * EDDI used to connect to the in-chart MongoDB as the root user
+         * ({@code authSource=admin}), so whoever read its mounted connection string
+         * held the whole server. It now connects as {@code mongodb.appUsername}, a user
+         * defined in {@code eddi}, which an init container creates with the root
+         * credentials — idempotently and on every start, because the mongo image's
+         * initdb scripts run on an empty volume only and would leave every existing
+         * release without the user. The {@code eddi} container itself references no
+         * root credential.
+         */
+        @Test
+        @DisplayName("helm: EDDI connects to the in-chart MongoDB as its own user, created by an init container")
+        void helmEddiDoesNotConnectAsMongoRoot() throws IOException {
+            String secret = stripGoComments(read(HELM_TEMPLATES.resolve("secret.yaml")));
+            String inChart = secret.lines()
+                    .filter(line -> line.strip().startsWith("mongodb.connectionString=") && line.contains("-mongodb:27017/eddi"))
+                    .collect(Collectors.joining("\n"));
+            assertTrue(inChart.contains("{{ .Values.mongodb.appUsername | urlquery }}")
+                    && inChart.contains("{{ include \"eddi.mongodbAppPassword\" . | urlquery }}")
+                    && inChart.contains("authSource=eddi"),
+                    "the in-chart connection string must use mongodb.appUsername / eddi.mongodbAppPassword with"
+                            + " authSource=eddi; it renders: " + inChart);
+            assertFalse(inChart.contains("rootPassword") || inChart.contains("rootUsername"),
+                    "EDDI's connection string must not carry the root credentials: " + inChart);
+
+            String deployment = read(HELM_TEMPLATES.resolve("deployment.yaml"));
+            int init = deployment.indexOf("- name: ensure-mongodb-user");
+            int containers = deployment.indexOf("\n      containers:");
+            assertTrue(init > 0 && init < containers, "deployment.yaml must run ensure-mongodb-user as an init container");
+            assertTrue(deployment.contains("{{- if and .Values.mongodb.enabled (not .Values.mongodb.existingSecret) }}"),
+                    "the init container is for the in-chart MongoDB whose Secret the chart writes");
+            String initBlock = deployment.substring(init, containers);
+            assertTrue(initBlock.contains("createUser") && initBlock.contains("updateUser"),
+                    "the init container must create the user or reset it, so it is idempotent across restarts");
+            assertTrue(initBlock.contains("readOnlyRootFilesystem: true") && initBlock.contains("runAsNonRoot: true"),
+                    "the init container must pass the restricted Pod Security Standard like the eddi container");
+            assertFalse(deployment.substring(containers).contains("MONGO_INITDB_ROOT"),
+                    "the eddi container must not reference the MongoDB root credentials");
+
+            String mongoSecret = read(HELM_TEMPLATES.resolve("mongodb.yaml"));
+            assertTrue(mongoSecret.contains("MONGO_APP_USERNAME:") && mongoSecret.contains("MONGO_APP_PASSWORD:"),
+                    "mongodb.yaml's Secret must carry the app user the init container reads");
+        }
+
+        @Test
+        @DisplayName("kustomize: EDDI connects as its own MongoDB user and an old Secret still starts")
+        void kustomizeEddiDoesNotConnectAsMongoRoot() throws IOException {
+            String kustomization = read(KUSTOMIZE_MONGO.resolve("kustomization.yaml"));
+            assertTrue(kustomization.contains("name: ensure-mongodb-user") && kustomization.contains("createUser"),
+                    "overlays/mongodb must add the ensure-mongodb-user init container");
+            assertTrue(kustomization.contains("mongodb://eddi_app:${apppw}@mongodb:27017/eddi?authSource=eddi"),
+                    "the documented Secret command must connect EDDI as eddi_app");
+            String withoutComments = stripComments(kustomization);
+            assertEquals(2, countOccurrences(withoutComments, "optional: true"),
+                    "the MONGO_APP_* references must be optional, so a Secret from before the split still starts"
+                            + " (the init container then does nothing) — and only those two");
+            assertFalse(read(K8S_DOC).contains("authSource=admin"),
+                    K8S_DOC + " still hands out a connection string for the root user");
+        }
 
         @Test
         @DisplayName("kustomize: the MongoDB overlay authenticates from a Secret the operator creates")

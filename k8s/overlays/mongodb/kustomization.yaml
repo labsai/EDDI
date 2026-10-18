@@ -4,9 +4,12 @@
 # ⚠️  CREATE THE mongodb-secrets SECRET FIRST — MongoDB runs with
 # authentication, and neither pod starts without it. It used to run with none:
 # any pod in the cluster could read and rewrite every agent, conversation and
-# the audit ledger. One password, in two shapes — the MONGO_INITDB_ROOT_* keys
-# for the mongo container, and a properties file with the connection string
-# for EDDI, mounted as a FILE (never an env var):
+# the audit ledger. The Secret holds two users: the root user (the
+# MONGO_INITDB_ROOT_* keys, for the mongo container and the ensure-mongodb-user
+# init container below) and EDDI's own least-privilege user (MONGO_APP_*:
+# readWrite + dbAdmin on `eddi`, nothing else), whose connection string reaches
+# EDDI as a properties FILE (never an env var). EDDI never holds the root
+# password; the init container creates or updates its user on every start.
 #
 # The Secret is the stored copy of the password — run this ONCE, never on an
 # upgrade: a fresh password over an initialised database locks EDDI out,
@@ -14,11 +17,26 @@
 # (not apply) refuses with AlreadyExists rather than replacing it.
 #
 #   set -eu
-#   pw=$(openssl rand -hex 24)   # hex: nothing in it needs URL-encoding
+#   pw=$(openssl rand -hex 24)      # hex: nothing in it needs URL-encoding
+#   apppw=$(openssl rand -hex 24)
 #   kubectl create secret generic mongodb-secrets -n eddi \
 #     --from-literal=MONGO_INITDB_ROOT_USERNAME=eddi \
 #     --from-literal=MONGO_INITDB_ROOT_PASSWORD="$pw" \
-#     --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi:${pw}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+#     --from-literal=MONGO_APP_USERNAME=eddi_app \
+#     --from-literal=MONGO_APP_PASSWORD="$apppw" \
+#     --from-literal=mongodb-secrets.properties="mongodb.connectionString=mongodb://eddi_app:${apppw}@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+#
+# UPGRADING a Secret created before the least-privilege user (it has no
+# MONGO_APP_* keys and connects EDDI as root): the init container skips itself
+# while those keys are missing, so EDDI keeps working as root until you add
+# them. Add both keys and the new connection string in one patch, then restart
+# EDDI — the init container creates the user before EDDI connects with it:
+#
+#   apppw=$(openssl rand -hex 24)
+#   kubectl patch secret mongodb-secrets -n eddi --type merge -p "{\"stringData\": {
+#     \"MONGO_APP_USERNAME\": \"eddi_app\", \"MONGO_APP_PASSWORD\": \"$apppw\",
+#     \"mongodb-secrets.properties\": \"mongodb.connectionString=mongodb://eddi_app:$apppw@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000\"}}"
+#   kubectl rollout restart deployment/eddi -n eddi
 #
 # (plus eddi-secrets from `bash k8s/create-secrets.sh`, as before).
 #
@@ -74,3 +92,80 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/env/0/value
         value: "/etc/eddi/secrets/application-secrets.properties,/etc/eddi/secrets/mongodb-secrets.properties"
+      # Creates EDDI's own MongoDB user (or resets its password and roles) with
+      # the root credentials, which the eddi container never receives. It runs
+      # before every start rather than as a /docker-entrypoint-initdb.d script,
+      # because the mongo image runs those only on an EMPTY volume. The MONGO_APP_*
+      # references are optional so a Secret from before this split (no such keys)
+      # still starts: the container then does nothing and EDDI keeps the root
+      # connection string it was given — see the UPGRADING note above.
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: ensure-mongodb-user
+            image: mongo:7.0.43
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 185
+              capabilities:
+                drop:
+                  - ALL
+              seccompProfile:
+                type: RuntimeDefault
+            env:
+              # mongosh keeps state under $HOME; the root filesystem is read-only.
+              - name: HOME
+                value: /tmp
+              - name: MONGO_HOST
+                value: mongodb
+              - name: MONGO_ROOT_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: mongodb-secrets
+                    key: MONGO_INITDB_ROOT_USERNAME
+              - name: MONGO_ROOT_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: mongodb-secrets
+                    key: MONGO_INITDB_ROOT_PASSWORD
+              - name: MONGO_APP_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: mongodb-secrets
+                    key: MONGO_APP_USERNAME
+                    optional: true
+              - name: MONGO_APP_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: mongodb-secrets
+                    key: MONGO_APP_PASSWORD
+                    optional: true
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                if [ -z "$MONGO_APP_USERNAME" ] || [ -z "$MONGO_APP_PASSWORD" ]; then
+                  echo "mongodb-secrets has no MONGO_APP_USERNAME/MONGO_APP_PASSWORD: EDDI still connects with whatever mongodb-secrets.properties says (see k8s/overlays/mongodb/kustomization.yaml, UPGRADING)" >&2
+                  exit 0
+                fi
+                i=0
+                until mongosh --quiet --host "$MONGO_HOST" --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
+                  i=$((i + 1)); [ "$i" -ge 90 ] && { echo "MongoDB at $MONGO_HOST is not reachable" >&2; exit 1; }
+                  sleep 2
+                done
+                exec mongosh --quiet --host "$MONGO_HOST" -u "$MONGO_ROOT_USERNAME" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval '
+                  const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
+                  const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
+                  const eddi = db.getSiblingDB("eddi");
+                  if (eddi.getUser(user)) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }
+                  else { eddi.createUser({ user: user, pwd: pwd, roles: roles }); print("created MongoDB user " + user); }'
+            volumeMounts:
+              - name: tmp
+                mountPath: /tmp
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi

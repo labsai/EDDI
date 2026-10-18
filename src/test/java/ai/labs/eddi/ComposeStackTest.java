@@ -597,6 +597,63 @@ class ComposeStackTest {
     }
 
     /**
+     * EDDI used to connect to the bundled MongoDB as the root user
+     * ({@code authSource=admin}), so anything that read its connection string held
+     * the whole server. Every stack that brings its own MongoDB now gives EDDI a
+     * user defined in {@code eddi} and lets a one-shot {@code mongodb-app-user}
+     * service — which runs on every {@code up}, so existing volumes migrate too —
+     * hold the root credentials instead. The mongodb healthcheck pings without
+     * credentials ({@code ping} needs none).
+     */
+    @Test
+    @DisplayName("EDDI connects to a bundled MongoDB as its own user, never as root")
+    void eddiDoesNotConnectAsMongoRoot() {
+        List<String> offenders = new ArrayList<>();
+        int stacks = 0;
+        for (Path file : composeFiles()) {
+            TreeMap<String, JsonNode> services = services(file);
+            if (!services.containsKey("mongodb") || !services.containsKey("eddi")) {
+                continue;
+            }
+            stacks++;
+            String connection = environmentValue(services.get("eddi"), "MONGODB_CONNECTIONSTRING");
+            // The password may FALL BACK to the root password (an existing .env keeps
+            // working); the user must be EDDI's own, defined in `eddi`.
+            if (connection == null || !connection.contains("authSource=eddi")
+                    || !connection.matches("mongodb://(\\$\\{MONGO_APP_USERNAME:-eddi_app\\}|eddi_app):.*")) {
+                offenders.add(name(file) + ": eddi's MONGODB_CONNECTIONSTRING is `" + connection + "`");
+            }
+            JsonNode helper = services.get("mongodb-app-user");
+            if (helper == null || !helper.path("command").toString().contains("createUser")) {
+                offenders.add(name(file) + ": declares no mongodb-app-user that creates EDDI's user");
+            }
+            if (!"service_completed_successfully".equals(
+                    services.get("eddi").path("depends_on").path("mongodb-app-user").path("condition").asText())) {
+                offenders.add(name(file) + ": eddi does not wait for mongodb-app-user to complete");
+            }
+            if (services.get("mongodb").path("healthcheck").path("test").toString().contains("\"-p\"")) {
+                offenders.add(name(file) + ": the mongodb healthcheck carries a password; ping needs none");
+            }
+        }
+        assertTrue(stacks >= 3, "expected the base, Open WebUI and cluster stacks to bring a MongoDB; found " + stacks);
+        assertEquals(List.of(), offenders);
+    }
+
+    /** One {@code environment} entry, in either the map or the list form. */
+    private static String environmentValue(JsonNode service, String variable) {
+        JsonNode environment = service.path("environment");
+        if (environment.isObject()) {
+            return environment.has(variable) ? environment.get(variable).asText() : null;
+        }
+        for (JsonNode item : environment) {
+            if (item.asText().startsWith(variable + "=")) {
+                return item.asText().substring(variable.length() + 1);
+            }
+        }
+        return null;
+    }
+
+    /**
      * One MongoDB version across everything a user runs and everything that gates a
      * release. The release smoke test used to start {@code mongo:6.0} (EOL July
      * 2025) while the documented stack pins 7.0.14, which left a 7.x-specific

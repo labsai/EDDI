@@ -746,9 +746,21 @@ jobs:
           # the pipe on the first match, and under pipefail a SIGPIPE'd helm would
           # fail the step even though the URI was right.
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
-            --set 'mongodb.rootPassword=a/b+c@d' "${optin[@]}")
-          grep -qF 'mongodb://eddi:a%2Fb%2Bc%40d@' <<<"$rendered" \
-            || { echo "::error::mongodb.rootPassword is not URL-encoded in mongodb.connectionString"; exit 1; }
+            --set mongodb.rootPassword=$mongopw --set 'mongodb.appPassword=a/b+c@d' "${optin[@]}")
+          grep -qF 'mongodb://eddi_app:a%2Fb%2Bc%40d@' <<<"$rendered" \
+            || { echo "::error::mongodb.appPassword is not URL-encoded in mongodb.connectionString"; exit 1; }
+
+          # EDDI connects as its own least-privilege user, never as root: the root
+          # password must not appear in the rendered connection string.
+          echo "--- EDDI does not connect to MongoDB as root"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key \
+            --set 'mongodb.rootPassword=root-only-a1b2c3' "${optin[@]}")
+          conn=$(grep -F 'mongodb.connectionString=' <<<"$rendered" || true)
+          grep -qF 'mongodb://eddi_app:' <<<"$conn" && grep -qF 'authSource=eddi' <<<"$conn" \
+            || { echo "::error::mongodb.connectionString does not use the eddi_app user: $conn"; exit 1; }
+          if grep -qF 'root-only-a1b2c3' <<<"$conn"; then
+            echo "::error::the MongoDB root password is in EDDI's connection string"; exit 1
+          fi
 
           # The startup probe checks liveness (readiness is false for the whole
           # first-boot migration), and its limits come from eddi.startupProbe.
