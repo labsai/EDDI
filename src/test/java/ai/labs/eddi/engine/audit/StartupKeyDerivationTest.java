@@ -13,9 +13,11 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -81,23 +83,25 @@ class StartupKeyDerivationTest {
     }
 
     @Test
-    @DisplayName("the early derivation does not run on the startup thread")
+    @DisplayName("the early derivation is handed to another thread, not run on the startup thread")
     void earlyDerivationDoesNotBlockTheCaller() {
-        // Four derivations of 600,000 iterations each: long enough that running them
-        // inline would be unmistakable next to starting a thread.
         List<String> previous = List.of("retired-key-a-12345678", "retired-key-b-12345678");
         var reference = new AuditKeyring(Optional.of(MASTER), Optional.of(CONFIGURED), Optional.of(previous), null);
-        long inlineStart = System.nanoTime();
         reference.initialize();
-        long inlineNanos = System.nanoTime() - inlineStart;
 
+        // Capture the derivation instead of running it: deriveEarly must hand it to the
+        // thread factory and return. A derivation run inline never reaches the factory.
+        var handedOff = new AtomicReference<Runnable>();
         var early = new AuditKeyring(Optional.of(MASTER), Optional.of(CONFIGURED), Optional.of(previous), null);
-        long start = System.nanoTime();
+        early.setDerivationThreadsForTesting(task -> {
+            handedOff.set(task);
+            return Thread.ofPlatform().unstarted(() -> {
+            });
+        });
         early.deriveEarly(new StartupEvent());
-        long callerNanos = System.nanoTime() - start;
+        assertNotNull(handedOff.get(), "deriveEarly did not hand the derivation to a thread");
 
-        assertTrue(callerNanos < inlineNanos / 4,
-                "deriveEarly held the caller for " + callerNanos / 1_000_000 + " ms; inline derivation takes " + inlineNanos / 1_000_000 + " ms");
+        handedOff.get().run();
         assertEquals(reference.signingKey().id(), early.signingKey().id());
         var expected = reference.verificationKeys();
         var actual = early.verificationKeys();

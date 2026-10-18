@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -113,6 +114,9 @@ public class AuditKeyring {
     private volatile long pinRetryMillis = MIN_PIN_RETRY_MILLIS;
     private final AtomicBoolean pinInProgress = new AtomicBoolean();
 
+    /** Where {@link #deriveEarly} runs the derivation; replaced only by tests. */
+    private ThreadFactory derivationThreads = Thread.ofVirtual().name("audit-keyring-derive").factory();
+
     @Inject
     public AuditKeyring(@ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKey,
             @ConfigProperty(name = "eddi.audit.hmac-key") Optional<String> configuredKey,
@@ -155,13 +159,13 @@ public class AuditKeyring {
         if (initialized) {
             return;
         }
-        Thread.ofVirtual().name("audit-keyring-derive").start(() -> {
+        derivationThreads.newThread(() -> {
             try {
                 initialize();
             } catch (RuntimeException e) {
                 LOGGER.debugf("Audit Ledger: early key derivation failed, retried on first use: %s", e.getMessage());
             }
-        });
+        }).start();
     }
 
     /**
@@ -264,6 +268,13 @@ public class AuditKeyring {
     private void scheduleRetry() {
         nextPinAttempt.set(System.currentTimeMillis() + pinRetryMillis);
         pinRetryMillis = Math.min(pinRetryMillis * 2, MAX_PIN_RETRY_MILLIS);
+    }
+
+    /**
+     * Test seam: observe the thread {@link #deriveEarly} hands the derivation to.
+     */
+    void setDerivationThreadsForTesting(ThreadFactory threads) {
+        this.derivationThreads = threads;
     }
 
     /** Test seam: retry without waiting. */
