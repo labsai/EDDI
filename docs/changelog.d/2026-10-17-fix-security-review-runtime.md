@@ -172,3 +172,5 @@ L7, L8 and the small L12/L13 items. One commit per finding.
   not yet know about `eddi.security.unauthenticated.allowed-hosts`, `eddi.health.verbose` or
   `eddi.security.hsts.enabled`; an admin asking "why 421?" will not get an answer from it.
 - L7 and L8 items listed as not done above.
+
+- **The review itself is now in the repository.** `planning/security-review-2026-10-17.md` is the report every `security review 2026-10-17, <id>` reference in code and fragments points to, with a status line, the live-probe results, what was verified clean and the remediation table; `docs/security-review.md` gains an entry for the October reviews.
