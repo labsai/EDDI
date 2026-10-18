@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -14,6 +15,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -37,6 +39,8 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.security.Principal;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -69,6 +73,7 @@ class McpConversationToolsOwnershipTest {
     private IRestConversationStore convStore;
     private IUserConversationStore userConversationStore;
     private IConversationDescriptorStore descriptorStore;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -80,6 +85,7 @@ class McpConversationToolsOwnershipTest {
         convStore = mock(IRestConversationStore.class);
         userConversationStore = mock(IUserConversationStore.class);
         descriptorStore = mock(IConversationDescriptorStore.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
 
         lenient().when(restInterfaceFactory.get(IRestConversationStore.class)).thenReturn(convStore);
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
@@ -111,7 +117,7 @@ class McpConversationToolsOwnershipTest {
     private McpConversationTools toolsWith(SecurityIdentity identity, ConversationAccessGuard guard) {
         return new McpConversationTools(conversationService, mock(IRestAgentAdministration.class), mock(IRestAgentStore.class),
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore, mock(IRestAgentTriggerStore.class),
-                userConversationStore, mock(IRestAgentEngine.class), identity, guard, mock(ResourceAccessGuard.class), true);
+                userConversationStore, mock(IRestAgentEngine.class), identity, guard, resourceAccessGuard, true);
     }
 
     private McpConversationTools asIntruder() {
@@ -360,6 +366,77 @@ class McpConversationToolsOwnershipTest {
 
             assertDenied(asIntruder().readAuditTrail(CONV_ID, null));
             verify(auditStore, never()).getAuditTrail(anyString(), anyInt(), anyInt());
+        }
+    }
+
+    /**
+     * {@code llmDetail.compiledPrompt} carries the agent's full system message.
+     * Owning a conversation with an agent shared as USE must not reveal it — USE is
+     * "may chat", VIEW is "may read the configuration".
+     */
+    @Nested
+    @DisplayName("read_audit_trail — compiled prompt")
+    class ReadAuditTrailPrompt {
+
+        private static final String SYSTEM_PROMPT = "You are the confidential pricing agent. Never offer more than 7%.";
+
+        private AuditEntry llmEntry() {
+            Map<String, Object> llmDetail = new LinkedHashMap<>();
+            llmDetail.put("compiledPrompt", SYSTEM_PROMPT + "\n---\nhello");
+            llmDetail.put("modelResponse", "Hi!");
+            llmDetail.put("modelName", "gpt-test");
+            return new AuditEntry("e1", CONV_ID, AGENT_ID, 1, OWNER, "production", 0, "llm", "ai.labs.llm", 3, 12L,
+                    Map.of("userInput", "hello"), null, llmDetail, null, List.of(), 0.01, Instant.EPOCH, "hmac", null);
+        }
+
+        @SuppressWarnings("unchecked")
+        private AuditEntry servedEntry() throws Exception {
+            var captor = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization).serialize(captor.capture());
+            var result = (Map<String, Object>) captor.getValue();
+            return ((List<AuditEntry>) result.get("entries")).getFirst();
+        }
+
+        @Test
+        @DisplayName("a USE-only owner gets the entry without the compiled prompt")
+        void useOnlyOwnerDoesNotSeePrompt() throws Exception {
+            when(auditStore.getAuditTrail(eq(CONV_ID), anyInt(), anyInt())).thenReturn(List.of(llmEntry()));
+            when(resourceAccessGuard.hasAccess(AGENT_ID, AccessLevel.VIEW)).thenReturn(false);
+
+            asOwner().readAuditTrail(CONV_ID, null);
+
+            AuditEntry served = servedEntry();
+            assertEquals(McpConversationTools.REDACTED_PROMPT, served.llmDetail().get("compiledPrompt"));
+            assertFalse(String.valueOf(served).contains("confidential pricing"), "the system prompt leaked: " + served);
+            assertEquals("Hi!", served.llmDetail().get("modelResponse"), "the model's reply to this caller stays");
+            assertEquals("gpt-test", served.llmDetail().get("modelName"));
+            assertEquals(0.01, served.cost());
+        }
+
+        @Test
+        @DisplayName("a caller with VIEW on the agent (or an admin, or workspaces off) sees the prompt")
+        void viewerOfAgentSeesPrompt() throws Exception {
+            AuditEntry entry = llmEntry();
+            when(auditStore.getAuditTrail(eq(CONV_ID), anyInt(), anyInt())).thenReturn(List.of(entry));
+            // hasAccess answers OWN for an admin and whenever workspaces are not enforced
+            when(resourceAccessGuard.hasAccess(AGENT_ID, AccessLevel.VIEW)).thenReturn(true);
+
+            asOwner().readAuditTrail(CONV_ID, null);
+
+            assertSame(entry, servedEntry(), "an entry the caller may fully see is passed through untouched");
+        }
+
+        @Test
+        @DisplayName("entries without a prompt need no access lookup")
+        void entriesWithoutPromptAreNotLookedUp() throws Exception {
+            AuditEntry entry = new AuditEntry("e2", CONV_ID, AGENT_ID, 1, OWNER, "production", 0, "parser", "ai.labs.parser", 0, 1L,
+                    null, null, null, null, List.of(), 0.0, Instant.EPOCH, "hmac", null);
+            when(auditStore.getAuditTrail(eq(CONV_ID), anyInt(), anyInt())).thenReturn(List.of(entry));
+
+            asOwner().readAuditTrail(CONV_ID, null);
+
+            assertSame(entry, servedEntry());
+            verify(resourceAccessGuard, never()).hasAccess(anyString(), any());
         }
     }
 
