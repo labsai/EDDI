@@ -99,6 +99,13 @@ class StartupKeyDerivationTest {
         assertTrue(callerNanos < inlineNanos / 4,
                 "deriveEarly held the caller for " + callerNanos / 1_000_000 + " ms; inline derivation takes " + inlineNanos / 1_000_000 + " ms");
         assertEquals(reference.signingKey().id(), early.signingKey().id());
-        assertEquals(4, early.verificationKeys().size());
+        var expected = reference.verificationKeys();
+        var actual = early.verificationKeys();
+        assertEquals(4, actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            assertEquals(expected.get(i).id(), actual.get(i).id());
+            assertArrayEquals(expected.get(i).hmacKey(), actual.get(i).hmacKey(), "hmac key of " + expected.get(i).id());
+            assertArrayEquals(expected.get(i).pseudonymKey(), actual.get(i).pseudonymKey(), "pseudonym key of " + expected.get(i).id());
+        }
     }
 }
