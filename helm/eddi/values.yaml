@@ -324,7 +324,11 @@ postgres:
   enabled: false
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "16.15-alpine"
+  # The uid (and gid, and fsGroup) PostgreSQL runs as. 70 is `postgres` in the
+  # alpine image; set 999 for a Debian-based postgres image. Running as it from
+  # the start lets the container drop every capability.
+  runAsUser: 70
   database: eddi
   username: eddi
   # REQUIRED when postgres.enabled=true — no default is shipped.

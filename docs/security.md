@@ -123,6 +123,68 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 > vault and index setup first, so a start that also had no reachable database spent its
 > server-selection timeout on MongoDB and exited with a MongoDB error instead of the reason.
 
+### Running without authentication
+
+With OIDC off (`authorization.enabled=false`, the quick start's
+`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) every endpoint, `/mcp` and
+`/secretstore` answer anyone who reaches the port. The compose stacks therefore
+publish on loopback only — but loopback stops the network, not the browser on the
+same machine. A page on `evil.example` whose DNS name is re-pointed at `127.0.0.1`
+(DNS rebinding) becomes same-origin with EDDI and can read and write the whole API;
+without rebinding, a page can still send CORS "simple" requests (a form-encoded or
+body-less `POST`) that execute although it cannot read the answer.
+
+So while authentication is off, `UnauthenticatedRequestGuard` (a Vert.x route
+filter, so it also covers `/mcp`, `/q/*` and static assets):
+
+- answers **421** to a request whose `Host` is not `localhost` (or a
+  `*.localhost` name), an IP address, one of the container-host names
+  `host.docker.internal`, `gateway.docker.internal` and `host.containers.internal`
+  (Podman), or an entry of `eddi.security.unauthenticated.allowed-hosts`
+  (`EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS`; `host` or `host:port`,
+  comma-separated, a bare host matching any port). IP addresses pass because a
+  rebinding attack needs a DNS name the attacker controls — and kubelet probes,
+  Prometheus scrapes and `eddi.self.base-url` address EDDI that way. The
+  container-host names are how a container (Open WebUI, an MCP client) reaches an
+  EDDI running on the host; Docker's and Podman's own resolvers answer them, and
+  `.internal` is a reserved top-level domain that public DNS never delegates. The raw
+  `Host` header is read, never a forwarded one: a rebound page is same-origin and
+  may set `X-Forwarded-Host` itself. `*` turns the check off;
+- answers **403** to a `POST`, `PUT`, `PATCH` or `DELETE` a browser marks as
+  cross-site: an `Origin` that is neither the request's own origin (host and port;
+  the scheme may differ behind a TLS-terminating proxy) nor in
+  `quarkus.http.cors.origins` — `Origin: null` included — or, with no `Origin`,
+  `Sec-Fetch-Site: cross-site` or `same-site`. A request with neither header
+  comes from a non-browser client (curl, an SDK) and passes.
+
+`/q/health` is exempt from both. EDDI logs one `[SECURITY]` WARN at startup
+describing the policy, and a WARN the first time it refuses each host (at most 32
+distinct hosts). With authentication on nothing is registered: every endpoint then
+needs a token, which a cross-site page does not have. The compose stacks set the
+allow-list to `eddi`, their service name on the compose network; add the name you
+browse to when it is not `localhost`. The MCP endpoint's own `Origin` validation
+still applies on top.
+
+> **Dev mode answers 400 for more hosts — that is Quarkus.** Under
+> `./mvnw quarkus:dev` (and in tests) the server binds `localhost`, which switches on
+> Quarkus' own `HostValidationFilter`: it accepts only `localhost`, `127.0.0.1` and
+> `[::1]` and ends every other `Host` — `eddi.localhost`, `localhost.`, any name on
+> `/q/health` — with an empty `400`, before or after this filter. Widen it with
+> `quarkus.http.host-validation.allowed-hosts`. A container binds `0.0.0.0`, does not
+> enable it, and answers those requests as described above.
+
+### Shipped realm hardening
+
+`keycloak/eddi-realm.json` (and its copies under `helm/eddi/files/` and
+`k8s/overlays/auth/`) sets a password policy (`length(12) and maxLength(128) and
+notUsername and notEmail and passwordHistory(3)`), records login and admin events
+(30-day retention, admin event bodies off), requires consent on `eddi-mcp` and limits
+that client's tokens to the `eddi-*` realm roles (`fullScopeAllowed: false` plus a scope
+mapping), and seeds its three accounts with `emailVerified: false` — their placeholder
+addresses were never verified, and the user directory resolves shares by verified e-mail.
+Realm import is one-shot: a realm imported before these settings keeps its old ones until
+you change them in the admin console or re-provision it.
+
 ### The Token Must Name the User
 
 EDDI files conversations, memories and approvals under the principal name.
@@ -740,6 +802,14 @@ if no TLS certificate is detected.
 Configure your reverse proxy to terminate TLS and forward traffic to EDDI
 on `localhost:7070`. This is the standard production pattern.
 
+**HSTS.** Once the public origin is https only, set
+`eddi.security.hsts.enabled=true` (`EDDI_SECURITY_HSTS_ENABLED`): every response then
+carries `Strict-Transport-Security: max-age=31536000` (`eddi.security.hsts.max-age`), so
+a browser that has seen the origin once refuses plain http to it afterwards. It is off by
+default because EDDI usually serves plain http behind the proxy; the Helm chart turns it
+on when `ingress.tls` is set, and the GCP provisioner's nginx sends it itself. Add
+`includeSubDomains`/`preload` at the proxy if the whole domain is https-only.
+
 ### Option 2: TLS Directly in Quarkus
 
 ```properties
@@ -785,6 +855,22 @@ For audited false positives, EDDI provides override files at the repository root
 - **`.gitleaksignore`** — Suppress specific Gitleaks fingerprints with justification
 
 Both files should be reviewed periodically to ensure suppressions remain valid.
+
+### Installer Downloads
+
+`install.sh` and `install.ps1` fetch the compose files, the Keycloak realm and login
+theme, and the monitoring configuration from `raw.githubusercontent.com` at a git ref
+(`EDDI_BRANCH`; by default the newest release tag). Each release now publishes a
+`SHA256SUMS` asset — the release job in `ci.yml` hashes those files at the tag — and when
+the ref is a release tag the installers check every downloaded file against it and refuse
+one whose hash differs. A ref without the asset (`main`, a branch, a release published
+before it existed) still installs, with a warning that only TLS vouches for the files; an
+unlisted file is warned about, not refused. The installers do not verify themselves —
+fetch `install.sh` from a release tag rather than `main` for a pinned install. The CLI's
+`eddi update` re-downloads compose files without this check. The GCP provisioner
+(`gcp/provision-vm.sh`) now defaults `--eddi-branch` to `--eddi-version`'s tag or the
+newest stable release instead of `main`, falling back to `main` with a warning when the
+lookup fails.
 
 ### Fuzz Testing
 
