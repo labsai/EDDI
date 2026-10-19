@@ -61,6 +61,14 @@ public final class ToolMockRegistry {
     /** The status an unmocked rule-triggered httpcall is answered with. */
     public static final int NOT_EXECUTED_HTTP_CODE = 501;
 
+    /**
+     * Template-data key the LLM tool path sets on an httpcall it hands to the
+     * executor after {@link #interceptToolCall} has already decided (and recorded)
+     * that call. The executor then skips {@link #interceptRuleCall}, so a live tool
+     * call is neither recorded nor mocked a second time.
+     */
+    public static final String TOOL_PATH_MARKER = "__agentTestToolPathIntercepted";
+
     static final String SOURCE_HTTP = "http";
     static final String SOURCE_MEMORY = "memory";
 

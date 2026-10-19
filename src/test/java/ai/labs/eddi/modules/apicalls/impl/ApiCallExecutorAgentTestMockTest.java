@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -143,6 +144,31 @@ class ApiCallExecutorAgentTestMockTest {
         verify(request, never()).send(any());
         assertEquals(ToolMockRegistry.NOT_EXECUTED_HTTP_CODE, result.get("httpCode"));
         assertTrue(String.valueOf(result.get("body")).contains("NOT_EXECUTED"), String.valueOf(result.get("body")));
+    }
+
+    @Test
+    @DisplayName("a call the LLM tool path already intercepted is not intercepted (or recorded) again")
+    void toolPathCallIsNotInterceptedTwice() {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null, List.of(), null));
+        ToolMockRegistry.register(TEST_USER, session);
+
+        // A rule-triggered call is intercepted and recorded once.
+        assertDoesNotThrow(() -> executor.execute(call(false), memory, new HashMap<>(), SERVER));
+        assertEquals(1, session.calls().size());
+
+        // The same call arriving from the tool path carries the marker: no second
+        // record
+        // and no 501 substitution here (the request is built and sent instead, which
+        // the
+        // bare mocks may fail on - only the interception is under test).
+        var marked = new HashMap<String, Object>();
+        marked.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+        try {
+            executor.execute(call(false), memory, marked, SERVER);
+        } catch (Exception ignored) {
+            // the live path hit unprimed mocks
+        }
+        assertEquals(1, session.calls().size(), "the tool path's call must not be recorded by the executor");
     }
 
     @Test

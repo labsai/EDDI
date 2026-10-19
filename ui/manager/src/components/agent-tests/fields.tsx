@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
 
 /** Shared look for the test-suite editor's text controls. */
 export const INPUT_CLASS =
-  "h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60";
+  'h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60';
 
 export function LabelledField({
   label,
@@ -19,8 +19,11 @@ export function LabelledField({
 }) {
   const id = useId();
   return (
-    <div className={cn("space-y-1", className)}>
-      <label htmlFor={id} className="block text-xs font-medium text-muted-foreground">
+    <div className={cn('space-y-1', className)}>
+      <label
+        htmlFor={id}
+        className="block text-xs font-medium text-muted-foreground"
+      >
         {label}
       </label>
       {children(id)}
@@ -55,7 +58,7 @@ export function JsonField({
   testId?: string;
 }) {
   const { t } = useTranslation();
-  const format = (v: unknown) => (v === undefined ? "" : JSON.stringify(v));
+  const format = (v: unknown) => (v === undefined ? '' : JSON.stringify(v));
   const [text, setText] = useState(() => format(value));
   const [invalid, setInvalid] = useState(false);
   const lastCommitted = useRef(format(value));
@@ -73,15 +76,18 @@ export function JsonField({
 
   const handle = (raw: string) => {
     setText(raw);
-    if (raw.trim() === "") {
+    if (raw.trim() === '') {
       setInvalid(false);
-      lastCommitted.current = "";
+      lastCommitted.current = '';
       onChange(undefined);
       return;
     }
     try {
       const parsed: unknown = JSON.parse(raw);
-      if (objectOnly && (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))) {
+      if (
+        objectOnly &&
+        (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+      ) {
         setInvalid(true);
         return;
       }
@@ -106,15 +112,21 @@ export function JsonField({
         aria-invalid={invalid || undefined}
         data-testid={testId}
         className={cn(
-          "w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-          invalid ? "border-destructive" : "border-input"
+          'w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring',
+          invalid ? 'border-destructive' : 'border-input',
         )}
       />
       {invalid && (
         <p className="mt-0.5 text-[11px] text-destructive" role="alert">
           {objectOnly
-            ? t("testSuiteEditor.invalidJsonObject", "Not a valid JSON object — the last valid value is kept.")
-            : t("testSuiteEditor.invalidJson", "Not valid JSON — the last valid value is kept.")}
+            ? t(
+                'testSuiteEditor.invalidJsonObject',
+                'Not a valid JSON object — the last valid value is kept.',
+              )
+            : t(
+                'testSuiteEditor.invalidJson',
+                'Not valid JSON — the last valid value is kept.',
+              )}
         </p>
       )}
     </div>
@@ -137,7 +149,7 @@ export function StringListField({
   placeholder?: string;
   testId?: string;
 }) {
-  const join = (v: string[] | undefined) => (v ?? []).join(", ");
+  const join = (v: string[] | undefined) => (v ?? []).join(', ');
   const [text, setText] = useState(() => join(value));
   const lastCommitted = useRef(join(value));
 
@@ -161,7 +173,7 @@ export function StringListField({
       onChange={(e) => {
         setText(e.target.value);
         const items = e.target.value
-          .split(",")
+          .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
         lastCommitted.current = join(items);
@@ -195,51 +207,61 @@ export function OptionalNumberField({
   placeholder?: string;
   testId?: string;
 }) {
-  const [text, setText] = useState(value === undefined ? "" : String(value));
+  const [text, setText] = useState(value === undefined ? '' : String(value));
   const [outOfRange, setOutOfRange] = useState(false);
   const lastCommitted = useRef(value);
 
   useEffect(() => {
     if (value !== lastCommitted.current) {
       lastCommitted.current = value;
-      setText(value === undefined ? "" : String(value));
+      setText(value === undefined ? '' : String(value));
       setOutOfRange(false);
     }
   }, [value]);
 
   return (
-    <input
-      id={id}
-      type="number"
-      inputMode={integer ? "numeric" : "decimal"}
-      value={text}
-      min={min}
-      max={max}
-      step={step ?? (integer ? 1 : "any")}
-      readOnly={readOnly}
-      placeholder={placeholder}
-      data-testid={testId}
-      aria-invalid={outOfRange || undefined}
-      title={outOfRange ? `${min ?? ""}–${max ?? ""}` : undefined}
-      className={cn(INPUT_CLASS, outOfRange && "border-destructive")}
-      onChange={(e) => {
-        setText(e.target.value);
-        if (e.target.value.trim() === "") {
+    <>
+      <input
+        id={id}
+        type="number"
+        inputMode={integer ? 'numeric' : 'decimal'}
+        value={text}
+        min={min}
+        max={max}
+        step={step ?? (integer ? 1 : 'any')}
+        readOnly={readOnly}
+        placeholder={placeholder}
+        data-testid={testId}
+        aria-invalid={outOfRange || undefined}
+        title={outOfRange ? `${min ?? ''}–${max ?? ''}` : undefined}
+        className={cn(INPUT_CLASS, outOfRange && 'border-destructive')}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value.trim() === '') {
+            setOutOfRange(false);
+            lastCommitted.current = undefined;
+            onChange(undefined);
+            return;
+          }
+          const n = Number(e.target.value);
+          if (!Number.isFinite(n) || (integer && !Number.isInteger(n))) return;
+          if (
+            (min !== undefined && n < min) ||
+            (max !== undefined && n > max)
+          ) {
+            setOutOfRange(true);
+            return;
+          }
           setOutOfRange(false);
-          lastCommitted.current = undefined;
-          onChange(undefined);
-          return;
-        }
-        const n = Number(e.target.value);
-        if (!Number.isFinite(n) || (integer && !Number.isInteger(n))) return;
-        if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
-          setOutOfRange(true);
-          return;
-        }
-        setOutOfRange(false);
-        lastCommitted.current = n;
-        onChange(n);
-      }}
-    />
+          lastCommitted.current = n;
+          onChange(n);
+        }}
+      />
+      {outOfRange && (
+        <p className="mt-0.5 text-[11px] text-destructive" role="alert">
+          {min ?? ''}–{max ?? ''}
+        </p>
+      )}
+    </>
   );
 }

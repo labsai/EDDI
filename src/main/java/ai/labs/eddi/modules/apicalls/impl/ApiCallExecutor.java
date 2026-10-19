@@ -268,6 +268,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // request (a URI, a header) is redacted before it is logged or becomes the
         // task error the turn records.
         Set<String> substitutedSecrets = new HashSet<>();
+        // A call reached through the LLM tool path was already intercepted (and
+        // recorded) by ToolLoopRunner; only a rule-triggered call is intercepted here.
+        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER);
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 
@@ -277,7 +280,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             if (call.getFireAndForget()) {
                 // Agent test harness: a test conversation's fire-and-forget call is never
                 // sent unless its suite runs calls live.
-                if (ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") != null) {
+                if (ruleTriggered && ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") != null) {
                     return Collections.emptyMap();
                 }
                 executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
@@ -315,7 +318,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // selected BEFORE the request is built: building resolves ${vault:},
                     // ${connection:} and ${caller:} references, and a mocked call must neither
                     // fetch a live credential nor fail for want of one.
-                    var mocked = ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall");
+                    var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") : null;
                     Set<String> resolvedSecrets;
                     if (mocked != null) {
                         resolvedSecrets = Set.of();
