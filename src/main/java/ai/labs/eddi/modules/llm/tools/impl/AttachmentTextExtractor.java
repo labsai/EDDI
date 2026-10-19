@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.PdfDecodeBudget;
+import ai.labs.eddi.modules.ingestion.extract.PdfStreamBudget;
+import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.pdfbox.Loader;
@@ -16,6 +19,8 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Calendar;
 import java.util.Locale;
 
@@ -51,8 +56,18 @@ public class AttachmentTextExtractor {
     /** Fallback page cap when configuration yields a non-positive value. */
     public static final int DEFAULT_MAX_PAGES = 500;
 
+    /**
+     * Fallback per-stream decode cap — the ingestion path's default
+     * ({@code ExtractionLimits}). The whole document may decode twice this.
+     */
+    public static final long DEFAULT_MAX_STREAM_BYTES = 64L * 1024 * 1024;
+
+    /** Wall-clock bound for the raw-byte pre-scan of one PDF. */
+    private static final Duration PRE_SCAN_DURATION = Duration.ofSeconds(30);
+
     private final int defaultMaxChars;
     private final int maxPages;
+    private final long maxStreamBytes;
 
     @Inject
     public AttachmentTextExtractor(
@@ -60,8 +75,18 @@ public class AttachmentTextExtractor {
                             defaultValue = "50000") int defaultMaxChars,
             @ConfigProperty(name = "eddi.attachments.extraction.max-pages",
                             defaultValue = "500") int maxPages) {
+        this(defaultMaxChars, maxPages, DEFAULT_MAX_STREAM_BYTES);
+    }
+
+    /**
+     * @param maxStreamBytes
+     *            what one compressed stream may expand to; the whole document may
+     *            decode twice this. Non-positive falls back to the default
+     */
+    public AttachmentTextExtractor(int defaultMaxChars, int maxPages, long maxStreamBytes) {
         this.defaultMaxChars = defaultMaxChars > 0 ? defaultMaxChars : DEFAULT_MAX_CHARS;
         this.maxPages = maxPages > 0 ? maxPages : DEFAULT_MAX_PAGES;
+        this.maxStreamBytes = maxStreamBytes > 0 ? maxStreamBytes : DEFAULT_MAX_STREAM_BYTES;
     }
 
     /**
@@ -73,12 +98,61 @@ public class AttachmentTextExtractor {
 
     /**
      * Loads a PDF from bytes with a temp-file scratch cache rather than PDFBox's
-     * default unlimited in-memory buffering, so a small but highly-compressed ("PDF
-     * bomb") document cannot inflate the heap during parsing.
+     * default unlimited in-memory buffering. The scratch cache alone does not bound
+     * a "PDF bomb": PDFBox decodes every stream into a buffer it sizes itself, so
+     * {@link #withDecodeBudget} wraps every use of a loaded document.
      */
     private static PDDocument loadPdf(byte[] pdfBytes) throws IOException {
         StreamCacheCreateFunction tempFileCache = IOUtils.createTempFileOnlyStreamCache();
         return Loader.loadPDF(pdfBytes, "", null, null, tempFileCache);
+    }
+
+    /** One PDF operation, run inside the decode budget. */
+    @FunctionalInterface
+    private interface PdfOperation<T> {
+        T run() throws Exception;
+    }
+
+    /**
+     * Runs {@code operation} under the ingestion path's PDF bounds (security review
+     * 2026-10-17, M11): {@link PdfStreamBudget} refuses a stream that expands past
+     * the per-stream cap before PDFBox sees the file, and {@link PdfDecodeBudget}
+     * counts everything PDFBox decodes while the operation runs and refuses the
+     * document once the total passes twice that. A FlateDecode bomb in an upload, a
+     * {@code PdfReaderTool} URL or a {@code readAttachment} call used to inflate to
+     * gigabytes of temp file and heap.
+     */
+    private <T> T withDecodeBudget(byte[] pdfBytes, String failure, PdfOperation<T> operation) throws AttachmentExtractionException {
+        try {
+            PdfStreamBudget.requireWithin(pdfBytes, maxStreamBytes, Instant.now().plus(PRE_SCAN_DURATION));
+        } catch (UnreadableDocumentException e) {
+            throw new AttachmentExtractionException(failure + ": " + e.getMessage(), e);
+        }
+        try (var budget = PdfDecodeBudget.open(2 * maxStreamBytes)) {
+            T result;
+            try {
+                result = operation.run();
+            } catch (AttachmentExtractionException e) {
+                throw budget.exceeded() ? tooMuchToDecode(failure, budget, e) : e;
+            } catch (Exception e) {
+                throw budget.exceeded()
+                        ? tooMuchToDecode(failure, budget, e)
+                        : new AttachmentExtractionException(failure + ": " + e.getMessage(), e);
+            }
+            // Checked on success too: PDFBox logs and swallows some failures, and a
+            // document that passed its budget is refused however it ended.
+            if (budget.exceeded()) {
+                throw tooMuchToDecode(failure, budget, null);
+            }
+            return result;
+        } catch (UnreadableDocumentException e) {
+            throw new AttachmentExtractionException(failure + ": " + e.getMessage(), e);
+        }
+    }
+
+    private static AttachmentExtractionException tooMuchToDecode(String failure, PdfDecodeBudget.Budget budget, Throwable cause) {
+        return new AttachmentExtractionException(failure + ": the PDF expands to more than " + budget.max() / (1024 * 1024)
+                + " MB while it is read, which is more than one document may take", cause);
     }
 
     /**
@@ -150,6 +224,10 @@ public class AttachmentTextExtractor {
      */
     public String extractPdfText(byte[] pdfBytes, int maxChars) throws AttachmentExtractionException {
         int cap = maxChars > 0 ? maxChars : defaultMaxChars;
+        return withDecodeBudget(pdfBytes, "Failed to extract text from PDF", () -> extractAllPages(pdfBytes, cap));
+    }
+
+    private String extractAllPages(byte[] pdfBytes, int cap) throws IOException {
         try (PDDocument document = loadPdf(pdfBytes)) {
             PDFTextStripper stripper = new PDFTextStripper();
             // Stop at the page cap: a document with tens of thousands of pages would
@@ -163,19 +241,22 @@ public class AttachmentTextExtractor {
             LOGGER.debugf("Extracted %d characters from PDF (%d of %d pages)",
                     text.length(), lastPage, totalPages);
             return cap(text, cap);
-        } catch (Exception e) {
-            throw new AttachmentExtractionException("Failed to extract text from PDF: " + e.getMessage(), e);
         }
     }
 
     /**
      * Extract text from a page range of a PDF, capped to {@code maxChars}.
      * {@code endPage} beyond the last page is clamped; {@code startPage} out of
-     * range throws.
+     * range throws. At most {@code eddi.attachments.extraction.max-pages} pages are
+     * read from {@code startPage} on, as for the whole-document variant.
      */
     public String extractPdfText(byte[] pdfBytes, int startPage, int endPage, int maxChars)
             throws AttachmentExtractionException {
         int cap = maxChars > 0 ? maxChars : defaultMaxChars;
+        return withDecodeBudget(pdfBytes, "Failed to extract PDF pages", () -> extractPageRange(pdfBytes, startPage, endPage, cap));
+    }
+
+    private String extractPageRange(byte[] pdfBytes, int startPage, int endPage, int cap) throws IOException, AttachmentExtractionException {
         try (PDDocument document = loadPdf(pdfBytes)) {
             int totalPages = document.getNumberOfPages();
             if (startPage < 1 || startPage > totalPages) {
@@ -183,6 +264,9 @@ public class AttachmentTextExtractor {
                         "Start page " + startPage + " is out of range (1-" + totalPages + ")");
             }
             int effectiveEnd = (endPage < startPage || endPage > totalPages) ? totalPages : endPage;
+            // The page cap applies here too: this variant used to read to the last
+            // page of a document with any number of them.
+            effectiveEnd = (int) Math.min(effectiveEnd, (long) startPage + maxPages - 1);
 
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setStartPage(startPage);
@@ -191,10 +275,6 @@ public class AttachmentTextExtractor {
             LOGGER.debugf("Extracted text from PDF pages %d-%d (%d characters)",
                     startPage, effectiveEnd, text.length());
             return cap(text, cap);
-        } catch (AttachmentExtractionException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new AttachmentExtractionException("Failed to extract PDF pages: " + e.getMessage(), e);
         }
     }
 
@@ -202,6 +282,10 @@ public class AttachmentTextExtractor {
      * Extract structural metadata from a PDF (page count + document information).
      */
     public PdfInfo extractPdfInfo(byte[] pdfBytes) throws AttachmentExtractionException {
+        return withDecodeBudget(pdfBytes, "Failed to read PDF information", () -> readPdfInfo(pdfBytes));
+    }
+
+    private static PdfInfo readPdfInfo(byte[] pdfBytes) throws IOException {
         try (PDDocument document = loadPdf(pdfBytes)) {
             var info = document.getDocumentInformation();
             String title = info != null ? info.getTitle() : null;
@@ -210,8 +294,6 @@ public class AttachmentTextExtractor {
             String creator = info != null ? info.getCreator() : null;
             Calendar creationDate = info != null ? info.getCreationDate() : null;
             return new PdfInfo(document.getNumberOfPages(), title, author, subject, creator, creationDate);
-        } catch (Exception e) {
-            throw new AttachmentExtractionException("Failed to read PDF information: " + e.getMessage(), e);
         }
     }
 

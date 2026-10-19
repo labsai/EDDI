@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 // ── Enums ─────────────────────────────────────────────────────────
 
@@ -311,7 +312,7 @@ export function resumeConversation(
   conversationId: string,
   decision: HitlDecision,
 ): Promise<void> {
-  return api.post(`/agents/${conversationId}/resume`, decision);
+  return api.post(`/agents/${seg(conversationId)}/resume`, decision);
 }
 
 /** Get the approval status of a paused conversation (summary view, incl.
@@ -321,7 +322,7 @@ export function getApprovalStatus(
   conversationId: string,
 ): Promise<ApprovalStatusSummary> {
   return api.get<ApprovalStatusSummary>(
-    `/agents/${conversationId}/approval-status?detail=summary`,
+    `/agents/${seg(conversationId)}/approval-status?detail=summary`,
   );
 }
 
@@ -340,7 +341,7 @@ export function listPendingApprovals(
 export function cancelConversation(
   conversationId: string,
 ): Promise<void> {
-  return api.post(`/agents/${conversationId}/cancel`);
+  return api.post(`/agents/${seg(conversationId)}/cancel`);
 }
 
 // ── Group discussion HITL API ─────────────────────────────────────
@@ -359,7 +360,7 @@ export function approveGroupPhase(
   request: GroupApprovalRequest,
 ): Promise<void> {
   return api.post(
-    `/groups/${groupId}/conversations/${gcId}/approve`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve`,
     request,
   );
 }
@@ -372,7 +373,7 @@ export function getGroupApprovalStatus(
   detail: "summary" | "full" = "summary",
 ): Promise<Record<string, unknown>> {
   return api.get(
-    `/groups/${groupId}/conversations/${gcId}/approval-status?detail=${detail}`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approval-status?detail=${detail}`,
   );
 }
 
@@ -393,5 +394,5 @@ export function cancelGroupDiscussion(
   groupId: string,
   gcId: string,
 ): Promise<void> {
-  return api.post(`/groups/${groupId}/conversations/${gcId}/cancel`);
+  return api.post(`/groups/${seg(groupId)}/conversations/${seg(gcId)}/cancel`);
 }

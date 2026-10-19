@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.OutputBuildingInstruction;
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.QuickRepliesBuildingInstruction;
@@ -55,6 +56,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.secrets.VaultGrantService;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -70,6 +72,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
@@ -150,6 +153,16 @@ public class AgentSetupService {
     @Inject
     @ConfigProperty(name = "eddi.setup.vault-key-reuse", defaultValue = VAULT_KEY_REUSE_CHECKSUM)
     String vaultKeyReuse = VAULT_KEY_REUSE_CHECKSUM;
+
+    /**
+     * {@code eddi.vault.grant-enforcement}: under {@code enforce} a secret this
+     * service cannot restrict to a destination is refused rather than stored open —
+     * see {@link #allowedHostsFor}. Field-injected like {@link #vaultKeyReuse}; a
+     * directly constructed instance gets the shipped default.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME)
+    String grantEnforcement = VaultGrantGate.DEFAULT_MODE_NAME;
 
     /**
      * Cache invalidation for secrets this service writes, exactly as
@@ -313,7 +326,9 @@ public class AgentSetupService {
         // a workflow already exist. Outside also keeps the message intact — a caller
         // reading a 400 wants "vaultKeyName 'x' does not exist", not that sentence
         // wrapped in "Failed to set up agent".
-        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+        String llmEndpoint = "ollama".equals(params.providerType) && isNullOrBlank(request.baseUrl()) ? ollamaDefaultBaseUrl : request.baseUrl();
+        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
+                new HostRule(request.allowedHosts(), SetupSecretHosts.forLlm(params.providerType, llmEndpoint), "apiKey"));
 
         try {
             // --- Step 1: Create Parser ---
@@ -600,7 +615,11 @@ public class AgentSetupService {
         // Outside the try, so an unusable vaultKeyName fails while rollback still has
         // nothing to undo and its message reaches the caller unwrapped. See setupAgent
         // for the full note.
-        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources);
+        String llmEndpoint = "ollama".equals(params.providerType) && isNullOrBlank(request.llmBaseUrl())
+                ? ollamaDefaultBaseUrl
+                : request.llmBaseUrl();
+        String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
+                new HostRule(request.allowedHosts(), SetupSecretHosts.forLlm(params.providerType, llmEndpoint), "apiKey"));
 
         try {
 
@@ -610,7 +629,10 @@ public class AgentSetupService {
             // spec before anything is written); when the value is vaulted it is parsed
             // again, so the generated headers carry the reference and never the
             // plaintext.
-            String effectiveApiAuth = vaultApiAuth(request.apiAuth(), request.agentName(), createdResources);
+            // Its destination is the API the generated httpcalls call, not the LLM.
+            var apiTargets = buildResult.configsByGroup().values().stream().map(ApiCallsConfiguration::getTargetServerUrl).toList();
+            String effectiveApiAuth = vaultApiAuth(request.apiAuth(), request.agentName(), createdResources,
+                    new HostRule(apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(apiTargets), "apiAuth"));
             if (!Objects.equals(effectiveApiAuth, request.apiAuth())) {
                 buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth,
                         request.apiAuthHeader(), specFetcher());
@@ -1312,7 +1334,7 @@ public class AgentSetupService {
      *            Also used to carry non-fatal warnings (see
      *            {@link #VAULT_GRANT_WARNING}) into {@code SetupResult.resources}.
      */
-    private String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources)
+    private String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
             throws AgentSetupException {
         // Trimmed once, here, and used for every subsequent decision AND as the stored
         // value: a key with a stray newline is not a usable credential either.
@@ -1320,7 +1342,7 @@ public class AgentSetupService {
         String requestedName = vaultKeyName == null ? null : vaultKeyName.trim();
 
         if (requestedName != null && !requestedName.isEmpty()) {
-            return useNamedVaultKey(requestedName, key, agentName, createdResources);
+            return useNamedVaultKey(requestedName, key, agentName, createdResources, hosts);
         }
 
         if (key == null || key.isEmpty()) {
@@ -1341,7 +1363,10 @@ public class AgentSetupService {
             return key;
         }
 
-        String reusable = findReusableSecret(key);
+        // Before the reuse scan: an entry is only reusable if it is restricted the way
+        // this one would be, and a refusal must come before anything is written.
+        List<String> allowedHosts = allowedHostsFor(hosts);
+        String reusable = findReusableSecret(key, allowedHosts);
         if (reusable != null) {
             LOGGER.infof("API key for agent '%s' is already in the vault as '%s' — reusing it instead of storing a second copy.",
                     LogSanitizer.sanitize(agentName), LogSanitizer.sanitize(reusable));
@@ -1372,7 +1397,8 @@ public class AgentSetupService {
             // value and reuses it. So under `checksum` the entry is left in place, and
             // is either reused by the retry or is one harmless orphan.
             Map<String, Object> rollbackRegistry = VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse) ? createdResources : null;
-            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, rollbackRegistry, VAULTED_SECRET_KEY);
+            return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), key, agentName, rollbackRegistry, VAULTED_SECRET_KEY,
+                    allowedHosts);
         } catch (ISecretProvider.SecretProviderException e) {
             // Fail closed. The vault is configured (checked above) but the write failed —
             // a transient database error, a locked DEK. Falling back to plaintext here
@@ -1410,7 +1436,8 @@ public class AgentSetupService {
      *             when the value mixes a reference with other text, or the vault
      *             write fails
      */
-    private String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources) throws AgentSetupException {
+    private String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts)
+            throws AgentSetupException {
         String value = apiAuth == null ? null : apiAuth.trim();
         if (value == null || value.isEmpty() || API_AUTH_REFERENCE.matcher(value).matches()) {
             return apiAuth;
@@ -1424,7 +1451,8 @@ public class AgentSetupService {
                     + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage, or pass a ${connection:name} reference.");
             return apiAuth;
         }
-        String reusable = findReusableSecret(value);
+        List<String> allowedHosts = allowedHostsFor(hosts);
+        String reusable = findReusableSecret(value, allowedHosts);
         if (reusable != null) {
             return reusable;
         }
@@ -1435,7 +1463,7 @@ public class AgentSetupService {
             // Same rollback rule as the apiKey entry — see vaultApiKey.
             Map<String, Object> rollbackRegistry = VAULT_KEY_REUSE_NEVER.equalsIgnoreCase(vaultKeyReuse) ? createdResources : null;
             return storeSecret(new SecretReference(SecretReference.DEFAULT_TENANT, keyName), value, agentName, rollbackRegistry,
-                    VAULTED_API_AUTH_KEY);
+                    VAULTED_API_AUTH_KEY, allowedHosts);
         } catch (ISecretProvider.SecretProviderException e) {
             // As for the API key: the provider's detail stays in the server log.
             LOGGER.error("Failed to vault apiAuth for agent '" + LogSanitizer.sanitize(agentName) + "': " + LogSanitizer.sanitize(e.getMessage()));
@@ -1450,7 +1478,8 @@ public class AgentSetupService {
      * one specific shared secret, and quietly writing a plaintext key or a second
      * copy under a different name would defeat the reason they named it.
      */
-    private String useNamedVaultKey(String requestedName, String key, String agentName, Map<String, Object> createdResources)
+    private String useNamedVaultKey(String requestedName, String key, String agentName, Map<String, Object> createdResources,
+                                    HostRule hosts)
             throws AgentSetupException {
         // Accept both "my-openai-key" and "${vault:my-openai-key}" — the Manager and
         // the stored configs show the reference form, so pasting that form into a
@@ -1524,6 +1553,9 @@ public class AgentSetupService {
                     + "supplied to create it. Supply the key in apiKey to store it under that name, or name an existing vault key.");
         }
 
+        // An existing named key above is the admin's own, restricted however they left
+        // it; a key this call creates gets the destination list every wizard key gets.
+        List<String> allowedHosts = allowedHostsFor(hosts);
         try {
             // Deliberately NOT registered for rollback (null, not createdResources).
             // Rollback exists to stop a retry loop growing the vault without bound, and
@@ -1532,7 +1564,7 @@ public class AgentSetupService {
             // triggers rollback, a concurrent setup may already have reused the entry,
             // and rollback would pull the key out from under an agent that is not ours.
             // Leaving it also means the retry finds the key already in place.
-            if (storeSecretIfAbsent(ref, key, agentName)) {
+            if (storeSecretIfAbsent(ref, key, agentName, allowedHosts)) {
                 return ref.toReferenceString();
             }
             // Lost the race for the name: another setup created it between the metadata
@@ -1587,7 +1619,7 @@ public class AgentSetupService {
      * generated path cannot drift on the grant list or the rollback bookkeeping.
      */
     private String storeSecret(SecretReference ref, String plaintext, String agentName, Map<String, Object> createdResources,
-                               String registryKey)
+                               String registryKey, List<String> allowedHosts)
             throws ISecretProvider.SecretProviderException {
         // "*" is deliberate. allowedAgents IS enforced now (VaultGrantGate, at
         // deploy time), so this list is a real access-control decision — but the
@@ -1598,7 +1630,10 @@ public class AgentSetupService {
         //
         // Operators who want a narrow grant set it after setup, via the secrets
         // REST API; see docs/secrets-vault.md "Agent Grants".
-        secretProvider.store(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName, List.of("*"));
+        //
+        // allowedHosts is the other half, and is not "*" by default: see
+        // allowedHostsFor.
+        secretProvider.store(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName, List.of("*"), allowedHosts);
         if (secretResolver != null) {
             secretResolver.invalidateCache(ref);
         }
@@ -1618,10 +1653,11 @@ public class AgentSetupService {
      *
      * @return {@code true} if this call created the entry
      */
-    private boolean storeSecretIfAbsent(SecretReference ref, String plaintext, String agentName) throws ISecretProvider.SecretProviderException {
+    private boolean storeSecretIfAbsent(SecretReference ref, String plaintext, String agentName, List<String> allowedHosts)
+            throws ISecretProvider.SecretProviderException {
         // "*" for the same reason as in storeSecret: the agent has no id yet.
         boolean created = secretProvider.storeIfAbsent(ref, plaintext, "Auto-vaulted by AgentSetupService for agent: " + agentName,
-                List.of("*"));
+                List.of("*"), allowedHosts);
         if (created) {
             if (secretResolver != null) {
                 secretResolver.invalidateCache(ref);
@@ -1656,7 +1692,7 @@ public class AgentSetupService {
      *
      * @return the reference string of the entry to reuse, or null
      */
-    private String findReusableSecret(String plaintext) {
+    private String findReusableSecret(String plaintext, List<String> allowedHosts) {
         if (!VAULT_KEY_REUSE_CHECKSUM.equalsIgnoreCase(vaultKeyReuse)) {
             return null;
         }
@@ -1668,6 +1704,7 @@ public class AgentSetupService {
                     .filter(metadata -> secretProvider.matchesChecksum(
                             metadata.tenantId() == null ? SecretReference.DEFAULT_TENANT : metadata.tenantId(), metadata.checksum(), plaintext))
                     .filter(AgentSetupService::isUnrestricted)
+                    .filter(metadata -> coversHosts(metadata, allowedHosts))
                     // Oldest first, key name as tie-break: repeated setups with the same key
                     // must converge on ONE entry, so the choice cannot depend on listing order.
                     .min(Comparator
@@ -1794,6 +1831,100 @@ public class AgentSetupService {
         // Delegates rather than repeating the three shapes, so this cannot drift from
         // the deploy-time check's idea of "everyone".
         return SecretMetadata.grantsAllAgents(metadata.allowedAgents());
+    }
+
+    /**
+     * Where a secret this setup vaults may be sent.
+     *
+     * @param requested
+     *            the request's {@code allowedHosts}: {@code null} to derive,
+     *            {@code ["*"]} for no restriction, else the exact list
+     * @param derived
+     *            what {@link SetupSecretHosts} worked out from the request — the
+     *            base URL the admin typed, or the provider's own endpoint —
+     *            {@code null} when it could not
+     * @param field
+     *            the request field the secret came from, for the message
+     */
+    record HostRule(List<String> requested, List<String> derived, String field) {
+    }
+
+    /**
+     * The requested list that applies to the {@code apiAuth} secret of
+     * {@code /setup-api}. The request's {@code allowedHosts} names where the LLM
+     * {@code apiKey} may go; the {@code apiAuth} credential goes to the API the
+     * generated httpcalls call, whose hosts are known exactly from their target
+     * servers. Applying an explicit LLM list to it as well locked the credential to
+     * the model provider, and every generated call was then refused. So only an
+     * explicit {@code ["*"]} — "store it open", said out loud — carries over; any
+     * other list leaves {@code apiAuth} to its derived hosts.
+     */
+    static List<String> apiAuthRequestedHosts(List<String> requested) {
+        return SetupSecretHosts.isExplicitlyUnrestricted(requested) ? requested : null;
+    }
+
+    /**
+     * The {@code allowedHosts} a newly vaulted secret is stored with, or
+     * {@code null} for none.
+     * <p>
+     * A wizard key used to be stored with none, so any editor could copy the
+     * reference into a configuration pointed at their own host and receive the key
+     * (security review 2026-10-17, H1). Now the list is derived from the request,
+     * and an unrestricted secret is created only when the request says
+     * {@code allowedHosts: ["*"]} — or, outside {@code grant-enforcement=enforce},
+     * when nothing could be derived, with a warning. That is the same rule
+     * {@code allowedAgents} follows on the secrets REST API.
+     */
+    List<String> allowedHostsFor(HostRule rule) throws AgentSetupException {
+        List<String> requested = rule == null ? null : rule.requested();
+        String field = rule == null ? "the secret" : rule.field();
+        if (requested != null) {
+            if (SetupSecretHosts.isExplicitlyUnrestricted(requested)) {
+                LOGGER.warnf("[SECURITY] Setup stores %s with no destination restriction (allowedHosts [\"*\"] requested): any configuration "
+                        + "that references it may send it to any host.", field);
+                return null;
+            }
+            if (requested.isEmpty()) {
+                throw new AgentSetupException("allowedHosts must not be empty. List the host[:port] values " + field + " may be sent to, or "
+                        + "send [\"*\"] to store it with no destination restriction.");
+            }
+            try {
+                return VaultHostAllowlist.validatedHosts(requested);
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException("Invalid allowedHosts: " + e.getMessage() + " Send [\"*\"] alone for no restriction.", e);
+            }
+        }
+        if (rule != null && rule.derived() != null && !rule.derived().isEmpty()) {
+            return rule.derived();
+        }
+        if (VaultGrantGate.Mode.parseStrict(grantEnforcement) == VaultGrantGate.Mode.ENFORCE) {
+            throw new AgentSetupException("Setup cannot tell where " + field + " is meant to be sent, so it would be stored with no destination "
+                    + "restriction, which eddi.vault.grant-enforcement=enforce does not do silently. Pass the endpoint (baseUrl / llmBaseUrl "
+                    + "/ apiBaseUrl), or allowedHosts with the host[:port] values it may go to, or allowedHosts [\"*\"] to allow any host.");
+        }
+        LOGGER.warnf("[SECURITY] Setup stores %s with no destination restriction: no endpoint was given and none is known for the provider. "
+                + "Restrict it with PUT /secretstore/secrets/{tenant}/{key}/grant {\"allowedHosts\": [...]}.", field);
+        return null;
+    }
+
+    /**
+     * Whether an existing entry is restricted exactly as the one setup would store:
+     * an unrestricted entry for an unrestricted wish, otherwise a restricted entry
+     * with the same hosts. Reusing a legacy, unrestricted wizard key for a new
+     * agent would carry the exposure forward; reusing a wider list would too, by
+     * less.
+     */
+    private static boolean coversHosts(SecretMetadata metadata, List<String> wanted) {
+        boolean restricted = SecretMetadata.restrictsHosts(metadata.allowedHosts());
+        if (wanted == null) {
+            return !restricted;
+        }
+        if (!restricted) {
+            return false;
+        }
+        var stored = metadata.allowedHosts().stream().filter(Objects::nonNull).map(h -> h.trim().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+        return stored.equals(new HashSet<>(wanted));
     }
 
     /**

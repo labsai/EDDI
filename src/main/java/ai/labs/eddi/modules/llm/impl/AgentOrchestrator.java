@@ -797,7 +797,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private ToolContribution discoverToolsContribution(List<ToolSpecification> availableSpecs,
                                                        LlmConfiguration.Task task) {
         var discoverTool = new DiscoverToolsTool(availableSpecs, task.getMaxToolsInContext());
-        LOGGER.infof("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", availableSpecs.size());
+        LOGGER.debugf("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", availableSpecs.size());
         var reflected = ToolObjectReflector.reflect(List.of(discoverTool));
         return new ToolContribution(reflected.specs(), reflected.executors(), reflected.toolSources(), Map.of(),
                 List.of(), reflected.toolCanonicalNames());
@@ -1031,12 +1031,12 @@ class AgentOrchestrator implements IAgentOrchestrator {
             }
             int maxToolsInContext = task.getMaxToolsInContext();
             allTools.add(new DiscoverToolsTool(allSpecs, maxToolsInContext));
-            LOGGER.infof("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", allSpecs.size());
+            LOGGER.debugf("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", allSpecs.size());
             return allTools;
         }
 
         // EAGER strategy (default): return all tools directly
-        LOGGER.info("Enabled " + allTools.size() + " built-in tools for agent");
+        LOGGER.debugf("Enabled %d built-in tools for agent", allTools.size());
         return allTools;
     }
 

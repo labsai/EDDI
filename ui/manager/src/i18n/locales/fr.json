@@ -335,6 +335,13 @@
     "maxForksHint": "par conversation",
     "maxRecallEntries": "Rappel max.",
     "memoryPolicy": "Politique de mémoire",
+    "limits": "Limites",
+    "limitsDesc": "Plafonne ce qu'une seule conversation avec cet agent peut dépenser. Une fois le plafond atteint, l'agent n'appelle plus son modèle et renvoie sa réponse de repli.",
+    "maxCostPerConversation": "Coût max. par conversation (USD)",
+    "unlimited": "Illimité",
+    "maxCostHint": "Vide = illimité. 0 = aucune dépense facturée.",
+    "maxCostInvalid": "Saisissez un montant supérieur ou égal à 0, ou laissez vide pour illimité.",
+    "maxCostPricedOnly": "Seuls les modèles tarifés comptent pour ce plafond. Un modèle sans prix d'entrée/sortie dans sa configuration LLM ajoute 0 $, mais est tout de même arrêté dès que d'autres dépenses ont atteint le plafond.",
     "memoryPolicyDesc": "La discipline d'écriture stricte régit ce qui se passe lorsque les mises à jour de propriétés échouent pendant une étape de conversation. Choisissez comment le moteur gère les données partiellement validées.",
     "onCapReached": "Lorsque le plafond est atteint",
     "onFailure": "Stratégie en cas d'échec",
@@ -1492,6 +1499,13 @@
     "maxToolCallsPerTurnDefault": "(par défaut {{n}})",
     "maxToolCallsHint": "Les appels au-delà d'une limite ne sont pas exécutés : chacun reçoit un résultat NOT_EXECUTED indiquant au modèle que la limite est atteinte, et le modèle répond avec ce qu'il a. Les appels refusés n'atteignent jamais la validation. Le décompte par tour inclut les appels faits avant une pause d'approbation. -1 ou 0 supprime une limite. Nécessite EDDI 6.6 ou plus — laissez vide sur un serveur plus ancien.",
     "maxToolCallsUncapped": "Une limite est désactivée : le modèle peut y exécuter un nombre illimité d'appels d'outils, borné seulement par Max Tool Iterations.",
+    "repeatGuardTitle": "Appels d'outils échoués répétés",
+    "repeatGuardEnabled": "Bloquer les appels échoués répétés",
+    "maxIdenticalFailures": "Échecs identiques autorisés",
+    "maxRefusalsPerTurn": "Refus avant l'arrêt",
+    "maxIdenticalCalls": "Max. d'appels identiques réussis",
+    "exemptTools": "Outils exemptés (séparés par des virgules)",
+    "repeatGuardHint": "Un appel d'outil déjà échoué à l'identique, sans qu'aucun autre n'ait réussi depuis, reçoit NOT_EXECUTED au lieu d'être réexécuté ; une fois la limite de refus atteinte, le tour se termine par un message fixe. Activé par défaut ; laissez les champs vides pour garder les valeurs par défaut. Un échec définitif (p. ex. HTTP 403/404) est refusé dès l'appel identique suivant, un échec réessayable après les échecs autorisés. Le max. d'appels identiques réussis est désactivé tant qu'il n'est pas défini (-1 ou 0 = illimité). Nécessite EDDI 6.6 ou plus - ne pas modifier sur un serveur plus ancien.",
     "toggleTask": "Afficher ou masquer les détails de la tâche",
     "noActionsWarning": "Cette tâche n'a aucune action déclencheuse et ne s'exécute donc jamais. Ajoutez l'action émise par vos règles de comportement, par exemple send_message.",
     "model": "Modèle",
@@ -1962,6 +1976,9 @@
     "allowedHostsHint": "Toute requête, tout modèle, toute base de connaissances ou tout serveur MCP/A2A qui enverrait ce secret à un autre hôte est refusé. Un hôte sans port correspond à tous les ports.",
     "allowedHostsTightened": "Ceci restreint les destinations du secret. Un agent déployé, une base de connaissances ou une configuration MCP/A2A qui l’envoie à un autre hôte cessera de fonctionner à son prochain appel — ce n’est pas vérifié à l’avance.",
     "allowedHostsAcknowledge": "J’ai vérifié que tout ce qui utilise ce secret ne l’envoie qu’à ces hôtes.",
+    "allowedHostsOnlyThese": "Uniquement ces hôtes",
+    "allowedHostsAnyHost": "N’importe quel hôte",
+    "allowedHostsRequired": "Ajoutez au moins un hôte ou choisissez « N’importe quel hôte ». Un nouveau secret exige l’un ou l’autre.",
     "grantOnlyTheseAgents": "Uniquement ces agents",
     "grantAllHint": "Tous les agents de ce tenant peuvent référencer ce secret. Restreignez la liste pour limiter la portée d’une seule configuration compromise.",
     "grantAddAgent": "Ajouter un agent",
@@ -2921,6 +2938,7 @@
     "question": "Question",
     "readyToDiscuss": "Prêt à discuter",
     "responding": "répond…",
+    "usingTool": "Utilisation de {{tool}}…",
     "reviewMemberRoster": "Liste des membres",
     "reviewMembers": "Membres",
     "reviewModerator": "Modérateur",
@@ -3572,7 +3590,7 @@
     "intent": "Intention",
     "deployments": "Déploiements d’agents",
     "addDeployment": "Ajouter un agent",
-    "agents": "agents",
+    "intentPlaceholder": "p. ex. booking_request",
     "empty": "Aucun déclencheur configuré",
     "created": "Déclencheur créé",
     "updated": "Déclencheur mis à jour",
@@ -4027,7 +4045,11 @@
     "targetType": "Type",
     "triggerHint": "Les utilisateurs saisissent « mot-clé : message » pour router vers cette cible",
     "triggerKeywords": "Mots-clés déclencheurs",
-    "triggers": "déclencheurs",
+    "targetFallback": "Cible {{number}}",
+    "untitledChannel": "Canal sans titre",
+    "triggerCount_one": "{{count}} déclencheur",
+    "triggerCount_many": "{{count}} déclencheurs",
+    "triggerCount_other": "{{count}} déclencheurs",
     "type": "Type de canal",
     "webhookHint": "Collez cette URL dans le champ Request URL des Event Subscriptions de votre application Slack.",
     "webhookUrl": "URL du webhook",
@@ -4324,6 +4346,13 @@
     "tenantId": "ID du locataire",
     "title": "Quotas de locataire",
     "limitHintEmpty": "Vide ou -1 = illimité, 0 = bloqué",
+    "costPricedOnly": "Ne compte que la dépense tarifée : un modèle sans inputPricePer1M / outputPricePer1M dans sa configuration LLM ajoute 0 $ au total, mais est refusé comme les autres une fois le budget épuisé.",
+    "budgetTitle": "Budget de coût mensuel",
+    "budgetUnlimited": "Aucun budget de coût mensuel n'est défini : la dépense est mesurée mais jamais limitée.",
+    "budgetNotEnforced": "Un budget de {{limit}} est défini, mais l'application est désactivée : il n'est pas appliqué.",
+    "budgetReached": "Budget atteint ({{spent}} sur {{limit}}). Les tâches LLM renvoient leur réponse de repli au lieu d'appeler le modèle et les appels d'outils sont refusés, jusqu'au changement de mois ou à l'augmentation de la limite.",
+    "budgetRemaining": "{{spent}} sur {{limit}} utilisés ce mois-ci. Il reste {{remaining}} avant que les modèles ne soient plus appelés.",
+    "budgetNote": "Compte les appels de modèle tarifés et le coût des outils suivis, par mois calendaire UTC. Les modèles sans prix, les résumés de conversation et les embeddings ne sont pas mesurés. Un tour qui franchit la limite se termine quand même : le total peut la dépasser légèrement. Les appels refusés sont comptés dans la métrique eddi.llm.spend.refused.",
     "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
     "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité."
   },
@@ -5006,6 +5035,7 @@
       "action": "Activer"
     },
     "activation": {
+      "storedPromptConfirm": "Ces instructions proviennent de la configuration enregistrée, que toute personne pouvant modifier les paramètres de la plateforme a pu changer. Je les ai lues ci-dessus et je souhaite les installer.",
       "title": "Activer l'opérateur de plateforme",
       "subtitle": "Choisissez le modèle qui fera fonctionner l'opérateur, vérifiez ses instructions et déployez.",
       "modelStep": "Modèle",
@@ -5108,7 +5138,11 @@
       "gateUnverifiedHelp": "La barrière d'approbation n'a pas pu être vérifiée sur le document de cet agent.",
       "agentId": "Agent",
       "platformBaseUrl": "Appelle la plateforme à",
-      "platformBaseUrlUnknown": "non enregistrée"
+      "platformBaseUrlUnknown": "non enregistrée",
+      "unregister": "Désinscrire l'opérateur",
+      "unregisterConfirmTitle": "Désinscrire l'opérateur de plateforme ?",
+      "unregisterConfirmBody": "Seule la configuration enregistrée de l'opérateur est supprimée. L'agent enregistré n'a pas pu être vérifié comme un opérateur mis en place par ce Manager : il n'est donc ni déployé, ni retiré, ni supprimé — vérifiez-le sur l'écran Agents.",
+      "unverifiedActions": "Cet agent n'a pas pu être vérifié comme un opérateur mis en place par le Manager ; cet écran ne le sondera, ne le retirera ni ne le supprimera donc pas. « Reconfigurer » provisionne un nouvel opérateur et laisse cet agent en place."
     },
     "chat": {
       "empty": "Interrogez votre déploiement. L'opérateur fait les recherches et vous montre chaque appel qu'il effectue.",
@@ -5198,7 +5232,8 @@
       "activatedChecking": "Opérateur de plateforme activé. Les vérifications de connexion s'exécutent en arrière-plan.",
       "writeProbeVerified": "Accès en écriture vérifié — une écriture réelle protégée a été mise en pause pour approbation.",
       "writeProbeFailed": "La barrière d'approbation n'a pas tenu — l'opérateur a été supprimé.",
-      "writeProbeInconclusive": "Le test d'écriture en direct n'a pas été concluant."
+      "writeProbeInconclusive": "Le test d'écriture en direct n'a pas été concluant.",
+      "unregistered": "Opérateur de plateforme désinscrit"
     },
     "canary": {
       "genericFailure": "La vérification de connexion a échoué.",
@@ -5239,7 +5274,22 @@
     "superseded": {
       "title": "L'agent opérateur précédent est toujours déployé."
     },
+    "trust": {
+      "checking": "Vérification de l'opérateur avant d'ouvrir le chat…",
+      "title": "L'opérateur de plateforme n'a pas pu être vérifié",
+      "body": "Le chat est désactivé car l'agent enregistré comme opérateur ({{agentId}}) n'est pas démontrablement celui que ce Manager a configuré. Toute personne pouvant modifier les paramètres de la plateforme peut changer de quel agent il s'agit.",
+      "reasonMarker": "Il ne porte pas le marqueur d'opérateur de plateforme ; ce n'est donc peut-être pas l'agent provisionné par le Manager.",
+      "reasonGate": "Sa porte d'approbation n'a pas pu être vérifiée : {{detail}}",
+      "reasonUnreadable": "Les vérifications n'ont pas pu aboutir : {{detail}}",
+      "recheck": "Vérifier à nouveau",
+      "manage": "Ouvrir l'écran de l'opérateur"
+    },
     "upgrade": {
+      "reviewTitle": "Vérifier les instructions enregistrées",
+      "reviewBody": "Ces instructions ont été enregistrées plus tôt et seront installées sur le nouvel opérateur. Toute personne pouvant modifier les paramètres de la plateforme a pu les changer : lisez ce qui diffère de la valeur par défaut avant de continuer.",
+      "reviewSummary": "{{added}} lignes ajoutées, {{removed}} lignes par défaut supprimées",
+      "reviewFull": "Afficher le texte enregistré complet",
+      "reviewConfirm": "J'ai lu ces instructions et je souhaite les installer",
       "hint": "Une mise à jour du Platform Operator est disponible.",
       "blockerBaseUrl": "L'adresse de son serveur de modèles n'a pas été enregistrée — saisissez-la à nouveau pour mettre à jour.",
       "addedTools_other": "{{count}} nouveaux outils",
@@ -5869,6 +5919,7 @@
     "referenceCopied": "Référence copiée",
     "copyReference": "Copier la référence à utiliser dans un agent",
     "secretStored": "Secret enregistré",
+    "secretHosts": "Envoyé uniquement à : {{hosts}}",
     "secrets": "Secrets",
     "noSecrets": "Aucun secret dans cet espace pour l'instant",
     "deleteNamed": "Supprimer {{name}}",
@@ -6375,5 +6426,14 @@
     "cancelled": "Non déployés : la clé du coffre n'a pas été accordée. Les agents ont été créés – réessayez pour l'accorder et les déployer, ou déployez-les depuis leurs pages d'agent.",
     "failed": "Créés mais non déployés : {{names}}. {{reason}} Réessayez, ou déployez-les depuis leurs pages d'agent.",
     "memberCancelled": "Non déployé : la clé du coffre n'a pas été accordée"
+  },
+  "modelCombobox": {
+    "toggle": "Afficher les suggestions de modèles",
+    "listLabel": "Suggestions de modèles",
+    "matching": "Correspondant à « {{query}} »",
+    "otherModels": "Autres modèles",
+    "default": "par défaut",
+    "noMatch": "Aucune suggestion ne correspond à « {{query}} » — la valeur sera utilisée telle que saisie.",
+    "customHint": "Absent de la liste ? Saisissez n’importe quel identifiant de modèle pris en charge par votre fournisseur."
   }
 }

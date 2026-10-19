@@ -59,6 +59,15 @@ class VaultSecretProviderAllowedHostsTest {
     }
 
     @Test
+    @DisplayName("storeIfAbsent writes allowedHosts in the same insert, so the secret is never visible unrestricted")
+    void storeIfAbsentCarriesHosts() throws Exception {
+        assertTrue(provider.storeIfAbsent(REF, "value", "d", List.of("*"), List.of("api.anthropic.com")));
+
+        assertEquals(List.of("api.anthropic.com"), provider.getMetadata(REF).allowedHosts());
+        assertEquals("value", provider.resolve(REF));
+    }
+
+    @Test
     @DisplayName("a rotation without a grant keeps the stored one")
     void rotationKeepsGrant() throws Exception {
         provider.store(REF, "value", "d", List.of("agent-a"));

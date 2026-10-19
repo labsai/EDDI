@@ -716,6 +716,59 @@ class ConversationMemoryUtilitiesTest {
 
     // ─── Test Helpers ────────────────────────────────────────────
 
+    // =================================================================
+    // conversationCost — the in-process running total of audit:cost
+    // =================================================================
+
+    private static ConversationMemorySnapshot snapshotWithStepCosts(Object... perStepCosts) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationId("conv-cost");
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        for (Object cost : perStepCosts) {
+            snapshot.getConversationOutputs().add(new ConversationOutput());
+            var workflow = new WorkflowRunSnapshot();
+            if (cost != null) {
+                workflow.getLifecycleTasks().add(new ResultSnapshot(MemoryKeys.AUDIT_COST, cost, null, new Date(), null, false));
+            }
+            var step = new ConversationStepSnapshot();
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+        }
+        return snapshot;
+    }
+
+    @Test
+    @DisplayName("conversationCost sums audit:cost over every step, even when only the current step is returned")
+    void conversationCostSumsEveryStep() {
+        var simple = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(snapshotWithStepCosts(0.05, null, 0.07), true, true,
+                null);
+
+        assertEquals(1, simple.getConversationSteps().size(), "only the current step is projected");
+        assertEquals(0.12, simple.getConversationCost(), 1e-9, "audit:cost is per step, so the conversation's spend is the sum");
+    }
+
+    @Test
+    @DisplayName("conversationCost is null when no step carried a cost, and skips non-finite or negative values")
+    void conversationCostAbsentOrPoisoned() {
+        assertNull(ConversationMemoryUtilities.convertSimpleConversationMemory(snapshotWithStepCosts(null, null), true, true)
+                .getConversationCost());
+        assertEquals(0.05, ConversationMemoryUtilities.convertSimpleConversationMemory(
+                snapshotWithStepCosts(Double.NaN, 0.05, Double.POSITIVE_INFINITY, -1.0, "x"), false, false).getConversationCost(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("conversationCost never reaches the wire")
+    void conversationCostIsNotSerialized() throws Exception {
+        var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(snapshotWithStepCosts(0.05), true, false);
+        assertNotNull(simple.getConversationCost());
+
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(simple);
+
+        assertFalse(json.contains("conversationCost"), json);
+        assertFalse(json.contains("audit:cost"), json);
+    }
+
     private ConversationMemorySnapshot buildSnapshotWithOutputs(String... keys) {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationId("conv-1");

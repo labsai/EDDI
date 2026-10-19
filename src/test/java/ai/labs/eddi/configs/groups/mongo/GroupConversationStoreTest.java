@@ -468,6 +468,36 @@ class GroupConversationStoreTest {
         verify(storage).removeAllPermanently("gc-2");
     }
 
+    @Test
+    @DisplayName("listAllForUser — exact owners only, with the scanned count as the paging cursor")
+    void listAllForUserKeepsExactOwnersAndReportsScanned() throws Exception {
+        var mine = resourceFor("user-1");
+        var nearMiss = resourceFor("user-10");
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(20), eq(10)))
+                .thenReturn(List.of(resourceId("gc-1"), resourceId("gc-2")));
+        when(storage.read("gc-1", 1)).thenReturn(mine);
+        when(storage.read("gc-2", 1)).thenReturn(nearMiss);
+
+        var page = store.listAllForUser("user-1", 20, 10);
+
+        assertEquals(2, page.scanned());
+        assertEquals(1, page.owned().size());
+        assertEquals("gc-1", page.owned().getFirst().getId());
+        verify(storage, never()).removeAllPermanently(any());
+    }
+
+    @Test
+    @DisplayName("listAllForUser — an unreadable row fails the listing instead of vanishing from an export")
+    void listAllForUserFailsOnUnreadableRow() throws Exception {
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("lastModified"), eq(0), anyInt()))
+                .thenReturn(List.of(resourceId("gc-1")));
+        IResourceStorage.IResource<GroupConversation> broken = mock(IResourceStorage.IResource.class);
+        when(broken.getData()).thenThrow(new IOException("corrupt"));
+        when(storage.read("gc-1", 1)).thenReturn(broken);
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.listAllForUser("user-1", 0, 10));
+    }
+
     /**
      * findResources caps a page at MAX_RESULT_LIMIT, and a limit &lt; 1 resolves to
      * that cap rather than meaning "unbounded". A single query would therefore

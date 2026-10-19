@@ -14,6 +14,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.secrets.VaultGrantRequests;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -100,8 +101,10 @@ public class RestSpaceResources implements IRestSpaceResources {
         }
         var reference = new SecretReference(tenant, keyName);
         List<String> allowedAgents;
+        List<String> allowedHosts;
         try {
             allowedAgents = VaultGrantRequests.validatedGrant(body.allowedAgents());
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage());
         }
@@ -110,6 +113,7 @@ public class RestSpaceResources implements IRestSpaceResources {
             if (!exists) {
                 try {
                     VaultGrantRequests.requireGrantOnCreate(grantEnforcement, allowedAgents);
+                    VaultGrantRequests.requireHostsOnCreate(grantEnforcement, body.allowedHosts());
                 } catch (IllegalArgumentException e) {
                     throw new BadRequestException(e.getMessage());
                 }
@@ -118,7 +122,7 @@ public class RestSpaceResources implements IRestSpaceResources {
                     allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
                 }
             }
-            secretProvider.store(reference, body.value(), body.description(), allowedAgents, null);
+            secretProvider.store(reference, body.value(), body.description(), allowedAgents, allowedHosts);
             // A model built with the old key, or with the unresolved reference, is cached
             // downstream — the same reason RestSecretStore always invalidates.
             secretResolver.invalidateCache(reference);
@@ -244,7 +248,8 @@ public class RestSpaceResources implements IRestSpaceResources {
 
     private static SpaceSecret toSecret(SecretMetadata metadata) {
         return new SpaceSecret(metadata.keyName(), new SecretReference(metadata.tenantId(), metadata.keyName()).toReferenceString(),
-                metadata.description(), metadata.allowedAgents(), metadata.createdAt() == null ? null : metadata.createdAt().toString());
+                metadata.description(), metadata.allowedAgents(), metadata.createdAt() == null ? null : metadata.createdAt().toString(),
+                metadata.allowedHosts() == null ? List.of() : metadata.allowedHosts());
     }
 
     /**

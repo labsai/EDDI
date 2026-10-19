@@ -43,6 +43,14 @@ curl -X POST http://localhost:7070/mcpcallsstore/mcpcalls/discover-tools \
 > URL is recorded by ingress, any reverse proxy, access logs, browser history and
 > APM traces before EDDI ever sees it. The `GET` form still works for servers that
 > need no authentication.
+>
+> The header carries the **credential itself**. A `${vault:…}` or `${vars:…}`
+> reference there is refused with a 400: the probe connects to whatever URL the
+> request names, so resolving a vault reference would hand the secret to that URL
+> (security review 2026-10-17, H1). Save the MCP configuration with the reference
+> instead — it is resolved, and checked against the secret's
+> [`allowedHosts`](secrets-vault.md#destination-allow-list-allowedhosts), when an
+> agent uses it.
 
 ---
 

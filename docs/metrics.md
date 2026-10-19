@@ -195,6 +195,7 @@ eddi_tool_execution_cached_total            # Cache-served executions
 eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
+eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
 ```
 
@@ -402,8 +403,10 @@ eddi_coordinator_dead_letters_retained      # The same gauge under the name the 
 eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
-eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit)
+eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit|conversation_queue)
 eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
+eddi_datastore_pool_wait_seconds            # Wait for a pooled MongoDB connection, per checkout (timer; PostgreSQL: agroal_blocking_time_*)
+eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for a connection
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
@@ -434,6 +437,20 @@ threads: past it a turn is refused with 503 `capacity_exceeded` and counted in
 persistence included, and a new conversation's start turn counts too, so the
 limit is reached slightly before `eddi_processing_conversation_count` shows it:
 that gauge drops as soon as the client has its answer.
+
+A refusal at the limit happens before the turn reads anything: the REST and SSE
+entry points check capacity before the ownership check and the conversation
+load, and a new conversation's start is checked before the access check, the
+GDPR restriction read and the agent lookup. A node at its limit spends no
+database round trips on turns it turns away, which matters most in a burst,
+when every refused client comes back after `Retry-After`. A conversation with more than
+`eddi.conversation.max-queued-turns-per-conversation` turns waiting refuses the
+next one with `reason="conversation_queue"`. Under load the MongoDB pool is
+where a turn's time goes; `eddi_datastore_pool_wait_seconds` shows how long
+operations wait for a connection, and `eddi_datastore_pool_wait_timeouts_total`
+how many gave up at the effective pool-wait limit: `waitQueueTimeoutMS` when the
+connection string sets it, otherwise `eddi.mongodb.max-wait-time-ms` (10 s by
+default; `0` leaves the driver's own 120 s).
 
 ### Pipeline Metrics
 
@@ -893,6 +910,7 @@ eddi_cluster_events_consumed_total          # Cluster events handled from other 
 eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
+eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
 eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
 eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}

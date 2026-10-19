@@ -130,6 +130,23 @@ class HttpClientModuleTest {
         assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost(host)));
     }
 
+    /**
+     * Security review 2026-10-17, H2: the same URI/URL host differential, on a
+     * redirect hop.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"x_y.example", "169.254.169.254.", "169%2e254%2e169%2e254"})
+    @DisplayName("a redirect hop whose host java.net.URI cannot read is refused")
+    void unreadableHopIsRefused(String host) {
+        assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost(host)));
+    }
+
+    @Test
+    @DisplayName("a redirect hop without a host is refused, not waved through")
+    void hostlessHopIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost("")));
+    }
+
     @Test
     @DisplayName("an ordinary hop is followed unchanged")
     void ordinaryHopIsFollowed() {

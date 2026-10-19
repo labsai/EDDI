@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.inject.Instance;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.security.Principal;
 import java.util.Map;
 
@@ -271,6 +273,100 @@ class ConversationAccessGuardTest {
             guard.conversationMemoryStoreInstance = instanceOf(store);
 
             assertThrows(ForbiddenException.class, () -> guard.requireConversationOwner(CONVERSATION_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("requireConversationTurnAccess (L4)")
+    class RequireConversationTurnAccess {
+
+        private static final String AGENT_ID = "aabbccddeeff00112233aabb";
+
+        private ResourceAccessGuard workspaceGuard;
+
+        @BeforeEach
+        void setUpGuard() {
+            workspaceGuard = mock(ResourceAccessGuard.class);
+        }
+
+        @SuppressWarnings("unchecked")
+        private ConversationAccessGuard turnGuard(SecurityIdentity identity) {
+            var guard = guardFor(identity, true);
+            Instance<ResourceAccessGuard> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(workspaceGuard);
+            guard.resourceAccessGuardInstance = instance;
+            return guard;
+        }
+
+        private void descriptorOnAgent(String ownerId, String agentId) throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setUserId(ownerId);
+            if (agentId != null) {
+                descriptor.setAgentResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + agentId + "?version=1"));
+            }
+            doReturn(descriptor).when(descriptorStore).readDescriptor(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("an owner whose access to the agent was revoked is refused the next turn")
+        void revokedUseRefusesTheTurn() throws Exception {
+            descriptorOnAgent(OWNER, AGENT_ID);
+            doThrow(new ForbiddenException("Access denied: you do not have access to this agent")).when(workspaceGuard)
+                    .requireAgentUseAccess(AGENT_ID);
+
+            assertThrows(ForbiddenException.class, () -> turnGuard(identityOf(OWNER, "eddi-user")).requireConversationTurnAccess(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("an owner who may still use the agent passes, and the owner id comes back")
+        void ownerWithUsePasses() throws Exception {
+            descriptorOnAgent(OWNER, AGENT_ID);
+
+            assertEquals(OWNER, turnGuard(identityOf(OWNER, "eddi-user")).requireConversationTurnAccess(CONVERSATION_ID));
+            verify(workspaceGuard).requireAgentUseAccess(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("without enforced workspaces (or for an admin) the agent is not checked at all")
+        void noCheckWhenNotEnforced() throws Exception {
+            descriptorOnAgent(OWNER, AGENT_ID);
+            when(workspaceGuard.seesEverything()).thenReturn(true);
+
+            assertEquals(OWNER, turnGuard(identityOf(OWNER, "eddi-user")).requireConversationTurnAccess(CONVERSATION_ID));
+            verify(workspaceGuard, never()).requireAgentUseAccess(anyString());
+        }
+
+        @Test
+        @DisplayName("owner semantics are unchanged: a non-owner is refused before the agent is looked at")
+        void nonOwnerRefusedFirst() throws Exception {
+            descriptorOnAgent(OWNER, AGENT_ID);
+
+            assertThrows(ForbiddenException.class, () -> turnGuard(identityOf(OTHER, "eddi-user")).requireConversationTurnAccess(CONVERSATION_ID));
+            verify(workspaceGuard, never()).requireAgentUseAccess(anyString());
+        }
+
+        @Test
+        @DisplayName("a descriptor without an agent falls back to the agent the memory recorded")
+        void agentFromMemory() throws Exception {
+            descriptorOnAgent(OWNER, null);
+            var store = mock(IConversationMemoryStore.class);
+            when(store.loadListingSummaries(anyCollection())).thenReturn(
+                    Map.of(CONVERSATION_ID, new ConversationListingSummary(CONVERSATION_ID, OWNER, null, null, AGENT_ID, 1, 0)));
+            var guard = turnGuard(identityOf(OWNER, "eddi-user"));
+            guard.conversationMemoryStoreInstance = instanceOf(store);
+
+            guard.requireConversationTurnAccess(CONVERSATION_ID);
+
+            verify(workspaceGuard).requireAgentUseAccess(AGENT_ID);
+        }
+
+        @Test
+        @DisplayName("a conversation that names no agent anywhere is refused under enforcement: it cannot be checked")
+        void noAgentAnywhereRefused() throws Exception {
+            descriptorOnAgent(OWNER, null);
+
+            assertThrows(ForbiddenException.class, () -> turnGuard(identityOf(OWNER, "eddi-user")).requireConversationTurnAccess(CONVERSATION_ID));
         }
     }
 

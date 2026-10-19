@@ -252,7 +252,7 @@ The agent document itself plus each workflow's LLM, HTTP-call, MCP-call, and RAG
 On most deployments this control is inert, for two reasons worth confirming rather than assuming:
 
 1. **No master key, no check.** With `eddi.vault.master-key` unset the vault is disabled and the checker reports no violations without looking at anything.
-2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]` — written out by the wizard, which says why in its source: the agent being set up has no id yet.
+2. **Auto-vaulted keys are unrestricted by agent.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]` — written out by the wizard, which says why in its source: the agent being set up has no id yet. Their *destination* is restricted instead — see [Where a wizard key may be sent](#where-a-wizard-key-may-be-sent).
 
 The deployments that *are* affected have **both** a master key and a grant an operator has deliberately narrowed. There, enforcement is a behavior change with no warning phase — the first symptom is an agent refusing to deploy. Before enabling it, run once with `warn` and confirm the log is free of:
 
@@ -383,7 +383,7 @@ Three properties are worth knowing:
 
 The agent grant says *which agent* may use a key. It says nothing about *where* the key goes: an editor who may change an agent's LLM configuration can point `baseUrl` at a host of their own, keep `apiKey: ${vault:openai-key}`, and the deploy-time check passes because the agent *is* granted the key. `${connection:…}` closes this with its `baseUrlAllowlist`; `${vault:…}` had nothing.
 
-A secret may now carry an optional **`allowedHosts`** list: the exact destinations it may be sent to.
+A secret carries an **`allowedHosts`** list: the exact destinations it may be sent to. Under `enforce` (the shipped default) a create must say what it is — see [Required on a create](#required-on-a-create) below.
 
 ```bash
 # At creation, with the value ...
@@ -399,10 +399,23 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 
 - **Entries are exact `host` or `host:port`** — no scheme, no path, no wildcard, compared case-insensitively. `host` alone admits that host on any port; `host:port` admits only that port, where the destination's port is the one in its URL or the scheme default (443 for `https`, 80 for `http`). There is no suffix matching: `example.com` admits neither `api.example.com` nor `example.com.attacker.net`. At most 100 entries.
 - **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl` or `host` in `langchain.json`), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
-- **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing until an operator sets it. `[]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
+- **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing for those until an operator sets it. `[]` or `["*"]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use.
 - **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's.
-- **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+- **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+
+### Required on a create
+
+`allowedAgents` limits which agents may reference a secret, but any editor can write a configuration that sends a referenced secret to a URL of their choosing, so a secret created without `allowedHosts` went wherever the next configuration edit pointed it (security review 2026-10-17, H1). Under `eddi.vault.grant-enforcement=enforce` a **create** — through `PUT /secretstore/secrets/{tenantId}/{keyName}` or a space's `PUT /spacestore/secrets/{key}` — therefore has to say where the secret may go, the same way it already has to say which agents may use it:
+
+| `allowedHosts` on a create | Result under `enforce` |
+| --- | --- |
+| omitted | **400**, naming the field and the `["*"]` opt-out |
+| `[]` | **400** — every layer reads an empty list as "any host", so a list filtered down to nothing must not create an open secret |
+| `["*"]` | stored with no destination restriction, said out loud. `"*"` is only accepted alone; it is never a pattern |
+| `["api.openai.com", …]` | stored as given, validated as above |
+
+Under `warn` and `off` an omitted list still creates an unrestricted secret. A **rotation** may omit the list in every mode and keeps the stored one. The setup wizard derives the list itself ([Where a wizard key may be sent](#where-a-wizard-key-may-be-sent)), and the Manager's **Add Secret** dialog, its inline create in the secret picker and the Workspaces page ask for it, offering *Any host* as the explicit choice.
 
 ## Encryption
 
@@ -646,6 +659,25 @@ When creating agents through the Manager's agent wizard, the Platform Operator, 
 2. `AgentSetupService.vaultApiKey()` resolves it against the vault (see *Reusing one key across agents* below)
 3. A vault reference (`${vault:setup.<agent-name>.<timestamp>-<random>.apiKey}`, or the name you chose) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
+5. The entry is stored with an [`allowedHosts`](#destination-allow-list-allowedhosts) list — see *Where a wizard key may be sent* below
+
+### Where a wizard key may be sent
+
+Every editor can read the LLM configuration that holds the reference, so a key stored with no destination list could be copied into a configuration pointed at an editor's own host and received there on the first turn (security review 2026-10-17, H1). Every secret the setup wizard **creates** — the LLM `apiKey`, and on `/setup-api` the `apiAuth` it vaults — is therefore stored with the destinations it was meant for:
+
+| Request | `allowedHosts` stored |
+| --- | --- |
+| a base URL (`baseUrl` on `/setup`, `llmBaseUrl` on `/setup-api`) | that URL's host, with its port when the URL spells one |
+| no base URL, a provider with a known endpoint | the provider's host: `api.openai.com`, `api.anthropic.com`, `generativelanguage.googleapis.com`, `api.mistral.ai`, `router.huggingface.co`, `huggingface.co` (jlama's model-download token), or the default and regional hosts of a named OpenAI-compatible provider |
+| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`) |
+| `"allowedHosts": ["api.example.com", "proxy.example:8443"]` | exactly that list, for every secret the request vaults — validated as on the secrets API |
+| `"allowedHosts": ["*"]` | no list: the secret may go anywhere |
+
+Under `eddi.vault.grant-enforcement=enforce` (the default) a secret is never stored open by accident: when the request names no endpoint and the provider has none setup knows (`azure-openai` without an endpoint, for one), the setup is refused with a **400** before anything is written, and the message says to pass the endpoint, a host list, or `["*"]`. Under `warn` and `off` the secret is stored open and a `[SECURITY]` warning is logged. A configuration that names no endpoint still uses the provider's own and is not checked, so the default list is what an editor may legitimately *spell out*, not something the agent needs in order to work.
+
+Plaintext reuse (below) follows the same rule: an existing entry holding the same key is reused only when it is restricted to the same hosts — an `["*"]` request reuses only an open entry — so a key vaulted open by an earlier release is not handed to new agents; a restricted copy is stored instead. An entry named in `vaultKeyName` that already exists, or a `${vault:…}` reference passed as `apiKey`, is used as it is: that entry is the administrator's own, restricted however they left it. Narrow an older open entry with `PUT /secretstore/secrets/{tenant}/{key}/grant {"allowedAgents": ["*"], "allowedHosts": [...]}`.
+
+`allowedHosts` is an administrator's field like `grantReferencedSecrets`, and is not exposed on the MCP `setup_agent` / `create_api_agent` tools; those always derive the list.
 
 ### Reusing one key across agents
 
@@ -711,7 +743,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …, "allowedHosts": …}`). A create under `enforce` must carry `allowedAgents` |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …, "allowedHosts": …}`). A create under `enforce` must carry `allowedAgents` and `allowedHosts` |
 | `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description and `allowedHosts`) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value) and [Destination allow-list](#destination-allow-list-allowedhosts). `?dryRun=true` previews the impact without writing |
 | `POST`   | `/{tenantId}/{keyName}/grant/agents/{agentId}` | Add one agent to `allowedAgents`, atomically and idempotently; never changes a `*` grant — see [Adding one agent](#adding-one-agent-to-a-grant). `?dryRun=true` previews |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
@@ -727,13 +759,14 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, the agent grant list and an optional [destination allow-list](#destination-allow-list-allowedhosts). On a **create**, `allowedAgents` is required under `eddi.vault.grant-enforcement=enforce` (the default) — send `["*"]` to grant every agent explicitly; under `warn` and `off` an omitted list still defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents`, `allowedHosts` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, the agent grant list and the [destination allow-list](#destination-allow-list-allowedhosts). On a **create**, `allowedAgents` and `allowedHosts` are required under `eddi.vault.grant-enforcement=enforce` (the default) — send `["*"]` to grant every agent, or to allow any host, explicitly; under `warn` and `off` an omitted `allowedAgents` still defaults to `["*"]` and an omitted `allowedHosts` leaves the secret unrestricted ([Required on a create](#required-on-a-create)). On an **update** — rotating the value — an omitted `allowedAgents`, `allowedHosts` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {
   "value": "sk-...",
   "description": "OpenAI production key",
-  "allowedAgents": ["*"]
+  "allowedAgents": ["*"],
+  "allowedHosts": ["api.openai.com"]
 }
 ```
 

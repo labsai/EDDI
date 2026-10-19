@@ -62,6 +62,8 @@ export function useStoreSecret() {
       value: string;
       description?: string;
       allowedAgents?: string[];
+      /** Required on a create under grant enforcement — hosts, or `["*"]`. */
+      allowedHosts?: string[];
       createOnly?: boolean;
     }) => {
       if (args.createOnly && (await findSecret(args.tenantId, args.keyName))) {
@@ -77,6 +79,7 @@ export function useStoreSecret() {
         args.value,
         args.description,
         args.allowedAgents,
+        args.allowedHosts,
       );
     },
     onSettled: (_data, _err, vars) => {

@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -109,26 +110,42 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     }
 
     /**
-     * Every member agent must be one the caller may actually converse with.
+     * Every agent the group will run must be one the caller may actually converse
+     * with: each member, the moderator, and the facilitator.
      * <p>
      * A group's member turns run system-initiated, deliberately below the USE gate
      * — no interactive caller exists then. So recruiting an agent into a group is
      * the moment to check: without this, adding a colleague's private agent as a
      * member is a standing bypass of the gate on {@code /agents/{id}/start}, with
-     * the group discussion as the read-out channel.
+     * the group discussion as the read-out channel. The moderator and the
+     * facilitator run through the same member-turn path (M3), so they are checked
+     * the same way.
      * <p>
      * Nested groups are checked as agents here; an id that names a group rather
      * than an agent resolves against its own descriptor, which is the right subject
-     * either way.
+     * either way. A {@code HUMAN} member's id is a person's principal, not an
+     * agent, so it is not checked.
      */
     private void requireUseOnMembers(AgentGroupConfiguration configuration) {
-        if (configuration == null || configuration.getMembers() == null) {
+        if (configuration == null) {
             return;
         }
-        for (var member : configuration.getMembers()) {
-            if (member != null && member.agentId() != null && !member.agentId().isBlank()) {
-                resourceAccessGuard.requireAgentUseAccess(member.agentId());
+        if (configuration.getMembers() != null) {
+            for (var member : configuration.getMembers()) {
+                if (member != null && member.memberType() != MemberType.HUMAN) {
+                    requireUse(member.agentId());
+                }
             }
+        }
+        requireUse(configuration.getModeratorAgentId());
+        if (configuration.getFacilitator() != null) {
+            requireUse(configuration.getFacilitator().agentId());
+        }
+    }
+
+    private void requireUse(String agentId) {
+        if (agentId != null && !agentId.isBlank()) {
+            resourceAccessGuard.requireAgentUseAccess(agentId.trim());
         }
     }
     @Override
@@ -160,6 +177,9 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     public Response duplicateGroup(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         AgentGroupConfiguration config = restVersionInfo.read(id, version);
+        // The copy is the caller's group: VIEW on the source is not USE on the agents
+        // it runs, so the copy is held to the same check a create is.
+        requireUseOnMembers(config);
         Response response = restVersionInfo.create(config);
         // Sync descriptor for the duplicate too
         URI location = response.getLocation();

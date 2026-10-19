@@ -108,10 +108,67 @@ class RestSecretStoreGrantOnCreateTest {
             noSuchSecret();
 
             Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
-                    new IRestSecretStore.SecretRequest("v", null, List.of("*")));
+                    new IRestSecretStore.SecretRequest("v", null, List.of("*"), List.of("api.example.com")));
 
             assertEquals(201, resp.getStatus());
-            verify(secretProvider).store(any(SecretReference.class), eq("v"), isNull(), eq(List.of("*")), isNull());
+            verify(secretProvider).store(any(SecretReference.class), eq("v"), isNull(), eq(List.of("*")), eq(List.of("api.example.com")));
+        }
+
+        /**
+         * Security review 2026-10-17, H1: a secret with no allowedHosts goes wherever
+         * the next configuration edit points it, and every editor can write that edit.
+         * allowedAgents does not help: it limits which agents reference the secret, not
+         * where it is sent.
+         */
+        @Test
+        @DisplayName("a create without allowedHosts is a 400 that offers [\"*\"], and writes nothing")
+        void createWithoutHostsRefused() throws Exception {
+            noSuchSecret();
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, List.of("*")));
+
+            assertEquals(400, resp.getStatus());
+            String error = String.valueOf(entityOf(resp).get("error"));
+            assertTrue(error.contains("allowedHosts"), error);
+            assertTrue(error.contains("[\"*\"]"), "the any-host opt-out must be named: " + error);
+            verify(secretProvider, never()).store(any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an empty allowedHosts is refused on a create: it means any host")
+        void createWithEmptyHostsRefused() throws Exception {
+            noSuchSecret();
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, List.of("*"), List.of()));
+
+            assertEquals(400, resp.getStatus());
+            verify(secretProvider, never()).store(any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("allowedHosts [\"*\"] creates an unrestricted secret, stored as the empty list")
+        void explicitAnyHostAccepted() throws Exception {
+            noSuchSecret();
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, List.of("*"), List.of(" * ")));
+
+            assertEquals(201, resp.getStatus());
+            verify(secretProvider).store(any(SecretReference.class), eq("v"), isNull(), eq(List.of("*")), eq(List.of()));
+        }
+
+        @Test
+        @DisplayName("\"*\" is not a pattern: mixed with hosts it is still refused")
+        void wildcardMixedWithHostsRefused() throws Exception {
+            noSuchSecret();
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, List.of("*"), List.of("*", "api.example.com")));
+
+            assertEquals(400, resp.getStatus());
+            verify(secretProvider, never()).store(any(), any(), any(), any(), any());
         }
 
         @Test
@@ -135,6 +192,17 @@ class RestSecretStoreGrantOnCreateTest {
 
         assertEquals(201, resp.getStatus());
         verify(secretProvider).store(any(SecretReference.class), eq("v"), isNull(), eq(List.of("*")), isNull());
+    }
+
+    @Test
+    @DisplayName("under warn and off an omitted allowedHosts still creates an unrestricted secret")
+    void warnAndOffKeepTheUnrestrictedCreate() throws Exception {
+        noSuchSecret();
+
+        for (VaultGrantGate.Mode mode : List.of(VaultGrantGate.Mode.WARN, VaultGrantGate.Mode.OFF)) {
+            Response resp = rest(mode).storeSecret("default", "k", new IRestSecretStore.SecretRequest("v", null, List.of("*")));
+            assertEquals(201, resp.getStatus(), mode.name());
+        }
     }
 
     @Test
@@ -201,6 +269,20 @@ class RestSecretStoreGrantOnCreateTest {
             // Models, embedding stores and MCP clients check the list when they are
             // built and are cached: the eviction is what makes a narrowed list bite.
             verify(secretResolver).invalidateCache(new SecretReference("default", "k"));
+        }
+
+        @Test
+        @DisplayName("the grant endpoint reads [\"*\"] as clearing the restriction, like []")
+        void grantEndpointAcceptsAnyHost() throws Exception {
+            SecretMetadata before = existing(List.of("api.openai.com"));
+            when(secretProvider.updateAllowedHosts(any(SecretReference.class), eq(List.of()))).thenReturn(before);
+            when(secretProvider.updateGrant(any(SecretReference.class), any(), any())).thenReturn(before);
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).updateGrant("default", "k", false,
+                    new IRestSecretStore.GrantRequest(List.of("agentOne"), null, null, List.of("*")));
+
+            assertEquals(200, resp.getStatus(), String.valueOf(resp.getEntity()));
+            verify(secretProvider).updateAllowedHosts(any(SecretReference.class), eq(List.of()));
         }
 
         @Test

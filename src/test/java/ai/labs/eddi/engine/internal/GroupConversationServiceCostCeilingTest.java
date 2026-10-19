@@ -26,10 +26,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
-import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -155,12 +152,10 @@ class GroupConversationServiceCostCeilingTest {
                 var output = new ConversationOutput();
                 output.put("output", List.of("Response"));
                 snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
-                var step = new SimpleConversationStep();
-                // AUDIT_COST is cumulative per conversation, so a member's second turn
-                // reports the running total, not that turn's delta.
-                step.getConversationStep().add(new ConversationStepData(
-                        MemoryKeys.AUDIT_COST, costPerTurn * counter.incrementAndGet(), null, null));
-                snapshot.getConversationSteps().add(step);
+                // conversationCost is the conversation's running total (the sum of
+                // every step's AUDIT_COST), so a member's second turn reports both
+                // turns, not that turn's delta.
+                snapshot.setConversationCost(costPerTurn * counter.incrementAndGet());
                 handler.onComplete(snapshot);
             }
             return null;

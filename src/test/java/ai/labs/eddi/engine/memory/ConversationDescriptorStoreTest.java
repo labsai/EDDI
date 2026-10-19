@@ -62,11 +62,42 @@ class ConversationDescriptorStoreTest {
     class UpdateTimeStampTests {
 
         @Test
-        @DisplayName("happy path — reads, updates, and saves descriptor")
-        void happyPath() throws Exception {
+        @DisplayName("one update of lastModifiedOn — no read, no rewrite of the descriptor")
+        void stampsWithOneUpdate() throws Exception {
+            doReturn(true).when(internalStore).touchLastModified(eq("conv-1"), anyLong());
+            long before = System.currentTimeMillis();
+
+            store.updateTimeStamp("conv-1");
+
+            verify(internalStore).touchLastModified(eq("conv-1"), longThat(t -> t >= before && t <= System.currentTimeMillis()));
+            verify(internalStore, never()).getCurrentResourceId(anyString());
+            verify(internalStore, never()).readDescriptor(anyString(), anyInt());
+            verify(internalStore, never()).setDescriptor(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("no live descriptor — nothing else is tried")
+        void noLiveDescriptor() throws Exception {
+            doReturn(false).when(internalStore).touchLastModified(eq("gone"), anyLong());
+
+            assertDoesNotThrow(() -> store.updateTimeStamp("gone"));
+            verify(internalStore, never()).setDescriptor(anyString(), anyInt(), any());
+        }
+
+        @Test
+        @DisplayName("a store failure is swallowed: the turn is already stored")
+        void swallowsStoreFailure() {
+            doThrow(new IllegalStateException("db down")).when(internalStore).touchLastModified(eq("error"), anyLong());
+
+            assertDoesNotThrow(() -> store.updateTimeStamp("error"));
+        }
+
+        @Test
+        @DisplayName("a backend without single-field updates falls back to reading and rewriting the descriptor")
+        void fallsBackToRewrite() throws Exception {
+            doThrow(new UnsupportedOperationException()).when(internalStore).touchLastModified(eq("conv-1"), anyLong());
             IResourceStore.IResourceId resourceId = mockResourceId("conv-1", 1);
             doReturn(resourceId).when(internalStore).getCurrentResourceId("conv-1");
-
             ConversationDescriptor descriptor = new ConversationDescriptor();
             doReturn(descriptor).when(internalStore).readDescriptor("conv-1", 1);
 
@@ -77,21 +108,13 @@ class ConversationDescriptorStoreTest {
         }
 
         @Test
-        @DisplayName("swallows ResourceNotFoundException")
-        void swallowsNotFoundException() throws Exception {
+        @DisplayName("the fallback swallows a missing descriptor")
+        void fallbackSwallowsNotFound() throws Exception {
+            doThrow(new UnsupportedOperationException()).when(internalStore).touchLastModified(eq("missing"), anyLong());
             doThrow(new IResourceStore.ResourceNotFoundException("not found"))
                     .when(internalStore).getCurrentResourceId("missing");
 
             assertDoesNotThrow(() -> store.updateTimeStamp("missing"));
-        }
-
-        @Test
-        @DisplayName("swallows ResourceStoreException")
-        void swallowsStoreException() throws Exception {
-            doThrow(new IResourceStore.ResourceNotFoundException("db error"))
-                    .when(internalStore).getCurrentResourceId("error");
-
-            assertDoesNotThrow(() -> store.updateTimeStamp("error"));
         }
     }
 

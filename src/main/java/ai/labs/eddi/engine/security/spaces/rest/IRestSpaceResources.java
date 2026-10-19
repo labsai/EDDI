@@ -57,17 +57,32 @@ public interface IRestSpaceResources {
      *            that may reference the space at all
      * @param createdAt
      *            ISO-8601, or null
+     * @param allowedHosts
+     *            the {@code host[:port]} values it may be sent to; empty means any
+     *            host
      */
-    record SpaceSecret(String keyName, String reference, String description, List<String> allowedAgents, String createdAt) {
+    record SpaceSecret(String keyName, String reference, String description, List<String> allowedAgents, String createdAt,
+            List<String> allowedHosts) {
     }
 
     /**
-     * What to store. {@code value} is required.
+     * What to store. {@code value} is required. On a create under
+     * {@code eddi.vault.grant-enforcement=enforce}, so are {@code allowedAgents}
+     * and {@code allowedHosts} — {@code ["*"]} for "any", said out loud. On a
+     * rotation an omitted list keeps the stored one.
      *
      * @param value
      *            the secret; write-only, never returned
+     * @param allowedHosts
+     *            the {@code host[:port]} values the secret may be sent to, or
+     *            {@code ["*"]} for any host
      */
-    record SecretWrite(String value, String description, List<String> allowedAgents) {
+    record SecretWrite(String value, String description, List<String> allowedAgents, List<String> allowedHosts) {
+
+        /** A write without a destination allow-list. */
+        public SecretWrite(String value, String description, List<String> allowedAgents) {
+            this(value, description, allowedAgents, null);
+        }
     }
 
     /**
@@ -116,8 +131,12 @@ public interface IRestSpaceResources {
     @Path("/secrets/{keyName}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Store a secret in a space", description = "Creates or replaces it. The value is encrypted and never returned.")
+    @Operation(summary = "Store a secret in a space",
+               description = "Creates or replaces it. The value is encrypted and never returned. Under eddi.vault.grant-enforcement=enforce "
+                       + "(the default) a create must carry allowedAgents and allowedHosts, each [\"*\"] to allow any agent or host "
+                       + "explicitly; a create without them is a 400. A rotation may omit both and keeps the stored lists.")
     @APIResponse(responseCode = "200", description = "Stored.")
+    @APIResponse(responseCode = "400", description = "No value, an invalid list, or a create without allowedAgents or allowedHosts under enforce.")
     @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
     Response storeSecret(@QueryParam("space") String space, @PathParam("keyName") String keyName, SecretWrite body);
 

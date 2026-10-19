@@ -335,6 +335,13 @@
     "maxForksHint": "por conversa",
     "maxRecallEntries": "Máx. de recuperação",
     "memoryPolicy": "Política de memória",
+    "limits": "Limites",
+    "limitsDesc": "Limita o quanto uma única conversa com este agente pode gastar. Ao atingir o limite, o agente deixa de chamar o modelo e responde com a resposta de contingência.",
+    "maxCostPerConversation": "Custo máx. por conversa (USD)",
+    "unlimited": "Ilimitado",
+    "maxCostHint": "Vazio = ilimitado. 0 = nenhum gasto com preço.",
+    "maxCostInvalid": "Insira um valor de 0 ou mais, ou deixe vazio para ilimitado.",
+    "maxCostPricedOnly": "Só modelos com preço contam para este teto. Um modelo sem preço de entrada/saída na configuração LLM soma US$ 0, mas ainda assim é interrompido quando outros gastos atingem o teto.",
     "memoryPolicyDesc": "A Disciplina de Escrita Estrita rege o que acontece quando atualizações de propriedades falham durante uma etapa da conversa. Escolha como o mecanismo lida com dados parcialmente confirmados.",
     "onCapReached": "Ao atingir o limite",
     "onFailure": "Estratégia em caso de falha",
@@ -1492,6 +1499,13 @@
     "maxToolCallsPerTurnDefault": "(padrão {{n}})",
     "maxToolCallsHint": "Chamadas além de um limite não são executadas: cada uma recebe um resultado NOT_EXECUTED informando ao modelo que o limite foi atingido, e o modelo responde com o que tem. Chamadas recusadas nunca chegam à aprovação. A contagem por turno inclui chamadas feitas antes de uma pausa de aprovação. -1 ou 0 remove um limite. Requer EDDI 6.6 ou posterior — deixe em branco em um servidor mais antigo.",
     "maxToolCallsUncapped": "Um limite está desligado: o modelo pode executar ali qualquer número de chamadas, limitado apenas por Max Tool Iterations.",
+    "repeatGuardTitle": "Chamadas de ferramentas com falha repetidas",
+    "repeatGuardEnabled": "Bloquear chamadas com falha repetidas",
+    "maxIdenticalFailures": "Falhas idênticas permitidas",
+    "maxRefusalsPerTurn": "Recusas antes de parar",
+    "maxIdenticalCalls": "Máx. de chamadas idênticas bem-sucedidas",
+    "exemptTools": "Ferramentas isentas (separadas por vírgulas)",
+    "repeatGuardHint": "Uma chamada de ferramenta que já falhou de forma idêntica, sem que nada tenha tido sucesso desde então, recebe NOT_EXECUTED em vez de ser executada de novo; ao atingir o limite de recusas, o turno termina com uma mensagem fixa. Ativado por padrão; deixe os campos vazios para manter os padrões. Uma falha definitiva (p. ex. HTTP 403/404) é recusada na próxima chamada idêntica, uma repetível após as falhas permitidas. O máx. de chamadas idênticas bem-sucedidas fica desligado se não for definido (-1 ou 0 = ilimitado). Requer EDDI 6.6 ou posterior - não altere num servidor mais antigo.",
     "toggleTask": "Mostrar ou ocultar os detalhes da tarefa",
     "noActionsWarning": "Esta tarefa não tem ação de disparo, portanto nunca é executada. Adicione a ação que suas regras de comportamento emitem, por exemplo send_message.",
     "model": "Modelo",
@@ -1962,6 +1976,9 @@
     "allowedHostsHint": "Um pedido, modelo, base de conhecimento ou servidor MCP/A2A que enviaria este segredo para outro host é recusado. Um host sem porta corresponde a todas as portas.",
     "allowedHostsTightened": "Isto restringe para onde o segredo pode ser enviado. Um agente implementado, uma base de conhecimento ou uma configuração MCP/A2A que o envie para outro host deixa de funcionar na próxima chamada — isto não é verificado antecipadamente.",
     "allowedHostsAcknowledge": "Verifiquei que tudo o que usa este segredo o envia apenas para estes hosts.",
+    "allowedHostsOnlyThese": "Apenas estes hosts",
+    "allowedHostsAnyHost": "Qualquer host",
+    "allowedHostsRequired": "Adicione pelo menos um host ou escolha “Qualquer host”. Um novo segredo precisa de uma das duas opções.",
     "grantOnlyTheseAgents": "Apenas estes agentes",
     "grantAllHint": "Todos os agentes deste tenant podem referenciar este segredo. Restrinja a lista para limitar o alcance de uma única configuração comprometida.",
     "grantAddAgent": "Adicionar um agente",
@@ -2921,6 +2938,7 @@
     "question": "Pergunta",
     "readyToDiscuss": "Pronto para discutir",
     "responding": "respondendo…",
+    "usingTool": "Usando {{tool}}…",
     "reviewMemberRoster": "Lista de membros",
     "reviewMembers": "Membros",
     "reviewModerator": "Moderador",
@@ -3572,7 +3590,7 @@
     "intent": "Intent",
     "deployments": "Implementações de agentes",
     "addDeployment": "Adicionar agente",
-    "agents": "agentes",
+    "intentPlaceholder": "ex.: booking_request",
     "empty": "Nenhum gatilho configurado ainda",
     "created": "Gatilho criado",
     "updated": "Gatilho atualizado",
@@ -4027,7 +4045,11 @@
     "targetType": "Tipo",
     "triggerHint": "Os usuários digitam \"palavra-chave: mensagem\" para encaminhar a este destino",
     "triggerKeywords": "Palavras-chave de ativação",
-    "triggers": "gatilhos",
+    "targetFallback": "Destino {{number}}",
+    "untitledChannel": "Canal sem título",
+    "triggerCount_one": "{{count}} gatilho",
+    "triggerCount_many": "{{count}} gatilhos",
+    "triggerCount_other": "{{count}} gatilhos",
     "type": "Tipo de canal",
     "webhookHint": "Cole esta URL no campo Request URL em Event Subscriptions do seu aplicativo Slack.",
     "webhookUrl": "URL do webhook",
@@ -4324,6 +4346,13 @@
     "tenantId": "ID do locatário",
     "title": "Cotas do locatário",
     "limitHintEmpty": "Vazio ou -1 = ilimitado, 0 = bloqueado",
+    "costPricedOnly": "Conta apenas gasto com preço: um modelo sem inputPricePer1M / outputPricePer1M na configuração LLM soma US$ 0 ao total, mas é recusado como qualquer outro quando o orçamento se esgota.",
+    "budgetTitle": "Orçamento de custo mensal",
+    "budgetUnlimited": "Nenhum orçamento de custo mensal definido: o gasto é medido, mas nunca limitado.",
+    "budgetNotEnforced": "Há um orçamento de {{limit}}, mas a aplicação está desativada, então ele não é aplicado.",
+    "budgetReached": "Orçamento atingido ({{spent}} de {{limit}}). As tarefas LLM respondem com a resposta de contingência em vez de chamar o modelo e as chamadas de ferramentas são recusadas, até virar o mês ou o limite ser aumentado.",
+    "budgetRemaining": "{{spent}} de {{limit}} usados neste mês. Restam {{remaining}} antes de os modelos deixarem de ser chamados.",
+    "budgetNote": "Conta chamadas de modelo com preço e o custo de ferramentas registrado, por mês civil UTC. Modelos sem preço, resumos de conversa e embeddings não são medidos. Um turno que ultrapassa o limite ainda termina, então o total pode ficar um pouco acima. As chamadas recusadas são contadas na métrica eddi.llm.spend.refused.",
     "invalidInteger": "Digite um número inteiro (0 ou mais) ou deixe em branco para ilimitado.",
     "invalidAmount": "Digite um valor (0 ou mais) ou deixe em branco para ilimitado."
   },
@@ -5006,6 +5035,7 @@
       "action": "Ativar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instruções vieram da configuração salva, que qualquer pessoa que possa editar as configurações da plataforma pode ter alterado. Eu as li acima e quero instalá-las.",
       "title": "Ativar o operador da plataforma",
       "subtitle": "Escolha o modelo que executará o operador, reveja as suas instruções e implante.",
       "modelStep": "Modelo",
@@ -5108,7 +5138,11 @@
       "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente.",
       "agentId": "Agente",
       "platformBaseUrl": "Chama a plataforma em",
-      "platformBaseUrlUnknown": "não registada"
+      "platformBaseUrlUnknown": "não registada",
+      "unregister": "Anular registo do operador",
+      "unregisterConfirmTitle": "Anular o registo do operador da plataforma?",
+      "unregisterConfirmBody": "Apenas a configuração guardada do operador é removida. Não foi possível verificar que o agente registado é um operador configurado por este Manager, por isso não é implementado, retirado nem eliminado — reveja-o no ecrã Agentes.",
+      "unverifiedActions": "Não foi possível verificar que este agente é um operador configurado pelo Manager, por isso este ecrã não o sonda, retira nem elimina. «Reconfigurar» aprovisiona um novo operador e deixa este agente como está."
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
@@ -5198,7 +5232,8 @@
       "activatedChecking": "Operador de plataforma ativado. As verificações de conexão estão em execução em segundo plano.",
       "writeProbeVerified": "Acesso de escrita verificado — uma escrita real protegida pausou para aprovação.",
       "writeProbeFailed": "O portão de aprovação não resistiu — o operador foi removido.",
-      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva."
+      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva.",
+      "unregistered": "Registo do operador da plataforma anulado"
     },
     "canary": {
       "genericFailure": "A verificação de ligação não foi bem-sucedida.",
@@ -5239,7 +5274,22 @@
     "superseded": {
       "title": "O agente operador anterior continua implantado."
     },
+    "trust": {
+      "checking": "Verificando o operador antes de abrir o chat…",
+      "title": "Não foi possível verificar o operador da plataforma",
+      "body": "O chat está desativado porque o agente registrado como operador ({{agentId}}) não é comprovadamente o que este Manager configurou. Quem pode editar as configurações da plataforma pode mudar qual é esse agente.",
+      "reasonMarker": "Ele não possui a marca de operador da plataforma, então pode não ser o agente provisionado pelo Manager.",
+      "reasonGate": "Não foi possível verificar o portão de aprovação dele: {{detail}}",
+      "reasonUnreadable": "Não foi possível concluir as verificações: {{detail}}",
+      "recheck": "Verificar novamente",
+      "manage": "Abrir a tela do operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar as instruções armazenadas",
+      "reviewBody": "Estas instruções foram salvas antes e serão instaladas no novo operador. Quem pode editar as configurações da plataforma pode tê-las alterado, então leia o que difere do padrão antes de continuar.",
+      "reviewSummary": "{{added}} linhas adicionadas, {{removed}} linhas padrão removidas",
+      "reviewFull": "Mostrar o texto armazenado completo",
+      "reviewConfirm": "Li estas instruções e quero instalá-las",
       "hint": "Há uma atualização disponível para o Platform Operator.",
       "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
       "addedTools_other": "{{count}} ferramentas novas",
@@ -5869,6 +5919,7 @@
     "referenceCopied": "Referência copiada",
     "copyReference": "Copiar a referência para usar em um agente",
     "secretStored": "Segredo armazenado",
+    "secretHosts": "Enviado apenas para: {{hosts}}",
     "secrets": "Segredos",
     "noSecrets": "Ainda não há segredos neste espaço",
     "deleteNamed": "Excluir {{name}}",
@@ -6375,5 +6426,14 @@
     "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
     "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
     "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
+  },
+  "modelCombobox": {
+    "toggle": "Mostrar sugestões de modelos",
+    "listLabel": "Sugestões de modelos",
+    "matching": "Correspondentes a “{{query}}”",
+    "otherModels": "Outros modelos",
+    "default": "padrão",
+    "noMatch": "Nenhuma sugestão corresponde a “{{query}}” — será usado como digitado.",
+    "customHint": "Não está na lista? Digite qualquer ID de modelo suportado pelo seu provedor."
   }
 }

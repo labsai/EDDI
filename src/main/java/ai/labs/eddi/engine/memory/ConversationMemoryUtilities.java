@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
+import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -54,9 +55,11 @@ public class ConversationMemoryUtilities {
             snapshot.getRedoCache().push(redoStepSnapshot);
         }
 
-        for (int i = conversationMemory.getAllSteps().size() - 1; i >= 0; i--) {
-            var conversationStep = conversationMemory.getAllSteps().get(i);
-            snapshot.getConversationSteps().add(iterateConversationStep(conversationStep));
+        // getAllSteps() copies the whole step list on every call, so it is taken once:
+        // calling it per iteration made each conversion quadratic in the step count.
+        var allSteps = conversationMemory.getAllSteps();
+        for (int i = allSteps.size() - 1; i >= 0; i--) {
+            snapshot.getConversationSteps().add(iterateConversationStep(allSteps.get(i)));
         }
 
         snapshot.getConversationOutputs().addAll(conversationMemory.getConversationOutputs());
@@ -249,6 +252,46 @@ public class ConversationMemoryUtilities {
      * prompts), raw model traces and raw error bodies — none of which are meant for
      * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
      */
+    /**
+     * Sums {@code audit:cost} over every step of the conversation. The value is per
+     * step — {@code LlmTask} accumulates it on the current step, and each new step
+     * starts without one — so the conversation's spend is the sum, never any single
+     * step's value. {@code null} when no step carried a cost, so a consumer can
+     * tell "nothing priced ran" apart from a genuine total. Non-finite and negative
+     * values are skipped: one NaN would poison the total and silently disable every
+     * ceiling compared against it.
+     */
+    static Double conversationCost(List<ConversationStepSnapshot> steps) {
+        if (steps == null) {
+            return null;
+        }
+        if (steps instanceof LazyStepSnapshots lazy) {
+            // The current-step projection must not convert every step just to price
+            // the conversation: the cost comes straight from the live steps.
+            return lazy.conversationCost();
+        }
+        double total = 0.0;
+        boolean found = false;
+        for (var step : steps) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var result : workflow.getLifecycleTasks()) {
+                    if (result != null && AUDIT_COST.equals(result.getKey()) && result.getResult() instanceof Number cost
+                            && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
+                        total += cost.doubleValue();
+                        found = true;
+                    }
+                }
+            }
+        }
+        return found ? total : null;
+    }
+
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -414,6 +457,7 @@ public class ConversationMemoryUtilities {
         }
 
         newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
+        newSnapshot.setConversationCost(conversationCost(allSteps));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
@@ -900,8 +944,90 @@ public class ConversationMemoryUtilities {
                                                                                            Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                                                                            List<String> returningFields) {
 
-        return convertSimpleConversationMemorySnapshot(convertConversationMemory(returnConversationMemory), returnDetailed, returnCurrentStepOnly,
-                returningFields);
+        var memorySnapshot = Boolean.TRUE.equals(returnCurrentStepOnly)
+                ? convertConversationMemoryForCurrentStep(returnConversationMemory)
+                : convertConversationMemory(returnConversationMemory);
+        return convertSimpleConversationMemorySnapshot(memorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
+    }
+
+    /**
+     * A {@link ConversationMemorySnapshot} for the simple projection of the current
+     * step only — the default turn response. It reads the same as
+     * {@link #convertConversationMemory} to everything that projection consults:
+     * the same header fields, the same outputs, properties and redo cache, and a
+     * step list of the same size whose entries are converted only when read. The
+     * projection with {@code returnCurrentStepOnly} reads just the last step (and
+     * the list's size, for {@code undoAvailable} and output/step pairing), so a
+     * turn no longer converts every step of the conversation to return one.
+     * <p>
+     * Package-private and only for that projection: it leaves
+     * {@code pendingLongTermWrites} empty and shares the live outputs list, so it
+     * must never be persisted. A future reader that walks every step still gets
+     * correct values — each step converts on first access — it just loses the
+     * saving.
+     */
+    static ConversationMemorySnapshot convertConversationMemoryForCurrentStep(IConversationMemory conversationMemory) {
+        var snapshot = getMemorySnapshot(conversationMemory);
+        for (var redoStep : conversationMemory.getRedoCache()) {
+            var redoStepSnapshot = iterateConversationStep(redoStep);
+            redoStepSnapshot.setConversationOutput(redoStep.getConversationOutput());
+            snapshot.getRedoCache().push(redoStepSnapshot);
+        }
+        snapshot.setConversationSteps(new LazyStepSnapshots(conversationMemory.getAllSteps()));
+        snapshot.setConversationOutputs(conversationMemory.getConversationOutputs());
+        snapshot.setConversationProperties(conversationMemory.getConversationProperties());
+        return snapshot;
+    }
+
+    /**
+     * Oldest-first view of a step stack — the order
+     * {@link #convertConversationMemory} builds — converting each step on first
+     * access.
+     */
+    private static final class LazyStepSnapshots extends AbstractList<ConversationStepSnapshot> implements RandomAccess {
+        private final IConversationStepStack steps;
+        private final ConversationStepSnapshot[] converted;
+
+        private LazyStepSnapshots(IConversationStepStack steps) {
+            this.steps = steps;
+            this.converted = new ConversationStepSnapshot[steps.size()];
+        }
+
+        /**
+         * What {@link ConversationMemoryUtilities#conversationCost(List)} returns for
+         * the fully converted steps, read from the live steps' {@code audit:cost}
+         * entries alone — one stack-level read, no step converted. A step holds at most
+         * one value per key, which is all the full conversion sums per step.
+         */
+        Double conversationCost() {
+            double total = 0.0;
+            boolean found = false;
+            for (IData<Object> data : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
+                if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
+                        && cost.doubleValue() >= 0.0) {
+                    total += cost.doubleValue();
+                    found = true;
+                }
+            }
+            return found ? total : null;
+        }
+
+        @Override
+        public ConversationStepSnapshot get(int index) {
+            Objects.checkIndex(index, converted.length);
+            var snapshot = converted[index];
+            if (snapshot == null) {
+                // The stack is newest-first: index 0 of this view is its last entry.
+                snapshot = iterateConversationStep(steps.get(converted.length - 1 - index));
+                converted[index] = snapshot;
+            }
+            return snapshot;
+        }
+
+        @Override
+        public int size() {
+            return converted.length;
+        }
     }
 
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
