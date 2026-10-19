@@ -642,7 +642,10 @@ content. The failure mode is a retry, never a silent bad merge.
 contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
 config save time; at write time a failing validator refuses the write with its
 message and stores nothing. Content is additionally capped at 256 KB per
-artifact.
+artifact. A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
+the schema (`#/$defs/...`) or at a bundled JSON Schema meta-schema, never at an
+`http(s):`, `file:` or other external location — such a spec is refused at save
+time, and nothing is fetched or read.
 
 Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own

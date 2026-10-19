@@ -127,6 +127,33 @@ class ApiCallExecutorAllowedHostsTest {
         assertEquals(Set.of(), references.getValue());
     }
 
+    /**
+     * Security review M9.4: the header flag was set by the resolved set growing, so
+     * a secret the body had already resolved left a later custom header carrying it
+     * unflagged — and a GET would then follow a cross-origin redirect with it.
+     */
+    @Test
+    @DisplayName("a header reusing a vault secret the body already resolved still disables redirects")
+    void headerReusingABodySecretIsStillACredential() throws Exception {
+        ApiCall call = callWithHeaders(Map.of("X-Custom-Auth", "${vault:api-key}"));
+        call.getRequest().setMethod("POST");
+        call.getRequest().setContentType("application/json");
+        call.getRequest().setBody("{\"key\":\"${vault:api-key}\"}");
+
+        executor.execute(call, memory, templateData(), SERVER);
+
+        verify(mockRequest).setHttpHeader("X-Custom-Auth", "live-key-42");
+        verify(mockRequest).setFollowRedirects(false);
+    }
+
+    @Test
+    @DisplayName("a header without any reference leaves redirects alone")
+    void plainHeaderKeepsRedirects() throws Exception {
+        executor.execute(callWithHeaders(Map.of("Accept", "application/json")), memory, templateData(), SERVER);
+
+        verify(mockRequest, never()).setFollowRedirects(false);
+    }
+
     private static ApiCall callWithHeaders(Map<String, String> headers) {
         ApiCall call = new ApiCall();
         call.setName("vault-call");
