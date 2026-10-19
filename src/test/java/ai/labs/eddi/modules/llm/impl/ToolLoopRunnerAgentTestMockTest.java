@@ -62,8 +62,8 @@ class ToolLoopRunnerAgentTestMockTest {
         // The 6-argument overload (conversation id first) is what the loop calls.
         lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
-        executors.put("getAvailability", (req, id) -> "real " + executed.incrementAndGet());
-        executors.put("createBooking", (req, id) -> "real " + executed.incrementAndGet());
+        executors.put("getAvailability", (_, _) -> "real " + executed.incrementAndGet());
+        executors.put("createBooking", (_, _) -> "real " + executed.incrementAndGet());
     }
 
     @AfterEach
