@@ -293,6 +293,16 @@ public class AgentSetupService {
         validateNameAndPrompt(request.agentName(), request.systemPrompt());
         rejectUnprovisionableProvider(request.provider());
         requireSelfHostedEndpoint(request.provider(), request.model(), request.baseUrl(), "baseUrl");
+        if (OpenAiCompatibleEndpoint.isType(request.provider())) {
+            // Same policy the LLM builders apply to a base URL later (protection off by
+            // default, so an in-cluster address passes), refused here before anything
+            // exists.
+            try {
+                OutboundTargetPolicy.orPermissive(targetPolicy).validateUrl(request.baseUrl().trim());
+            } catch (IllegalArgumentException e) {
+                throw new AgentSetupException("baseUrl refused: " + e.getMessage(), e);
+            }
+        }
         boolean isLocalLLM = isLocalLlmProvider(request.provider());
         // vaultKeyName alone is enough: it names a key the vault already holds, which
         // is the whole point of provisioning a second agent against an existing one.
