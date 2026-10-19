@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 // ─────────────────────────────────────────────────────────────────
 // I10 — packaged group templates (research-pod, editorial-team,
@@ -72,7 +73,7 @@ export function listGroupTemplates(): Promise<TemplateManifest[]> {
  */
 export function readGroupTemplate(templateId: string): Promise<GroupTemplateDetail> {
   return api.get<GroupTemplateDetail>(
-    `/groupstore/templates/${encodeURIComponent(templateId)}`,
+    `/groupstore/templates/${seg(templateId)}`,
   );
 }
 
@@ -94,7 +95,7 @@ export function instantiateGroupTemplate(
   request: InstantiateTemplateRequest,
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `/groupstore/templates/${encodeURIComponent(templateId)}/instantiate`,
+    `/groupstore/templates/${seg(templateId)}/instantiate`,
     request,
   );
 }

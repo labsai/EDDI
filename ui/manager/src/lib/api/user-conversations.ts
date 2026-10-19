@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 // ==================== Types ====================
 
@@ -23,7 +24,7 @@ export async function getUserConversation(
   userId: string,
 ): Promise<UserConversation> {
   return api.get<UserConversation>(
-    `${BASE}/${encodeURIComponent(intent)}/${encodeURIComponent(userId)}`,
+    `${BASE}/${nameSeg(intent)}/${nameSeg(userId)}`,
   );
 }
 
@@ -37,7 +38,7 @@ export async function createUserConversation(
   data: UserConversation,
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `${BASE}/${encodeURIComponent(intent)}/${encodeURIComponent(userId)}`,
+    `${BASE}/${nameSeg(intent)}/${nameSeg(userId)}`,
     data,
   );
 }
@@ -51,6 +52,6 @@ export async function deleteUserConversation(
   userId: string,
 ): Promise<void> {
   return api.delete(
-    `${BASE}/${encodeURIComponent(intent)}/${encodeURIComponent(userId)}`,
+    `${BASE}/${nameSeg(intent)}/${nameSeg(userId)}`,
   );
 }

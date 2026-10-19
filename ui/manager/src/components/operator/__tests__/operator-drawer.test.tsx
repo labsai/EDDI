@@ -8,6 +8,7 @@ import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator
 import type { OperatorConfig } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 const authState = vi.hoisted(() => ({ roles: [] as string[], method: "none" as "none" | "keycloak" }));
 
@@ -55,6 +56,7 @@ describe("OperatorDrawer", () => {
     useOperatorChatStore.getState().reset();
     useOperatorDrawerStore.setState({ isOpen: false });
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),
@@ -279,6 +281,7 @@ describe("OperatorDrawer — keyboard and pending-approval affordances", () => {
     useOperatorChatStore.getState().reset();
     useOperatorDrawerStore.setState({ isOpen: false });
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),
