@@ -978,6 +978,9 @@ fi
 RELEASE_CHECKSUMS=""
 RELEASE_CHECKSUMS_LOADED=false
 RELEASE_SIGNER_IDENTITY_PREFIX="https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+# The first release whose SHA256SUMS the release job signs. From it on, a
+# missing bundle is refused instead of being taken for an older, unsigned release.
+FIRST_SIGNED_RELEASE="6.6.0"
 RELEASE_SIGNER_ISSUER="https://token.actions.githubusercontent.com"
 
 sha256_of() {
@@ -990,10 +993,20 @@ sha256_of() {
   fi
 }
 
+# release_is_signed <tag>: whether the tag is FIRST_SIGNED_RELEASE or later. A
+# pre-release suffix is ignored, so 6.6.0-RC1 counts as 6.6.0.
+release_is_signed() {
+  local a b c x y z
+  IFS=. read -r a b c <<<"${1%%-*}"
+  IFS=. read -r x y z <<<"$FIRST_SIGNED_RELEASE"
+  (( a > x || (a == x && (b > y || (b == y && c >= z))) ))
+}
+
 # verify_release_checksums_signature <SHA256SUMS file>: checks the release's
 # cosign bundle when cosign is installed; refuses (fail) a list whose signature
-# does not verify. A release published before the bundle existed has none, and is
-# used unsigned with a warning, as is any release when cosign is not installed.
+# does not verify, and a signed release whose bundle cannot be fetched. A release
+# from before FIRST_SIGNED_RELEASE has no bundle and is used unsigned with a
+# warning, as is any release when cosign is not installed.
 verify_release_checksums_signature() {
   local sums="$1" bundle
   if ! command -v cosign &>/dev/null; then
@@ -1004,7 +1017,11 @@ verify_release_checksums_signature() {
   if ! curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS.sigstore.json" -o "$bundle" 2>/dev/null \
       || [[ ! -s "$bundle" ]]; then
     rm -f "$bundle"
-    warn "Release ${EDDI_BRANCH} publishes no signature for its SHA256SUMS — its checksums are used unsigned."
+    if release_is_signed "$EDDI_BRANCH"; then
+      rm -f "$sums"
+      fail "Release ${EDDI_BRANCH} should carry SHA256SUMS.sigstore.json (every release from ${FIRST_SIGNED_RELEASE} on is signed), but it could not be fetched.\n     Nothing was downloaded. Retry later; if it persists, report it."
+    fi
+    warn "Release ${EDDI_BRANCH} predates signed checksums — its SHA256SUMS is used unsigned."
     return 0
   fi
   if cosign verify-blob --bundle "$bundle" \

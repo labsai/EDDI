@@ -398,11 +398,12 @@ class InstallerReleaseRefTest {
                 warn() { echo "WARN: $*"; }
                 info() { echo "INFO: $*"; }
                 fail() { echo "FAIL: $*"; exit 1; }
-                EDDI_BRANCH=9.8.7
+                EDDI_BRANCH="${STUB_BRANCH:-9.8.7}"
                 export PATH="$(pwd)/stub${WITH_COSIGN:+:$(pwd)/cosign}:/usr/bin:/bin"
                 if [[ -z "${WITH_COSIGN:-}" ]] && command -v cosign >/dev/null; then echo REAL_COSIGN; exit 0; fi
                 eval "$(sed -n -e '/^RELEASE_CHECKSUMS=""$/,/^RELEASE_SIGNER_ISSUER=/p' \\
                   -e '/^sha256_of() {$/,/^}$/p' \\
+                  -e '/^release_is_signed() {$/,/^}$/p' \\
                   -e '/^verify_release_checksums_signature() {$/,/^}$/p' \\
                   -e '/^load_release_checksums() {$/,/^}$/p' "$INSTALL_SH")"
                 load_release_checksums
@@ -435,10 +436,21 @@ class InstallerReleaseRefTest {
         assertTrue(refused.output().contains("FAIL: The SHA256SUMS of release 9.8.7 is not signed")
                 && !refused.output().contains("LOADED="), "a list that fails verification must stop the install: " + refused.output());
 
-        Run unsigned = execute(bash, withCosign + "STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh", dir, null);
+        Run missing = execute(bash, withCosign + "STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh", dir, null);
+        assertNotEquals(0, missing.exit(), missing.output());
+        assertTrue(missing.output().contains("should carry SHA256SUMS.sigstore.json") && !missing.output().contains("LOADED="),
+                "a release from the first signed one on with no bundle must be refused, not taken for an old"
+                        + " unsigned one: " + missing.output());
+
+        Run unsigned = execute(bash, withCosign + "STUB_BRANCH=6.5.0 STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh", dir,
+                null);
         assertEquals(0, unsigned.exit(), unsigned.output());
-        assertTrue(unsigned.output().contains("publishes no signature") && unsigned.output().contains("LOADED=yes"),
-                "a release from before the bundle existed is used unsigned, with a warning: " + unsigned.output());
+        assertTrue(unsigned.output().contains("predates signed checksums") && unsigned.output().contains("LOADED=yes"),
+                "a release from before the first signed one is used unsigned, with a warning: " + unsigned.output());
+
+        Run candidate = execute(bash, withCosign + "STUB_BRANCH=6.6.0-RC1 STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh",
+                dir, null);
+        assertNotEquals(0, candidate.exit(), "a pre-release of the first signed version is signed too: " + candidate.output());
     }
 
     /**

@@ -838,11 +838,14 @@ $script:MonitoringFiles = @(
 $script:ReleaseChecksums = $null
 $script:ReleaseChecksumsLoaded = $false
 $script:ReleaseSignerIdentityPrefix = "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+# The first release whose SHA256SUMS is signed; from it on a missing bundle is refused.
+$script:FirstSignedRelease = [version]"6.6.0"
 $script:ReleaseSignerIssuer = "https://token.actions.githubusercontent.com"
 
 # Verifies the release's cosign bundle for the SHA256SUMS bytes when cosign is
-# installed; throws (Write-Fail) when the signature does not verify. A release
-# published before the bundle existed has none and is used unsigned, with a warning.
+# installed; throws (Write-Fail) when the signature does not verify, or when a
+# release from FirstSignedRelease on has no bundle. An older release has none and
+# is used unsigned, with a warning.
 function Confirm-ReleaseChecksumsSignature {
     param([byte[]]$Bytes)
     if (-not (Get-Command cosign -ErrorAction SilentlyContinue)) {
@@ -860,7 +863,11 @@ function Confirm-ReleaseChecksumsSignature {
             Write-Verbose "SHA256SUMS.sigstore.json for release $EddiBranch could not be fetched: $($_.Exception.Message)"
         }
         if ((Get-Item $bundleFile).Length -eq 0) {
-            Write-Warn "Release $EddiBranch publishes no signature for its SHA256SUMS -- its checksums are used unsigned."
+            # A pre-release suffix is ignored: 6.6.0-RC1 counts as 6.6.0.
+            if ([version]($EddiBranch -replace '-.*$', '') -ge $script:FirstSignedRelease) {
+                Write-Fail "Release $EddiBranch should carry SHA256SUMS.sigstore.json (every release from $($script:FirstSignedRelease) on is signed), but it could not be fetched. Nothing was downloaded. Retry later; if it persists, report it."
+            }
+            Write-Warn "Release $EddiBranch predates signed checksums -- its SHA256SUMS is used unsigned."
             return
         }
         & cosign verify-blob --bundle $bundleFile `

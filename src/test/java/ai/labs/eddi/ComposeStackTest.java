@@ -547,6 +547,36 @@ class ComposeStackTest {
     }
 
     /**
+     * The guard can only see the configured password; Keycloak reads it on first
+     * boot only, so a volume created with {@code admin}/{@code admin} keeps that
+     * login whatever .env says later (CodeRabbit on PR #1099).
+     * {@code keycloak-admin-rotate} closes that: once Keycloak is healthy, and
+     * before EDDI starts, it sets a still-working default login to the configured
+     * password, which it hands to kcadm on stdin rather than its command line.
+     */
+    @Test
+    @DisplayName("an existing admin/admin login is rotated to the configured password before EDDI starts")
+    void keycloakDefaultLoginIsRotatedOnAnExistingVolume() {
+        TreeMap<String, JsonNode> services = services(AUTH_OVERLAY);
+        JsonNode rotate = services.get("keycloak-admin-rotate");
+        assertTrue(rotate != null, "docker-compose.auth.yml must declare keycloak-admin-rotate");
+        assertEquals("service_healthy", rotate.path("depends_on").path("keycloak").path("condition").asText(),
+                "the rotation needs a running Keycloak to log in to");
+        assertEquals("service_completed_successfully",
+                services.get("eddi").path("depends_on").path("keycloak-admin-rotate").path("condition").asText(),
+                "EDDI must not start before the default login has been checked and rotated");
+        assertEquals(services.get("keycloak").path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                rotate.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                "the rotation must set the same password the guard judged");
+
+        String script = rotate.path("command").get(0).asText();
+        assertTrue(script.contains("--password admin") && script.contains("reset-password") && script.contains("-f -"),
+                "the script must try the default login and reset the password from stdin: " + script);
+        assertFalse(script.lines().anyMatch(line -> line.contains("kcadm") && line.contains("$$KC_BOOTSTRAP_ADMIN_PASSWORD")),
+                "the configured password must not appear on a kcadm command line: " + script);
+    }
+
+    /**
      * Runs the guard's script itself, so the decision table is exercised and not
      * just the wiring. Needs a POSIX {@code sh} — always there on the Linux CI
      * runner, skipped where there is none.

@@ -168,3 +168,7 @@ service exits 1 with the fix in its message. Installs made by `install.sh` / `in
 unaffected. If your Keycloak volume predates that and you changed the console password by hand,
 put that password in `.env` as `KC_BOOTSTRAP_ADMIN_PASSWORD`: Keycloak reads it only on first
 boot, and the guard only needs to see that it is not the default.
+
+A volume that still has the original `admin`/`admin` login is fixed on the next `up`: the one-shot
+`keycloak-admin-rotate` service logs in with `admin` once Keycloak is healthy and, if that works,
+sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` before EDDI starts.

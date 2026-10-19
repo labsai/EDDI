@@ -103,12 +103,21 @@ services:
       - "MONGO_APP_PASSWORD=changeme-app"
     command:
       - |
-        exec mongosh --quiet --host mongodb -u "$$MONGO_ROOT_USERNAME" -p "$$MONGO_ROOT_PASSWORD" --authenticationDatabase admin --eval '
+        exec mongosh --quiet --host mongodb --eval '
+          // The root credentials are read here, from the environment, so they never
+          // appear on the mongosh command line (/proc/<pid>/cmdline, ps).
+          db.getSiblingDB("admin").auth(process.env.MONGO_ROOT_USERNAME, process.env.MONGO_ROOT_PASSWORD);
           const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
           const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
           const eddi = db.getSiblingDB("eddi");
-          if (eddi.getUser(user)) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }
-          else { eddi.createUser({ user: user, pwd: pwd, roles: roles }); print("created MongoDB user " + user); }'
+          // 51003: another starter created the user between getUser and createUser
+          // (several replicas at once); update it instead of failing.
+          let created = false;
+          if (!eddi.getUser(user)) {
+            try { eddi.createUser({ user: user, pwd: pwd, roles: roles }); created = true; print("created MongoDB user " + user); }
+            catch (e) { if (e.code !== 51003) { throw e; } }
+          }
+          if (!created) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }'
 
   # One-shot: creates and deploys a small rule-based agent so the model list is
   # not empty on first start. EDDI seeds nothing automatically — there is no

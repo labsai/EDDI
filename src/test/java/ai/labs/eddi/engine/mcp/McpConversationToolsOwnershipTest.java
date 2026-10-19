@@ -386,7 +386,7 @@ class McpConversationToolsOwnershipTest {
             llmDetail.put("modelResponse", "Hi!");
             llmDetail.put("modelName", "gpt-test");
             return new AuditEntry("e1", CONV_ID, AGENT_ID, 1, OWNER, "production", 0, "llm", "ai.labs.llm", 3, 12L,
-                    Map.of("userInput", "hello"), null, llmDetail, null, List.of(), 0.01, Instant.EPOCH, "hmac", null);
+                    Map.of("userInput", "hello"), null, llmDetail, null, List.of(), 0.01, Instant.EPOCH, "hmac", "agent-signature");
         }
 
         @SuppressWarnings("unchecked")
@@ -411,6 +411,8 @@ class McpConversationToolsOwnershipTest {
             assertEquals("Hi!", served.llmDetail().get("modelResponse"), "the model's reply to this caller stays");
             assertEquals("gpt-test", served.llmDetail().get("modelName"));
             assertEquals(0.01, served.cost());
+            assertNull(served.hmac(), "the HMAC covers the unredacted payload; a redacted copy must not carry it");
+            assertNull(served.agentSignature(), "the agent signature signs that HMAC and must go with it");
         }
 
         @Test

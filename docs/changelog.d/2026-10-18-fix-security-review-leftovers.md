@@ -117,3 +117,28 @@ there and nothing elsewhere (`dbAdmin` because `MongoResourceStorage` un-hides a
   overlay and example render.
 - Not changed: `scripts/loadtest/docker-compose.loadtest.yml` (a load-test harness, still root) and
   `k8s/quickstart.yaml` (its MongoDB runs without authentication at all).
+
+### Review follow-ups (CodeRabbit on #1099)
+
+- **Keycloak, an existing `admin`/`admin` volume.** `keycloak-guard` sees only the configured
+  password, and Keycloak reads it on first boot only, so a volume first started with the default
+  kept that login whatever `.env` said. A new one-shot `keycloak-admin-rotate` runs once Keycloak
+  is healthy and before EDDI starts: when a non-default password is configured and `admin` still
+  logs in, it resets the account to the configured password through `kcadm`, password on stdin.
+  The window in which such a volume is published with the old login is now Keycloak's start-up,
+  not indefinite. Verified live: `admin` accepted, rotation, `admin` refused, the new password
+  (with a quote and a backslash) accepted, second run a no-op. `ComposeStackTest` pins the wiring.
+- **MongoDB helper: root password off the command line.** All five copies (three compose files,
+  Helm, kustomize) now authenticate with `db.auth(process.env…)` inside `--eval`, so the root
+  password is no longer in mongosh's argv (`/proc/<pid>/cmdline`).
+- **MongoDB helper: concurrent starts.** Several replicas starting at once could race between
+  `getUser` and `createUser`; a `51003` (user already exists) now falls through to `updateUser`.
+  Verified with four init containers started at the same moment: all exit 0.
+- **Signed releases fail closed.** A missing `SHA256SUMS.sigstore.json` used to be taken for a
+  release from before signing. From 6.6.0, the first signed release (pre-releases included), the
+  installers refuse when cosign is installed and the bundle cannot be fetched; older tags keep
+  the unsigned-with-warning path. Tested in `InstallerReleaseRefTest` (9.8.7 and 6.6.0-RC1
+  refused, 6.5.0 warned) and by hand for `install.ps1`.
+- **Redacted audit entries carry no signature.** The copy `read_audit_trail` returns with the
+  prompt redacted no longer keeps the original `hmac` and `agentSignature`, which covered the
+  unredacted payload and would have made an intact entry look tampered.

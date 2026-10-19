@@ -73,6 +73,8 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+      keycloak-admin-rotate:
+        condition: service_completed_successfully
 
   # One-shot guard, the same pattern as docker-compose.yml's bind-guard: it exits
   # 0 when Keycloak stays on loopback or has a real bootstrap admin password, and
@@ -109,6 +111,39 @@ services:
         echo "  put that password there — Keycloak only reads it on first boot." >&2
         echo "  Or keep Keycloak on loopback (KEYCLOAK_BIND=127.0.0.1, the default)." >&2
         exit 1
+
+  # keycloak-guard can only judge the configured value: Keycloak reads
+  # KC_BOOTSTRAP_ADMIN_PASSWORD only when it first creates the master realm, so a
+  # keycloak-data volume first started with admin/admin keeps that login however
+  # .env changes later. This one-shot runs once Keycloak is up, before EDDI starts.
+  # If a password other than `admin` is configured and the stored admin account
+  # still accepts `admin`, it sets the account's password to the configured one
+  # through the admin API (what install.sh / install.ps1 do on a re-run). The new
+  # password goes to kcadm on stdin, never on its command line. With the dev
+  # default there is nothing to rotate to, and keycloak-guard already keeps that
+  # case on loopback.
+  keycloak-admin-rotate:
+    image: quay.io/keycloak/keycloak:26.8.0
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    environment:
+      KC_ADMIN_USER: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+    command:
+      - |
+        [ -z "$$KC_BOOTSTRAP_ADMIN_PASSWORD" ] || [ "$$KC_BOOTSTRAP_ADMIN_PASSWORD" = "admin" ] && exit 0
+        kcadm=/opt/keycloak/bin/kcadm.sh; cfg=/tmp/kcadm.config
+        if ! "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
+            --user "$$KC_ADMIN_USER" --password admin >/dev/null 2>&1; then
+          exit 0   # the default no longer works: the account was already changed
+        fi
+        id=$$("$$kcadm" get users --config "$$cfg" -r master -q exact=true -q "username=$$KC_ADMIN_USER" --fields id --format csv --noquotes) || exit 1
+        pw=$${KC_BOOTSTRAP_ADMIN_PASSWORD//\\/\\\\}; pw=$${pw//\"/\\\"}
+        printf '{"type":"password","temporary":false,"value":"%s"}' "$$pw" \
+          | "$$kcadm" update "users/$$id/reset-password" --config "$$cfg" -r master -f - || exit 1
+        echo "[SECURITY] Keycloak's admin account still accepted the default password 'admin'; it now uses KC_BOOTSTRAP_ADMIN_PASSWORD."
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0

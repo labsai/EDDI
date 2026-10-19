@@ -672,7 +672,11 @@ public class McpConversationTools {
             }
             Map<String, Object> redacted = new LinkedHashMap<>(llmDetail);
             redacted.put(COMPILED_PROMPT, REDACTED_PROMPT);
-            visible.add(entry.withPayload(entry.input(), entry.output(), redacted, entry.toolCalls()));
+            // A presentation copy, not the ledger row: the HMAC and agent signature
+            // cover the original payload, so keeping them would make an intact
+            // entry look tampered to anyone who verifies it. The marker says why.
+            visible.add(entry.withPayload(entry.input(), entry.output(), redacted, entry.toolCalls()).withHmac(null)
+                    .withAgentSignature(null));
         }
         return visible;
     }
