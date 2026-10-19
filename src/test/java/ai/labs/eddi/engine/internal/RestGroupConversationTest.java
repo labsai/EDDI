@@ -123,6 +123,71 @@ class RestGroupConversationTest {
         }
 
         @Test
+        @DisplayName("an inline file over eddi.attachments.max-size-bytes is refused before the service sees it")
+        void oversizedInlineAttachment_isRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentBytes = 4;
+            // "aGVsbG8=" decodes to five bytes, one over the limit.
+            var req = new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png")));
+
+            Response response = restGroupConversation.discuss("group-1", req);
+
+            assertEquals(400, response.getStatus());
+            assertTrue(String.valueOf(response.getEntity()).contains("too large"));
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("more inline files than eddi.attachments.max-per-conversation are refused")
+        void tooManyInlineAttachments_areRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentsPerConversation = 1;
+            var file = new AttachmentRef("image/png", "aGVsbG8=", null, "a.png");
+
+            Response response = restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1", List.of(file, file)));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("inline files totalling more than max-total-bytes-per-conversation are refused")
+        void inlineAttachmentsOverTheConversationTotal_areRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentBytesPerConversation = 9;
+            var file = new AttachmentRef("image/png", "aGVsbG8=", null, "a.png");
+
+            Response response = restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1", List.of(file, file)));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("the streaming start applies the same attachment limits")
+        void streaming_oversizedInlineAttachment_isRefused() throws Exception {
+            restGroupConversation.maxAttachmentBytes = 4;
+            var sink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+
+            restGroupConversation.discussStreaming("group-1",
+                    new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png"))), sink, sse);
+
+            verifyNoInteractions(groupService);
+            verify(sink).close();
+        }
+
+        @Test
+        @DisplayName("a per-user quota refusal at materialization answers 400, not 500")
+        void userQuotaRefusal_isA400() throws Exception {
+            when(groupService.discuss(eq("group-1"), eq("Q"), eq("user-1"), eq(0), isNull(), anyList()))
+                    .thenThrow(new IGroupConversationService.GroupAttachmentRejectedException("user", "store text", null));
+
+            Response response = restGroupConversation.discuss("group-1",
+                    new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png"))));
+
+            assertEquals(400, response.getStatus());
+            assertEquals("Attachment refused: the per-user attachment quota is exhausted.", response.getEntity());
+        }
+
+        @Test
         @DisplayName("empty attachments use the plain overload")
         void discussWithEmptyAttachments() throws Exception {
             var gc = new GroupConversation();

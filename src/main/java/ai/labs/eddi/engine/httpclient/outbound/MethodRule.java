@@ -22,7 +22,7 @@ public enum MethodRule {
      * <li>HEAD survives every one of them: an existence or size probe must not turn
      * into a full body download.</li>
      * </ul>
-     * The rule {@code SafeHttpClient} has always applied.
+     * The rule the retired {@code SafeHttpClient} always applied.
      */
     JDK_SAFE,
 

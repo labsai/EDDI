@@ -24,13 +24,15 @@ public interface IDatabaseLogs {
 
     /**
      * Pseudonymize all log entries for a user (GDPR Art. 17). Replaces the userId
-     * with a SHA-256 hash to preserve log integrity while removing personally
-     * identifiable information.
+     * with the caller's pseudonym to preserve log integrity while removing
+     * personally identifiable information. Erasure passes a keyed one (see
+     * {@code GdprPseudonymizer}); rows erased by earlier releases carry an unsalted
+     * SHA-256.
      *
      * @param userId
      *            the original user identifier
      * @param pseudonym
-     *            the pseudonymized replacement (SHA-256 hash)
+     *            the pseudonymized replacement
      * @return number of entries pseudonymized
      */
     long pseudonymizeByUserId(String userId, String pseudonym);

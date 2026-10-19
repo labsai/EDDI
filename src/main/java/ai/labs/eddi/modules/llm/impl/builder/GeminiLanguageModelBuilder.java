@@ -9,7 +9,6 @@ import ai.labs.eddi.utils.LogSanitizer;
 
 import dev.langchain4j.http.client.HttpClient;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.googleai.GeminiHarmBlockThreshold;
@@ -341,7 +340,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -381,7 +380,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        return buildStreaming(parameters, JdkHttpClient.builder());
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder());
     }
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */

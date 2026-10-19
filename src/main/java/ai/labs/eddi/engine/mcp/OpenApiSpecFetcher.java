@@ -4,9 +4,16 @@
  */
 package ai.labs.eddi.engine.mcp;
 
-import ai.labs.eddi.engine.httpclient.BoundedBodyReader;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.BodyTooLargeException;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundTimeoutException;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -15,13 +22,9 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -41,10 +44,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@link OutboundTargetPolicy#validateUrl}: the cloud metadata service is
  * refused always, and with {@code eddi.security.ssrf-protection.enabled} so is
  * any private, loopback or link-local address;</li>
- * <li>redirects are followed by hand ({@link SafeHttpClient#sendNoRedirect}),
- * at most {@value #MAX_REDIRECTS} of them, GET only, no credentials;</li>
- * <li>the body is read through {@link BoundedBodyReader} and refused above
- * {@value #MAX_SPEC_BYTES} bytes, while it streams, not after buffering.</li>
+ * <li>redirects are followed by hand — each hop is one {@link OutboundHttp}
+ * send with {@link RedirectPolicy#NEVER} — at most {@value #MAX_REDIRECTS} of
+ * them, GET only, no credentials;</li>
+ * <li>the body is a capped facade stream, refused above
+ * {@value #MAX_SPEC_BYTES} bytes while it streams, not after buffering.</li>
  * </ul>
  * The content is then handed to the parser as text with the location as its
  * base, so a multi-file spec's relative {@code $ref}s still resolve as before —
@@ -60,38 +64,34 @@ public class OpenApiSpecFetcher {
     /** Most bytes of spec accepted. Large public specs run to a few megabytes. */
     static final long MAX_SPEC_BYTES = 16L * 1024 * 1024;
 
-    /** Redirect hops followed before the fetch fails, as {@link SafeHttpClient}. */
+    /** Redirect hops followed before the fetch fails, as {@link OutboundHttp}. */
     static final int MAX_REDIRECTS = 5;
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 
     /**
-     * Lazily supplied: a JDK {@code HttpClient} opens a loopback selector pipe on
-     * construction, which an inline-only caller (and a sandbox without loopback)
-     * never needs. Memoized after the first remote fetch.
+     * Lazily supplied for the permissive instance: a standalone facade's engine
+     * opens a loopback selector pipe on first use, which an inline-only caller (and
+     * a sandbox without loopback) never needs. Memoized after the first remote
+     * fetch.
      */
-    private final Supplier<SafeHttpClient> httpClient;
+    private final Supplier<OutboundHttp> http;
     private final OutboundTargetPolicy targetPolicy;
     private final long maxSpecBytes;
-    private final ScheduledExecutorService bodyReadWatchdog = Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "openapi-spec-body-watchdog");
-        thread.setDaemon(true);
-        return thread;
-    });
 
     @Inject
-    public OpenApiSpecFetcher(SafeHttpClient httpClient, OutboundTargetPolicy targetPolicy) {
-        this(httpClient, targetPolicy, MAX_SPEC_BYTES);
+    public OpenApiSpecFetcher(OutboundHttp http, OutboundTargetPolicy targetPolicy) {
+        this(http, targetPolicy, MAX_SPEC_BYTES);
     }
 
     /** For tests: a cap small enough to hit without serving 16 MB. */
-    OpenApiSpecFetcher(SafeHttpClient httpClient, OutboundTargetPolicy targetPolicy, long maxSpecBytes) {
-        this(() -> httpClient, targetPolicy, maxSpecBytes);
+    OpenApiSpecFetcher(OutboundHttp http, OutboundTargetPolicy targetPolicy, long maxSpecBytes) {
+        this(() -> http, targetPolicy, maxSpecBytes);
     }
 
-    private OpenApiSpecFetcher(Supplier<SafeHttpClient> httpClient, OutboundTargetPolicy targetPolicy, long maxSpecBytes) {
-        this.httpClient = httpClient;
+    private OpenApiSpecFetcher(Supplier<OutboundHttp> http, OutboundTargetPolicy targetPolicy, long maxSpecBytes) {
+        this.http = http;
         this.targetPolicy = targetPolicy;
         this.maxSpecBytes = maxSpecBytes;
     }
@@ -107,16 +107,16 @@ public class OpenApiSpecFetcher {
     }
 
     private static final class Permissive {
-        private static final OpenApiSpecFetcher INSTANCE = new OpenApiSpecFetcher(memoized(() -> new SafeHttpClient(10_000)),
-                OutboundTargetPolicy.permissive(), MAX_SPEC_BYTES);
+        private static final OpenApiSpecFetcher INSTANCE = new OpenApiSpecFetcher(
+                memoized(() -> OutboundHttp.standalone(Duration.ofSeconds(10))), OutboundTargetPolicy.permissive(), MAX_SPEC_BYTES);
 
-        private static Supplier<SafeHttpClient> memoized(Supplier<SafeHttpClient> factory) {
+        private static Supplier<OutboundHttp> memoized(Supplier<OutboundHttp> factory) {
             return new Supplier<>() {
-                private volatile SafeHttpClient client;
+                private volatile OutboundHttp client;
 
                 @Override
-                public SafeHttpClient get() {
-                    SafeHttpClient local = client;
+                public OutboundHttp get() {
+                    OutboundHttp local = client;
                     if (local == null) {
                         synchronized (this) {
                             local = client;
@@ -158,23 +158,33 @@ public class OpenApiSpecFetcher {
         URI uri = UrlValidationUtils.validateUrlSyntax(location.trim());
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             targetPolicy.validateUrl(uri.toString());
-            // codeql[java/ssrf] False Positive: fetching the editor-supplied spec
-            // location is the feature; this hop passed targetPolicy.validateUrl above.
-            HttpRequest request = HttpRequest.newBuilder(uri).GET().timeout(REQUEST_TIMEOUT)
+            // This hop passed targetPolicy.validateUrl above, which is the gate (it
+            // carries the deployment's SSRF flag and allowed hosts), so the facade adds
+            // no check of its own; redirects are this loop's, never the facade's.
+            OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, uri)
+                    .ssrf(SsrfPolicy.NONE)
+                    .redirects(RedirectPolicy.NEVER)
+                    .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json, application/yaml, application/x-yaml, text/yaml, */*;q=0.5")
-                    .header("User-Agent", "EDDI-OpenAPI-Discovery/1.0").build();
-            HttpResponse<InputStream> response;
+                    .header("User-Agent", "EDDI-OpenAPI-Discovery/1.0")
+                    .build();
+            OutboundResponse<InputStream> response;
             try {
-                response = httpClient.get().sendNoRedirect(request, OpenApiSpecFetcher::bodyOrNothing);
+                // codeql[java/ssrf] False Positive: fetching the editor-supplied spec
+                // location is the feature; this hop passed targetPolicy.validateUrl above.
+                // Capped while it streams; the read budget is 4 x the request timeout.
+                response = http.get().send(request, BodyMode.stream(maxSpecBytes, REQUEST_TIMEOUT.multipliedBy(4)));
             } catch (IOException e) {
                 throw new IllegalArgumentException("Could not fetch the OpenAPI spec from " + forMessage(uri) + ": " + e.getMessage(), e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalArgumentException("Interrupted while fetching the OpenAPI spec from " + forMessage(uri), e);
             }
-            int status = response.statusCode();
+            int status = response.status();
             if (REDIRECT_CODES.contains(status)) {
-                String target = response.headers().firstValue("Location").orElse(null);
+                // A redirect's body is never read: closing it drops the connection.
+                closeQuietly(response.body());
+                String target = response.firstHeader("Location").orElse(null);
                 if (target == null || target.isBlank()) {
                     throw new IllegalArgumentException(
                             "OpenAPI spec location " + forMessage(uri) + " answered " + status + " without a Location header");
@@ -192,17 +202,16 @@ public class OpenApiSpecFetcher {
                 closeQuietly(response.body());
                 throw new IllegalArgumentException("OpenAPI spec location " + forMessage(uri) + " answered HTTP " + status);
             }
-            BoundedBodyReader.Bounded body;
-            try {
-                body = BoundedBodyReader.read(response.body(), maxSpecBytes, REQUEST_TIMEOUT, bodyReadWatchdog);
+            byte[] body;
+            try (InputStream in = response.body()) {
+                body = in.readAllBytes();
+            } catch (BodyTooLargeException | OutboundTimeoutException e) {
+                throw new IllegalArgumentException("OpenAPI spec at " + forMessage(uri) + " is larger than the " + maxSpecBytes
+                        + " byte limit, or did not arrive within " + REQUEST_TIMEOUT.multipliedBy(4).toSeconds() + " seconds", e);
             } catch (IOException e) {
                 throw new IllegalArgumentException("Could not read the OpenAPI spec from " + forMessage(uri) + ": " + e.getMessage(), e);
             }
-            if (body.truncated()) {
-                throw new IllegalArgumentException("OpenAPI spec at " + forMessage(uri) + " is larger than the " + maxSpecBytes
-                        + " byte limit, or did not arrive within " + REQUEST_TIMEOUT.toSeconds() + " seconds");
-            }
-            return new FetchedSpec(new String(body.bytes(), StandardCharsets.UTF_8), uri.toString());
+            return new FetchedSpec(new String(body, StandardCharsets.UTF_8), uri.toString());
         }
         throw new IllegalArgumentException("OpenAPI spec location redirected more than " + MAX_REDIRECTS + " times: " + forMessage(uri));
     }
@@ -213,16 +222,6 @@ public class OpenApiSpecFetcher {
         } catch (IOException e) {
             // Best effort: the status is what the caller needs to hear about.
         }
-    }
-
-    /**
-     * A redirect's body is never read, so it gets a subscriber that drops it and
-     * completes with an empty stream; any other response is streamed to the caller.
-     */
-    private static HttpResponse.BodySubscriber<InputStream> bodyOrNothing(HttpResponse.ResponseInfo info) {
-        return REDIRECT_CODES.contains(info.statusCode())
-                ? HttpResponse.BodySubscribers.replacing(InputStream.nullInputStream())
-                : HttpResponse.BodySubscribers.ofInputStream();
     }
 
     /**

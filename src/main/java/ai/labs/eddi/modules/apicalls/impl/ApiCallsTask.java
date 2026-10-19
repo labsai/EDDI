@@ -24,9 +24,11 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -168,6 +170,7 @@ public class ApiCallsTask implements ILifecycleTask {
                 }
                 httpCallsConfig.setTargetServerUrl(targetServerUrl);
                 rejectTemplatedHosts(httpCallsConfig, uriObj);
+                warnAboutUnescapedJsonValues(httpCallsConfig, uriObj);
                 return httpCallsConfig;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -197,6 +200,73 @@ public class ApiCallsTask implements ILifecycleTask {
         } catch (IllegalArgumentException e) {
             throw new WorkflowConfigurationException(e.getMessage() + " (uri:" + uriObj + ")", e);
         }
+    }
+
+    /**
+     * Warns, once per deployment, about a JSON body that splices a template
+     * expression into a string literal ({@code "text": "{memory.current.input}"}).
+     * A request body is a template whose values are substituted as they are: a
+     * runtime value containing {@code ","admin":true,"x":"} rewrites the JSON
+     * around it (security review 2026-10-17, L16). The safe form is {@code "text":
+     * {json:serialize(memory.current.input)}} — no quotes of its own, because
+     * {@code json:serialize} adds them. Only a warning: plenty of values spliced
+     * this way are numbers or ids that cannot carry a quote, and refusing every
+     * such config would break working agents.
+     */
+    static void warnAboutUnescapedJsonValues(ApiCallsConfiguration httpCallsConfig, Object uriObj) {
+        if (httpCallsConfig.getHttpCalls() == null) {
+            return;
+        }
+        for (ApiCall call : httpCallsConfig.getHttpCalls()) {
+            Request request = call.getRequest();
+            if (request == null || request.getBody() == null || request.getContentType() == null
+                    || !request.getContentType().toLowerCase(Locale.ROOT).contains("json")) {
+                continue;
+            }
+            List<String> spliced = expressionsInsideJsonStrings(request.getBody());
+            if (!spliced.isEmpty()) {
+                LOGGER.warnf("httpCall '%s' (uri:%s) splices %s into a JSON string literal of its body without escaping. A value "
+                        + "containing a quote changes the JSON structure; write {json:serialize(...)} in place of the quoted "
+                        + "expression instead (see docs/httpcalls.md).", call.getName(), uriObj, String.join(", ", spliced));
+            }
+        }
+    }
+
+    /**
+     * The Qute expressions ({@code {name...}}) that sit inside a JSON string
+     * literal of {@code body}, other than {@code json:} ones. A linear scan: string
+     * literals are tracked by their unescaped quotes.
+     */
+    static List<String> expressionsInsideJsonStrings(String body) {
+        var found = new ArrayList<String>();
+        boolean inString = false;
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (inString && c == '\\') {
+                i++;
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString && c == '{' && i + 1 < body.length() && isExpressionStart(body.charAt(i + 1)) && (i == 0 || body.charAt(i - 1) != '$')) {
+                int end = body.indexOf('}', i);
+                int quote = body.indexOf('"', i);
+                if (end > i && (quote < 0 || end < quote)) {
+                    String expression = body.substring(i, end + 1);
+                    if (!expression.startsWith("{json:")) {
+                        found.add(expression);
+                    }
+                    i = end;
+                }
+            }
+        }
+        return found;
+    }
+
+    private static boolean isExpressionStart(char c) {
+        return Character.isLetter(c) || c == '_';
     }
 
     @Override

@@ -227,7 +227,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         // enables the tool. The conversation id resolves back to the user through the
         // store when an operator genuinely needs that, without writing a stable
         // per-person identifier into logs that outlive the conversation.
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', conversation='%s', groups=%s",
+        LOGGER.debugf("[MEMORY] UserMemoryTool enabled for agent='%s', conversation='%s', groups=%s",
                 sanitize(memory.getAgentId()), sanitize(memory.getConversationId()),
                 groupIds.stream().map(g -> sanitize(g)).toList());
     }
@@ -284,7 +284,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
         var tool = new ConversationRecallTool(List.copyOf(memory.getConversationOutputs()), throughStep, summaryConfig.getMaxRecallTurns());
         tools.add(tool);
-        LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
+        LOGGER.debugf("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
     }
 
@@ -331,7 +331,7 @@ class ContextualToolsProvider implements ToolSourceProvider {
         }
         var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
         tools.add(tool);
-        LOGGER.infof(
+        LOGGER.debugf(
                 "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",
                 sanitize(memory.getConversationId()), thisTurn, earlierTurns);
     }

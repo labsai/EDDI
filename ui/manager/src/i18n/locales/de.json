@@ -2192,7 +2192,8 @@
     "serverRefusedCreate": "Der Server hat diesen Zeitplan abgelehnt:",
     "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
     "finishedOneShot": "Einmaliger Zeitplan: Er wurde ausgeführt und ist abgeschlossen.",
-    "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten)."
+    "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten).",
+    "openKnowledgeBase": "Wissensbasis öffnen"
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -2539,7 +2540,101 @@
       "explicit": "Ort: {{value}} (oben gesetzt)",
       "default": "Ort: {{value}} (Standard)",
       "legacyDefault": "Ort: abgeleitet vom Namen „{{name}}“ (Standard)"
-    }
+    },
+    "runs": {
+      "inProgress": "Lauf wird ausgeführt",
+      "elapsedOfBudget": "{{elapsed}} von {{budget}} Min. Zeitbudget",
+      "progressLabel": "Fortschritt der Aufnahme",
+      "progressOfEstimate": "{{seen}} von etwa {{total}} Dokumenten geprüft (der letzte Lauf sah {{total}})",
+      "progressOfTotal": "{{seen}} von {{total}} Dokumenten geprüft",
+      "progressSeen": "Bisher {{seen}} Dokumente geprüft",
+      "showFewer": "Weniger anzeigen",
+      "showAll": "Alle {{total}} Läufe anzeigen",
+      "duration": "Dauer",
+      "finishedAt": "Beendet",
+      "cost": "Geschätzte Kosten",
+      "stopReason": "Wie er endete",
+      "ingested": "Aufgenommen",
+      "skipped": "Übersprungen",
+      "removed": "Entfernt",
+      "chunks": "Gespeicherte Chunks",
+      "triggerScheduled": "Geplant",
+      "triggerManual": "Manuell",
+      "failedCount": "{{failed}} fehlgeschlagen",
+      "stopCompleted": "Hat die ganze Quelle abgedeckt",
+      "stopPageLimit": "Am Seitenlimit gestoppt – nichts wurde als gelöscht gewertet",
+      "stopFetchLimit": "Am Abruflimit gestoppt – nichts wurde als gelöscht gewertet",
+      "stopByteLimit": "Am Größenlimit gestoppt – nichts wurde als gelöscht gewertet",
+      "stopTimeLimit": "Am Zeitbudget gestoppt – nichts wurde als gelöscht gewertet",
+      "stopCancelled": "Vorzeitig gestoppt – abgebrochen, abgelöst oder Chunk-Budget erreicht",
+      "hoursMinutes": "{{hours}} Std. {{minutes}} Min.",
+      "minutesSeconds": "{{minutes}} Min. {{seconds}} Sek.",
+      "seconds": "{{seconds}} Sek."
+    },
+    "schedule": {
+      "presetCustom": "Eigener Cron…",
+      "customCron": "Cron-Ausdruck",
+      "invalid": "Dieser Cron würde abgelehnt.",
+      "checking": "Wird geprüft…",
+      "nextRuns": "Nächste Läufe (Ihre Ortszeit): {{times}}",
+      "loadFailed": "Der Zeitplan konnte nicht gelesen werden: {{error}}",
+      "notScheduled": "Dieser Cron ist gespeichert, aber nichts ist geplant. Speichern Sie die Wissensbasis erneut; bleibt es so, hat der Server den Cron abgelehnt – sein Log nennt den Grund.",
+      "disabledSource": "Die Quelle ist deaktiviert, daher läuft ihr Cron nicht.",
+      "nextFire": "Nächster Lauf {{relative}} ({{time}})",
+      "paused": "Kein Lauf geplant",
+      "lastFired": "Zuletzt ausgelöst {{relative}}",
+      "neverFired": "Noch nie ausgelöst",
+      "disabledBecause": "Der Scheduler hat diesen Zeitplan deaktiviert: {{reason}}",
+      "disabled": "Der Scheduler hat diesen Zeitplan deaktiviert.",
+      "deadLettered": "Der Scheduler hat nach wiederholten Fehlern aufgegeben. Beheben Sie die Ursache und speichern Sie dann die Wissensbasis, um ihn neu zu aktivieren.",
+      "failing": "Die letzten {{fails}} Auslösungen sind fehlgeschlagen; der Scheduler versucht es erneut.",
+      "fireFailed": "fehlgeschlagen",
+      "fireStarted": "hat einen Lauf gestartet",
+      "presetManual": "Nur bei manuellem Start",
+      "presetHourly": "Jede Stunde",
+      "presetDaily": "Täglich um 02:00 UTC",
+      "presetWeekly": "Jeden Montag um 02:00 UTC",
+      "presetMonthly": "Am 1. jedes Monats um 02:00 UTC"
+    },
+    "contents": {
+      "title": "Aufgenommene Dokumente",
+      "filter": "Nach URL oder Dateiname filtern",
+      "loadFailed": "Die Dokumente konnten nicht geladen werden: {{error}}",
+      "noMatch": "Kein Dokument passt zu diesem Filter.",
+      "empty": "Noch nichts aufgenommen. Führen Sie die Quelle aus, dann erscheinen ihre Dokumente hier.",
+      "truncated": "Diese Quelle enthält mehr Dokumente als aufgelistet. Filtern Sie, um ein bestimmtes zu finden.",
+      "page": "Seite {{page}} von {{pages}}",
+      "openUrl": "Seite öffnen",
+      "removed": "Entfernt",
+      "missed": "Von den letzten {{runs}} Läufen nicht gefunden",
+      "live": "Aktiv",
+      "firstIngested": "Zuerst aufgenommen",
+      "lastIngested": "Zuletzt eingebettet",
+      "removedHint": "Dieses Dokument ist aus der Quelle verschwunden, und seine Chunks wurden aus der Wissensbasis entfernt.",
+      "chunksFailed": "Die Chunks konnten nicht gelesen werden: {{error}}",
+      "noChunks": "Der Vektorspeicher enthält keine Chunks für dieses Dokument. Ist der Speicher In-Memory, leert ihn ein Neustart – führen Sie die Quelle erneut aus.",
+      "chunkNumber": "Chunk Nr. {{number}}",
+      "chunk": "Chunk",
+      "characters": "{{length}} Zeichen"
+    },
+    "retrieval": {
+      "score": "Score {{score}}",
+      "hint": "Durchsuchen Sie diese Wissensbasis genau so, wie es der Retrieval eines Agenten tut. Jede Suche kostet einen Embedding-Aufruf; nichts wird gespeichert.",
+      "placeholder": "Fragen Sie, was ein Nutzer fragen würde…",
+      "query": "Anfrage",
+      "source": "Quelle",
+      "allSources": "Gesamte Wissensbasis",
+      "maxResults": "Ergebnisse",
+      "minScore": "Min. Score",
+      "search": "Suchen",
+      "unsaved": "Die Suche nutzt die gespeicherte Wissensbasis – ihr Embedding-Modell und ihren Speicher –, nicht die Änderungen auf dem Bildschirm.",
+      "failed": "Die Suche ist fehlgeschlagen: {{error}}",
+      "resultCount": "{{results}} Chunk(s) mit Score {{minScore}} oder höher",
+      "noResults": "Kein Treffer. Senken Sie den Mindest-Score oder prüfen Sie, ob die Quellen gelaufen sind.",
+      "title": "Retrieval testen",
+      "saveFirst": "Speichern Sie diese Wissensbasis zuerst, um sie zu durchsuchen."
+    },
+    "legacyIngestionNote": "Für einmalige Texte. Hier hinzugefügte Dokumente können später weder aufgelistet, aktualisiert noch entfernt werden – für Dokumente, die Sie pflegen werden, fügen Sie stattdessen unter Aufnahmequellen eine Dateien-Quelle hinzu."
   },
   "onboarding": {
     "welcome": {
@@ -2795,6 +2890,7 @@
     "question": "Frage",
     "readyToDiscuss": "Bereit zur Diskussion",
     "responding": "antwortet…",
+    "usingTool": "Verwendet {{tool}} …",
     "reviewMemberRoster": "Mitgliederliste",
     "reviewMembers": "Mitglieder",
     "reviewModerator": "Moderator",
@@ -3653,7 +3749,7 @@
     "intent": "Absicht",
     "deployments": "Agentenbereitstellungen",
     "addDeployment": "Agent hinzufügen",
-    "agents": "Agenten",
+    "intentPlaceholder": "z. B. booking_request",
     "empty": "Noch keine Auslöser konfiguriert",
     "created": "Auslöser erstellt",
     "updated": "Auslöser aktualisiert",
@@ -3885,7 +3981,10 @@
     "targetType": "Typ",
     "triggerHint": "Benutzer geben „Schlüsselwort: Nachricht“ ein, um an dieses Ziel weiterzuleiten",
     "triggerKeywords": "Trigger-Schlüsselwörter",
-    "triggers": "Trigger",
+    "targetFallback": "Ziel {{number}}",
+    "untitledChannel": "Unbenannter Kanal",
+    "triggerCount_one": "{{count}} Auslöser",
+    "triggerCount_other": "{{count}} Auslöser",
     "type": "Kanaltyp",
     "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
     "webhookUrl": "Webhook-URL",
@@ -4857,6 +4956,7 @@
       "action": "Aktivieren"
     },
     "activation": {
+      "storedPromptConfirm": "Diese Anweisungen stammen aus der gespeicherten Konfiguration, die jeder ändern konnte, der Plattformeinstellungen bearbeiten darf. Ich habe sie oben gelesen und möchte sie installieren.",
       "title": "Plattform-Operator aktivieren",
       "subtitle": "Wählen Sie das Modell für den Operator, prüfen Sie seine Anweisungen und starten Sie das Deployment.",
       "modelStep": "Modell",
@@ -4959,7 +5059,11 @@
       "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden.",
       "agentId": "Agent",
       "platformBaseUrl": "Ruft Plattform auf unter",
-      "platformBaseUrlUnknown": "nicht erfasst"
+      "platformBaseUrlUnknown": "nicht erfasst",
+      "unregister": "Operator abmelden",
+      "unregisterConfirmTitle": "Plattform-Operator abmelden?",
+      "unregisterConfirmBody": "Nur die gespeicherte Operator-Konfiguration wird entfernt. Der registrierte Agent konnte nicht als ein von diesem Manager eingerichteter Operator verifiziert werden, daher wird er weder bereitgestellt noch zurückgezogen oder gelöscht – prüfen Sie ihn auf der Agenten-Seite.",
+      "unverifiedActions": "Dieser Agent konnte nicht als ein vom Manager eingerichteter Operator verifiziert werden. Diese Seite prüft, zieht zurück oder löscht ihn daher nicht. „Neu konfigurieren“ richtet einen neuen Operator ein und lässt diesen Agenten unverändert."
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
@@ -5049,7 +5153,8 @@
       "activatedChecking": "Platform Operator aktiviert. Verbindungsprüfungen laufen im Hintergrund.",
       "writeProbeVerified": "Schreibzugriff verifiziert — ein echter, geschützter Schreibvorgang wurde zur Freigabe angehalten.",
       "writeProbeFailed": "Das Freigabe-Gate hat nicht gehalten — der Operator wurde entfernt.",
-      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos."
+      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos.",
+      "unregistered": "Plattform-Operator abgemeldet"
     },
     "canary": {
       "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",
@@ -5088,7 +5193,22 @@
     "superseded": {
       "title": "Der vorherige Operator-Agent ist weiterhin deployed."
     },
+    "trust": {
+      "checking": "Der Operator wird geprüft, bevor der Chat geöffnet wird …",
+      "title": "Der Plattform-Operator konnte nicht verifiziert werden",
+      "body": "Der Chat ist deaktiviert, weil der als Operator registrierte Agent ({{agentId}}) nicht nachweislich der ist, den dieser Manager eingerichtet hat. Wer Plattformeinstellungen bearbeiten darf, kann ändern, welcher Agent das ist.",
+      "reasonMarker": "Er trägt die Plattform-Operator-Markierung nicht und ist daher möglicherweise nicht der vom Manager bereitgestellte Agent.",
+      "reasonGate": "Sein Freigabe-Gate konnte nicht verifiziert werden: {{detail}}",
+      "reasonUnreadable": "Die Prüfungen konnten nicht abgeschlossen werden: {{detail}}",
+      "recheck": "Erneut prüfen",
+      "manage": "Operator-Bildschirm öffnen"
+    },
     "upgrade": {
+      "reviewTitle": "Gespeicherte Anweisungen prüfen",
+      "reviewBody": "Diese Anweisungen wurden zuvor gespeichert und werden auf dem neuen Operator installiert. Wer Plattformeinstellungen bearbeiten darf, könnte sie geändert haben – lesen Sie daher, was vom Standard abweicht, bevor Sie fortfahren.",
+      "reviewSummary": "{{added}} Zeilen hinzugefügt, {{removed}} Standardzeilen entfernt",
+      "reviewFull": "Gesamten gespeicherten Text anzeigen",
+      "reviewConfirm": "Ich habe diese Anweisungen gelesen und möchte sie installieren",
       "hint": "Für den Platform Operator ist ein Update verfügbar.",
       "blockerBaseUrl": "Die Adresse seines Modellservers wurde nicht gespeichert — gib sie für das Update erneut ein.",
       "addedTools_other": "{{count}} neue Werkzeuge",
@@ -6210,5 +6330,14 @@
     "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
+  },
+  "modelCombobox": {
+    "toggle": "Modellvorschläge anzeigen",
+    "listLabel": "Modellvorschläge",
+    "matching": "Passend zu „{{query}}“",
+    "otherModels": "Weitere Modelle",
+    "default": "Standard",
+    "noMatch": "Kein Vorschlag passt zu „{{query}}“ – der Wert wird wie eingegeben verwendet.",
+    "customHint": "Nicht dabei? Gib eine beliebige Modell-ID ein, die dein Anbieter unterstützt."
   }
 }

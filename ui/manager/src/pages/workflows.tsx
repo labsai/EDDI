@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Workflow, Search, Plus, ExternalLink, Trash2, Copy, Share2, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { accessFor } from "@/lib/access";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useSpaces } from "@/hooks/use-spaces";
 import { OwnershipBadge } from "@/components/workspaces/ownership-badge";
 import { ShareDialog } from "@/components/workspaces/share-dialog";
@@ -36,6 +37,8 @@ type SortDir = "asc" | "desc";
 export function WorkflowsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
+  // The input updates on every keystroke; the server is asked once typing pauses.
+  const debouncedSearch = useDebounce(search.trim(), 250);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("workflows"));
@@ -63,7 +66,7 @@ export function WorkflowsPage() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useInfiniteWorkflowDescriptors(search);
+  } = useInfiniteWorkflowDescriptors(debouncedSearch);
 
   const deleteMutation = useDeleteWorkflow();
   const duplicateMutation = useDuplicateWorkflow();
@@ -223,7 +226,7 @@ export function WorkflowsPage() {
             </div>
           ) : (
             <div
-              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
               data-testid="workflow-list"
             >
               <table className="w-full">
@@ -238,7 +241,7 @@ export function WorkflowsPage() {
                         {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-30" />}
                       </span>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    <th className="hidden md:table-cell px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.id", "ID")}
                     </th>
                     <th
@@ -286,7 +289,7 @@ export function WorkflowsPage() {
                           visibility={wf.visibility}
                         />
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="hidden md:table-cell px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
                           {wf.id.slice(0, 12)}…
                         </span>

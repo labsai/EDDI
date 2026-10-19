@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -19,7 +20,7 @@ export async function listVariables(
   tenantId = DEFAULT_TENANT,
 ): Promise<GlobalVariable[]> {
   return api.get<GlobalVariable[]>(
-    `${BASE}/${encodeURIComponent(tenantId)}`,
+    `${BASE}/${nameSeg(tenantId)}`,
   );
 }
 
@@ -29,7 +30,7 @@ export async function getVariable(
   tenantId = DEFAULT_TENANT,
 ): Promise<GlobalVariable> {
   return api.get<GlobalVariable>(
-    `${BASE}/${encodeURIComponent(tenantId)}/${encodeURIComponent(key)}`,
+    `${BASE}/${nameSeg(tenantId)}/${nameSeg(key)}`,
   );
 }
 
@@ -40,7 +41,7 @@ export async function upsertVariable(
   tenantId = DEFAULT_TENANT,
 ): Promise<void> {
   await api.put(
-    `${BASE}/${encodeURIComponent(tenantId)}/${encodeURIComponent(key)}`,
+    `${BASE}/${nameSeg(tenantId)}/${nameSeg(key)}`,
     variable,
   );
 }
@@ -51,7 +52,7 @@ export async function deleteVariable(
   tenantId = DEFAULT_TENANT,
 ): Promise<void> {
   await api.delete(
-    `${BASE}/${encodeURIComponent(tenantId)}/${encodeURIComponent(key)}`,
+    `${BASE}/${nameSeg(tenantId)}/${nameSeg(key)}`,
   );
 }
 

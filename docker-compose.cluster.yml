@@ -93,6 +93,9 @@ services:
       EDDI_SECURITY_ALLOW_UNAUTHENTICATED: ${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}
       EDDI_MCP_ALLOW_UNAUTHENTICATED: ${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}
       EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: ${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}
+      # Host allow-list while authentication is off — see docker-compose.yml. The
+      # load balancer passes the browser's Host through, so localhost works as is.
+      EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: ${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}
       # Cluster mode. EDDI_CLUSTER_NODE_ID is left unset: each replica uses its
       # container host name, which is unique.
       EDDI_MESSAGING_TYPE: nats
@@ -132,6 +135,43 @@ services:
     depends_on:
       eddi:
         condition: service_healthy
+      bind-guard:
+        condition: service_completed_successfully
+
+  # Refuses to publish an UNAUTHENTICATED cluster beyond loopback — the same
+  # one-shot guard as docker-compose.yml's: the load balancer below publishes on
+  # EDDI_BIND while authentication is off by default here, and EDDI_BIND=0.0.0.0
+  # used to publish an open EDDI, MCP server and secrets vault. ComposeStackTest
+  # keeps the copies identical apart from the image.
+  bind-guard:
+    image: mongo:7.0.43
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - "EDDI_BIND=${EDDI_BIND:-127.0.0.1}"
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=${EDDI_SECURITY_ALLOW_UNAUTHENTICATED:-true}"
+      - "EDDI_I_UNDERSTAND_PUBLIC=${EDDI_I_UNDERSTAND_PUBLIC:-false}"
+    command:
+      - |
+        case "$$EDDI_BIND" in
+          ""|127.0.0.1|localhost|::1|"[::1]") exit 0 ;;
+        esac
+        if [ "$$EDDI_SECURITY_ALLOW_UNAUTHENTICATED" != "true" ] || [ "$$EDDI_I_UNDERSTAND_PUBLIC" = "true" ]; then
+          exit 0
+        fi
+        echo "" >&2
+        echo "[SECURITY] Refusing to start: EDDI_BIND=$$EDDI_BIND would publish EDDI on a" >&2
+        echo "  non-loopback interface while EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true," >&2
+        echo "  so every API endpoint — agents, conversations, the secrets vault, MCP —" >&2
+        echo "  would be reachable from the network with no token at all." >&2
+        echo "" >&2
+        echo "  Turn authentication on first:" >&2
+        echo "    EDDI_SECURITY_ALLOW_UNAUTHENTICATED=false   (in .env)" >&2
+        echo "    QUARKUS_OIDC_TENANT_ENABLED=true" >&2
+        echo "    docker compose -f docker-compose.yml -f docker-compose.auth.yml up" >&2
+        echo "  or keep EDDI on loopback (EDDI_BIND=127.0.0.1, the default)." >&2
+        echo "  To expose an UNAUTHENTICATED instance on purpose — an isolated network" >&2
+        echo "  you alone can reach — set EDDI_I_UNDERSTAND_PUBLIC=true." >&2
+        exit 1
 
 volumes:
   cluster-mongodb:

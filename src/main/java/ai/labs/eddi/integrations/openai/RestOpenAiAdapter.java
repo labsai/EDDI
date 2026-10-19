@@ -12,7 +12,7 @@ import ai.labs.eddi.integrations.openai.model.ModelObject;
 import ai.labs.eddi.integrations.openai.model.ModelsResponse;
 import ai.labs.eddi.integrations.openai.model.OpenAiErrorResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.smallrye.common.annotation.Blocking;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.annotation.security.PermitAll;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -137,7 +137,15 @@ public class RestOpenAiAdapter {
     @Path("/chat/completions")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces({MediaType.APPLICATION_JSON, MediaType.SERVER_SENT_EVENTS})
-    @Blocking
+    // A virtual thread, not a worker: the method waits for the whole turn (and the
+    // streaming body for the whole stream), so on the worker pool every /v1 request
+    // held a second platform thread next to the turn's own — the adapter alone
+    // could
+    // pin max-concurrent-requests of the ~200. Nothing here needs a platform
+    // thread:
+    // the request context and SecurityIdentity are available on Quarkus' request
+    // virtual thread, and the caller identity travels with the turn's callable.
+    @RunOnVirtualThread
     @Operation(summary = "Create a chat completion",
                description = "Sends the last user message to the agent behind the requested model. "
                        + "Set stream=true for an SSE token stream. Prior messages in the array are "

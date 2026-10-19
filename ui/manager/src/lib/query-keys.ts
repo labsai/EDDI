@@ -74,6 +74,42 @@ export const agentKeys = {
       : (["agent-prompt", agentId, version] as const),
 } as const;
 
+/**
+ * Matches the `agentKeys.all` queries a deploy or undeploy of `agentIds` can
+ * change: those agents' deployment, status, impact, profile and usage entries,
+ * plus the per-environment listings. Every OTHER agent's per-agent entries and
+ * the descriptor and version lists are left alone.
+ *
+ * Invalidating all of `agentKeys.all` instead refetched every card's status on
+ * the Agents page (one request per card, several per environment) after each
+ * single deploy — the page jittered and the user's next click queued behind it.
+ * Sub-keys this does not know about are refreshed, to stay on the safe side.
+ */
+export function agentDeploymentQueries(agentIds: readonly string[]) {
+  const ids = new Set(agentIds);
+  return {
+    queryKey: agentKeys.all,
+    predicate: (query: { queryKey: readonly unknown[] }) => {
+      const [, sub, a, b] = query.queryKey;
+      switch (sub) {
+        case "descriptors":
+        case "descriptors-infinite":
+        case "versions":
+          return false;
+        case "deployment":
+        case "deploymentImpact":
+          return ids.has(b as string);
+        case "deploymentStatuses":
+        case "profile":
+        case "usage":
+          return ids.has(a as string);
+        default:
+          return true;
+      }
+    },
+  };
+}
+
 export const groupKeys = {
   all: ["groups"] as const,
   conversations: ["groupConversations"] as const,

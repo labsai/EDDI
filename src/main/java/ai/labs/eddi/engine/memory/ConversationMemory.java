@@ -34,6 +34,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.Consumer;
 
 /**
  * @author ginccc
@@ -87,6 +88,7 @@ public class ConversationMemory implements IConversationMemory {
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
+    private transient Consumer<String> toolCallObserver;
 
     /**
      * Transient — never serialized. The running turn's deadline, set per turn.
@@ -474,6 +476,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public ConversationEventSink getEventSink() {
         return eventSink;
+    }
+
+    @Override
+    public Consumer<String> getToolCallObserver() {
+        return toolCallObserver;
+    }
+
+    @Override
+    public void setToolCallObserver(Consumer<String> toolCallObserver) {
+        this.toolCallObserver = toolCallObserver;
     }
 
     @Override

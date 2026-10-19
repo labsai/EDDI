@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
+import java.util.function.Consumer;
 
 /**
  * @author ginccc
@@ -75,6 +76,26 @@ public interface IConversationMemory extends Serializable {
      * {@code ConversationService.sayStreaming()} before lifecycle execution.
      */
     default void setEventSink(ConversationEventSink eventSink) {
+        // no-op by default
+    }
+
+    /**
+     * Observer told the NAME of each tool the turn's tool loop is about to run, or
+     * {@code null} (the default) when nobody listens. Deliberately separate from
+     * {@link #getEventSink()}: a non-null sink is the signal that the turn is
+     * <em>streamed</em> and switches the LLM task into its streaming path, which a
+     * plain turn that merely wants tool-call visibility (a group member's) must not
+     * trigger. Transient, set per turn, never persisted.
+     */
+    default Consumer<String> getToolCallObserver() {
+        return null;
+    }
+
+    /**
+     * Sets (or, with {@code null}, clears) the observer of
+     * {@link #getToolCallObserver()}.
+     */
+    default void setToolCallObserver(Consumer<String> toolCallObserver) {
         // no-op by default
     }
 

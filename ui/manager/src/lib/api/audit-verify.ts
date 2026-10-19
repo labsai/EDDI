@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 /**
  * The audit ledger's integrity check, as the backend computes it.
@@ -58,13 +59,13 @@ const BASE = "/auditstore/verify";
 
 /** `GET /auditstore/verify/{conversationId}` — HMACs plus the sequence chain. */
 export function verifyConversationAudit(conversationId: string): Promise<AuditVerificationReport> {
-  return api.get<AuditVerificationReport>(`${BASE}/${encodeURIComponent(conversationId)}`);
+  return api.get<AuditVerificationReport>(`${BASE}/${seg(conversationId)}`);
 }
 
 /** `GET /auditstore/verify/agent/{agentId}` — HMACs only; the chain is not applicable across conversations. */
 export function verifyAgentAudit(agentId: string, agentVersion?: number | null): Promise<AuditVerificationReport> {
   const query = agentVersion != null ? `?agentVersion=${agentVersion}` : "";
-  return api.get<AuditVerificationReport>(`${BASE}/agent/${encodeURIComponent(agentId)}${query}`);
+  return api.get<AuditVerificationReport>(`${BASE}/agent/${seg(agentId)}${query}`);
 }
 
 /**

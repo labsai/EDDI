@@ -720,7 +720,7 @@ class RagSourceIngestionServiceTest {
         void runsTheNamedSource() throws Exception {
             var source = source("0 2 * * *");
             when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any()))
                     .thenReturn(IngestionReport.skipped(SOURCE_ID, "stub"));
 
             IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
@@ -728,7 +728,7 @@ class RagSourceIngestionServiceTest {
             assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
             assertTrue(report.isSuccess(), "a started run is a successful fire");
             verify(pipeline, timeout(5_000)).run(eq(KB_ID), any(RagConfiguration.class),
-                    any(IngestionSource.class), eq(Mode.INGEST), eq(report.runId()));
+                    any(IngestionSource.class), eq(Mode.INGEST), eq(report.runId()), eq(IIngestionStateStore.IngestionRun.Trigger.SCHEDULED));
         }
 
         @Test
@@ -742,7 +742,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
             var release = new CountDownLatch(1);
             var runThread = new AtomicReference<Thread>();
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any())).thenAnswer(invocation -> {
                 runThread.set(Thread.currentThread());
                 release.await(10, TimeUnit.SECONDS);
                 return IngestionReport.skipped(SOURCE_ID, "stub");
@@ -752,7 +752,7 @@ class RagSourceIngestionServiceTest {
                 IngestionReport report = service.processScheduledFire(KB_ID, 1, SOURCE_ID);
 
                 assertEquals(IngestionReport.Outcome.STARTED, report.outcome());
-                verify(pipeline, timeout(5_000)).run(anyString(), any(), any(), eq(Mode.INGEST), anyString());
+                verify(pipeline, timeout(5_000)).run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any());
                 assertNotEquals(Thread.currentThread(), runThread.get(), "the run needs a thread of its own");
             } finally {
                 release.countDown();
@@ -764,7 +764,7 @@ class RagSourceIngestionServiceTest {
         void theFireLearnsTheOutcome() throws Exception {
             var source = source("0 2 * * *");
             when(ragStore.read(eq(KB_ID), anyInt())).thenReturn(knowledgeBase(source));
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any()))
                     .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
             var outcome = new AtomicReference<IngestionReport>();
             var done = new CountDownLatch(1);
@@ -795,7 +795,7 @@ class RagSourceIngestionServiceTest {
             // doThrow, not when(...): the setUp stub would run on when()'s own call.
             doThrow(new IngestionStateStoreException("database unwell", null))
                     .when(pipeline).claimForMaintenance(anyString(), any());
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString()))
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any()))
                     .thenReturn(IngestionReport.failed("r", SOURCE_ID, "site unreachable"));
             var outcome = new AtomicReference<IngestionReport>();
             var done = new CountDownLatch(1);
@@ -820,7 +820,7 @@ class RagSourceIngestionServiceTest {
             String sourceKey = IngestionPipeline.stateKey(KB_ID, source);
             var release = new CountDownLatch(1);
             var running = new CountDownLatch(1);
-            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString())).thenAnswer(invocation -> {
+            when(pipeline.run(anyString(), any(), any(), eq(Mode.INGEST), anyString(), any())).thenAnswer(invocation -> {
                 running.countDown();
                 release.await(10, TimeUnit.SECONDS);
                 return IngestionReport.skipped(SOURCE_ID, "stub");
@@ -829,13 +829,21 @@ class RagSourceIngestionServiceTest {
             try {
                 String runId = service.runAsync(KB_ID, knowledgeBase(source), source).orElseThrow();
                 assertTrue(running.await(5, TimeUnit.SECONDS));
+                stateStore.reportProgress(new IIngestionStateStore.IngestionRun(runId, sourceKey,
+                        IIngestionStateStore.IngestionRun.Status.RUNNING, null, null, 12, 5, 6, 1, 0, 30, 0.0, null, 0,
+                        null, IIngestionStateStore.IngestionRun.Trigger.MANUAL));
 
                 assertEquals(1, service.cancelInFlightRuns());
 
                 assertTrue(stateStore.activeRun(sourceKey).isEmpty(), "the source is free again at once");
-                assertEquals(IIngestionStateStore.IngestionRun.Status.CANCELLED,
-                        stateStore.listRuns(sourceKey, 5).stream()
-                                .filter(run -> run.runId().equals(runId)).findFirst().orElseThrow().status());
+                var closed = stateStore.listRuns(sourceKey, 5).stream()
+                        .filter(run -> run.runId().equals(runId)).findFirst().orElseThrow();
+                assertEquals(IIngestionStateStore.IngestionRun.Status.CANCELLED, closed.status());
+                // Closed with how far it got, not a row of zeroes.
+                assertEquals(12, closed.documentsSeen());
+                assertEquals(5, closed.documentsIngested());
+                assertEquals("CANCELLED", closed.stopReason());
+                assertEquals(IIngestionStateStore.IngestionRun.Trigger.MANUAL, closed.trigger());
             } finally {
                 release.countDown();
             }

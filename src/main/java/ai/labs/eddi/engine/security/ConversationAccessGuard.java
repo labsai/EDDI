@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.security;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import io.quarkus.security.ForbiddenException;
@@ -48,12 +49,6 @@ public class ConversationAccessGuard {
     private static final Logger LOGGER = Logger.getLogger(ConversationAccessGuard.class);
     private static final String RESOURCE_TYPE = "conversation";
 
-    /**
-     * Conversation descriptors are written once and updated in place, so they never
-     * leave version 0 — the archived copy a soft delete leaves keeps it too.
-     */
-    private static final int DESCRIPTOR_VERSION = 0;
-
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final IConversationDescriptorStore conversationDescriptorStore;
@@ -73,6 +68,14 @@ public class ConversationAccessGuard {
      */
     @Inject
     Instance<IConversationMemoryStore> conversationMemoryStoreInstance;
+
+    /**
+     * Shares one descriptor read between the checks of a request — see
+     * {@link ConversationDescriptorMemo}. Field-injected for the same reason as
+     * {@link #reviewPolicyInstance}; without it, every check reads the store.
+     */
+    @Inject
+    Instance<ConversationDescriptorMemo> descriptorMemoInstance;
 
     @Inject
     public ConversationAccessGuard(SecurityIdentity identity,
@@ -221,17 +224,7 @@ public class ConversationAccessGuard {
      */
     private ConversationDescriptor resolveDescriptor(String conversationId) {
         try {
-            try {
-                var live = conversationDescriptorStore.readDescriptor(conversationId, DESCRIPTOR_VERSION);
-                if (live != null) {
-                    return live;
-                }
-            } catch (ResourceNotFoundException e) {
-                // Fall through to the archive: a soft delete drops only the live row.
-            }
-            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, DESCRIPTOR_VERSION);
-        } catch (ResourceNotFoundException e) {
-            return null;
+            return ConversationDescriptorMemo.resolve(conversationDescriptorStore, descriptorMemoInstance, conversationId).descriptor();
         } catch (ResourceStoreException e) {
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
             throw new ForbiddenException("Access denied: unable to verify conversation ownership");

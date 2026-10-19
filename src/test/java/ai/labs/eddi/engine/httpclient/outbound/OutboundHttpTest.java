@@ -41,8 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@link OutboundHttp}'s policies against a scripted engine: every hop the
  * facade sends is recorded, every response is canned, so redirect, header, SSRF
  * and body rules are pinned without a socket. The real JDK engine is exercised
- * in {@code JdkOutboundEngineTest} and, through the adapter, in
- * {@code SafeHttpClientTest}.
+ * in {@code JdkOutboundEngineTest} and, end to end, in
+ * {@code OutboundHttpServerTest}.
  */
 class OutboundHttpTest {
 

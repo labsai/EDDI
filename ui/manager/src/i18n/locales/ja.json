@@ -2192,7 +2192,8 @@
     "serverRefusedCreate": "サーバーがこのスケジュールを拒否しました:",
     "disabledAccessRevokedHintBy": "作成者（{{user}}）がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
     "finishedOneShot": "1 回限りのスケジュール：実行済みで完了しています。",
-    "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。"
+    "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。",
+    "openKnowledgeBase": "ナレッジベースを開く"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -2539,7 +2540,101 @@
       "explicit": "場所: {{value}}（上で設定）",
       "default": "場所: {{value}}（デフォルト）",
       "legacyDefault": "場所: 名前「{{name}}」から導出（デフォルト）"
-    }
+    },
+    "runs": {
+      "inProgress": "実行中",
+      "elapsedOfBudget": "{{budget}} 分の予算のうち {{elapsed}}",
+      "progressLabel": "取り込みの進捗",
+      "progressOfEstimate": "約 {{total}} 件中 {{seen}} 件のドキュメントを確認（前回の実行では {{total}} 件）",
+      "progressOfTotal": "{{total}} 件中 {{seen}} 件のドキュメントを確認",
+      "progressSeen": "これまでに {{seen}} 件のドキュメントを確認",
+      "showFewer": "表示を減らす",
+      "showAll": "{{total}} 件の実行をすべて表示",
+      "duration": "所要時間",
+      "finishedAt": "終了",
+      "cost": "推定コスト",
+      "stopReason": "終了の仕方",
+      "ingested": "取り込み済み",
+      "skipped": "スキップ",
+      "removed": "削除",
+      "chunks": "保存されたチャンク",
+      "triggerScheduled": "スケジュール",
+      "triggerManual": "手動",
+      "failedCount": "{{failed}} 件失敗",
+      "stopCompleted": "ソース全体をカバーしました",
+      "stopPageLimit": "ページ上限で停止 — 削除扱いになったものはありません",
+      "stopFetchLimit": "取得上限で停止 — 削除扱いになったものはありません",
+      "stopByteLimit": "サイズ上限で停止 — 削除扱いになったものはありません",
+      "stopTimeLimit": "時間予算で停止 — 削除扱いになったものはありません",
+      "stopCancelled": "早期に停止 — キャンセル、置き換え、またはチャンク予算に到達",
+      "hoursMinutes": "{{hours}} 時間 {{minutes}} 分",
+      "minutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
+      "seconds": "{{seconds}} 秒"
+    },
+    "schedule": {
+      "presetCustom": "カスタム cron…",
+      "customCron": "Cron 式",
+      "invalid": "この cron は拒否されます。",
+      "checking": "確認中…",
+      "nextRuns": "次回の実行（ローカル時刻）: {{times}}",
+      "loadFailed": "スケジュールを読み取れませんでした: {{error}}",
+      "notScheduled": "この cron は保存されていますが、何もスケジュールされていません。ナレッジベースをもう一度保存してください。それでも変わらない場合はサーバーが cron を拒否しています — 理由はサーバーのログにあります。",
+      "disabledSource": "ソースが無効なため、その cron は実行されません。",
+      "nextFire": "次回の実行 {{relative}}（{{time}}）",
+      "paused": "実行予定はありません",
+      "lastFired": "最終実行 {{relative}}",
+      "neverFired": "まだ実行されていません",
+      "disabledBecause": "スケジューラーがこのスケジュールを無効にしました: {{reason}}",
+      "disabled": "スケジューラーがこのスケジュールを無効にしました。",
+      "deadLettered": "失敗が続いたため、スケジューラーは再試行をやめました。原因を修正してから、ナレッジベースを保存して再度有効にしてください。",
+      "failing": "直近 {{fails}} 回の実行が失敗しました。スケジューラーが再試行しています。",
+      "fireFailed": "失敗",
+      "fireStarted": "実行を開始しました",
+      "presetManual": "手動で実行したときのみ",
+      "presetHourly": "毎時",
+      "presetDaily": "毎日 02:00 UTC",
+      "presetWeekly": "毎週月曜 02:00 UTC",
+      "presetMonthly": "毎月 1 日 02:00 UTC"
+    },
+    "contents": {
+      "title": "取り込まれたドキュメント",
+      "filter": "URL またはファイル名で絞り込む",
+      "loadFailed": "ドキュメントを読み込めませんでした: {{error}}",
+      "noMatch": "この条件に一致するドキュメントはありません。",
+      "empty": "まだ何も取り込まれていません。ソースを実行すると、そのドキュメントがここに表示されます。",
+      "truncated": "このソースには一覧より多くのドキュメントがあります。特定のものを探すには絞り込んでください。",
+      "page": "{{pages}} ページ中 {{page}} ページ",
+      "openUrl": "ページを開く",
+      "removed": "削除済み",
+      "missed": "直近 {{runs}} 回の実行で見つかりません",
+      "live": "有効",
+      "firstIngested": "初回取り込み",
+      "lastIngested": "最終埋め込み",
+      "removedHint": "このドキュメントはソースからなくなり、そのチャンクはナレッジベースから削除されました。",
+      "chunksFailed": "チャンクを読み取れませんでした: {{error}}",
+      "noChunks": "ベクトルストアにこのドキュメントのチャンクがありません。インメモリのストアは再起動で空になります — ソースを再実行してください。",
+      "chunkNumber": "チャンク {{number}}",
+      "chunk": "チャンク",
+      "characters": "{{length}} 文字"
+    },
+    "retrieval": {
+      "score": "スコア {{score}}",
+      "hint": "エージェントの検索とまったく同じ方法でこのナレッジベースを検索します。検索ごとに埋め込み呼び出しが 1 回かかり、何も保存されません。",
+      "placeholder": "ユーザーが尋ねそうなことを入力…",
+      "query": "クエリ",
+      "source": "ソース",
+      "allSources": "ナレッジベース全体",
+      "maxResults": "結果数",
+      "minScore": "最小スコア",
+      "search": "検索",
+      "unsaved": "検索には保存済みのナレッジベース（埋め込みモデルとストア）が使われ、画面上の変更は使われません。",
+      "failed": "検索に失敗しました: {{error}}",
+      "resultCount": "スコア {{minScore}} 以上のチャンク {{results}} 件",
+      "noResults": "一致するものがありません。最小スコアを下げるか、ソースが実行済みか確認してください。",
+      "title": "検索をテスト",
+      "saveFirst": "検索するには、まずこのナレッジベースを保存してください。"
+    },
+    "legacyIngestionNote": "一度きりのテキスト用です。ここで追加したドキュメントは後から一覧表示・更新・削除できません。継続して管理するドキュメントは、代わりに「取り込みソース」でファイルソースを追加してください。"
   },
   "onboarding": {
     "welcome": {
@@ -2795,6 +2890,7 @@
     "question": "質問",
     "readyToDiscuss": "議論の準備完了",
     "responding": "応答中…",
+    "usingTool": "{{tool}} を使用中…",
     "reviewMemberRoster": "メンバー一覧",
     "reviewMembers": "メンバー",
     "reviewModerator": "モデレーター",
@@ -3432,7 +3528,7 @@
     "intent": "インテント",
     "deployments": "エージェントデプロイメント",
     "addDeployment": "エージェントを追加",
-    "agents": "エージェント",
+    "intentPlaceholder": "例: booking_request",
     "empty": "トリガーはまだ設定されていません",
     "created": "トリガーを作成しました",
     "updated": "トリガーを更新しました",
@@ -3885,7 +3981,10 @@
     "targetType": "タイプ",
     "triggerHint": "ユーザーが「キーワード: メッセージ」と入力するとこのターゲットにルーティングされます",
     "triggerKeywords": "トリガーキーワード",
-    "triggers": "トリガー",
+    "targetFallback": "ターゲット {{number}}",
+    "untitledChannel": "無題のチャネル",
+    "triggerCount_one": "{{count}} 件のトリガー",
+    "triggerCount_other": "{{count}} 件のトリガー",
     "type": "チャネルタイプ",
     "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
     "webhookUrl": "Webhook URL",
@@ -4857,6 +4956,7 @@
       "action": "有効にする"
     },
     "activation": {
+      "storedPromptConfirm": "これらの指示は保存済みの設定から引き継がれたもので、プラットフォーム設定を編集できる人が変更した可能性があります。上の内容を読み、インストールすることに同意します。",
       "title": "プラットフォームオペレーターを有効にする",
       "subtitle": "オペレーターを動かすモデルを選び、指示内容を確認してデプロイします。",
       "modelStep": "モデル",
@@ -4959,7 +5059,11 @@
       "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。",
       "agentId": "エージェント",
       "platformBaseUrl": "プラットフォームの呼び出し先",
-      "platformBaseUrlUnknown": "記録なし"
+      "platformBaseUrlUnknown": "記録なし",
+      "unregister": "オペレーターの登録を解除",
+      "unregisterConfirmTitle": "プラットフォームオペレーターの登録を解除しますか？",
+      "unregisterConfirmBody": "保存されたオペレーター設定のみが削除されます。登録されたエージェントがこの Manager で設定したオペレーターであることを確認できなかったため、デプロイ、アンデプロイ、削除は行われません。エージェント画面で確認してください。",
+      "unverifiedActions": "このエージェントが Manager で設定したオペレーターであることを確認できなかったため、この画面では接続確認、アンデプロイ、削除を行いません。「再設定」は新しいオペレーターを作成し、このエージェントはそのまま残します。"
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
@@ -5049,7 +5153,8 @@
       "activatedChecking": "プラットフォームオペレーターを有効化しました。接続チェックはバックグラウンドで実行中です。",
       "writeProbeVerified": "書き込みアクセスを検証しました — 実際のゲート付き書き込みが承認のため一時停止しました。",
       "writeProbeFailed": "承認ゲートが機能しませんでした — オペレーターは削除されました。",
-      "writeProbeInconclusive": "ライブ書き込みプローブは結論が出ませんでした。"
+      "writeProbeInconclusive": "ライブ書き込みプローブは結論が出ませんでした。",
+      "unregistered": "プラットフォームオペレーターの登録を解除しました"
     },
     "canary": {
       "genericFailure": "接続確認に失敗しました。",
@@ -5088,7 +5193,22 @@
     "superseded": {
       "title": "以前のオペレーターエージェントがまだデプロイされています。"
     },
+    "trust": {
+      "checking": "チャットを開く前にオペレーターを確認しています…",
+      "title": "プラットフォームオペレーターを確認できませんでした",
+      "body": "オペレーターとして登録されているエージェント（{{agentId}}）が、このマネージャーが設定したものであると確認できないため、チャットは無効です。プラットフォーム設定を編集できる人は、どのエージェントを指すかを変更できます。",
+      "reasonMarker": "プラットフォームオペレーターのマーカーがないため、マネージャーがプロビジョニングしたエージェントではない可能性があります。",
+      "reasonGate": "承認ゲートを確認できませんでした: {{detail}}",
+      "reasonUnreadable": "確認を完了できませんでした: {{detail}}",
+      "recheck": "再確認",
+      "manage": "オペレーター画面を開く"
+    },
     "upgrade": {
+      "reviewTitle": "保存されている指示を確認",
+      "reviewBody": "これらの指示は以前に保存されたもので、新しいオペレーターにインストールされます。プラットフォーム設定を編集できる人が変更した可能性があるため、続行する前にデフォルトとの差分をお読みください。",
+      "reviewSummary": "{{added}} 行追加、デフォルトの {{removed}} 行を削除",
+      "reviewFull": "保存されているテキスト全体を表示",
+      "reviewConfirm": "これらの指示を読み、インストールすることに同意します",
       "hint": "Platform Operator のアップデートがあります。",
       "blockerBaseUrl": "モデルサーバーのアドレスが記録されていません。アップグレードするには再入力してください。",
       "addedTools_other": "{{count}} 件の新しいツール",
@@ -6210,5 +6330,14 @@
     "cancelled": "デプロイされていません: 保管庫キーが付与されませんでした。エージェントは作成済みです。もう一度試して付与とデプロイを行うか、各エージェントのページからデプロイしてください。",
     "failed": "作成済みですが未デプロイ: {{names}}。{{reason}} もう一度試すか、各エージェントのページからデプロイしてください。",
     "memberCancelled": "デプロイされていません: 保管庫キーが付与されませんでした"
+  },
+  "modelCombobox": {
+    "toggle": "モデル候補を表示",
+    "listLabel": "モデル候補",
+    "matching": "「{{query}}」に一致",
+    "otherModels": "その他のモデル",
+    "default": "デフォルト",
+    "noMatch": "「{{query}}」に一致する候補はありません。入力したとおりに使用されます。",
+    "customHint": "一覧にない場合は、プロバイダーがサポートする任意のモデル ID を入力できます。"
   }
 }

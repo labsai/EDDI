@@ -774,13 +774,30 @@ filters on the run id.
 
 | Method | Path | Access | Purpose |
 | ------ | ---- | ------ | ------- |
-| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202, or 409 if one is in flight) |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202 with its `runId`, or 409 if one is in flight) |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
-| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors — including the run in flight, whose counters move while it works |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
+| `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N&q=&offset=&limit=` | VIEW | The documents the source has ingested — URL or file name, first and last embedded, missed runs, removed — most recent first, filterable |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/chunks?version=N&documentId=...` | EDIT | The chunks one document was stored as, in document order (one embedding call; 501 on a store that cannot filter by metadata) |
+| `POST` | `/ragstore/rags/{id}/search?version=N` | EDIT | Test retrieval: `{query, maxResults?, minScore?, sourceId?}` searched exactly as an agent's retrieval does, with each chunk's score and metadata (one embedding call; 502 naming the cause when the provider or store fails) |
 | `DELETE` | `/ragstore/rags/{id}/sources/{sourceId}/documents?version=N` | EDIT | Forget what the source has ingested |
 
 Running needs EDIT rather than VIEW because a published knowledge base grants VIEW to everyone by
-design, and a run rewrites what every agent using it retrieves.
+design, and a run rewrites what every agent using it retrieves. Reading chunks and searching need EDIT
+for the same reason in the other direction: they return the knowledge base's text and cost an
+embedding call each, while the document listing returns only ingestion state and needs VIEW.
+
+#### What a run records
+
+Each run row carries, besides its counters, **why it stopped** (`stopReason`: `COMPLETED`, or the limit
+it hit — `PAGE_LIMIT`, `FETCH_LIMIT`, `BYTE_LIMIT`, `TIME_LIMIT` — or `CANCELLED`, which also covers a
+run that was superseded or reached its chunk budget), **what started it** (`trigger`: `MANUAL` or
+`SCHEDULED`; absent on rows written before it was recorded) and how many documents were **skipped** for
+having no text worth embedding. A running run writes its counters every couple of seconds
+(`IIngestionStateStore.reportProgress`), fenced on the row still being `RUNNING`, so a late write can
+neither reopen nor overwrite a finished run. A run cancelled at shutdown keeps the counters it had got to.
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
 the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
@@ -803,6 +820,24 @@ it, the files the source holds, each marked **Indexed**, **Changed** or **Not in
 uploaded file, one that is in the knowledge base, and one that was replaced after it was indexed are
 told apart without running the source and comparing counters. While anything is waiting, a line says so
 with a **Run now** beside it. Deleting a file confirms first and says what it removes.
+
+While a run is in flight the card shows its **progress**: documents looked at so far against what the
+last complete run saw (or, for a Files source, the number of files), each counter as it moves, the
+trigger, and the time used against the source's time budget. Each past run opens to everything it
+recorded — skipped, failed, removed, chunks stored, duration, estimated cost and how it ended — and a
+failed **Run now**, **Preview** or **Purge** shows the server's own reason rather than a guess.
+
+The **schedule** is chosen from presets (hourly, daily, weekly, monthly — all UTC) or typed as a custom
+cron, which is checked against the server's rules as it is typed and shows its next fire times in the
+viewer's local time. Once saved, the card shows what the scheduler is actually doing: the next run, the
+last fire, a warning when a saved cron produced no schedule, and recent fires with their errors —
+failing, disabled by the scheduler and dead-lettered are each said in words. On the **Schedules** page an
+ingestion schedule links back to its knowledge base.
+
+**Ingested documents** lists what the source has put into the knowledge base — filterable, paged, each
+marked **Live**, **Missed by the last N runs** or **Removed** — and opens a document to the chunks it was
+stored as. **Test Retrieval** searches the knowledge base, or one source, exactly as an agent would and
+shows each chunk with its score and origin.
 
 Run and Preview address the source by id and version, so they crawl the **saved** configuration. While
 the editor has unsaved changes both are disabled, with a line saying why — otherwise editing a start
@@ -955,7 +990,7 @@ parameter rather than ignoring it.
 | Store Type | Required Parameters | Notes |
 |---|---|---|
 | `in-memory` | — | Held in the EDDI process, one store per knowledge base, for dev/test — **loses every ingested document on restart**; ingestion sources re-embed on their next run (see below) |
-| `pgvector` | `password` | PostgreSQL + pgvector; `host`, `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
+| `pgvector` | `password` | PostgreSQL + pgvector; `host` (one hostname or IP address — no port, path, query or comma-separated list; the port goes in `port`), `port`, `database`, `user`, `table`, `dimension`. `table` defaults to a location of the knowledge base's own — see [Knowledge base isolation](#knowledge-base-isolation) |
 | `mongodb-atlas` | `connectionString` | MongoDB Atlas Vector Search; `databaseName`, `collectionName`, `indexName` |
 | `elasticsearch` | — | `serverUrl` (default: `localhost:9200`); optional `apiKey` or `userName`+`password`; `indexName` |
 | `qdrant` | — | `host` (default: `localhost`), `port` (default: `6334`); optional `apiKey`, `useTls`; `collectionName` |

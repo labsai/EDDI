@@ -6,7 +6,12 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -18,7 +23,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
@@ -52,7 +56,7 @@ public class WeatherTool {
      */
     private static final Pattern APPID_PARAMETER = Pattern.compile("(?i)(appid=)[^&\\s\"']*");
 
-    private final SafeHttpClient httpClient;
+    private final OutboundHttp http;
 
     @Inject
     IJsonSerialization jsonSerialization;
@@ -61,8 +65,8 @@ public class WeatherTool {
     Optional<String> openWeatherMapApiKey;
 
     @Inject
-    public WeatherTool(SafeHttpClient httpClient) {
-        this.httpClient = httpClient;
+    public WeatherTool(OutboundHttp http) {
+        this.http = http;
     }
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")
@@ -84,11 +88,9 @@ public class WeatherTool {
             String url = String.format("https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s&units=%s", encode(city),
                     encode(openWeatherMapApiKey.get()), units);
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
+            OutboundResponse<byte[]> response = fetch(url);
 
-            SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
-
-            if (response.statusCode() == 404) {
+            if (response.status() == 404) {
                 return "Error: City '" + city + "' not found. Please check the city name.";
             }
 
@@ -130,11 +132,9 @@ public class WeatherTool {
             String url = String.format("https://api.openweathermap.org/data/2.5/forecast?q=%s&appid=%s&units=%s&cnt=%d", encode(city),
                     encode(openWeatherMapApiKey.get()), units, days * 8);
 
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(10)).GET().build();
+            OutboundResponse<byte[]> response = fetch(url);
 
-            SafeHttpClient.BoundedResponse response = httpClient.sendBounded(request, MAX_RESPONSE_BYTES);
-
-            if (response.statusCode() == 404) {
+            if (response.status() == 404) {
                 return "Error: City '" + city + "' not found.";
             }
 
@@ -190,13 +190,25 @@ public class WeatherTool {
     }
 
     /**
-     * The body of a 200 answer, read through {@link SafeHttpClient#sendBounded}. A
-     * body cut short at {@link #MAX_RESPONSE_BYTES} or the read deadline is refused
-     * rather than parsed as a fragment.
+     * A GET of an OpenWeatherMap URL. The host is fixed, so the URL is trusted;
+     * every redirect hop is still SSRF-checked. The body is capped at
+     * {@link #MAX_RESPONSE_BYTES} as it is read.
      */
-    private static String bodyOf(SafeHttpClient.BoundedResponse response) throws IOException {
-        if (response.statusCode() != 200) {
-            throw new IOException("Weather API returned status: " + response.statusCode());
+    private OutboundResponse<byte[]> fetch(String url) throws IOException, InterruptedException {
+        return http.send(OutboundRequest.get(Profile.DEFAULT, URI.create(url))
+                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .timeout(Duration.ofSeconds(10))
+                .build(), BodyMode.bytes(MAX_RESPONSE_BYTES, BodyMode.OnOverflow.TRUNCATE));
+    }
+
+    /**
+     * The body of a 200 answer, read through {@link #fetch}. A body cut short at
+     * {@link #MAX_RESPONSE_BYTES} or the read deadline is refused rather than
+     * parsed as a fragment.
+     */
+    private static String bodyOf(OutboundResponse<byte[]> response) throws IOException {
+        if (response.status() != 200) {
+            throw new IOException("Weather API returned status: " + response.status());
         }
         if (response.truncated()) {
             throw new IOException("Weather API response exceeded " + MAX_RESPONSE_BYTES + " bytes or its read deadline");

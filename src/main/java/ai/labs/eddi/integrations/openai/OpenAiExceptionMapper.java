@@ -23,9 +23,12 @@ public class OpenAiExceptionMapper implements ExceptionMapper<OpenAiApiException
 
     @Override
     public Response toResponse(OpenAiApiException exception) {
-        return Response.status(exception.getStatus())
+        Response.ResponseBuilder response = Response.status(exception.getStatus())
                 .entity(exception.toErrorResponse())
-                .type(MediaType.APPLICATION_JSON)
-                .build();
+                .type(MediaType.APPLICATION_JSON);
+        if (exception.getRetryAfterSeconds() != null) {
+            response.header("Retry-After", String.valueOf(exception.getRetryAfterSeconds()));
+        }
+        return response.build();
     }
 }

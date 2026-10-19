@@ -398,9 +398,13 @@ eddi_coordinator_total_dead_lettered_total  # Turns dead-lettered (failed after 
 eddi_coordinator_dead_letters               # Dead letters retained right now (gauge; in cluster mode the shared stream's count)
 eddi_coordinator_dead_lettered_total        # The same count under the name the shipped alert rules use (both modes)
 eddi_coordinator_dead_letters_retained      # The same gauge under the name the shipped dashboards use (both modes)
-eddi_runtime_executor_active                # Conversation work running; tag: pool (managed|nested)
+eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
+eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit|conversation_queue)
+eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
+eddi_datastore_pool_wait_seconds            # Wait for a pooled MongoDB connection, per checkout (timer; PostgreSQL: agroal_blocking_time_*)
+eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for a connection
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
@@ -416,10 +420,35 @@ lists. Both coordinators register them; in cluster mode the gauge is the shared
 dead-letter stream's count, and the console at `/administration/cluster` lists it.
 
 `queue_depth` counts turns waiting behind an earlier turn of the **same**
-conversation. `eddi_runtime_executor_queued{pool="managed"}` counts turns
-waiting for a **thread**: above zero for minutes means the worker pool is
-saturated (alert `EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not
-see this work — they count only what is dispatched through Vert.x.
+conversation. The executor gauges count work by where it runs: `pool="turn"` is
+the coordinators' turns and `pool="nested"` their pipelines, both on virtual
+threads; `pool="managed"` is the bounded worker pool, which now carries deploys,
+retention sweeps and the parser endpoint, not turns. `queued{pool="managed"}`
+above zero for minutes means that pool is saturated (alert
+`EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not see this work —
+they count only what is dispatched through Vert.x.
+
+Turns are bounded by `eddi.conversation.max-in-flight-turns` instead of by
+threads: past it a turn is refused with 503 `capacity_exceeded` and counted in
+`eddi_turn_rejected_total{reason="in_flight_limit"}` (alert
+`EddiTurnCapacityReached`). A turn holds its place until its task has ended,
+persistence included, and a new conversation's start turn counts too, so the
+limit is reached slightly before `eddi_processing_conversation_count` shows it:
+that gauge drops as soon as the client has its answer.
+
+A refusal at the limit happens before the turn reads anything: the REST and SSE
+entry points check capacity before the ownership check and the conversation
+load, and a new conversation's start is checked before the access check, the
+GDPR restriction read and the agent lookup. A node at its limit spends no
+database round trips on turns it turns away, which matters most in a burst,
+when every refused client comes back after `Retry-After`. A conversation with more than
+`eddi.conversation.max-queued-turns-per-conversation` turns waiting refuses the
+next one with `reason="conversation_queue"`. Under load the MongoDB pool is
+where a turn's time goes; `eddi_datastore_pool_wait_seconds` shows how long
+operations wait for a connection, and `eddi_datastore_pool_wait_timeouts_total`
+how many gave up at the effective pool-wait limit: `waitQueueTimeoutMS` when the
+connection string sets it, otherwise `eddi.mongodb.max-wait-time-ms` (10 s by
+default; `0` leaves the driver's own 120 s).
 
 ### Pipeline Metrics
 
@@ -563,7 +592,7 @@ eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: s
 
 ### Outbound HTTP Metrics
 
-Requests through the outbound HTTP facade. So far its only traffic comes from the `SafeHttpClient` adapter (profile `default`), that is, from that adapter's callers: the built-in tools, the RAG crawler, OAuth token requests and attachment downloads. `httpcalls`, LLM providers, A2A, Slack and remote sync use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
+Requests through the outbound HTTP facade: the built-in tools, the RAG crawler, OAuth token requests, attachment downloads, A2A peers and Slack (profile `default`), and remote agent sync (profile `internal-peer`). `httpcalls` and the LLM providers use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
 
 ```text
 eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)

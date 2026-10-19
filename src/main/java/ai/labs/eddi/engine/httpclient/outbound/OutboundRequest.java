@@ -72,7 +72,7 @@ public record OutboundRequest(Profile profile, String method, URI uri, Map<Strin
     }
 
     /** A new unmodifiable, case-insensitive map with copied value lists. */
-    static Map<String, List<String>> caseInsensitiveCopy(Map<String, List<String>> source) {
+    public static Map<String, List<String>> caseInsensitiveCopy(Map<String, List<String>> source) {
         TreeMap<String, List<String>> copy = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         if (source != null) {
             source.forEach((name, values) -> {

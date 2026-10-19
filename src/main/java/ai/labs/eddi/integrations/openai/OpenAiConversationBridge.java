@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
@@ -43,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -511,6 +513,10 @@ public class OpenAiConversationBridge {
         } catch (IConversationService.AgentNotReadyException e) {
             throw OpenAiApiException.unavailable(OpenAiErrorResponse.CODE_AGENT_NOT_READY,
                     "Agent '" + model.displayName() + "' is not ready: " + e.getMessage());
+        } catch (RejectedExecutionException e) {
+            // The start turn counts against the in-flight limit too: a refusal for
+            // capacity is a retryable 503, not a server fault.
+            throw rejectionAsApiException(e);
         } catch (Exception e) {
             // The cause stays in the log: its message can name hosts or connection
             // strings, and this reaches a caller holding only the shared key.
@@ -978,6 +984,21 @@ public class OpenAiConversationBridge {
     static final String INPUT_TOO_LARGE_CODE = "input_too_large";
 
     /** Translate a turn failure into the OpenAI error envelope. */
+    /**
+     * A {@link RejectedExecutionException} as the OpenAI error the REST surface
+     * would answer: 503 {@code quota_accounting_unavailable} when the quota store
+     * could not answer, otherwise 503 {@code capacity_exceeded}; both with
+     * {@code Retry-After}. The message is EDDI's own refusal text, which names no
+     * host or credential.
+     */
+    static OpenAiApiException rejectionAsApiException(RejectedExecutionException e) {
+        String message = e.getMessage() != null ? e.getMessage() : "Service temporarily unavailable. Retry shortly.";
+        if (e instanceof QuotaAccountingUnavailableException) {
+            return OpenAiApiException.unavailable(OpenAiErrorResponse.CODE_QUOTA_ACCOUNTING_UNAVAILABLE, message).withRetryAfter(5);
+        }
+        return OpenAiApiException.capacityExceeded(message);
+    }
+
     OpenAiApiException asApiException(Exception e) {
         if (e instanceof OpenAiApiException apiException) {
             return apiException;
@@ -1002,6 +1023,16 @@ public class OpenAiConversationBridge {
         }
         if (e.getCause() instanceof OpenAiApiException causeException) {
             return causeException;
+        }
+        // Backpressure, not a fault: the in-flight-turn limit, coordinator
+        // saturation or a shutdown drain. Every other surface answers 503 with
+        // Retry-After; a 500 here made OpenAI clients and proxies give up instead
+        // of retrying, and logged an ERROR stack trace per refused turn.
+        RejectedExecutionException rejected = e instanceof RejectedExecutionException direct
+                ? direct
+                : e.getCause() instanceof RejectedExecutionException cause ? cause : null;
+        if (rejected != null) {
+            return rejectionAsApiException(rejected);
         }
         // Logged, not returned: an unclassified exception's message can carry hosts,
         // connection strings or paths, and this one reaches a caller holding only the

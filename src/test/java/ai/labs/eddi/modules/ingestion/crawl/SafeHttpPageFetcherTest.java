@@ -4,31 +4,22 @@
  */
 package ai.labs.eddi.modules.ingestion.crawl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
-import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
+import ai.labs.eddi.engine.httpclient.outbound.ScriptedEngine;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.crawl.PageFetcher.FetchCommand;
 import ai.labs.eddi.modules.ingestion.crawl.PageFetcher.FetchedPage;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,10 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * {@link SafeHttpPageFetcher} — the production fetcher.
@@ -53,44 +40,42 @@ import static org.mockito.Mockito.when;
  */
 class SafeHttpPageFetcherTest {
 
-    private SafeHttpClient httpClient;
+    /**
+     * A public IP literal: every fetch is SSRF-checked, and a hostname would make
+     * the test depend on DNS.
+     */
+    private static final String URL = "https://93.184.215.14/a";
+
+    private ScriptedEngine engine;
     private SafeHttpPageFetcher fetcher;
-    private ScheduledExecutorService scheduler;
 
     @BeforeEach
     void setUp() {
-        httpClient = mock(SafeHttpClient.class);
-        scheduler = Executors.newSingleThreadScheduledExecutor();
-        IRuntime runtime = mock(IRuntime.class);
-        when(runtime.getScheduledExecutorService()).thenReturn(scheduler);
-        fetcher = new SafeHttpPageFetcher(httpClient, runtime);
-    }
-
-    @AfterEach
-    void tearDown() {
-        scheduler.shutdownNow();
+        engine = new ScriptedEngine();
+        // A real facade over a scripted engine: the cap, the read budget and the
+        // truncation flag are the facade's, so they are exercised, not mocked.
+        fetcher = new SafeHttpPageFetcher(TestOutbound.facade(engine));
     }
 
     private static FetchCommand command(long maxBytes) {
-        return new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0", Duration.ofSeconds(5),
-                null, null, maxBytes);
+        return new FetchCommand(URL, "EDDI-Crawler/1.0", Duration.ofSeconds(5), null, null, maxBytes);
     }
 
-    @SuppressWarnings("unchecked")
-    private void respond(int statusCode, Map<String, List<String>> headers, byte[] body) throws Exception {
-        HttpResponse<InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(statusCode);
-        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
-        when(response.headers()).thenReturn(HttpHeaders.of(headers, (k, v) -> true));
-        when(response.body()).thenReturn(new ByteArrayInputStream(body));
-        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(response);
+    private void respond(int statusCode, Map<String, List<String>> headers, byte[] body) {
+        engine.respond(statusCode, headers, body);
     }
 
-    private HttpRequest capturedRequest() throws Exception {
-        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient).sendValidated(captor.capture(), any());
-        return captor.getValue();
+    private void respond(int statusCode, Map<String, List<String>> headers, InputStream body) {
+        engine.respond(statusCode, headers, body);
+    }
+
+    private Hop capturedRequest() {
+        return engine.lastHop();
+    }
+
+    private static String header(Hop hop, String name) {
+        List<String> values = hop.headers().get(name);
+        return values == null || values.isEmpty() ? null : values.getFirst();
     }
 
     @Test
@@ -179,6 +164,14 @@ class SafeHttpPageFetcherTest {
     }
 
     @Test
+    @DisplayName("the seed is SSRF-checked: a loopback URL is refused before anything is sent")
+    void loopbackSeedIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> fetcher.fetch(new FetchCommand("http://127.0.0.1:8080/admin",
+                "EDDI-Crawler/1.0", Duration.ofSeconds(5), null, null, 1024)));
+        assertTrue(engine.hops.isEmpty());
+    }
+
+    @Test
     @DisplayName("a 304 comes back as not-modified with no body")
     void notModified() throws Exception {
         respond(304, Map.of("ETag", List.of("\"v1\"")), new byte[0]);
@@ -196,12 +189,12 @@ class SafeHttpPageFetcherTest {
     void sendsConditionalHeaders() throws Exception {
         respond(200, Map.of("Content-Type", List.of("text/html")), new byte[]{1});
 
-        fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0", Duration.ofSeconds(5),
+        fetcher.fetch(new FetchCommand(URL, "EDDI-Crawler/1.0", Duration.ofSeconds(5),
                 "\"v1\"", "Wed, 21 Oct 2026 07:28:00 GMT", 1024));
 
-        HttpRequest request = capturedRequest();
-        assertEquals(Optional.of("\"v1\""), request.headers().firstValue("If-None-Match"));
-        assertEquals(Optional.of("Wed, 21 Oct 2026 07:28:00 GMT"), request.headers().firstValue("If-Modified-Since"));
+        Hop request = capturedRequest();
+        assertEquals("\"v1\"", header(request, "If-None-Match"));
+        assertEquals("Wed, 21 Oct 2026 07:28:00 GMT", header(request, "If-Modified-Since"));
     }
 
     @Test
@@ -211,9 +204,9 @@ class SafeHttpPageFetcherTest {
 
         fetcher.fetch(command(1024));
 
-        HttpRequest request = capturedRequest();
-        assertTrue(request.headers().firstValue("If-None-Match").isEmpty());
-        assertTrue(request.headers().firstValue("If-Modified-Since").isEmpty());
+        Hop request = capturedRequest();
+        assertNull(header(request, "If-None-Match"));
+        assertNull(header(request, "If-Modified-Since"));
     }
 
     @Test
@@ -223,9 +216,9 @@ class SafeHttpPageFetcherTest {
 
         fetcher.fetch(command(1024));
 
-        HttpRequest request = capturedRequest();
-        assertEquals(Optional.of("EDDI-Crawler/1.0"), request.headers().firstValue("User-Agent"));
-        assertEquals(Optional.of(Duration.ofSeconds(5)), request.timeout());
+        Hop request = capturedRequest();
+        assertEquals("EDDI-Crawler/1.0", header(request, "User-Agent"));
+        assertEquals(Duration.ofSeconds(5), request.hopTimeout());
         assertEquals("GET", request.method());
     }
 
@@ -246,8 +239,7 @@ class SafeHttpPageFetcherTest {
     @Test
     @DisplayName("a transport failure propagates rather than being swallowed")
     void transportFailurePropagates() throws Exception {
-        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenThrow(new IOException("connection reset"));
+        engine.fail(new IOException("connection reset"));
 
         IOException thrown = assertThrows(IOException.class,
                 () -> fetcher.fetch(command(1024)));
@@ -260,17 +252,10 @@ class SafeHttpPageFetcherTest {
         // HttpRequest.timeout covers the response HEADERS only. Without a deadline on
         // the body, a server sending one byte per second holds this thread for weeks,
         // and the crawl's own budget is only checked between pages.
-        HttpResponse<InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(200);
-        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
-        when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", List.of("text/html")),
-                (k, v) -> true));
-        when(response.body()).thenReturn(new TrickleStream());
-        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(response);
+        respond(200, Map.of("Content-Type", List.of("text/html")), new TrickleStream());
 
         long start = System.nanoTime();
-        FetchedPage page = fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
+        FetchedPage page = fetcher.fetch(new FetchCommand(URL, "EDDI-Crawler/1.0",
                 Duration.ofMillis(50), null, null, 10_000_000));
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 
@@ -284,19 +269,12 @@ class SafeHttpPageFetcherTest {
         // The trickle case above returns from read() often enough for the loop to
         // check its deadline. A server that sends headers and then nothing never
         // returns from read(), so only closing the stream from outside ends it.
-        HttpResponse<InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(200);
-        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
-        when(response.headers()).thenReturn(HttpHeaders.of(Map.of("Content-Type", List.of("text/html")),
-                (k, v) -> true));
         // Closed on every exit, so a failing run does not leave a reader blocked.
         try (StallingStream stalling = new StallingStream("<p>partial")) {
-            when(response.body()).thenReturn(stalling);
-            when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                    .thenReturn(response);
+            respond(200, Map.of("Content-Type", List.of("text/html")), stalling);
 
             FetchedPage page = assertTimeoutPreemptively(Duration.ofSeconds(10),
-                    () -> fetcher.fetch(new FetchCommand("https://example.com/a", "EDDI-Crawler/1.0",
+                    () -> fetcher.fetch(new FetchCommand(URL, "EDDI-Crawler/1.0",
                             Duration.ofMillis(50), null, null, 10_000_000)));
 
             assertTrue(page.truncated(), "a stalled body must come back truncated");
@@ -308,18 +286,12 @@ class SafeHttpPageFetcherTest {
     @Test
     @DisplayName("a failure before the deadline still propagates")
     void readFailureBeforeTheDeadlinePropagates() throws Exception {
-        HttpResponse<InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(200);
-        when(response.uri()).thenReturn(URI.create("https://example.com/a"));
-        when(response.headers()).thenReturn(HttpHeaders.of(Map.of(), (k, v) -> true));
-        when(response.body()).thenReturn(new InputStream() {
+        respond(200, Map.of(), new InputStream() {
             @Override
             public int read() throws IOException {
                 throw new IOException("connection reset");
             }
         });
-        when(httpClient.sendValidated(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
-                .thenReturn(response);
 
         assertThrows(IOException.class, () -> fetcher.fetch(command(0)));
     }

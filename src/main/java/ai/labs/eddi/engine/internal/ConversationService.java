@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.KvKeys;
@@ -46,6 +47,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -84,6 +86,7 @@ import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
+import jakarta.annotation.PostConstruct;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -198,6 +201,24 @@ public class ConversationService implements IConversationService, UserErasurePar
     ConversationAccessGuard conversationAccessGuard;
 
     /**
+     * Lets {@link #isSoftDeleted} reuse the descriptor the ownership check of the
+     * same request read (see {@link ConversationDescriptorMemo}). Field-injected
+     * for the same reason as {@link #attachmentStore}; {@code null} means every
+     * check reads the store.
+     */
+    @Inject
+    Instance<ConversationDescriptorMemo> descriptorMemoInstance;
+
+    /**
+     * Serves the pinned agent configuration {@link ConversationHitlService} reads
+     * on every turn from memory instead of the store. Field-injected for the same
+     * reason as {@link #attachmentStore}; {@code null} means every read goes to the
+     * store.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
+
+    /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
      * reason as {@link #attachmentStore}; {@code null} (a directly constructed
      * instance) means the feature is off.
@@ -279,6 +300,32 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
     boolean captureDeadLetterInput = true;
+
+    /**
+     * Turns this node runs at once, queued or executing; one more is refused with
+     * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
+     * pool no longer bounds them — this does, and it is what keeps memory per
+     * in-flight turn times the number of turns inside the heap. {@code auto} (the
+     * default) derives it from the maximum heap, see {@link InFlightTurnLimit}; a
+     * number sets it, {@code <= 0} disables it. Field-injected with the default in
+     * the initializer for the same reason as {@link #captureDeadLetterInput}.
+     */
+    @ConfigProperty(name = "eddi.conversation.max-in-flight-turns", defaultValue = InFlightTurnLimit.AUTO)
+    String maxInFlightTurnsSetting = InFlightTurnLimit.AUTO;
+
+    /** Heap budget per in-flight turn for {@code max-in-flight-turns=auto}. */
+    @ConfigProperty(name = "eddi.conversation.in-flight-turn-memory-mb", defaultValue = "2")
+    int inFlightTurnMemoryMb = 2;
+
+    /** Marks {@link #maxInFlightTurns} as not resolved yet. */
+    static final int LIMIT_UNRESOLVED = Integer.MIN_VALUE;
+
+    /**
+     * The resolved limit. Set once from {@link #maxInFlightTurnsSetting}, by the
+     * {@code @PostConstruct} under CDI or on first use in tests that construct the
+     * service with {@code new}; tests may also set it directly.
+     */
+    volatile int maxInFlightTurns = LIMIT_UNRESOLVED;
     // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
     // existing).
     private final MeterRegistry meterRegistry;
@@ -297,6 +344,13 @@ public class ConversationService implements IConversationService, UserErasurePar
      * {@code finally} can do neither.
      */
     private final AtomicInteger processingConversationCount = new AtomicInteger();
+
+    /**
+     * Turns holding an {@code eddi.conversation.max-in-flight-turns} permit: the
+     * gauge's count plus the turns already answered but still persisting. See
+     * {@link ProcessingTurn#finish()}.
+     */
+    private final AtomicInteger inFlightTurnPermits = new AtomicInteger();
 
     /**
      * Live memories of conversations currently executing on THIS pod, keyed by
@@ -360,6 +414,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.meterRegistry = meterRegistry;
 
         meterRegistry.gauge("eddi_processing_conversation_count", Tags.empty(), processingConversationCount, AtomicInteger::doubleValue);
+        // The limit eddi_processing_conversation_count runs into; with the default
+        // max-in-flight-turns=auto it depends on the heap, so it is exported rather
+        // than left for operators to work out.
+        meterRegistry.gauge("eddi.conversation.max_in_flight_turns", Tags.empty(), this, ConversationService::inFlightTurnLimit);
 
         // Constructed here rather than in a @PostConstruct: ~34 test classes build
         // this service with `new` and never run the CDI lifecycle, so a
@@ -384,24 +442,109 @@ public class ConversationService implements IConversationService, UserErasurePar
      * paths the turn takes — completion, skip, watchdog timeout, pipeline error or
      * a pre-submission throw. Idempotent, so the turn callable's {@code finally}
      * can act as a safety net behind the normal completion path.
+     * <p>
+     * It also carries the turn's {@code eddi.conversation.max-in-flight-turns}
+     * permit, which has its own, later release. {@link #release()} fires as soon as
+     * the client has its answer, but the turn is still running then: it is
+     * persisted afterwards, on the same thread. Releasing the permit there let new
+     * turns in while earlier ones were still writing, so the node ran past its
+     * limit (1029 active at a limit of 1000 in the load test). The permit is
+     * returned by {@link #finish()}, which only the turn's own exits call: the turn
+     * task's {@code finally}, its discard hook and the pre-submission rollback.
      */
     static final class ProcessingTurn {
         private final AtomicInteger counter;
+        private final AtomicInteger capacity;
         private final AtomicBoolean released = new AtomicBoolean(false);
+        private final AtomicBoolean finished = new AtomicBoolean(false);
+        /** Set when an abandoned body that is still running took over the permit. */
+        private final AtomicBoolean permitHeldByBody = new AtomicBoolean(false);
         /**
          * The client-visible completion of a turn that ended AWAITING_HUMAN, held back
          * until the pause is persisted — see {@link DeferredDelivery}.
          */
         final DeferredDelivery deferredDelivery = new DeferredDelivery();
 
+        /**
+         * A token outside any limit (tests build it reflectively). The counter has
+         * already been incremented for this turn.
+         */
         private ProcessingTurn(AtomicInteger counter) {
-            this.counter = counter;
-            counter.incrementAndGet();
+            this(counter, new AtomicInteger(1));
         }
 
+        /** Both counters have already been incremented for this turn. */
+        private ProcessingTurn(AtomicInteger counter, AtomicInteger capacity) {
+            this.counter = counter;
+            this.capacity = capacity;
+        }
+
+        /**
+         * Admits a turn against the in-flight limit, or refuses it. The limit is
+         * checked and the permit taken in one CAS, so concurrent admissions can never
+         * overshoot it (unlike the coordinator's deliberately soft conversation cap).
+         *
+         * @param counter
+         *            backs {@code eddi_processing_conversation_count}; released early
+         *            by {@link #release()}
+         * @param capacity
+         *            the permits; held until {@link #finish()}
+         * @param limit
+         *            {@code eddi.conversation.max-in-flight-turns}; {@code <= 0} admits
+         *            everything
+         */
+        static ProcessingTurn admit(AtomicInteger counter, AtomicInteger capacity, int limit) {
+            while (true) {
+                int current = capacity.get();
+                if (limit > 0 && current >= limit) {
+                    throw new TurnCapacityExceededException("This node is already running " + limit
+                            + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+                }
+                if (capacity.compareAndSet(current, current + 1)) {
+                    counter.incrementAndGet();
+                    return new ProcessingTurn(counter, capacity);
+                }
+            }
+        }
+
+        /**
+         * The client-visible end of the turn: takes it off the gauge. The capacity
+         * permit stays held — see {@link #finish()}.
+         */
         void release() {
             if (released.compareAndSet(false, true)) {
                 counter.decrementAndGet();
+            }
+        }
+
+        /**
+         * The turn task is done — run, skipped, discarded or never submitted. Releases
+         * the gauge if that has not happened yet and gives the capacity permit back,
+         * both exactly once.
+         */
+        void finish() {
+            release();
+            if (!permitHeldByBody.get()) {
+                returnPermit();
+            }
+        }
+
+        /**
+         * The watchdog gave up on a turn whose body is still running (its interrupt was
+         * swallowed). That body is still doing work — model calls, tool calls, writes —
+         * so it keeps the permit: {@link #finish()} then only drops the gauge, and the
+         * body returns the permit through {@link #returnPermit()} when it really stops.
+         * Otherwise repeated timeouts would admit new turns on top of work that never
+         * stopped. Must be called before the turn task's {@code finish()}.
+         */
+        void handPermitToBody() {
+            permitHeldByBody.set(true);
+        }
+
+        /** Gives the capacity permit back, exactly once. */
+        void returnPermit() {
+            if (finished.compareAndSet(false, true)) {
+                capacity.decrementAndGet();
             }
         }
     }
@@ -443,6 +586,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             context = new LinkedHashMap<>();
         }
 
+        ProcessingTurn startTurn = null;
         try {
             // GDPR Art. 18 — processing restriction check
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
@@ -461,6 +605,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                 message = String.format(message, agentId, environment);
                 throw new AgentNotReadyException(message);
             }
+
+            // The CONVERSATION_START turn runs inline below and can call an LLM like any
+            // other turn, so it takes an in-flight permit too — before the quota slot, as
+            // say() does, so a capacity refusal spends no quota. Finished in the finally.
+            startTurn = admitTurn("(new conversation of agent " + agentId + ")");
 
             // Tenant quota — atomic slot acquisition AFTER cheap validations
             // (avoids burning quota on GDPR-restricted or agent-not-ready failures)
@@ -538,6 +687,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new ResourceStoreException(e.getLocalizedMessage(), e);
         } finally {
+            releaseTurn(startTurn);
             recordMetrics(timerConversationStart, counterConversationStart, startTime);
         }
     }
@@ -900,7 +1050,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
             throws Exception {
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
+        say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler,
+                null);
+    }
+
+    /**
+     * @param preloaded
+     *            the conversation as the caller has just loaded it, so the turn
+     *            does not load it a second time; {@code null} to load it here
+     */
+    private void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler,
+                     ConversationMemorySnapshot preloaded)
+            throws Exception {
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -910,6 +1073,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                     @Override
                     public void skipped(SimpleConversationMemorySnapshot snapshot) {
                         responseHandler.onSkipped(snapshot);
+                    }
+
+                    @Override
+                    public Consumer<String> toolCallObserver() {
+                        return responseHandler instanceof ToolCallObserving observing ? observing.toolCallObserver() : null;
                     }
                 });
     }
@@ -923,8 +1091,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception {
+        sayStreaming(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, streamingHandler,
+                null);
+    }
+
+    /**
+     * As
+     * {@link #say(Environment, String, String, Boolean, Boolean, List, InputData, boolean, ConversationResponseHandler, ConversationMemorySnapshot)}.
+     */
+    private void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler,
+                              ConversationMemorySnapshot preloaded)
+            throws Exception {
         ConversationEventSink eventSink = eventSinkFor(streamingHandler);
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false,
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -969,6 +1149,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         /** Progress events for a streamed turn; {@code null} for a plain one. */
         default ConversationEventSink eventSink() {
+            return null;
+        }
+
+        /** Name-only tool-call observer for a plain turn; {@code null} for none. */
+        default Consumer<String> toolCallObserver() {
             return null;
         }
 
@@ -1053,7 +1238,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     private void admitTurn(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
                            Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData, boolean rerunOnly,
-                           TurnListener listener)
+                           ConversationMemorySnapshot preloaded, TurnListener listener)
             throws Exception {
 
         long startTime = System.nanoTime();
@@ -1063,7 +1248,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         // need an effectively-final alias (processingTurn).
         ProcessingTurn admittedTurn = null;
         try {
-            final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
+            // The conversation-id entry points have just loaded the conversation to find
+            // its agent and run the pre-turn checks; loading it again here was a second
+            // full-document read on every turn.
+            final IConversationMemory conversationMemory = preloaded != null
+                    ? convertConversationMemorySnapshot(preloaded)
+                    : loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             // GDPR Art. 18 — processing restriction check
@@ -1114,6 +1304,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentNotReadyException(msg);
             }
 
+            // In-flight admission BEFORE the quota slot: a turn refused for capacity
+            // must not have spent the tenant's api-call quota. Every exit below
+            // releases it through releaseTurn / ProcessingTurn.release (C11).
+            admittedTurn = admitTurn(conversationId);
+            final ProcessingTurn processingTurn = admittedTurn;
+
             // Tenant quota — atomic slot acquisition AFTER cheap validations
             // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
             // agent-not-ready failures)
@@ -1127,9 +1323,6 @@ public class ConversationService implements IConversationService, UserErasurePar
                         ? new QuotaAccountingUnavailableException(quotaCheck.reason())
                         : new QuotaExceededException(quotaCheck.reason());
             }
-
-            admittedTurn = new ProcessingTurn(processingConversationCount);
-            final ProcessingTurn processingTurn = admittedTurn;
 
             // Handler contract: a skipped turn (pause/busy committed by the time the
             // queued turn executed) must still complete the response — with the
@@ -1155,6 +1348,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 if (listener.eventSink() != null) {
                     memory.setEventSink(listener.eventSink());
                 }
+                // Always assigned: a memory reused across turns must not keep the
+                // previous turn's observer.
+                memory.setToolCallObserver(listener.toolCallObserver());
 
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
@@ -1217,7 +1413,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
-                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException e) {
+                | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException | TurnCapacityExceededException e) {
             // All five are thrown before the turn is admitted, and none is an internal
             // fault of this class: the generic handler below logs a full ERROR stack
             // trace, which for the restriction-unavailable case meant every turn of
@@ -1264,10 +1460,78 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * The pre-submission rollback: the turn task never ran, so this is its end —
+     * gauge and capacity permit both.
+     */
     static void releaseTurn(ProcessingTurn turn) {
         if (turn != null) {
-            turn.release();
+            turn.finish();
         }
+    }
+
+    /**
+     * Admits one turn against {@code eddi.conversation.max-in-flight-turns}; a
+     * refusal is counted as {@code eddi.turn.rejected{reason="in_flight_limit"}}
+     * and never logged as an ERROR — it is backpressure, not a fault. Only at DEBUG
+     * here: the surface answering the 503 already logs it once (RestAgentEngine at
+     * WARN), and under overload a second line per refused turn would only double
+     * the flood. The counter is the signal.
+     */
+    ProcessingTurn admitTurn(String conversationId) {
+        int limit = inFlightTurnLimit();
+        try {
+            return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, limit);
+        } catch (TurnCapacityExceededException e) {
+            countRefusal(conversationId, limit);
+            throw e;
+        }
+    }
+
+    /**
+     * Refuses a turn before anything is read for it when the node is already at
+     * {@code eddi.conversation.max-in-flight-turns}. {@link #admitTurn} stays the
+     * authoritative check (this one is not atomic); this exists so that, at the
+     * limit, a turn that will be refused does not first spend the database round
+     * trips of checking ownership and loading its conversation.
+     */
+    @Override
+    public void refuseIfAtCapacity(String conversationId) {
+        int limit = inFlightTurnLimit();
+        if (limit > 0 && inFlightTurnPermits.get() >= limit) {
+            countRefusal(conversationId, limit);
+            throw new TurnCapacityExceededException("This node is already running " + limit
+                    + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+        }
+    }
+
+    private void countRefusal(String conversationId, int limit) {
+        meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
+        LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
+                sanitize(conversationId), limit);
+    }
+
+    /**
+     * Resolves the limit at startup, so a setting that is neither {@code auto} nor
+     * a number fails the boot instead of the first turn, and the value the node
+     * actually runs with is in the log.
+     */
+    @PostConstruct
+    void resolveInFlightTurnLimit() {
+        int limit = inFlightTurnLimit();
+        LOGGER.infof("Conversation turns in flight per node: %s (eddi.conversation.max-in-flight-turns=%s, max heap %d MB, %d MB per turn)",
+                limit > 0 ? String.valueOf(limit) : "unlimited", maxInFlightTurnsSetting, Runtime.getRuntime().maxMemory() / (1024 * 1024),
+                inFlightTurnMemoryMb);
+    }
+
+    /** The resolved {@code eddi.conversation.max-in-flight-turns}. */
+    int inFlightTurnLimit() {
+        int limit = maxInFlightTurns;
+        if (limit == LIMIT_UNRESOLVED) {
+            limit = InFlightTurnLimit.resolve(maxInFlightTurnsSetting, Runtime.getRuntime().maxMemory(), inFlightTurnMemoryMb);
+            maxInFlightTurns = limit;
+        }
+        return limit;
     }
 
     /**
@@ -1512,7 +1776,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    rerunOnly, handler);
+                    rerunOnly, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
@@ -1644,7 +1908,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                    inputData, handler);
+                    inputData, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
@@ -1759,18 +2023,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * No live descriptor, but an archived one: the conversation was soft-deleted.
      */
     private boolean isSoftDeleted(String conversationId) throws ResourceStoreException {
-        try {
-            if (conversationDescriptorStore.readDescriptor(conversationId, 0) != null) {
-                return false;
-            }
-        } catch (ResourceNotFoundException e) {
-            // no live descriptor — check the archive
-        }
-        try {
-            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0) != null;
-        } catch (ResourceNotFoundException e) {
-            return false;
-        }
+        // The ownership check of this request has usually resolved the descriptor
+        // already.
+        return ConversationDescriptorMemo.resolve(conversationDescriptorStore, descriptorMemoInstance, conversationId).archived();
     }
 
     /**

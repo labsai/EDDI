@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.bootstrap;
 
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
+import ai.labs.eddi.datastore.mongo.PoolWaitListener;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +36,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.concurrent.TimeUnit;
 import io.quarkus.arc.DefaultBean;
 
 import static org.bson.codecs.configuration.CodecRegistries.*;
@@ -56,6 +58,15 @@ public class PersistenceModule {
     private static final Logger LOGGER = Logger.getLogger(PersistenceModule.class);
 
     private volatile MongoClient mongoClient;
+
+    /**
+     * How long an operation waits for a pooled connection before it fails. The
+     * driver's own default is two minutes, twice the turn timeout: a saturated pool
+     * then holds turns long after their callers have given up. A
+     * {@code waitQueueTimeoutMS} in the connection string wins over this.
+     */
+    @ConfigProperty(name = "eddi.mongodb.max-wait-time-ms", defaultValue = "10000")
+    long maxWaitTimeMs = 10000;
 
     @Produces
     @ApplicationScoped
@@ -109,7 +120,8 @@ public class PersistenceModule {
                 fromCodecs(new URIStringCodec(), new RawBsonDocumentCodec()), fromProviders(new ValueCodecProvider(), new BsonValueCodecProvider(),
                         new DocumentCodecProvider(), new IterableCodecProvider(), new MapCodecProvider(), new JacksonProvider(objectMapper)));
 
-        return MongoClientSettings.builder().applyConnectionString(new ConnectionString(connectionString)).codecRegistry(codecRegistry)
+        ConnectionString parsedConnectionString = new ConnectionString(connectionString);
+        return MongoClientSettings.builder().applyConnectionString(parsedConnectionString).codecRegistry(codecRegistry)
                 .writeConcern(WriteConcern.MAJORITY).readPreference(readPreference)
                 // This client is built here, not by the quarkus-mongodb-client
                 // extension, so quarkus.mongodb.metrics.enabled never reached it and
@@ -117,7 +129,13 @@ public class PersistenceModule {
                 // pool listener adds a handful of gauges per server (size,
                 // checked out, wait queue); the per-command listener is left out on
                 // purpose — it adds a timer per command and collection.
-                .applyToConnectionPoolSettings(pool -> pool.addConnectionPoolListener(new MongoMetricsConnectionPoolListener(meterRegistry)))
+                .applyToConnectionPoolSettings(pool -> {
+                    pool.addConnectionPoolListener(new MongoMetricsConnectionPoolListener(meterRegistry));
+                    pool.addConnectionPoolListener(new PoolWaitListener(meterRegistry));
+                    if (parsedConnectionString.getMaxWaitTime() == null && maxWaitTimeMs > 0) {
+                        pool.maxWaitTime(maxWaitTimeMs, TimeUnit.MILLISECONDS);
+                    }
+                })
                 .build();
     }
 

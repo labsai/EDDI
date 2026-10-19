@@ -2222,7 +2222,8 @@
     "serverRefusedCreate": "O servidor recusou este agendamento:",
     "disabledAccessRevokedHintBy": "O criador ({{user}}) não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o.",
     "finishedOneShot": "Agendamento único: foi executado e está concluído.",
-    "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo)."
+    "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo).",
+    "openKnowledgeBase": "Abrir a base de conhecimento"
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -2570,7 +2571,101 @@
       "explicit": "Local: {{value}} (definido acima)",
       "default": "Local: {{value}} (padrão)",
       "legacyDefault": "Local: derivado do nome “{{name}}” (padrão)"
-    }
+    },
+    "runs": {
+      "inProgress": "Execução em andamento",
+      "elapsedOfBudget": "{{elapsed}} de um orçamento de {{budget}} min",
+      "progressLabel": "Progresso da ingestão",
+      "progressOfEstimate": "{{seen}} de cerca de {{total}} documentos analisados (a última execução viu {{total}})",
+      "progressOfTotal": "{{seen}} de {{total}} documentos analisados",
+      "progressSeen": "{{seen}} documentos analisados até agora",
+      "showFewer": "Mostrar menos",
+      "showAll": "Mostrar todas as {{total}} execuções",
+      "duration": "Duração",
+      "finishedAt": "Concluída",
+      "cost": "Custo estimado",
+      "stopReason": "Como terminou",
+      "ingested": "Ingeridos",
+      "skipped": "Ignorados",
+      "removed": "Removidos",
+      "chunks": "Fragmentos armazenados",
+      "triggerScheduled": "Agendada",
+      "triggerManual": "Manual",
+      "failedCount": "{{failed}} com falha",
+      "stopCompleted": "Cobriu toda a fonte",
+      "stopPageLimit": "Parou no limite de páginas — nada foi tratado como excluído",
+      "stopFetchLimit": "Parou no limite de downloads — nada foi tratado como excluído",
+      "stopByteLimit": "Parou no limite de tamanho — nada foi tratado como excluído",
+      "stopTimeLimit": "Parou no orçamento de tempo — nada foi tratado como excluído",
+      "stopCancelled": "Parou antes — cancelada, substituída ou atingiu o orçamento de fragmentos",
+      "hoursMinutes": "{{hours}} h {{minutes}} min",
+      "minutesSeconds": "{{minutes}} min {{seconds}} s",
+      "seconds": "{{seconds}} s"
+    },
+    "schedule": {
+      "presetCustom": "Cron personalizado…",
+      "customCron": "Expressão cron",
+      "invalid": "Este cron seria recusado.",
+      "checking": "Verificando…",
+      "nextRuns": "Próximas execuções (horário local): {{times}}",
+      "loadFailed": "Não foi possível ler o agendamento: {{error}}",
+      "notScheduled": "Este cron está salvo, mas nada está agendado. Salve a base de conhecimento novamente; se continuar assim, o servidor recusou o cron — o log dele diz o porquê.",
+      "disabledSource": "A fonte está desativada, então o cron dela não é executado.",
+      "nextFire": "Próxima execução {{relative}} ({{time}})",
+      "paused": "Nenhuma execução agendada",
+      "lastFired": "Último disparo {{relative}}",
+      "neverFired": "Ainda não disparou",
+      "disabledBecause": "O agendador desativou este agendamento: {{reason}}",
+      "disabled": "O agendador desativou este agendamento.",
+      "deadLettered": "O agendador desistiu após falhas repetidas. Corrija a causa e salve a base de conhecimento para reativá-lo.",
+      "failing": "Os últimos {{fails}} disparos falharam; o agendador está tentando novamente.",
+      "fireFailed": "falhou",
+      "fireStarted": "iniciou uma execução",
+      "presetManual": "Somente quando executada manualmente",
+      "presetHourly": "A cada hora",
+      "presetDaily": "Todos os dias às 02:00 UTC",
+      "presetWeekly": "Toda segunda-feira às 02:00 UTC",
+      "presetMonthly": "No dia 1 de cada mês às 02:00 UTC"
+    },
+    "contents": {
+      "title": "Documentos ingeridos",
+      "filter": "Filtrar por URL ou nome de arquivo",
+      "loadFailed": "Não foi possível carregar os documentos: {{error}}",
+      "noMatch": "Nenhum documento corresponde a este filtro.",
+      "empty": "Nada ingerido ainda. Execute a fonte e os documentos dela aparecerão aqui.",
+      "truncated": "Esta fonte contém mais documentos do que os listados. Filtre para encontrar um específico.",
+      "page": "Página {{page}} de {{pages}}",
+      "openUrl": "Abrir a página",
+      "removed": "Removido",
+      "missed": "Não visto nas últimas {{runs}} execuções",
+      "live": "Ativo",
+      "firstIngested": "Primeira ingestão",
+      "lastIngested": "Último embedding",
+      "removedHint": "Este documento saiu da fonte e seus fragmentos foram removidos da base de conhecimento.",
+      "chunksFailed": "Não foi possível ler os fragmentos: {{error}}",
+      "noChunks": "O armazenamento vetorial não tem fragmentos deste documento. Se o armazenamento for em memória, uma reinicialização o esvazia — execute a fonte novamente.",
+      "chunkNumber": "Fragmento {{number}}",
+      "chunk": "Fragmento",
+      "characters": "{{length}} caracteres"
+    },
+    "retrieval": {
+      "score": "pontuação {{score}}",
+      "hint": "Pesquise nesta base de conhecimento exatamente como a recuperação de um agente faz. Cada pesquisa custa uma chamada de embedding; nada é armazenado.",
+      "placeholder": "Pergunte o que um usuário perguntaria…",
+      "query": "Consulta",
+      "source": "Fonte",
+      "allSources": "Toda a base de conhecimento",
+      "maxResults": "Resultados",
+      "minScore": "Pontuação mín.",
+      "search": "Pesquisar",
+      "unsaved": "A pesquisa usa a base de conhecimento salva — seu modelo de embedding e seu armazenamento —, não as edições na tela.",
+      "failed": "A pesquisa falhou: {{error}}",
+      "resultCount": "{{results}} fragmento(s) com pontuação {{minScore}} ou superior",
+      "noResults": "Nada encontrado. Reduza a pontuação mínima ou verifique se as fontes foram executadas.",
+      "title": "Testar recuperação",
+      "saveFirst": "Salve esta base de conhecimento primeiro para pesquisá-la."
+    },
+    "legacyIngestionNote": "Para textos avulsos. Documentos adicionados aqui não podem ser listados, atualizados nem removidos depois — para documentos que você vai manter, adicione uma fonte de Arquivos em Fontes de ingestão."
   },
   "onboarding": {
     "welcome": {
@@ -2826,6 +2921,7 @@
     "question": "Pergunta",
     "readyToDiscuss": "Pronto para discutir",
     "responding": "respondendo…",
+    "usingTool": "Usando {{tool}}…",
     "reviewMemberRoster": "Lista de membros",
     "reviewMembers": "Membros",
     "reviewModerator": "Moderador",
@@ -3477,7 +3573,7 @@
     "intent": "Intent",
     "deployments": "Implementações de agentes",
     "addDeployment": "Adicionar agente",
-    "agents": "agentes",
+    "intentPlaceholder": "ex.: booking_request",
     "empty": "Nenhum gatilho configurado ainda",
     "created": "Gatilho criado",
     "updated": "Gatilho atualizado",
@@ -3932,7 +4028,11 @@
     "targetType": "Tipo",
     "triggerHint": "Os usuários digitam \"palavra-chave: mensagem\" para encaminhar a este destino",
     "triggerKeywords": "Palavras-chave de ativação",
-    "triggers": "gatilhos",
+    "targetFallback": "Destino {{number}}",
+    "untitledChannel": "Canal sem título",
+    "triggerCount_one": "{{count}} gatilho",
+    "triggerCount_many": "{{count}} gatilhos",
+    "triggerCount_other": "{{count}} gatilhos",
     "type": "Tipo de canal",
     "webhookHint": "Cole esta URL no campo Request URL em Event Subscriptions do seu aplicativo Slack.",
     "webhookUrl": "URL do webhook",
@@ -4911,6 +5011,7 @@
       "action": "Ativar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instruções vieram da configuração salva, que qualquer pessoa que possa editar as configurações da plataforma pode ter alterado. Eu as li acima e quero instalá-las.",
       "title": "Ativar o operador da plataforma",
       "subtitle": "Escolha o modelo que executará o operador, reveja as suas instruções e implante.",
       "modelStep": "Modelo",
@@ -5013,7 +5114,11 @@
       "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente.",
       "agentId": "Agente",
       "platformBaseUrl": "Chama a plataforma em",
-      "platformBaseUrlUnknown": "não registada"
+      "platformBaseUrlUnknown": "não registada",
+      "unregister": "Anular registo do operador",
+      "unregisterConfirmTitle": "Anular o registo do operador da plataforma?",
+      "unregisterConfirmBody": "Apenas a configuração guardada do operador é removida. Não foi possível verificar que o agente registado é um operador configurado por este Manager, por isso não é implementado, retirado nem eliminado — reveja-o no ecrã Agentes.",
+      "unverifiedActions": "Não foi possível verificar que este agente é um operador configurado pelo Manager, por isso este ecrã não o sonda, retira nem elimina. «Reconfigurar» aprovisiona um novo operador e deixa este agente como está."
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
@@ -5103,7 +5208,8 @@
       "activatedChecking": "Operador de plataforma ativado. As verificações de conexão estão em execução em segundo plano.",
       "writeProbeVerified": "Acesso de escrita verificado — uma escrita real protegida pausou para aprovação.",
       "writeProbeFailed": "O portão de aprovação não resistiu — o operador foi removido.",
-      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva."
+      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva.",
+      "unregistered": "Registo do operador da plataforma anulado"
     },
     "canary": {
       "genericFailure": "A verificação de ligação não foi bem-sucedida.",
@@ -5144,7 +5250,22 @@
     "superseded": {
       "title": "O agente operador anterior continua implantado."
     },
+    "trust": {
+      "checking": "Verificando o operador antes de abrir o chat…",
+      "title": "Não foi possível verificar o operador da plataforma",
+      "body": "O chat está desativado porque o agente registrado como operador ({{agentId}}) não é comprovadamente o que este Manager configurou. Quem pode editar as configurações da plataforma pode mudar qual é esse agente.",
+      "reasonMarker": "Ele não possui a marca de operador da plataforma, então pode não ser o agente provisionado pelo Manager.",
+      "reasonGate": "Não foi possível verificar o portão de aprovação dele: {{detail}}",
+      "reasonUnreadable": "Não foi possível concluir as verificações: {{detail}}",
+      "recheck": "Verificar novamente",
+      "manage": "Abrir a tela do operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar as instruções armazenadas",
+      "reviewBody": "Estas instruções foram salvas antes e serão instaladas no novo operador. Quem pode editar as configurações da plataforma pode tê-las alterado, então leia o que difere do padrão antes de continuar.",
+      "reviewSummary": "{{added}} linhas adicionadas, {{removed}} linhas padrão removidas",
+      "reviewFull": "Mostrar o texto armazenado completo",
+      "reviewConfirm": "Li estas instruções e quero instalá-las",
       "hint": "Há uma atualização disponível para o Platform Operator.",
       "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
       "addedTools_other": "{{count}} ferramentas novas",
@@ -6280,5 +6401,14 @@
     "cancelled": "Não implantados: a chave do cofre não foi concedida. Os agentes foram criados; tente novamente para concedê-la e implantá-los, ou implante-os a partir das páginas dos agentes.",
     "failed": "Criados, mas não implantados: {{names}}. {{reason}} Tente novamente ou implante-os a partir das páginas dos agentes.",
     "memberCancelled": "Não implantado: a chave do cofre não foi concedida"
+  },
+  "modelCombobox": {
+    "toggle": "Mostrar sugestões de modelos",
+    "listLabel": "Sugestões de modelos",
+    "matching": "Correspondentes a “{{query}}”",
+    "otherModels": "Outros modelos",
+    "default": "padrão",
+    "noMatch": "Nenhuma sugestão corresponde a “{{query}}” — será usado como digitado.",
+    "customHint": "Não está na lista? Digite qualquer ID de modelo suportado pelo seu provedor."
   }
 }

@@ -712,8 +712,8 @@ Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified ag
 > follows the document to Keycloak, and Keycloak answers `invalid_client`. `install.sh`
 > does not add it either; its realm repair only restores `eddi-frontend`'s client scopes.
 >
-> Either re-provision the realm (in development, `docker compose -f docker-compose.auth.yml
-> down -v` and start again — this deletes your Keycloak data), or create the client by hand
+> Either re-provision the realm (in development, `docker compose -f docker-compose.yml -f
+> docker-compose.auth.yml down -v` and start again — this deletes your Keycloak data), or create the client by hand
 > from `eddi-mcp` in [`keycloak/eddi-realm.json`](../keycloak/eddi-realm.json). Creating it
 > in the admin console takes four things: **public** client, **Standard flow** on with
 > **Direct access grants** off, `pkce.code.challenge.method` = `S256` under Advanced, and the

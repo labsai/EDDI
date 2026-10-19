@@ -206,13 +206,13 @@ export function ChannelsPage() {
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-border/50 overflow-hidden">
+        <div className="rounded-xl border border-border/50 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="text-start px-4 py-3 font-medium">{t("channels.name", "Name")}</th>
                 <th className="text-start px-4 py-3 font-medium">{t("channels.type", "Type")}</th>
-                <th className="text-start px-4 py-3 font-medium">{t("channels.channelIdCol", "Channel ID")}</th>
+                <th className="hidden md:table-cell text-start px-4 py-3 font-medium">{t("channels.channelIdCol", "Channel ID")}</th>
                 <th className="text-start px-4 py-3 font-medium">{t("channels.targetsCol", "Targets")}</th>
                 <th className="text-end px-4 py-3 font-medium">{t("channels.version", "Version")}</th>
               </tr>
@@ -237,7 +237,7 @@ export function ChannelsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3"><Badge variant="outline" className="text-xs">{ch.channelType}</Badge></td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{ch.channelId ?? "—"}</td>
+                  <td className="hidden md:table-cell px-4 py-3 font-mono text-xs text-muted-foreground">{ch.channelId ?? "—"}</td>
                   <td className="px-4 py-3">{ch.targetCount}</td>
                   <td className="px-4 py-3 text-end">v{ch.version}</td>
                 </tr>

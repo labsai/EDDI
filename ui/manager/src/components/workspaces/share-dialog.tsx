@@ -113,14 +113,22 @@ export function ShareDialog({ open, onClose, resourceId, resourceName, chatLink 
   const afterChange = useCallback(
     async (result: ShareResult, action: ShareAction) => {
       setLastResult({ result, action });
+      // This dialog's own share info is what the user is looking at, so it is
+      // awaited; one GET.
       await refetch();
       // Owner, visibility and space ride on the descriptor, so every listing and
-      // detail view showing this resource is now stale.
-      await queryClient.invalidateQueries({ queryKey: agentKeys.all });
-      await queryClient.invalidateQueries({ queryKey: agentKeys.detail(resourceId) });
-      await queryClient.invalidateQueries({ queryKey: agentKeys.descriptor(resourceId) });
-      await queryClient.invalidateQueries({ queryKey: ["workflows"] });
-      await queryClient.invalidateQueries({ queryKey: ["resources"] });
+      // detail view showing this resource is now stale. Those refresh in the
+      // background: awaiting them held every control here disabled, and the
+      // success toast back, until each list on the page had refetched.
+      // agentKeys.detail and .descriptor have their own roots ("agent",
+      // "agent-descriptor"), not "agents", so they are named here too.
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentKeys.all }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.detail(resourceId) }),
+        queryClient.invalidateQueries({ queryKey: agentKeys.descriptor(resourceId) }),
+        queryClient.invalidateQueries({ queryKey: ["workflows"] }),
+        queryClient.invalidateQueries({ queryKey: ["resources"] }),
+      ]);
     },
     [refetch, queryClient, resourceId]
   );

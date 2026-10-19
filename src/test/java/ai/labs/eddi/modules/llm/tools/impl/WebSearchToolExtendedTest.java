@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,7 +26,7 @@ class WebSearchToolExtendedTest {
 
     @BeforeEach
     void setUp() {
-        var httpClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+        var httpClient = org.mockito.Mockito.mock(OutboundHttp.class);
         tool = new WebSearchTool(httpClient, new ObjectMapper());
     }
 

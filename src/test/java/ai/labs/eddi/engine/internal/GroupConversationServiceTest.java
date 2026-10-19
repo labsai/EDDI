@@ -23,7 +23,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupAttachmentRejectedException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -42,6 +45,7 @@ import org.mockito.MockitoAnnotations;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -102,6 +106,32 @@ class GroupConversationServiceTest {
     // ai.labs.eddi.engine.internal.groups.GroupAttachmentBinderTest
     // (Wave R, R1 step 1: logic extracted to GroupAttachmentBinder)
     // =================================================================
+
+    @Test
+    void materializeAttachments_quotaExceeded_failsTheNewDiscussionAndRejects() throws Exception {
+        var store = mock(IAttachmentStore.class);
+        service.attachmentStore = store;
+        when(store.store(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IAttachmentStore.AttachmentQuotaExceededException(
+                        IAttachmentStore.AttachmentQuotaExceededException.SCOPE_USER, "500 files"));
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setUserId("alice");
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        var inline = new Attachment();
+        inline.setMimeType("image/png");
+        inline.setFileName("a.png");
+        inline.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
+
+        var thrown = assertThrows(GroupAttachmentRejectedException.class,
+                () -> service.materializeAttachments(gc, List.of(inline), null));
+
+        assertEquals("user", thrown.getScope());
+        // The discussion was created but will never run: it must not be left
+        // IN_PROGRESS for crash recovery to find.
+        assertEquals(GroupConversationState.FAILED, gc.getState());
+        verify(conversationStore).updateIfState(gc, GroupConversationState.IN_PROGRESS);
+    }
 
     // =================================================================
     // discuss() tests

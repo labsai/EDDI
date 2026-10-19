@@ -91,6 +91,8 @@ const COLLAPSE_THRESHOLD = 144;
 interface AgentResponseCardProps {
   entry: TranscriptEntry;
   isSpeaking?: boolean;
+  /** Tool the speaking member's loop most recently started (name only). */
+  toolName?: string;
   allowHtml?: boolean;
   discussionStyle?: DiscussionStyle;
   /** Pre-configured tasks from group config (for TASK_FORCE style PLAN entries) */
@@ -100,7 +102,7 @@ interface AgentResponseCardProps {
   className?: string;
 }
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, preConfiguredTasks, memberDisplayNames, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, discussionStyle, preConfiguredTasks, memberDisplayNames, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = entryTypeInfo(entry.type);
   const isSynthesis = entry.type === "SYNTHESIS";
@@ -225,7 +227,11 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
-            <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
+            <span role="status" aria-relevant="text" className="min-w-0 break-all text-xs text-muted-foreground ms-1">
+              {toolName
+                ? t("groups.usingTool", "using {{tool}}…", { tool: toolName })
+                : t("groups.responding", "responding…")}
+            </span>
           </div>
         ) : isStructuredBody(body) ? (
           <StructuredEntryBody body={body} />
