@@ -51,6 +51,7 @@ import {
   isProvisionableBySetup,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
+import { ModelCombobox } from "@/components/shared/model-combobox";
 import {
   getApiKeyUrl,
   getDefaultBaseUrl,
@@ -902,7 +903,6 @@ function LlmStep({
   const { t } = useTranslation();
   const prov = getProviderConfig(provider);
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
-  const datalistId = `model-suggestions-${provider}`;
   const baseUrlRequired = isBaseUrlRequired(provider);
   const baseUrlSupported = supportsBaseUrl(provider);
   const inProcess = !baseUrlSupported;
@@ -960,22 +960,16 @@ function LlmStep({
           >
             {t("setupWizard.model", "Model")} *
           </label>
-          <input
+          <ModelCombobox
             id="wizard-model"
-            type="text"
-            list={datalistId}
             value={model}
-            onChange={(e) => onModelChange(e.target.value)}
+            onChange={onModelChange}
+            suggestions={suggestions}
+            defaultModel={prov?.defaultModel}
             placeholder={t("setupWizard.modelPlaceholder", "e.g. {{model}} (or any model your provider supports)", { model: prov?.defaultModel ?? "" })}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="wizard-model"
-            autoComplete="off"
+            testId="wizard-model"
           />
-          <datalist id={datalistId}>
-            {suggestions.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
           <p className="mt-1 text-xs text-muted-foreground">
             {inProcess
               ? t(

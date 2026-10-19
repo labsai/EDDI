@@ -6305,5 +6305,14 @@
     "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
+  },
+  "modelCombobox": {
+    "toggle": "Modellvorschläge anzeigen",
+    "listLabel": "Modellvorschläge",
+    "matching": "Passend zu „{{query}}“",
+    "otherModels": "Weitere Modelle",
+    "default": "Standard",
+    "noMatch": "Kein Vorschlag passt zu „{{query}}“ – der Wert wird wie eingegeben verwendet.",
+    "customHint": "Nicht dabei? Gib eine beliebige Modell-ID ein, die dein Anbieter unterstützt."
   }
 }

@@ -6375,5 +6375,14 @@
     "cancelled": "Non déployés : la clé du coffre n'a pas été accordée. Les agents ont été créés – réessayez pour l'accorder et les déployer, ou déployez-les depuis leurs pages d'agent.",
     "failed": "Créés mais non déployés : {{names}}. {{reason}} Réessayez, ou déployez-les depuis leurs pages d'agent.",
     "memberCancelled": "Non déployé : la clé du coffre n'a pas été accordée"
+  },
+  "modelCombobox": {
+    "toggle": "Afficher les suggestions de modèles",
+    "listLabel": "Suggestions de modèles",
+    "matching": "Correspondant à « {{query}} »",
+    "otherModels": "Autres modèles",
+    "default": "par défaut",
+    "noMatch": "Aucune suggestion ne correspond à « {{query}} » — la valeur sera utilisée telle que saisie.",
+    "customHint": "Absent de la liste ? Saisissez n’importe quel identifiant de modèle pris en charge par votre fournisseur."
   }
 }
