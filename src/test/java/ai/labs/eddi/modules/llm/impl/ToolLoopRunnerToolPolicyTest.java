@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
@@ -39,10 +40,12 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -242,6 +245,37 @@ class ToolLoopRunnerToolPolicyTest {
             assertEquals(List.of("call_0", "call_1", "call_2"), resultIds);
             var last = (ToolExecutionResultMessage) requests.get(1).messages().getLast();
             assertTrue(last.text().contains("NOT_EXECUTED"), last.text());
+        }
+
+        @Test
+        @DisplayName("a turn cancelled mid-loop (lost cluster lease, /cancel, GDPR stop) runs no further tool and no further model call")
+        void cancelledTurnStopsTheLoop() {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            AtomicBoolean cancelled = new AtomicBoolean();
+            AtomicInteger executed = new AtomicInteger();
+            ToolExecutor calc = (request, memoryId) -> {
+                executed.incrementAndGet();
+                cancelled.set(true); // e.g. the lease was taken over while this tool ran
+                return "result";
+            };
+            var spec = ToolSpecification.builder().name("calculate").description("d").build();
+            var setup = new AgentOrchestrator.ToolSetup(List.of(spec), Map.of("calculate", calc), Map.of("calculate", "builtin"), List.of(spec),
+                    Map.of(), Map.of(), Map.of());
+            ChatModel model = mock(ChatModel.class);
+            AtomicInteger modelCalls = new AtomicInteger();
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                modelCalls.incrementAndGet();
+                return ChatResponse.builder().aiMessage(response(3)).build();
+            });
+            IConversationMemory memory = memory("conv-1");
+            when(memory.isCancelled()).thenAnswer(i -> cancelled.get());
+
+            assertThrows(LifecycleException.class, () -> runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup, task,
+                    memory, null, -1, 0, null));
+
+            assertEquals(1, executed.get(), "the other two calls of the batch must not run once the turn is cancelled");
+            assertEquals(1, modelCalls.get(), "no further model call for a cancelled turn");
         }
 
         @Test

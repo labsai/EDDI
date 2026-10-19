@@ -76,7 +76,7 @@ still omit the list. The user agreed to the break before it was made.
 
 #1079 merged as a squash while this branch still carried its earlier commits,
 and `main` had moved on, so the sync merge resolves the overlap (operator
-revision 21 after a second sync past #1091, `main`'s dialog sizing, `nameSeg` encoding in `space-resources.ts`)
+revision 22 after later syncs past #1091 and #1078, `main`'s dialog sizing, `nameSeg` encoding in `space-resources.ts`)
 and carries the fixes below:
 
 - **`main` was red** (#1066 against #1093: the response's cost sum converted

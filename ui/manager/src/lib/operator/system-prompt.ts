@@ -203,7 +203,12 @@ const BODY_CLUSTER = `Cluster questions:
   write refused because another node took the conversation over; a
   "lease-lost" one is a turn stopped because its node lost the lease while it
   ran, so nothing of it was stored. Replaying runs the turn again with its side
-  effects, so advise replay only once the cause is fixed.
+  effects, so advise replay only once the cause is fixed. The dead-letter stream
+  is capped by size (eddi.coordinator.dead-letter.max-bytes, 1 GiB) as well as
+  age; when it is full, new dead letters stay on the node that produced them
+  until there is room, so discarding handled ones frees space.
+- Draining a node also hands any leader role it held (the HITL crash-recovery
+  sweep) to another node; nothing else needs to be moved first.
 - You cannot release leases, drain nodes, resync caches, reconcile deployments
   or replay/discard dead letters. Say which action in the Cluster screen fits
   and why; never claim you did it.`;
