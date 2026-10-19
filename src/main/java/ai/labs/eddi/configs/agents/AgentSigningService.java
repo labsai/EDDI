@@ -18,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
@@ -68,18 +70,43 @@ public class AgentSigningService {
      * test can pin the number of vault round trips one agent deletion costs.
      */
     static final int MAX_KEY_VERSION_SCAN = 100;
+    /**
+     * How long a key the vault reported missing is taken to stay missing.
+     * <p>
+     * The audit ledger signs every entry, and almost no agent has a signing key:
+     * {@link #generateKeyPair} has no production caller, so a key exists only where
+     * an operator wrote one into the vault by hand. Without this, every audit entry
+     * of every turn paid a vault read that was certain to miss, plus three
+     * exceptions, on the turn's own thread. A key written by hand, possibly through
+     * another node, is picked up within this window; {@link #generateKeyPair} and
+     * {@link #deleteKeyPair} clear the marker at once on this node.
+     */
+    static final Duration MISSING_KEY_RECHECK = Duration.ofSeconds(60);
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
+    private final Clock clock;
     private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
+    /**
+     * Cache key → epoch millis until which the vault is not asked again. Only
+     * {@link ISecretProvider.SecretNotFoundException} is remembered: a vault that
+     * could not answer is retried on the next call. Bounded by the number of agents
+     * and key versions that are actually signed for.
+     */
+    private final ConcurrentHashMap<String, Long> missingKeyUntil = new ConcurrentHashMap<>();
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
 
     @Inject
     public AgentSigningService(ISecretProvider secretProvider, MeterRegistry meterRegistry) {
+        this(secretProvider, meterRegistry, Clock.systemUTC());
+    }
+
+    AgentSigningService(ISecretProvider secretProvider, MeterRegistry meterRegistry, Clock clock) {
         this.secretProvider = secretProvider;
         this.meterRegistry = meterRegistry;
+        this.clock = clock;
     }
 
     @PostConstruct
@@ -117,6 +144,7 @@ public class AgentSigningService {
             // Evict cached private key so the new key is used immediately
             // (prevents stale key on re-generation / rotation)
             privateKeyCache.remove(cacheKey(tenantId, agentId));
+            missingKeyUntil.remove(cacheKey(tenantId, agentId));
 
             LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
             return publicKeyB64;
@@ -163,6 +191,31 @@ public class AgentSigningService {
                     cause);
         } catch (Exception e) {
             throw new AgentSigningException("Signing failed for agent " + agentId, e);
+        }
+    }
+
+    /**
+     * As {@link #sign}, for callers that sign when they can and carry on unsigned
+     * when the agent has no key — the audit ledger. Returns {@code null} when the
+     * vault has no key for the agent, without asking the vault again or throwing
+     * while that answer is fresh (see {@link #MISSING_KEY_RECHECK}).
+     *
+     * @return Base64-encoded signature, or {@code null} if the agent has no key
+     * @throws AgentSigningException
+     *             if a key exists but signing failed, or the vault could not answer
+     */
+    public String signIfKeyPresent(String tenantId, String agentId, String payload) throws AgentSigningException {
+        String cacheKeyStr = cacheKey(tenantId, agentId);
+        if (!privateKeyCache.containsKey(cacheKeyStr) && isKnownMissing(cacheKeyStr)) {
+            return null;
+        }
+        try {
+            return sign(tenantId, agentId, payload);
+        } catch (AgentSigningException e) {
+            if (e.getCause() instanceof ISecretProvider.SecretNotFoundException) {
+                return null;
+            }
+            throw e;
         }
     }
 
@@ -371,6 +424,7 @@ public class AgentSigningService {
             }
         } finally {
             privateKeyCache.remove(cacheKeyStr);
+            missingKeyUntil.remove(cacheKeyStr);
         }
     }
 
@@ -403,6 +457,10 @@ public class AgentSigningService {
         if (cached != null) {
             return cached;
         }
+        if (isKnownMissing(cacheKeyStr)) {
+            throw new PrivateKeyLoadException(agentId, new ISecretProvider.SecretNotFoundException(
+                    "No signing key for agent " + agentId + " (vault re-checked every " + MISSING_KEY_RECHECK.toSeconds() + " s)"));
+        }
 
         String vaultKey = keyVersion > 0 ? vaultKeyNameVersioned(agentId, keyVersion) : vaultKeyName(agentId);
         PrivateKey loaded;
@@ -412,12 +470,32 @@ public class AgentSigningService {
             byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             loaded = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            missingKeyUntil.put(cacheKeyStr, clock.millis() + MISSING_KEY_RECHECK.toMillis());
+            throw new PrivateKeyLoadException(agentId, e);
         } catch (Exception e) {
             throw new PrivateKeyLoadException(agentId, e);
         }
+        missingKeyUntil.remove(cacheKeyStr);
 
         PrivateKey raced = privateKeyCache.putIfAbsent(cacheKeyStr, loaded);
         return raced != null ? raced : loaded;
+    }
+
+    /**
+     * Whether the vault reported this key missing within
+     * {@link #MISSING_KEY_RECHECK}.
+     */
+    private boolean isKnownMissing(String cacheKeyStr) {
+        Long until = missingKeyUntil.get(cacheKeyStr);
+        if (until == null) {
+            return false;
+        }
+        if (clock.millis() < until) {
+            return true;
+        }
+        missingKeyUntil.remove(cacheKeyStr, until);
+        return false;
     }
 
     private String vaultKeyName(String agentId) {
