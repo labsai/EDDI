@@ -194,6 +194,13 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * Whether {@code id} can name a conversation in this store at all (an ObjectId
+     * for MongoDB, a UUID for PostgreSQL). Lets a caller refuse a user-supplied id,
+     * such as a paging cursor, before it reaches a query.
+     */
+    boolean isValidConversationId(String id);
+
+    /**
      * How many ended conversations of the agent would be candidates but for being
      * ended — same filters as {@link #loadGenerationUpgradeCandidates}, grouped by
      * stored agent version, in one count query.

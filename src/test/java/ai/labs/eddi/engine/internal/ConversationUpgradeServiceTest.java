@@ -120,6 +120,7 @@ class ConversationUpgradeServiceTest {
         when(agentFactory.getLatestReadyAgentOfGeneration(Environment.production, AGENT, TARGET_GENERATION)).thenReturn(serving);
 
         when(store.upgradeCompatibilityGeneration(anyString(), eq(AGENT), eq(TARGET_GENERATION))).thenReturn(GenerationUpgradeOutcome.UPGRADED);
+        when(store.isValidConversationId(anyString())).thenReturn(true);
     }
 
     private ConversationUpgradeService service() {
@@ -340,6 +341,20 @@ class ConversationUpgradeServiceTest {
         assertEquals(1, third.totals().upgraded());
         verify(store).upgradeCompatibilityGeneration("r1", AGENT, TARGET_GENERATION);
         verify(store).upgradeCompatibilityGeneration("r2", AGENT, TARGET_GENERATION);
+    }
+
+    @Test
+    @DisplayName("a malformed after cursor is a bad request, refused before anything is listed or written")
+    void malformedAfterIsRefused() throws Exception {
+        when(store.isValidConversationId("garbage")).thenReturn(false);
+
+        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, false, null, "garbage"));
+
+        assertEquals(UpgradeRefusedException.Kind.INVALID, e.kind());
+        assertTrue(e.getMessage().contains("after"), e.getMessage());
+        verify(store, never()).loadGenerationUpgradeCandidates(anyString(), any(), anyInt(), any(), anyInt());
+        verify(store, never()).upgradeCompatibilityGeneration(anyString(), anyString(), anyInt());
+        assertTrue(queued.isEmpty());
     }
 
     @Test

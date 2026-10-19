@@ -188,6 +188,11 @@ public class ConversationUpgradeService {
             throw new UpgradeRefusedException(UpgradeRefusedException.Kind.INVALID, "limit must be between 1 and " + MAX_LIMIT);
         }
 
+        if (after != null && !conversationMemoryStore.isValidConversationId(after)) {
+            throw new UpgradeRefusedException(UpgradeRefusedException.Kind.INVALID,
+                    "after is not a conversation id; pass the nextAfter of a previous report");
+        }
+
         int currentVersion;
         Integer targetGeneration;
         try {

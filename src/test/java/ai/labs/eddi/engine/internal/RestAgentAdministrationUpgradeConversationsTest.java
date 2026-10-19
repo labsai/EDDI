@@ -118,6 +118,18 @@ class RestAgentAdministrationUpgradeConversationsTest {
     }
 
     @Test
+    @DisplayName("a malformed after cursor is a 400 with the reason, not a 500")
+    void malformedAfterIsA400() {
+        when(service.upgrade(ENV, AGENT, null, true, null, "garbage"))
+                .thenThrow(new UpgradeRefusedException(UpgradeRefusedException.Kind.INVALID, "after is not a conversation id"));
+
+        Response response = admin.upgradeConversations(ENV, AGENT, true, null, null, "garbage");
+
+        assertEquals(400, response.getStatus());
+        assertEquals("after is not a conversation id", response.getEntity());
+    }
+
+    @Test
     @DisplayName("an unexpected failure is a 500 that does not echo the internals")
     void unexpectedFailureIsA500() {
         when(service.upgrade(eq(ENV), eq(AGENT), any(), any(Boolean.class), isNull(), isNull()))

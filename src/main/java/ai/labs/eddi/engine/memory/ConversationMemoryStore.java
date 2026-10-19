@@ -724,6 +724,11 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean isValidConversationId(String id) {
+        return isStorableId(id);
+    }
+
+    @Override
     public Map<Integer, Long> countEndedGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration)
             throws IResourceStore.ResourceStoreException {
         try {
