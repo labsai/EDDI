@@ -543,7 +543,8 @@ def s6_undeploy(infra, ctx):
 def s7_secret(infra, ctx):
     """Rotate a vault secret on A; C's next LLM call carries the new key."""
     key = "p11-llm-key"
-    http(NODES[0], "PUT", f"/secretstore/secrets/default/{key}", {"value": "sk-first-0123456789abcdef"})
+    http(NODES[0], "PUT", f"/secretstore/secrets/default/{key}", {"value": "sk-first-0123456789abcdef",
+                                                               "allowedAgents": ["*"], "allowedHosts": [f"host.docker.internal:{MOCK_PORT}"]})
     agent = setup_llm_agent(NODES[0], f"p11-secret-{int(time.time())}", None, {"vaultKeyName": key})
     wait_ready_everywhere(agent)
     conv = start_conv(NODES[2], agent)

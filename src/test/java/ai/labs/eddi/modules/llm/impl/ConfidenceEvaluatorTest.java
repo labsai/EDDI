@@ -213,4 +213,19 @@ class ConfidenceEvaluatorTest {
         assertTrue(instruction.contains("response"));
         assertTrue(instruction.contains("JSON"));
     }
+
+    // ==================== long replies (security review L14) ====================
+
+    @Test
+    void longResponseInTheRegexFallbackDoesNotOverflowTheStack() {
+        // not valid JSON (the trailing bare word), so the scan fallback handles it
+        String answer = "x\\\"y ".repeat(40_000);
+        String reply = "{\"confidence\": 0.9, \"response\": \"" + answer + "\", oops}";
+
+        var result = assertDoesNotThrow(() -> ConfidenceEvaluator.evaluateStructuredOutput(reply));
+
+        assertEquals(0.9, result.confidence(), 0.0001);
+        assertTrue(result.response().startsWith("x\"y x\"y"), result.response().substring(0, 20));
+        assertTrue(result.response().length() > 150_000, "the whole answer is kept");
+    }
 }

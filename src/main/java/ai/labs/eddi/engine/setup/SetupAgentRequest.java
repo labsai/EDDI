@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 /**
  * Request object for setting up a standard Agent. Maps to the MCP
  * {@code setup_agent} tool parameters and the REST
@@ -71,7 +73,19 @@ public record SetupAgentRequest(@JsonProperty(required = true)
          * callers (McpSetupTools, CreateSubAgentTool) use the overload below, which
          * passes null.
          */
-        Boolean grantReferencedSecrets) {
+        Boolean grantReferencedSecrets,
+        /*
+         * Where a secret this request vaults (apiKey) may be sent — stored as the
+         * secret's allowedHosts. Null derives the list: the host of the base URL the
+         * request names, or the provider's own endpoint. ["*"] stores the secret with
+         * no destination restriction, which under eddi.vault.grant-enforcement=enforce
+         * is the only way to get one. Without a list any editor who can read the
+         * generated configuration could repoint it and receive the key (security review
+         * 2026-10-17, H1).
+         *
+         * Admin input like grantReferencedSecrets: not exposed on any MCP tool.
+         */
+        List<String> allowedHosts) {
 
     /** Every field but {@link #grantReferencedSecrets}, which stays off. */
     public SetupAgentRequest(String agentName, String systemPrompt, String provider, String model, String apiKey, String baseUrl,
@@ -79,6 +93,15 @@ public record SetupAgentRequest(@JsonProperty(required = true)
             Boolean enableSentimentAnalysis, String mcpServerUrls, Boolean deploy, String environment, AgentConfiguration.HitlConfig hitlConfig,
             String vaultKeyName) {
         this(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools, builtInToolsWhitelist, enableQuickReplies,
-                enableSentimentAnalysis, mcpServerUrls, deploy, environment, hitlConfig, vaultKeyName, null);
+                enableSentimentAnalysis, mcpServerUrls, deploy, environment, hitlConfig, vaultKeyName, null, null);
+    }
+
+    /** Every field but {@link #allowedHosts}, which is derived. */
+    public SetupAgentRequest(String agentName, String systemPrompt, String provider, String model, String apiKey, String baseUrl,
+            String introMessage, Boolean enableBuiltInTools, String builtInToolsWhitelist, Boolean enableQuickReplies,
+            Boolean enableSentimentAnalysis, String mcpServerUrls, Boolean deploy, String environment, AgentConfiguration.HitlConfig hitlConfig,
+            String vaultKeyName, Boolean grantReferencedSecrets) {
+        this(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools, builtInToolsWhitelist, enableQuickReplies,
+                enableSentimentAnalysis, mcpServerUrls, deploy, environment, hitlConfig, vaultKeyName, grantReferencedSecrets, null);
     }
 }

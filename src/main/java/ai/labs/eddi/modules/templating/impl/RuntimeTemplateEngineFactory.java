@@ -22,6 +22,7 @@ import io.quarkus.qute.WithSectionHelper;
 
 import java.math.BigDecimal;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -103,6 +104,13 @@ public final class RuntimeTemplateEngineFactory {
      */
     static final int NOT_FOUND_MAPPER_PRIORITY = 1000;
 
+    /**
+     * Template-instance attribute holding the {@link RenderDeadline} of one render.
+     * Set by {@code TemplatingEngine}; a render without it has no wall-clock bound
+     * beyond Qute's own (which never fires for a synchronous render).
+     */
+    public static final String RENDER_DEADLINE_ATTRIBUTE = "eddi.templating.deadline";
+
     private RuntimeTemplateEngineFactory() {
     }
 
@@ -162,6 +170,10 @@ public final class RuntimeTemplateEngineFactory {
                 .addSectionHelper(new WhenSectionHelper.Factory());
 
         int maxChars = settings.maxOutputChars();
+        // str:fmt / String.fmt with the output size checked before String.format
+        // allocates it — ahead of the generated, unchecked implementations.
+        builder.addValueResolver(BoundedResolvers.bound(new BoundedFormat.Instance(maxChars), maxChars));
+        builder.addNamespaceResolver(BoundedResolvers.bound(new BoundedFormat.Namespace(maxChars), maxChars));
         for (ValueResolver resolver : source.getValueResolvers()) {
             if (resolver instanceof ReflectionValueResolver) {
                 continue;
@@ -278,7 +290,42 @@ public final class RuntimeTemplateEngineFactory {
     }
 
     /**
-     * Resolver wrappers that reject oversized string results.
+     * The wall-clock end of one render.
+     * <p>
+     * {@code TemplatingEngine} renders synchronously and only then waits on the
+     * result with {@code quarkus.qute.timeout}, so that timeout never fired for a
+     * CPU-bound template: {@code {#for i in 99999}{#let x=str:fmt('%1900000d',1)}…}
+     * stayed under every size and iteration cap and burned minutes of CPU per
+     * request. The deadline is checked on every value resolution (the bounded
+     * resolvers) and every loop iteration instead, so such a render stops at the
+     * timeout. Security review 2026-10-17, M10.
+     *
+     * @param deadlineNanos
+     *            {@link System#nanoTime()} value past which the render fails
+     * @param timeoutMillis
+     *            the configured timeout, for the message
+     */
+    public record RenderDeadline(long deadlineNanos, long timeoutMillis) {
+
+        /**
+         * A deadline {@code timeoutMillis} from now; {@code null} when {@code <= 0}.
+         */
+        public static RenderDeadline startingNow(long timeoutMillis) {
+            return timeoutMillis > 0 ? new RenderDeadline(System.nanoTime() + timeoutMillis * 1_000_000L, timeoutMillis) : null;
+        }
+
+        /** Fails when {@code attribute} is a deadline that has passed. */
+        public static void check(Object attribute) {
+            if (attribute instanceof RenderDeadline deadline && System.nanoTime() - deadline.deadlineNanos() > 0) {
+                throw new TemplateLimitExceededException(
+                        "The template render exceeded its timeout of " + deadline.timeoutMillis() + " ms (quarkus.qute.timeout)");
+            }
+        }
+    }
+
+    /**
+     * Resolver wrappers that reject oversized string results and stop a render that
+     * is past its {@link RenderDeadline}.
      */
     static final class BoundedResolvers {
 
@@ -286,15 +333,25 @@ public final class RuntimeTemplateEngineFactory {
         }
 
         static ValueResolver bound(ValueResolver delegate, int maxChars) {
-            return maxChars <= 0 ? delegate : new BoundedValueResolver(delegate, maxChars);
+            return new BoundedValueResolver(delegate, maxChars);
         }
 
         static NamespaceResolver bound(NamespaceResolver delegate, int maxChars) {
-            return maxChars <= 0 ? delegate : new BoundedNamespaceResolver(delegate, maxChars);
+            return new BoundedNamespaceResolver(delegate, maxChars);
+        }
+
+        /** A failed stage when the render is past its deadline, else {@code null}. */
+        static CompletionStage<Object> pastDeadline(EvalContext context) {
+            try {
+                RenderDeadline.check(context.getAttribute(RENDER_DEADLINE_ATTRIBUTE));
+                return null;
+            } catch (TemplateLimitExceededException e) {
+                return CompletableFuture.failedFuture(e);
+            }
         }
 
         static Object check(Object value, int maxChars) {
-            if (value instanceof CharSequence chars && chars.length() > maxChars) {
+            if (maxChars > 0 && value instanceof CharSequence chars && chars.length() > maxChars) {
                 throw new TemplateLimitExceededException(
                         "A template expression produced " + chars.length() + " characters, more than the limit of " + maxChars
                                 + " (eddi.templating.max-output-chars)");
@@ -319,6 +376,10 @@ public final class RuntimeTemplateEngineFactory {
 
             @Override
             public CompletionStage<Object> resolve(EvalContext context) {
+                CompletionStage<Object> expired = pastDeadline(context);
+                if (expired != null) {
+                    return expired;
+                }
                 return delegate.resolve(context).thenApply(value -> check(value, maxChars));
             }
 
@@ -346,6 +407,10 @@ public final class RuntimeTemplateEngineFactory {
 
             @Override
             public CompletionStage<Object> resolve(EvalContext context) {
+                CompletionStage<Object> expired = pastDeadline(context);
+                if (expired != null) {
+                    return expired;
+                }
                 return delegate.resolve(context).thenApply(value -> check(value, maxChars));
             }
         }

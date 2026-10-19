@@ -1,4 +1,5 @@
 import { api, apiErrorFromResponse } from "@/lib/api-client";
+import { seg } from "./path-segment";
 
 /**
  * Ingestion sources — where a knowledge base pulls its own documents from.
@@ -123,7 +124,7 @@ export interface UploadFilesResult {
 }
 
 const base = (kbId: string, sourceId: string) =>
-  `/ragstore/rags/${encodeURIComponent(kbId)}/sources/${encodeURIComponent(sourceId)}`;
+  `/ragstore/rags/${seg(kbId)}/sources/${seg(sourceId)}`;
 
 /** Starts a run. The backend answers 202; progress is followed through the run history. */
 export function runSource(kbId: string, sourceId: string, version: number) {
@@ -275,7 +276,7 @@ export interface KnowledgeSearchResult {
 /** Retrieves exactly as an agent would — one embedding call, nothing stored. */
 export function searchKnowledgeBase(kbId: string, version: number, request: KnowledgeSearchRequest) {
   return api.post<KnowledgeSearchResult>(
-    `/ragstore/rags/${encodeURIComponent(kbId)}/search?version=${version}`,
+    `/ragstore/rags/${seg(kbId)}/search?version=${version}`,
     request,
   );
 }
@@ -304,7 +305,7 @@ export function deleteSourceFile(
   fileId: string,
 ) {
   return api.delete<DeleteFileResult>(
-    `${base(kbId, sourceId)}/files/${encodeURIComponent(fileId)}?version=${version}`,
+    `${base(kbId, sourceId)}/files/${seg(fileId)}?version=${version}`,
   );
 }
 

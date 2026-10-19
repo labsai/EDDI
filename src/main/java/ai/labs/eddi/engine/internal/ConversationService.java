@@ -1073,6 +1073,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                     public void skipped(SimpleConversationMemorySnapshot snapshot) {
                         responseHandler.onSkipped(snapshot);
                     }
+
+                    @Override
+                    public Consumer<String> toolCallObserver() {
+                        return responseHandler instanceof ToolCallObserving observing ? observing.toolCallObserver() : null;
+                    }
                 });
     }
 
@@ -1143,6 +1148,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         /** Progress events for a streamed turn; {@code null} for a plain one. */
         default ConversationEventSink eventSink() {
+            return null;
+        }
+
+        /** Name-only tool-call observer for a plain turn; {@code null} for none. */
+        default Consumer<String> toolCallObserver() {
             return null;
         }
 
@@ -1328,7 +1338,19 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             // Everything bound to one memory instance lives in the builder, so a queued
             // turn can be rebuilt over the current document when it finally runs (H13a).
+            final String idempotencyKey = idempotencyKeyOf(inputData, rerunOnly);
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                // Rebuilt over a newer document: a turn committed while this one queued. If
+                // that turn carried this request's Idempotency-Key, it WAS this request —
+                // sent again to another node while the first ran there, where the in-flight
+                // registry of the running node cannot see it. Checked here, under the
+                // conversation's lease, so the duplicate never runs a second time; it is
+                // answered as skipped (409 + Retry-After) and its retry is served the
+                // stored answer by the persisted lookup.
+                if (memory != conversationMemory && idempotencyKey != null
+                        && turnIdempotency.isRecordedIn(convertConversationMemory(memory), idempotencyKey)) {
+                    throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
+                }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
@@ -1337,6 +1359,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 if (listener.eventSink() != null) {
                     memory.setEventSink(listener.eventSink());
                 }
+                // Always assigned: a memory reused across turns must not keep the
+                // previous turn's observer.
+                memory.setToolCallObserver(listener.toolCallObserver());
 
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
@@ -1469,11 +1494,32 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, limit);
         } catch (TurnCapacityExceededException e) {
-            meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
-            LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
-                    sanitize(conversationId), limit);
+            countRefusal(conversationId, limit);
             throw e;
         }
+    }
+
+    /**
+     * Refuses a turn before anything is read for it when the node is already at
+     * {@code eddi.conversation.max-in-flight-turns}. {@link #admitTurn} stays the
+     * authoritative check (this one is not atomic); this exists so that, at the
+     * limit, a turn that will be refused does not first spend the database round
+     * trips of checking ownership and loading its conversation.
+     */
+    @Override
+    public void refuseIfAtCapacity(String conversationId) {
+        int limit = inFlightTurnLimit();
+        if (limit > 0 && inFlightTurnPermits.get() >= limit) {
+            countRefusal(conversationId, limit);
+            throw new TurnCapacityExceededException("This node is already running " + limit
+                    + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+        }
+    }
+
+    private void countRefusal(String conversationId, int limit) {
+        meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
+        LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
+                sanitize(conversationId), limit);
     }
 
     /**

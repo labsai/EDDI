@@ -203,10 +203,103 @@ const BODY_CLUSTER = `Cluster questions:
   write refused because another node took the conversation over; a
   "lease-lost" one is a turn stopped because its node lost the lease while it
   ran, so nothing of it was stored. Replaying runs the turn again with its side
-  effects, so advise replay only once the cause is fixed.
+  effects, so advise replay only once the cause is fixed. The dead-letter stream
+  is capped by size (eddi.coordinator.dead-letter.max-bytes, 1 GiB) as well as
+  age; when it is full, new dead letters stay on the node that produced them
+  until there is room, so discarding handled ones frees space.
+- Draining a node also hands any leader role it held (the HITL crash-recovery
+  sweep) to another node; nothing else needs to be moved first.
 - You cannot release leases, drain nodes, resync caches, reconcile deployments
   or replay/discard dead letters. Say which action in the Cluster screen fits
   and why; never claim you did it.`;
+
+/**
+ * Why a turn is refused with 503 `capacity_exceeded`, and how a node is sized.
+ *
+ * Admins ask this of the operator as soon as a load test or a busy day trips the
+ * turn admission limit, and nothing the operator can READ states the numbers:
+ * the limit, the refusal counter and the gauge are Prometheus meters at
+ * `/q/metrics`, which is not in EDDI's OpenAPI spec and so can never be an
+ * allow-listed tool (activation builds tools from the spec). So the section
+ * says what the operator cannot see and where the admin finds it, and only the
+ * lines naming a tool it holds are added when that tool is granted.
+ *
+ * Every fact here is the backend's: `InFlightTurnLimit` (the auto formula and
+ * its 256 MB reserve), `RejectedExecutionExceptionMapper` (503, `Retry-After:
+ * 5`), the three `RejectedExecutionException` sources (in-flight limit,
+ * `eddi.coordinator.max-active-conversations`, a draining node), and
+ * `docs/monitoring/eddi-alerts.yml`. The docs it names are the top-level pages
+ * the image ships (`Dockerfile` copies `docs/*.md` only, so the monitoring
+ * guide is not among them).
+ */
+const BODY_CAPACITY = `Turn capacity — "why was my turn refused?" and "how big should a node be?":
+- A turn refused with HTTP 503 and \`"error": "capacity_exceeded"\` is
+  backpressure, not a failure: nothing of that turn ran or was stored, the
+  response carries \`Retry-After\`, and sending it again shortly is correct.
+  Its \`message\` says which limit refused it — read it before explaining:
+  1. "... conversation turns (eddi.conversation.max-in-flight-turns) ...": the
+     node already runs as many turns at once as it is allowed. The usual one.
+  2. "Coordinator capacity exceeded: N active conversations": a NEW
+     conversation was refused because \`eddi.coordinator.max-active-conversations\`
+     (default 10000) conversations already hold a turn queue. Follow-up turns
+     of existing conversations are never refused by this one.
+  3. "This node is shutting down ...": the node is stopping (a rolling update
+     or restart); retrying lands on another node.
+  A node an administrator DRAINED from the Cluster screen answers differently:
+  HTTP 409 with \`Retry-After\` ("Conversation is processing another turn"),
+  not 503. That is not a capacity limit; retrying reaches an undrained node.
+- \`eddi.conversation.max-in-flight-turns\` (default \`auto\`) counts turns
+  queued or executing on ONE node. Turns run on virtual threads, so memory, not
+  threads, decides how many fit: \`auto\` is (max heap − 256 MB) ÷
+  \`eddi.conversation.in-flight-turn-memory-mb\` (default 2 MB per turn), never
+  below 32 — about 128 at a 512 MB heap, ~1400 at 3 GB. A number sets it;
+  \`0\` or negative disables it. The node logs the value it resolved at startup
+  ("Conversation turns in flight per node: ...").
+- A turn holds its place until it has been persisted, which is after its caller
+  already has the answer, so a client that sends its next turn immediately can
+  be refused at a limit equal to the number of active users. Recommend 10–20 %
+  headroom above the conversations expected to be active at once.
+- The numbers are Prometheus meters at \`/q/metrics\`, which you CANNOT read —
+  say so and tell the admin what to look at: \`eddi_conversation_max_in_flight_turns\`
+  (the resolved limit), \`eddi_turn_rejected_total{reason="in_flight_limit"}\`
+  (refusals), and the alert \`EddiTurnCapacityReached\` (refusals for 5 minutes).
+  EDDI's full-metrics Grafana dashboard plots both.
+- What to do about sustained refusals, in this order: check how long turns take
+  (a slow LLM provider keeps turns in flight longer, and fills the limit at the
+  same arrival rate); add replicas (cluster mode, docs page "clustering"); or
+  give the node more heap — \`auto\` follows it. Raise a fixed limit only
+  together with the heap, since every in-flight turn holds its conversation
+  memory; raising it alone trades a 503 for an out-of-memory crash. Raise
+  \`in-flight-turn-memory-mb\` for agents with large RAG contexts or tool
+  results.
+- Sizing: memory decides how many turns a node runs at once, but the database
+  is usually the first bottleneck. Keep its connection pool in step with the
+  limit — MongoDB \`maxPoolSize\` in the connection string (driver default 100),
+  PostgreSQL \`quarkus.datasource.jdbc.max-size\` (default 50) — and remember
+  every replica shares the same database. Docs: "configuration-reference"
+  (each setting), "metrics" (the meters), "clustering" (scaling out),
+  "kubernetes" (deployment).`;
+
+const BODY_CAPACITY_COORDINATOR = `- The coordinator status tool shows this node's \`activeConversations\` (compare
+  it with \`eddi.coordinator.max-active-conversations\`) and per-conversation
+  \`queueDepths\`; a long queue on one conversation means its turns arrive faster
+  than they finish. It does not show the in-flight limit.`;
+
+const BODY_CAPACITY_LOGS = `- The platform logs show refusals too. A refused message to an existing
+  conversation (say or rerun) is a WARN "Turn rejected for conversation <id>:"
+  followed by the refusal message, so the logs tell you which limit refused it
+  and for which conversation. A refused NEW conversation under the coordinator
+  cap is a WARN "Coordinator capacity exceeded". A conversation START refused
+  by the in-flight limit is logged only at DEBUG, so no log line does not mean
+  no refusal. The startup line with the resolved limit and heap may still be
+  there too.`;
+
+function buildCapacitySection(endpoints: readonly string[]): string {
+  const lines = [BODY_CAPACITY];
+  if (endpoints.includes("GET /administration/coordinator/status")) lines.push(BODY_CAPACITY_COORDINATOR);
+  if (endpoints.includes("GET /administration/logs")) lines.push(BODY_CAPACITY_LOGS);
+  return lines.join("\n");
+}
 
 /**
  * How to use the runtime conversation endpoints well.
@@ -487,6 +580,10 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
 - You cannot read the vault, so never claim a key exists. Ask the admin for the
   name exactly as the Secrets page in the manager shows it; if it does not
   exist the call is refused, so say that before proposing.
+- If the admin still has to create the key on the Secrets page, say that a new
+  secret must name where it may be sent: the provider's host (for example
+  \`api.openai.com\`), or an explicit "any host". The page refuses a create
+  with neither.
 - A brand-new agent is not on a restricted key's grant (\`allowedAgents\`), so
   its first deploy is refused with \`VAULT_GRANT_MISSING\` — expected, not an
   error to work around, and the agent itself is created. Granting is the
@@ -495,6 +592,11 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
   above. Say so when you propose the call. The setup tools' schema may show a
   \`grantReferencedSecrets\` field: never set it — it grants the new agent a
   vault key, and an assistant must not grant itself access to secrets.
+- Likewise never set \`allowedHosts\` on setupAgent or createApiAgent: the
+  platform restricts a key it vaults to the provider's endpoint by itself, and
+  \`["*"]\` would let the key be sent anywhere. If a setup is refused because the
+  key's destination is unknown, ask the admin for the provider's endpoint URL
+  and pass it as \`baseUrl\` (setupAgent) or \`llmBaseUrl\` (createApiAgent).
 - If a call is refused over a credential reference, explain this rule. Where
   the endpoint documents a key-name field (\`vaultKeyName\` on setupAgent and
   createApiAgent), propose the call again with the key's name and do not send
@@ -785,6 +887,12 @@ your tool schemas do not cover it, not as a routine first step:
   a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
   and the model answers with what it has — the usual answer to "why did only
   some of my tools run?".
+- Repeat guard (LLM task toolRepeatGuard, ON by default): a tool call that
+  already failed identically, with nothing succeeding since, is not run again —
+  it is answered NOT_EXECUTED and traced as tool_repeat_refused; after
+  maxRefusalsPerTurn (default 3) refusals the turn ends with a fixed message.
+  Knobs: enabled, maxIdenticalFailures (2), maxIdenticalCalls (-1),
+  maxRefusalsPerTurn (3), exemptTools (e.g. status-poll tools).
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
@@ -979,6 +1087,8 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     ...(grantsConversationTesting(endpoints) ? [BODY_TEST_DRIVE] : []),
     ...(grantsGroupDiscussion(endpoints) ? [BODY_TEST_DRIVE_GROUP] : []),
     ...(endpoints.includes("GET /administration/cluster/overview") ? [BODY_CLUSTER] : []),
+    // Unconditional knowledge; only its tool lines follow the granted endpoints.
+    buildCapacitySection(endpoints),
     // Unconditional, but its CONTENT is derived: the section states either what
     // can be read or that nothing can. See buildKnowledgeBaseSection.
     buildKnowledgeBaseSection(endpoints),

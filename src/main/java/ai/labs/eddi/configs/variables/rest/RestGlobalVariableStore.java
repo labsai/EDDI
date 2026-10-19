@@ -17,10 +17,13 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -42,6 +45,19 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
 
     /** Only this role may store a global variable that resolves to a secret. */
     private static final String ADMIN_ROLE = "eddi-admin";
+
+    /**
+     * Keys under this prefix are the platform's own settings, and only an
+     * administrator may write or delete them (M5).
+     * <p>
+     * {@code platform.operator} is the Platform Operator's configuration: the
+     * Manager reads from it which agent is "the operator" an administrator talks
+     * to, and the prompt an Upgrade re-provisions with the administrator's
+     * {@code ${caller:token}} tools. An editor who could write it could point an
+     * administrator's operator at an agent of their own, or plant the prompt the
+     * real one is rebuilt with. Matched case-insensitively, in every tenant.
+     */
+    public static final String RESERVED_KEY_PREFIX = "platform.";
 
     private final IGlobalVariableStore store;
     private final GlobalVariableResolver resolver;
@@ -91,6 +107,7 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         validateId(tenantId, "tenantId");
         validateId(key, "key");
         requireWrite(tenantId);
+        requireAdminForReservedKey(tenantId, key, "change");
         if (variable == null) {
             throw new BadRequestException("Request body must not be empty");
         }
@@ -128,11 +145,40 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
         validateId(tenantId, "tenantId");
         validateId(key, "key");
         requireWrite(tenantId);
+        requireAdminForReservedKey(tenantId, key, "delete");
         store.delete(tenantId, key);
         resolver.invalidateCache();
 
         LOGGER.infof("Global variable deleted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.noContent().build();
+    }
+
+    /**
+     * Whether {@code key} is one of the platform's own
+     * ({@value #RESERVED_KEY_PREFIX}…).
+     */
+    public static boolean isReservedKey(String key) {
+        return key != null && key.toLowerCase(Locale.ROOT).startsWith(RESERVED_KEY_PREFIX);
+    }
+
+    /**
+     * Refuses a non-administrator's write or delete of a {@link #isReservedKey
+     * reserved} key with a JSON 403 naming the prefix. Anonymous callers
+     * (authorization disabled) are out of scope for the same reason they are for
+     * the secret-reference check: there is no role to tell apart. The request
+     * itself — refused or not — is on the audit ledger through
+     * {@code AdminActionAuditFilter}, like every other administrative write.
+     */
+    private void requireAdminForReservedKey(String tenantId, String key, String action) {
+        if (!isReservedKey(key) || identity == null || identity.isAnonymous() || identity.hasRole(ADMIN_ROLE)) {
+            return;
+        }
+        LOGGER.warnf("[SECURITY] Refused a non-admin %s of reserved global variable %s/%s by '%s'", action, sanitize(tenantId), sanitize(key),
+                sanitize(identity.getPrincipal() != null ? identity.getPrincipal().getName() : null));
+        String message = "Global variables whose key starts with '" + RESERVED_KEY_PREFIX + "' hold the platform's own settings (such as "
+                + "the Platform Operator's configuration) and only an " + ADMIN_ROLE + " may " + action + " them.";
+        throw new ForbiddenException(Response.status(Response.Status.FORBIDDEN).type(MediaType.APPLICATION_JSON)
+                .entity(Map.of("error", message, "reservedPrefix", RESERVED_KEY_PREFIX)).build());
     }
 
     /**

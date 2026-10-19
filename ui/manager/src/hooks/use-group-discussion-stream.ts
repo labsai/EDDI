@@ -28,6 +28,7 @@ import {
   type RetroRecordedPayload,
   type ArtifactUpdatedPayload,
   type CostUpdatedPayload,
+  type MemberToolCallPayload,
   type StanceUpdatedPayload,
 } from "@/lib/api/groups";
 import { cancelGroupDiscussion, type GroupApprovalRequest } from "@/lib/api/hitl";
@@ -160,6 +161,12 @@ export interface GroupStreamState {
    */
   stances: Map<string, StanceUpdatedPayload>;
   /**
+   * agentId → the tool that member's loop most recently started, from
+   * `member_tool_call` ("using X…" indicator). Cleared when the member's turn
+   * ends; name only — the backend never sends arguments.
+   */
+  memberToolCalls: Map<string, string>;
+  /**
    * The connection ended without any terminal event — a proxy timeout, a pod
    * restart, a network drop. The discussion may well still be running on the
    * server, so this is deliberately NOT a failure: consumers stop treating the
@@ -229,6 +236,7 @@ const initialState: GroupStreamState = {
   artifactUpdates: [],
   memberCosts: new Map(),
   stances: new Map(),
+  memberToolCalls: new Map(),
   interrupted: false,
   connected: false,
   cancelRequested: false,
@@ -250,6 +258,7 @@ function freshState(): GroupStreamState {
     artifactUpdates: [],
     memberCosts: new Map(),
     stances: new Map(),
+    memberToolCalls: new Map(),
     roundStartIndex: 0,
   };
 }
@@ -410,8 +419,14 @@ export function persistedHasCaughtUp(
  * Terminal settle shared by every event that ends the run: no one is speaking
  * any more, so any placeholder still open never gets its content.
  */
-function settleTerminal(s: GroupStreamState): Pick<GroupStreamState, "activeSpeakers" | "transcript"> {
-  return { activeSpeakers: new Set(), transcript: closePlaceholders(s.transcript) };
+function settleTerminal(
+  s: GroupStreamState,
+): Pick<GroupStreamState, "activeSpeakers" | "transcript" | "memberToolCalls"> {
+  return {
+    activeSpeakers: new Set(),
+    transcript: closePlaceholders(s.transcript),
+    memberToolCalls: new Map(),
+  };
 }
 
 function swapController(groupId: string): AbortController {
@@ -991,6 +1006,7 @@ function handleSSEEvent(
           return {
             ...s,
             activeSpeakers: newSpeakers,
+            memberToolCalls: withoutToolCall(s.memberToolCalls, payload.agentId),
             tasksInProgress: newTasksInProgress,
             // Add a placeholder entry for the active speaker (typing indicator)
             transcript: [
@@ -1090,6 +1106,7 @@ function handleSSEEvent(
           return {
             ...s,
             activeSpeakers: newSpeakers,
+            memberToolCalls: withoutToolCall(s.memberToolCalls, payload.agentId),
             transcript,
             tasksInProgress: newTasksInProgress2,
             tasksCompleted: newTasksCompleted,
@@ -1422,7 +1439,12 @@ function handleSSEEvent(
               errorReason: payload.reason,
             };
           }
-          return { ...s, activeSpeakers: newSpeakers, transcript };
+          return {
+            ...s,
+            activeSpeakers: newSpeakers,
+            memberToolCalls: withoutToolCall(s.memberToolCalls, payload.agentId),
+            transcript,
+          };
         });
       } catch (e) {
         console.warn('[SSE] Failed to parse member_pause_skipped event:', e);
@@ -1486,12 +1508,41 @@ function handleSSEEvent(
       return false;
     }
 
+    case "member_tool_call": {
+      try {
+        const payload: MemberToolCallPayload = JSON.parse(event.data);
+        if (typeof payload.agentId !== "string" || typeof payload.tool !== "string") {
+          return false;
+        }
+        setState((s) => {
+          // Late frame: the member already finished (a tool event can trail the
+          // speaker_complete that closed its turn) — showing "using X" on a
+          // member nobody is waiting for would never clear.
+          if (!s.activeSpeakers.has(payload.agentId)) return s;
+          const next = new Map(s.memberToolCalls);
+          next.set(payload.agentId, payload.tool);
+          return { ...s, memberToolCalls: next };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse member_tool_call event:', e);
+      }
+      return false;
+    }
+
     default:
       return false;
   }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
+
+/** `calls` without `agentId` — the same instance when nothing changes. */
+function withoutToolCall(calls: Map<string, string> | undefined, agentId: string): Map<string, string> {
+  if (!calls?.has(agentId)) return calls ?? new Map();
+  const next = new Map(calls);
+  next.delete(agentId);
+  return next;
+}
 
 /**
  * `speaker_complete.outcome` as one of the three reasons a turn can produce

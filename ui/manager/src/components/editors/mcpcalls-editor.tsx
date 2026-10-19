@@ -1195,6 +1195,7 @@ export function McpCallsEditor({
               readOnly={readOnly}
               placeholder="${vault:my-mcp-key}"
               testId="mcp-apikey-input"
+              destinationUrl={data.mcpServerUrl}
               connections
             />
             <ConnectionReferenceWarning

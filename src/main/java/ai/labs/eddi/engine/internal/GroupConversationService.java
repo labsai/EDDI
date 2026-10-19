@@ -10,7 +10,9 @@ import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
@@ -216,6 +218,14 @@ public class GroupConversationService implements IGroupConversationService, User
     IDeploymentStore deploymentStore;
 
     /**
+     * The facilitator RECRUIT move's USE check (M3), same field-injection pattern:
+     * {@code null} in the direct-construction unit tests, which then recruit
+     * unchecked as before.
+     */
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
+
+    /**
      * Graceful-shutdown gate (R1 step 10). Same reasoning and field-injection
      * pattern as {@link #attachmentStore}: {@code null} in the direct-construction
      * unit tests, which then never reject.
@@ -340,7 +350,8 @@ public class GroupConversationService implements IGroupConversationService, User
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
-        this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry);
+        this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,
+                this::discussionOwnerMayUse);
         this.taskForceEngine = new TaskForceEngine(memberTurnExecutor, templatingEngine, jsonSerialization, executorService, callerIdentityContext,
                 discussionControls, DEFAULT_AGENT_TIMEOUT_SECONDS, MEMBER_TURN_CANCEL_DRAIN_SECONDS);
         // Constructed last, same reasoning as memberTurnExecutor above: needs `this`
@@ -428,6 +439,21 @@ public class GroupConversationService implements IGroupConversationService, User
     public GroupConversation discuss(String groupId, String question, String userId, int depth,
                                      GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, listener, attachments, inheritedCostCeiling, null);
+    }
+
+    /**
+     * The nested-group overload: {@code attachmentSourceConversationId} is the
+     * parent discussion the {@code storageRef}-only {@code attachments} were taken
+     * from. A reference is shared with this discussion's members only when that
+     * conversation can read it — see
+     * {@link GroupAttachmentBinder#materializeAttachments(GroupConversation, List, String)}.
+     * Every other caller passes {@code null}, which refuses bare references.
+     */
+    public GroupConversation discuss(String groupId, String question, String userId, int depth,
+                                     GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling,
+                                     String attachmentSourceConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
@@ -455,7 +481,7 @@ public class GroupConversationService implements IGroupConversationService, User
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
-        materializeAttachments(gc, attachments);
+        materializeAttachments(gc, attachments, attachmentSourceConversationId);
         gc.setInheritedCostCeiling(inheritedCostCeiling);
         // Artifacts live in their own collection and are attached at read time; the
         // discuss response is a read of the finished discussion too, and without this
@@ -517,7 +543,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
         // Create the conversation synchronously so we can return its ID
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
-        materializeAttachments(gc, attachments);
+        materializeAttachments(gc, attachments, null);
 
         // Register the control token BEFORE submitting: the caller already has the
         // conversation ID, so a cancel can arrive before the executor thread runs —
@@ -675,8 +701,25 @@ public class GroupConversationService implements IGroupConversationService, User
      * Constructed per call (not cached) since {@link #attachmentStore} is a
      * field-injected, test-mutable dependency (see field comment).
      */
-    void materializeAttachments(GroupConversation gc, List<Attachment> incoming) {
-        attachmentBinder().materializeAttachments(gc, incoming);
+    void materializeAttachments(GroupConversation gc, List<Attachment> incoming) throws GroupAttachmentRejectedException {
+        materializeAttachments(gc, incoming, null);
+    }
+
+    /**
+     * As {@link #materializeAttachments(GroupConversation, List)}, with the
+     * conversation server code took any {@code storageRef}s from. A quota refusal
+     * fails the just-created discussion — it has not run and never will — and is
+     * rethrown as {@link GroupAttachmentRejectedException} for the caller to answer
+     * 400; the binder has already removed what the request stored.
+     */
+    void materializeAttachments(GroupConversation gc, List<Attachment> incoming, String trustedSourceConversationId)
+            throws GroupAttachmentRejectedException {
+        try {
+            attachmentBinder().materializeAttachments(gc, incoming, trustedSourceConversationId);
+        } catch (IAttachmentStore.AttachmentQuotaExceededException e) {
+            failConversation(gc);
+            throw new GroupAttachmentRejectedException(e.getScope(), "Attachment refused: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -1910,7 +1953,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private GroupLifecycleOps lifecycleOps() {
         return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
-                deploymentStore, sharedArtifactStore, operationsInProgress, discussionControls, this,
+                deploymentStore, sharedArtifactStore, attachmentStore, operationsInProgress, discussionControls, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
     }
 
@@ -2418,6 +2461,22 @@ public class GroupConversationService implements IGroupConversationService, User
     // =================================================================
     // Helpers
     // =================================================================
+
+    /**
+     * Whether the discussion's owner may use {@code agentId} — the facilitator
+     * RECRUIT move's USE check, the same one {@code RecruitAgentTool} applies.
+     * Administrator status is taken only from the owner's own captured identity,
+     * bound on the discussion thread; absent, the owner is checked as a
+     * non-administrator, which can only refuse more.
+     */
+    boolean discussionOwnerMayUse(String agentId, String principal) {
+        ResourceAccessGuard guard = resourceAccessGuard;
+        if (guard == null) {
+            return true;
+        }
+        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
+        return guard.principalMayUse(agentId, principal, caller != null && caller.isAdminActingAs(principal));
+    }
 
     private GroupConversation createGroupConversation(String groupId, String question, String userId, int depth)
             throws IResourceStore.ResourceStoreException {

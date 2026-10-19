@@ -63,9 +63,10 @@ import java.util.function.Consumer;
  * <p>
  * <b>Publishing</b> never blocks the caller: {@code publishAsync}; a failure or
  * a disconnected client appends to a bounded outbox
- * ({@code eddi.cluster.events.outbox-size}) that is flushed on reconnect. An
- * outbox overflow publishes {@code cache.resync-all} on reconnect, so the other
- * nodes flush whatever this one could not tell them.
+ * ({@code eddi.cluster.events.outbox-size}) that is flushed on reconnect, and
+ * every few seconds while connected (an async publish can fail without a
+ * disconnect). An outbox overflow publishes {@code cache.resync-all} on
+ * reconnect, so the other nodes flush whatever this one could not tell them.
  * <p>
  * Events from this node's own boot are ignored (the change was applied locally
  * before publishing), and handlers run in arrival order on one thread.
@@ -95,6 +96,10 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
     private final ConcurrentLinkedDeque<byte[][]> outbox = new ConcurrentLinkedDeque<>();
     private final AtomicInteger outboxCount = new AtomicInteger();
     private final AtomicBoolean outboxOverflowed = new AtomicBoolean();
+    /** A flush of the outbox is running (at most one at a time). */
+    private final AtomicBoolean flushing = new AtomicBoolean();
+    /** A full resync is queued on the dispatch thread and has not started yet. */
+    private final AtomicBoolean resyncQueued = new AtomicBoolean();
     private final ExecutorService dispatch = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "eddi-cluster-events");
         t.setDaemon(true);
@@ -135,6 +140,13 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         connections.scheduler().scheduleAtFixedRate(() -> {
             if (connections.isConnected()) {
                 lastConnectedAt = System.currentTimeMillis();
+                if (outboxCount.get() > 0 && !flushing.get()) {
+                    // An event whose async publish failed while the connection stayed up
+                    // (a JetStream timeout, a leader election) waited for the next
+                    // reconnect, which may never come. Flushed off this thread: a flush
+                    // publishes synchronously.
+                    Thread.ofVirtual().name("eddi-cluster-outbox").start(this::flushOutbox);
+                }
             }
         }, 2, 2, TimeUnit.SECONDS);
     }
@@ -191,6 +203,17 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
     }
 
     void flushOutbox() {
+        if (!flushing.compareAndSet(false, true)) {
+            return; // another flush is draining the same deque
+        }
+        try {
+            drainOutbox();
+        } finally {
+            flushing.set(false);
+        }
+    }
+
+    private void drainOutbox() {
         if (outboxOverflowed.compareAndSet(true, false)) {
             LOGGER.warn("Cluster event outbox overflowed while NATS was unreachable — asking every node to resync");
             publish(ClusterEvent.RESYNC_ALL, Map.of("reason", "outbox-overflow", "node", node.nodeId()));
@@ -340,12 +363,29 @@ public class JetStreamEventBus implements IClusterEventBus, ClusterStartable {
         return connected;
     }
 
+    /**
+     * Flushes every invalidatable cache on this node, on the dispatch thread.
+     * <p>
+     * Coalesced: a request that arrives while a flush is queued but has not started
+     * joins it. When NATS comes back after a long outage, every node whose outbox
+     * overflowed asks for a resync, and each node may also see a gap — without
+     * coalescing a node flushed its caches once per request, and each flush is a
+     * wave of cache misses against the database. A request that arrives once the
+     * flush has started queues one more, so nothing loaded before a request is kept
+     * after it.
+     */
     void resync(String reason) {
+        if (!resyncQueued.compareAndSet(false, true)) {
+            LOGGER.debugf("Cluster cache resync (%s) joined the one already queued", reason);
+            meterRegistry.counter("eddi.cluster.events.resync.coalesced").increment();
+            return;
+        }
         LOGGER.warnf("Cluster cache resync: %s — flushing every invalidatable cache on this node", reason);
         if (resyncCounter != null) {
             resyncCounter.increment();
         }
         dispatch.execute(() -> {
+            resyncQueued.set(false);
             for (Runnable flush : resyncs) {
                 try {
                     flush.run();

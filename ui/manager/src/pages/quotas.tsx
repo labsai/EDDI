@@ -257,6 +257,10 @@ export function QuotasPage() {
                     step={0.01}
                     integer={false}
                     dimmed={!form.enabled}
+                    note={t(
+                      "quotas.costPricedOnly",
+                      "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration adds $0 to the total, but is refused like any other once the budget is spent.",
+                    )}
                   />
                 </div>
               ) : null}
@@ -334,6 +338,12 @@ export function QuotasPage() {
                   </div>
                 </div>
               )}
+
+              {/* The saved policy, not the form: this says what the backend is doing now,
+                  and an unsaved edit is not applied until it is saved. */}
+              {usage && quota && (
+                <CostBudgetStatus spent={usage.monthlyCostUsd} limit={quota.maxMonthlyCostUsd} enforced={quota.enabled} />
+              )}
             </div>
           </div>
         </>
@@ -391,6 +401,7 @@ function QuotaField({
   step = 1,
   dimmed = false,
   integer = true,
+  note,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -403,6 +414,8 @@ function QuotaField({
   dimmed?: boolean;
   /** Counts must be whole numbers; the cost limit takes decimals. */
   integer?: boolean;
+  /** Always-visible explanation under the hint (what the limit does and does not cover). */
+  note?: string;
 }) {
   const id = useId();
   const hintId = `${id}-hint`;
@@ -459,6 +472,59 @@ function QuotaField({
       ) : (
         <p id={hintId} className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
       )}
+      {note && (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid={`${testId}-note`}>
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the monthly cost budget is doing right now. The limit is enforced by the
+ * backend (priced spend is metered after each turn; once the month's total
+ * reaches the limit, LLM tasks serve their fallback answer instead of calling
+ * the model), so this says which of four states the tenant is in rather than
+ * leaving the operator to infer it from a progress bar.
+ */
+function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
+  const { t } = useTranslation();
+  const unlimited = limit < 0;
+  const reached = !unlimited && spent >= limit;
+  const money = (n: number) => `$${n.toFixed(2)}`;
+
+  let tone = "border-border/50 bg-muted/30 text-muted-foreground";
+  let state: string;
+  if (unlimited) {
+    state = t("quotas.budgetUnlimited", "No monthly cost budget is set, so spend is metered but never limited.");
+  } else if (!enforced) {
+    state = t("quotas.budgetNotEnforced", "A budget of {{limit}} is set, but enforcement is off, so it is not applied.", { limit: money(limit) });
+  } else if (reached) {
+    tone = "border-destructive/40 bg-destructive/5 text-destructive";
+    state = t(
+      "quotas.budgetReached",
+      "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
+      { spent: money(spent), limit: money(limit) },
+    );
+  } else {
+    state = t("quotas.budgetRemaining", "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.", {
+      spent: money(spent),
+      limit: money(limit),
+      remaining: money(limit - spent),
+    });
+  }
+
+  return (
+    <div className={`mt-3 rounded-lg border p-3 text-xs ${tone}`} data-testid="cost-budget-status" role="status">
+      <p className="font-medium text-foreground">{t("quotas.budgetTitle", "Monthly cost budget")}</p>
+      <p className="mt-1" data-testid="cost-budget-state">{state}</p>
+      <p className="mt-1 text-muted-foreground">
+        {t(
+          "quotas.budgetNote",
+          "Counts priced model calls and tracked tool cost, per UTC calendar month. Unpriced models, conversation summaries and embeddings are not metered. A turn that crosses the limit still finishes, so the total can end slightly above it. Refused calls are counted in the eddi.llm.spend.refused metric.",
+        )}
+      </p>
     </div>
   );
 }
