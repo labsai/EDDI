@@ -153,9 +153,27 @@ public class MongoUserDirectoryStore implements IUserDirectoryStore {
         }
         // Pattern.quote, because the prefix is whatever a person typed into a share
         // box — "a.b" must not match "axb", and "(" must not be a syntax error.
+        return collect(prefixFilter(lower), limit);
+    }
+
+    @Override
+    public List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, int limit) {
+        if (teamSubjects == null || teamSubjects.isEmpty()) {
+            return List.of();
+        }
+        Bson inTeams = Filters.in(TEAMS, List.copyOf(teamSubjects));
+        String lower = DirectoryUser.lower(prefix);
+        if (lower == null || lower.isEmpty()) {
+            return collect(inTeams, limit);
+        }
+        return collect(Filters.and(inTeams, prefixFilter(lower)), limit);
+    }
+
+    /** Principal, username, email or display name starting with {@code lower}. */
+    private static Bson prefixFilter(String lower) {
         String pattern = "^" + Pattern.quote(lower);
-        return collect(Filters.or(Filters.regex(PRINCIPAL_LOWER, pattern), Filters.regex(USERNAME_LOWER, pattern),
-                Filters.regex(EMAIL_LOWER, pattern), Filters.regex(DISPLAY_NAME_LOWER, pattern)), limit);
+        return Filters.or(Filters.regex(PRINCIPAL_LOWER, pattern), Filters.regex(USERNAME_LOWER, pattern), Filters.regex(EMAIL_LOWER, pattern),
+                Filters.regex(DISPLAY_NAME_LOWER, pattern));
     }
 
     @Override

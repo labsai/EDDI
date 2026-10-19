@@ -67,6 +67,24 @@ class NamelessPrincipalAugmentorTest {
         assertEquals(NamelessPrincipalAugmentor.FAILURE_MESSAGE, failure.getMessage());
     }
 
+    @ParameterizedTest(name = "name=[{0}]")
+    @ValueSource(strings = {"slack:T1:U2", "openwebui:alice", "group:aabbcc", "system:scheduler", "a2a:peer", "webhook:abc",
+            "agent-test:run:case:1", "mcp:root", "anonymous-1f2e", "gdpr-erased:abc", "anonymous", "Slack:T1:U2", " system:x"})
+    @DisplayName("L3: an identity carrying a principal name EDDI reserves for itself fails authentication (401)")
+    void reservedPrincipal_rejected(String name) {
+        var identity = identityNamed(name);
+        var failure = assertThrows(AuthenticationFailedException.class, () -> augment(identity));
+        assertEquals(NamelessPrincipalAugmentor.RESERVED_FAILURE_MESSAGE, failure.getMessage());
+    }
+
+    @ParameterizedTest(name = "name=[{0}]")
+    @ValueSource(strings = {"alice", "alice@example.com", "systematic", "slacker", "groupie", "anonymously", "f81d4fae-7dec-11d0"})
+    @DisplayName("L3: ordinary names that merely start like a reserved word pass")
+    void lookalikePrincipal_passes(String name) {
+        var identity = identityNamed(name);
+        assertSame(identity, augment(identity));
+    }
+
     @Test
     @DisplayName("an authenticated identity with no principal at all fails authentication")
     void principalLessIdentity_rejected() {
