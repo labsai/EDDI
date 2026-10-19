@@ -65,10 +65,26 @@ eddi:
   # application default (20 s) otherwise.
   shutdownDrainTimeoutSeconds: ""
 
-  # Vault master key — encrypts API keys and secrets. REQUIRED.
+  # Vault master key — encrypts API keys and secrets. REQUIRED, unless
+  # existingSecret below supplies it.
   # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
   # Generate: openssl rand -base64 24
   vaultMasterKey: ""
+
+  # Bring your own Secret instead of <release>-secrets (External Secrets
+  # Operator, Sealed Secrets, a Secret you create by hand). When set, the chart
+  # renders NO Secret for EDDI and the pod mounts this one instead, so neither
+  # the vault master key nor a datastore password ever passes through a values
+  # file or `--set`. It must hold ONE key, application-secrets.properties, with
+  # the same lines <release>-secrets would carry:
+  #   eddi.vault.master-key=<key>
+  #   mongodb.connectionString=mongodb://user:pass@<release>-eddi-mongodb:27017/eddi?authSource=admin
+  #     (in-chart MongoDB — percent-encode the password; or your external URI)
+  #   quarkus.datasource.username= / quarkus.datasource.password=
+  #     (external PostgreSQL only; the in-chart one has its own Secret)
+  #   eddi.nats.username= / eddi.nats.password=   (in-chart NATS with auth)
+  # vaultMasterKey and the external-datastore credentials are then ignored.
+  existingSecret: ""
 
   # Database backend: exactly "mongodb" or exactly "postgres", both lowercase.
   #
@@ -264,6 +280,13 @@ mongodb:
   # the database first (db.changeUserPassword in the admin db), then upgrade.
   rootUsername: eddi
   rootPassword: ""
+  # Bring your own Secret instead of <release>-mongodb: it must carry the keys
+  # MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD, which the mongo
+  # container reads at first init. rootPassword is then ignored — and because
+  # the chart can no longer build EDDI's connection string without it,
+  # eddi.existingSecret is REQUIRED alongside (the chart refuses to render
+  # otherwise); put the full mongodb.connectionString in that Secret.
+  existingSecret: ""
   # UPGRADING a release from before MongoDB authentication: its data volume is
   # already initialised, so the image will NOT create rootUsername, yet it does
   # turn --auth on. Create the user in the still-unauthenticated database first
@@ -309,6 +332,14 @@ postgres:
   #     psql -U eddi -d eddi -c "ALTER ROLE eddi PASSWORD '<new>'"
   # then run the upgrade.
   password: ""
+  # Bring your own Secret instead of <release>-postgres. It must carry the four
+  # keys that Secret would: POSTGRES_DB, POSTGRES_USER and POSTGRES_PASSWORD
+  # (read by the postgres container at initdb) and postgres-secrets.properties,
+  # a two-line Quarkus properties file mounted into EDDI:
+  #   quarkus.datasource.username=<username>
+  #   quarkus.datasource.password=<password>
+  # password is then ignored.
+  existingSecret: ""
   storage:
     size: 10Gi
     # storageClassName: standard
@@ -380,9 +411,15 @@ keycloak:
     repository: quay.io/keycloak/keycloak
     tag: "26.8.0"
   adminUsername: admin
-  # REQUIRED when keycloak.enabled=true — no default is shipped.
+  # REQUIRED when keycloak.enabled=true and existingSecret is empty — no default
+  # is shipped. Rendered into the <release>-keycloak Secret and read by the pod
+  # through secretKeyRef, never as a plain env value in the pod spec.
   # Generate: openssl rand -base64 24
   adminPassword: ""
+  # Bring your own Secret instead of <release>-keycloak: it must carry the key
+  # `password` (the same shape as the kustomize overlay's keycloak-admin
+  # Secret). adminPassword is then ignored.
+  existingSecret: ""
 
   # The realm in files/eddi-realm.json is imported on FIRST boot only. It ships
   # allowing redirects to localhost and to the https://eddi.example.com
@@ -390,12 +427,28 @@ keycloak:
   # substituted in both redirectUris and webOrigins. A realm that does not list
   # your host answers "Invalid parameter: redirect_uri" and login cannot finish.
   # Leave empty for the port-forward flow, which localhost already covers.
+  #
+  # Setting it also REMOVES the localhost entries and the `+` wildcard web
+  # origin from the eddi-frontend client: a realm published under a real
+  # hostname that still accepts redirects to http://localhost:* lets a page on
+  # the operator's own machine, or any local port a malicious site can reach,
+  # complete a login with the authorization code. The eddi-mcp client keeps its
+  # loopback redirects — that is how MCP clients on a workstation sign in.
   publicOrigin: ""
 
   # Keycloak runs `start-dev` on its embedded H2 database. This PVC is what
   # keeps realms, clients and users across a restart — without it a rollout,
   # eviction or OOM kill wipes the identity provider. Run `start` against an
   # external database for anything past dev/demo.
+  #
+  # Because of that, the chart REFUSES to render keycloak.enabled=true together
+  # with ingress.enabled=true: an Ingress means the deployment is reachable by
+  # name, and a `start-dev` Keycloak (no production hardening, H2 on a single
+  # PVC, no HA) must not be the identity provider behind it unless you say so.
+  # Set devModeAcknowledged=true to render anyway (a demo or a staging cluster
+  # you understand), or point eddi.oidc.authServerUrl at a Keycloak you run
+  # with `start` and leave keycloak.enabled=false.
+  devModeAcknowledged: false
   storage:
     size: 1Gi
     # storageClassName: standard

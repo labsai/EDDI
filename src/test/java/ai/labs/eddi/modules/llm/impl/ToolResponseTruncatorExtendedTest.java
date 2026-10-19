@@ -126,10 +126,10 @@ class ToolResponseTruncatorExtendedTest {
             limits.setDefaultMaxChars(50);
             limits.setTruncationStrategy("paginate");
 
-            when(paginatedResponseStore.store("testTool", "A".repeat(200), 50)).thenReturn("resp-123");
-            when(paginatedResponseStore.getPageCount("resp-123")).thenReturn(4);
+            when(paginatedResponseStore.store("conv-1", "testTool", "A".repeat(200), 50)).thenReturn("resp-123");
+            when(paginatedResponseStore.getPageCount("conv-1", "resp-123")).thenReturn(4);
 
-            String result = truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
+            String result = truncator.truncateIfNeeded("conv-1", "testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.contains("[PAGINATED:"));
             assertTrue(result.contains("resp-123"));
             assertTrue(result.contains("page 1 of 4"));
@@ -142,10 +142,23 @@ class ToolResponseTruncatorExtendedTest {
             limits.setDefaultMaxChars(50);
             limits.setTruncationStrategy("paginate");
 
-            when(paginatedResponseStore.store(anyString(), anyString(), anyInt())).thenReturn(null);
+            when(paginatedResponseStore.store(anyString(), anyString(), anyString(), anyInt())).thenReturn(null);
+
+            String result = truncator.truncateIfNeeded("conv-1", "testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
+            assertTrue(result.contains("[TRUNCATED:"));
+        }
+
+        @Test
+        @DisplayName("L13: without a conversation to scope the pages to, pagination falls back to truncation and stores nothing")
+        void testPaginateNeedsAConversation() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(50);
+            limits.setTruncationStrategy("paginate");
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
-            assertTrue(result.contains("[TRUNCATED:"));
+
+            assertTrue(result.contains("[TRUNCATED:"), result);
+            verify(paginatedResponseStore, never()).store(anyString(), anyString(), anyString(), anyInt());
         }
 
         @Test
@@ -494,10 +507,10 @@ class ToolResponseTruncatorExtendedTest {
             limits.setDefaultMaxChars(50);
             limits.setTruncationStrategy("PAGINATE");
 
-            when(paginatedResponseStore.store(anyString(), anyString(), anyInt())).thenReturn("id-1");
-            when(paginatedResponseStore.getPageCount("id-1")).thenReturn(2);
+            when(paginatedResponseStore.store(anyString(), anyString(), anyString(), anyInt())).thenReturn("id-1");
+            when(paginatedResponseStore.getPageCount("conv-1", "id-1")).thenReturn(2);
 
-            String result = truncator.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
+            String result = truncator.truncateIfNeeded("conv-1", "testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.contains("[PAGINATED:"));
         }
 

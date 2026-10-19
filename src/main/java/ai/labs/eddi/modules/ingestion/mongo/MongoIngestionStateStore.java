@@ -105,6 +105,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_SEGMENTS_STORED = "segmentsStored";
     private static final String FIELD_COST_USD = "costUsd";
     private static final String FIELD_ERROR = "error";
+    private static final String FIELD_DOCS_SKIPPED = "documentsSkipped";
+    private static final String FIELD_STOP_REASON = "stopReason";
+    private static final String FIELD_TRIGGER = "trigger";
 
     private final MongoCollection<Document> documents;
     private final MongoCollection<Document> runs;
@@ -366,21 +369,18 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public void finishRun(IngestionRun run) {
+        List<Bson> updates = new ArrayList<>(counterUpdates(run));
+        updates.add(Updates.set(FIELD_STATUS, run.status().name()));
+        updates.add(Updates.set(FIELD_FINISHED_AT,
+                Date.from(run.finishedAt() == null ? Instant.now() : run.finishedAt())));
+        updates.add(Updates.set(FIELD_ERROR, run.error()));
+        if (run.stopReason() != null) {
+            updates.add(Updates.set(FIELD_STOP_REASON, run.stopReason()));
+        }
         var result = translating("finish a run", () -> runs.updateOne(
                 Filters.and(Filters.eq(FIELD_RUN_ID, run.runId()),
                         Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
-                Updates.combine(
-                        Updates.set(FIELD_STATUS, run.status().name()),
-                        Updates.set(FIELD_FINISHED_AT,
-                                Date.from(run.finishedAt() == null ? Instant.now() : run.finishedAt())),
-                        Updates.set(FIELD_DOCS_SEEN, run.documentsSeen()),
-                        Updates.set(FIELD_DOCS_INGESTED, run.documentsIngested()),
-                        Updates.set(FIELD_DOCS_UNCHANGED, run.documentsUnchanged()),
-                        Updates.set(FIELD_DOCS_FAILED, run.documentsFailed()),
-                        Updates.set(FIELD_DOCS_TOMBSTONED, run.documentsTombstoned()),
-                        Updates.set(FIELD_SEGMENTS_STORED, run.segmentsStored()),
-                        Updates.set(FIELD_COST_USD, run.costUsd()),
-                        Updates.set(FIELD_ERROR, run.error()))));
+                Updates.combine(updates)));
         if (result.getMatchedCount() == 0) {
             // The run was reaped while it was still working. Its own result is
             // discarded — the reaper already declared it dead, and a second run may
@@ -388,6 +388,37 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
             LOGGER.warnf("Ingestion run %s was already closed (reaped) before it finished; its result is discarded",
                     LogSanitizer.sanitize(run.runId()));
         }
+    }
+
+    @Override
+    public void reportProgress(IngestionRun progress) {
+        // Fenced on RUNNING like finishRun, so a late progress write cannot reopen a
+        // finished or reaped run, nor overwrite the counters finishRun wrote.
+        translating("report a run's progress", () -> runs.updateOne(
+                Filters.and(Filters.eq(FIELD_RUN_ID, progress.runId()),
+                        Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
+                Updates.combine(counterUpdates(progress))));
+    }
+
+    /**
+     * The counters and the trigger, which a progress write and the final write
+     * share. The trigger is only ever set, never cleared: a caller that does not
+     * know it leaves what the first progress write recorded.
+     */
+    private static List<Bson> counterUpdates(IngestionRun run) {
+        List<Bson> updates = new ArrayList<>(List.of(
+                Updates.set(FIELD_DOCS_SEEN, run.documentsSeen()),
+                Updates.set(FIELD_DOCS_INGESTED, run.documentsIngested()),
+                Updates.set(FIELD_DOCS_UNCHANGED, run.documentsUnchanged()),
+                Updates.set(FIELD_DOCS_FAILED, run.documentsFailed()),
+                Updates.set(FIELD_DOCS_TOMBSTONED, run.documentsTombstoned()),
+                Updates.set(FIELD_DOCS_SKIPPED, run.documentsSkipped()),
+                Updates.set(FIELD_SEGMENTS_STORED, run.segmentsStored()),
+                Updates.set(FIELD_COST_USD, run.costUsd())));
+        if (run.trigger() != null) {
+            updates.add(Updates.set(FIELD_TRIGGER, run.trigger().name()));
+        }
+        return updates;
     }
 
     @Override
@@ -562,7 +593,10 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 intOrZero(document, FIELD_DOCS_TOMBSTONED),
                 intOrZero(document, FIELD_SEGMENTS_STORED),
                 document.get(FIELD_COST_USD) == null ? 0.0 : document.getDouble(FIELD_COST_USD),
-                document.getString(FIELD_ERROR));
+                document.getString(FIELD_ERROR),
+                intOrZero(document, FIELD_DOCS_SKIPPED),
+                document.getString(FIELD_STOP_REASON),
+                IngestionRun.Trigger.parse(document.getString(FIELD_TRIGGER)));
     }
 
     private static int intOrZero(Document document, String field) {

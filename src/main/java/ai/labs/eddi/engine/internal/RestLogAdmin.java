@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
+import ai.labs.eddi.utils.PageBounds;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -60,12 +61,14 @@ public class RestLogAdmin implements IRestLogAdmin {
 
     @Override
     public List<LogEntry> getRecentLogs(String agentId, String conversationId, String level, int limit) {
+        PageBounds.requireLimit(limit);
         return boundedLogStore.getEntries(agentId, conversationId, level, limit);
     }
 
     @Override
     public List<LogEntry> getHistoryLogs(Deployment.Environment environment, String agentId, Integer agentVersion, String conversationId,
                                          String userId, String instanceId, Integer skip, Integer limit) {
+        PageBounds.require(skip, limit);
         return databaseLogs.getLogs(environment, agentId, agentVersion, conversationId, userId, instanceId, skip, limit);
     }
 

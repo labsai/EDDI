@@ -433,14 +433,14 @@ export function VariablesPage() {
       {/* ─── Create / Edit dialog ─── */}
       {showDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={closeDialog}
           onKeyDown={(e) => {
             if (e.key === "Escape") closeDialog();
           }}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -456,6 +456,7 @@ export function VariablesPage() {
                   : t("variables.createTitle", "Add Global Variable")}
               </h2>
               <button
+                aria-label={t("common.close", "Close")}
                 onClick={closeDialog}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
               >

@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -31,6 +32,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -82,6 +84,7 @@ public class ChatModelRegistry {
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    private final VaultHostAllowlist vaultHostAllowlist;
 
     /**
      * Attached to every model this registry builds, sync and streaming alike. It is
@@ -183,11 +186,43 @@ public class ChatModelRegistry {
     @Inject
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
-            LlmTelemetryListener telemetryListener) {
+            LlmTelemetryListener telemetryListener, VaultHostAllowlist vaultHostAllowlist) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.telemetryListener = telemetryListener;
+        this.vaultHostAllowlist = vaultHostAllowlist;
+    }
+
+    /**
+     * The parameter keys the builders read an endpoint from. Checked before the
+     * vault references are resolved, so that a secret restricted to
+     * {@code api.openai.com} is never handed to a builder pointed elsewhere.
+     * <p>
+     * A configuration with none of these keys uses the provider's own default
+     * endpoint, which an editor cannot choose, so there is nothing to check — the
+     * list exists to stop an editor-chosen destination, not a vendor's.
+     */
+    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint", "url", "serverUrl", "host");
+
+    /**
+     * Refuses the build when a referenced secret's {@code allowedHosts} does not
+     * name a configured endpoint. Every endpoint key that is set is checked, not
+     * only the first: which key a builder reads depends on the provider, so a
+     * configuration carrying an allowed {@code baseUrl} and an attacker's
+     * {@code endpoint} must not pass on the strength of the one it does not use.
+     *
+     * @param params
+     *            the builder parameters with global variables resolved and vault
+     *            references still in place
+     */
+    private void requireSecretsAllowedAt(String type, Map<String, String> params) {
+        for (String key : ENDPOINT_KEYS) {
+            String endpoint = params.get(key);
+            if (endpoint != null && !endpoint.isBlank()) {
+                vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
+            }
+        }
     }
 
     /**
@@ -295,6 +330,7 @@ public class ChatModelRegistry {
         // after Qute, before builder.build())
         var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
+        requireSecretsAllowedAt(type, resolvedParams);
         resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
         resolvedParams = adaptToModel(type, resolvedParams);
         var modelBuilder = languageModelApiConnectorBuilders.get(type).get();
@@ -350,6 +386,7 @@ public class ChatModelRegistry {
             // after Qute, before builder.build())
             var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
+            requireSecretsAllowedAt(type, resolvedParams);
             resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams), "LLM provider '" + type + "'");
             resolvedParams = adaptToModel(type, resolvedParams);
             var modelBuilder = languageModelApiConnectorBuilders.get(type).get();

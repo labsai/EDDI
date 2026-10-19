@@ -88,13 +88,27 @@ data:
   QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:7070"
   QUARKUS_OIDC_TENANT_ENABLED: "false"
 
-  # Authentication escape hatches. OIDC is off by default in this quickstart, and
-  # AuthStartupGuard refuses a production boot in that state without an explicit
-  # opt-out — so these three are what make the manifest actually start. The MCP
-  # endpoint and the secrets vault need their OWN opt-in on top of the first flag:
-  # inheriting it must not be enough to expose agent CRUD or vault writes.
-  # Set all three to "false" and QUARKUS_OIDC_TENANT_ENABLED to "true" for anything
-  # reachable from outside the cluster.
+  # ⚠️  ⚠️  ⚠️  EVERY ENDPOINT IS OPEN — EVALUATION ONLY  ⚠️  ⚠️  ⚠️
+  #
+  # The three flags below switch authentication OFF for the whole API, for the
+  # MCP server (agent CRUD, conversations, memories, audit trails) AND for the
+  # secrets vault (/secretstore: writes, key rotation, reset). Anyone who can
+  # reach the eddi Service — every pod in the cluster, and the whole network if
+  # you add an Ingress or a LoadBalancer — is an administrator. There is no
+  # token, no role, no audit identity. Treat this manifest exactly like the
+  # unauthenticated MongoDB it ships: a port-forward demo on a cluster you alone
+  # can reach, never a shared, staging or internet-facing one.
+  #
+  # Why all three are "true" rather than only the first: OIDC is off here, and
+  # with OIDC off EDDI refuses to boot (HighValueSurfaceGuard) unless the MCP
+  # server and the vault are EACH opted in explicitly — "false" on either one is
+  # not a safer quickstart, it is a CrashLoopBackOff. The Helm chart makes the
+  # same choice visible at render time: it refuses an OIDC-off release until
+  # both opt-ins are set. So the only way to close these is to turn OIDC on:
+  # set QUARKUS_OIDC_TENANT_ENABLED to "true", all three flags to "false", and
+  # add an identity provider — k8s/overlays/auth does exactly that (see
+  # docs/kubernetes.md, "Authentication (Keycloak)"). Do it BEFORE anything
+  # but you can reach the Service.
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
   EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"

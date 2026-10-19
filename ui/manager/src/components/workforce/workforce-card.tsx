@@ -221,7 +221,7 @@ function WorkforceCard({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
-                    className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100"
+                    className="reveal-on-touch shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:p-2"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();

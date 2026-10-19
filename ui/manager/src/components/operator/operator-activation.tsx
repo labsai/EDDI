@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ModelCombobox } from "@/components/shared/model-combobox";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
 import { SELF_HOSTED_EXAMPLES, SELF_HOSTED_PROVIDER_ID, getProviderRegions } from "@/lib/llm-provider-catalog";
 import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
@@ -345,20 +346,16 @@ export function OperatorActivation({
                   : undefined
               }
             >
-              <input
+              <ModelCombobox
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
-                list="operator-model-suggestions"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                onChange={setModel}
+                suggestions={suggestions}
+                defaultModel={providerConfig?.defaultModel}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
                 id="operator-model"
                 aria-describedby={provider === SELF_HOSTED_PROVIDER_ID ? "operator-model-hint" : undefined}
-                data-testid="operator-model"
+                testId="operator-model"
               />
-              <datalist id="operator-model-suggestions">
-                {suggestions.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
             </Field>
 
             {baseUrlRequired && (

@@ -197,7 +197,24 @@ function MarkdownImage({ src, alt, title }: ComponentPropsWithoutRef<"img"> & { 
   );
 }
 
-const COMPONENTS: Components = { a: MarkdownLink, img: MarkdownImage, pre: CodeBlock };
+/** Wide tables scroll inside the bubble instead of widening the transcript. */
+function ScrollableTable({
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<"table"> & { node?: unknown }) {
+  return (
+    <div className="table-scroll">
+      <table {...props} />
+    </div>
+  );
+}
+
+const COMPONENTS: Components = {
+  a: MarkdownLink,
+  img: MarkdownImage,
+  pre: CodeBlock,
+  table: ScrollableTable,
+};
 
 export const MessageBubble = memo(function MessageBubble({
   message,
@@ -260,9 +277,11 @@ export const MessageBubble = memo(function MessageBubble({
               })}{" "}
         </span>
         {isUser ? (
-          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{message.content}</p>
+          <p dir="auto" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+            {message.content}
+          </p>
         ) : enableMarkdown ? (
-          <div className="markdown-body">
+          <div className="markdown-body" dir="auto">
             {hasContent ? (
               <ReactMarkdown
                 remarkPlugins={remark}
@@ -278,7 +297,7 @@ export const MessageBubble = memo(function MessageBubble({
             )}
           </div>
         ) : hasContent || !images.length ? (
-          <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+          <p dir="auto" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
             {message.content || (message.isStreaming ? "…" : t("message.noResponse"))}
           </p>
         ) : null}

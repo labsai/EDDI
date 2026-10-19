@@ -24,6 +24,12 @@ interface SecretInputProps {
    */
   onCancel?: () => void;
   disabled?: boolean;
+  /**
+   * Take focus on mount. Off for a field the agent asks for before the user
+   * has done anything: an embedded widget must not steal the host page's
+   * focus on load, or pop the keyboard up on a phone.
+   */
+  autoFocus?: boolean;
 }
 
 export function SecretInput({
@@ -34,6 +40,7 @@ export function SecretInput({
   onSend,
   onCancel,
   disabled = false,
+  autoFocus = true,
 }: SecretInputProps) {
   const dispatch = useChatDispatch();
   const [value, setValue] = useState(defaultValue);
@@ -104,7 +111,7 @@ export function SecretInput({
             onKeyDown={handleKeyDown}
             placeholder={placeholder || (isSecret ? t("input.secretPlaceholder") : "")}
             disabled={disabled}
-            autoFocus
+            autoFocus={autoFocus}
             autoComplete={isSecret ? "off" : undefined}
             data-testid="secret-input-field"
           />

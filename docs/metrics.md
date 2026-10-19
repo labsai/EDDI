@@ -83,7 +83,7 @@ The Grafana login is `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` — `admin`
 `Integrations — MCP, A2A Identity, OpenAI-compatible API` ·
 `Capability Registry & Connections` · `Secrets Vault` · `Tenancy, Quotas & Audit` ·
 `Platform Operator` · `NATS JetStream` · `Backup — Export, Import & Sync` ·
-`RAG Ingestion` ·
+`RAG Ingestion` · `Outbound HTTP` ·
 `Runtime context (Quarkus / JVM built-ins)`
 
 ---
@@ -386,9 +386,11 @@ eddi_coordinator_total_dead_lettered_total  # Turns dead-lettered (failed after 
 eddi_coordinator_dead_letters               # Dead letters retained right now (gauge; in cluster mode the shared stream's count)
 eddi_coordinator_dead_lettered_total        # The same count under the name the shipped alert rules use (both modes)
 eddi_coordinator_dead_letters_retained      # The same gauge under the name the shipped dashboards use (both modes)
-eddi_runtime_executor_active                # Conversation work running; tag: pool (managed|nested)
+eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
+eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit)
+eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
 ```
 
 `queue_depth` rising while `total_processed` flattens is the signature of a
@@ -404,10 +406,21 @@ lists. Both coordinators register them; in cluster mode the gauge is the shared
 dead-letter stream's count, and the console at `/administration/cluster` lists it.
 
 `queue_depth` counts turns waiting behind an earlier turn of the **same**
-conversation. `eddi_runtime_executor_queued{pool="managed"}` counts turns
-waiting for a **thread**: above zero for minutes means the worker pool is
-saturated (alert `EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not
-see this work — they count only what is dispatched through Vert.x.
+conversation. The executor gauges count work by where it runs: `pool="turn"` is
+the coordinators' turns and `pool="nested"` their pipelines, both on virtual
+threads; `pool="managed"` is the bounded worker pool, which now carries deploys,
+retention sweeps and the parser endpoint, not turns. `queued{pool="managed"}`
+above zero for minutes means that pool is saturated (alert
+`EddiExecutorSaturated`). Quarkus' `worker_pool_*` meters do not see this work —
+they count only what is dispatched through Vert.x.
+
+Turns are bounded by `eddi.conversation.max-in-flight-turns` instead of by
+threads: past it a turn is refused with 503 `capacity_exceeded` and counted in
+`eddi_turn_rejected_total{reason="in_flight_limit"}` (alert
+`EddiTurnCapacityReached`). A turn holds its place until its task has ended,
+persistence included, and a new conversation's start turn counts too, so the
+limit is reached slightly before `eddi_processing_conversation_count` shows it:
+that gauge drops as soon as the client has its answer.
 
 ### Pipeline Metrics
 
@@ -551,6 +564,19 @@ eddi_attachment_errors_total                # Drops, cap-skips and capability ga
 eddi_attachments_quota_rejected_total       # Uploads refused by a quota; tag: scope (conversation, user)
 ```
 
+### Outbound HTTP Metrics
+
+Requests through the outbound HTTP facade: the built-in tools, the RAG crawler, OAuth token requests, attachment downloads, A2A peers and Slack (profile `default`), and remote agent sync (profile `internal-peer`). `httpcalls` and the LLM providers use their own clients and report nothing here until they migrate. Settings: [configuration-reference.md](configuration-reference.md#outbound-http-client).
+
+```text
+eddi_http_outbound_requests_total           # Exchanges, a redirect chain counted once; tags: profile, method, status (2xx..5xx|none), outcome (success|blocked|timeout|error)
+eddi_http_outbound_duration_seconds         # Exchange time, to the end of a buffered body or the headers of a streamed one; tags: profile, outcome
+eddi_http_outbound_blocked_total            # Refused by policy; tags: profile, reason (ssrf|cap|redirect)
+eddi_http_outbound_bytes_total              # Response body bytes read into memory or a file; tag: profile
+```
+
+Target hosts are never a tag: most targets are chosen by a user or a model, and a tag per URL would be unbounded. A rising `reason="ssrf"` rate means something keeps steering tools at internal addresses.
+
 ### HITL Metrics
 
 Full guide: [hitl.md](hitl.md).
@@ -670,6 +696,7 @@ eddi_vault_store_duration_seconds           # Write latency (timer)
 
 ```text
 eddi_mcp_discovery_total                    # Remote tool discoveries; tag: outcome
+eddi_mcp_tool_schema_governed_total         # Remote tool parameter schemas changed before prompting; tag: outcome (redacted|truncated|dropped|dropped_server_cap)
 eddi_mcp_response_truncation_count_total    # Tool responses truncated to fit the context
 eddi_mcp_conversation_access_denied_total   # MCP conversation access refused; tag: tool
 eddi_openai_requests_total                  # OpenAI-compatible API requests; tags: mode, outcome
@@ -677,6 +704,7 @@ eddi_openai_request_duration_seconds        # Request latency (timer)
 eddi_openai_conversations_created_total     # Conversations created via the /v1 adapter
 eddi_openai_conversations_rolled_over_total # /v1 conversations ended at max-conversation-steps
 eddi_openai_chat_keys_total                 # Stateful /v1 requests by chat-key source; tag: source
+eddi_a2a_tool_schema_governed_total         # Peer tool parameter schemas changed before prompting; tag: outcome (as the MCP counter)
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)

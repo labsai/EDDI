@@ -1,9 +1,11 @@
 import { useState, useCallback, useId } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
 import { ActionTags } from "./action-tags";
 import { Field } from "./editor-field";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
+import { ModelCombobox } from "@/components/shared/model-combobox";
 import { getProviderConfig } from "@/lib/api/agent-setup";
 import { dedicatedParamKeys, modelParamSpec } from "./llm/model-params";
 import { NumberInput } from "./number-input";
@@ -159,7 +161,7 @@ function SkillsFilterInput({
           </span>
         ))}
         {skills.length === 0 && (
-          <span className="text-[10px] text-muted-foreground italic">All skills</span>
+          <span className="text-[10px] text-muted-foreground italic">{t("llmEditor.allSkills", "All skills")}</span>
         )}
       </div>
       {!readOnly && (
@@ -169,6 +171,7 @@ function SkillsFilterInput({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 addSkill();
@@ -178,6 +181,7 @@ function SkillsFilterInput({
             className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
+            aria-label={t("common.add", "Add")}
             type="button"
             onClick={addSkill}
             className="inline-flex h-6 items-center rounded border border-input px-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
@@ -260,7 +264,6 @@ function TaskEditor({
       ? numberProblem(temperatureValue, temperatureRange)
       : null;
   const providerInfo = getProviderConfig(task.type ?? "");
-  const modelListId = `${uid}-models`;
 
   /**
    * Changing the provider keeps the parameters (the grid shows what carries
@@ -448,23 +451,19 @@ function TaskEditor({
               >
                 {(control) => (
                   <>
-                    <input
+                    <ModelCombobox
                       {...control}
-                      type="text"
-                      list={modelListId}
                       value={modelValue}
-                      onChange={(e) => updateParam(modelKey, e.target.value)}
+                      onChange={(v) => updateParam(modelKey, v)}
+                      suggestions={MODEL_SUGGESTIONS[task.type ?? ""] ?? []}
+                      defaultModel={providerInfo?.defaultModel}
                       readOnly={readOnly}
                       placeholder={providerInfo?.defaultModel ?? ""}
                       aria-invalid={modelValue.trim() === "" ? true : undefined}
+                      density="compact"
                       className="h-8 w-full rounded-md border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      data-testid="llm-model-name"
+                      testId="llm-model-name"
                     />
-                    <datalist id={modelListId}>
-                      {(MODEL_SUGGESTIONS[task.type ?? ""] ?? []).map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
                     {modelValue.trim() === "" && (
                       <p className="text-[11px] text-warning" data-testid="llm-model-missing">
                         {t("llmEditor.modelMissing", "No model set: the provider will reject every request.")}
@@ -1032,6 +1031,7 @@ function TaskEditor({
                       />
                       {!readOnly && (
                         <button
+                          aria-label={t("common.remove", "Remove")}
                           type="button"
                           onClick={() =>
                             onChange({
@@ -1395,6 +1395,7 @@ function TaskEditor({
                               />
                               {!readOnly && (
                                 <button
+                                  aria-label={t("common.remove", "Remove")}
                                   type="button"
                                   onClick={() => {
                                     const rules = (
@@ -1528,6 +1529,7 @@ function TaskEditor({
                             />
                             {!readOnly && (
                               <button
+                                aria-label={t("common.remove", "Remove")}
                                 type="button"
                                 onClick={() => {
                                   const rules = (
@@ -1754,6 +1756,7 @@ function TaskEditor({
                             <span className="text-[10px] text-muted-foreground">/min</span>
                             {!readOnly && (
                               <button
+                                aria-label={t("common.remove", "Remove")}
                                 type="button"
                                 onClick={() => {
                                   const entries = Object.entries(task.toolRateLimits ?? {}).filter((_, j) => j !== i);
@@ -1950,6 +1953,7 @@ function TaskEditor({
                         <span className="text-[10px] text-muted-foreground">chars</span>
                         {!readOnly && (
                           <button
+                            aria-label={t("common.remove", "Remove")}
                             type="button"
                             onClick={() => {
                               const entries = Object.entries(task.toolResponseLimits?.perToolLimits ?? {}).filter((_, j) => j !== i);

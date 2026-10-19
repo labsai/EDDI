@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import jakarta.ws.rs.core.Response;
@@ -35,7 +36,7 @@ class RestRagIngestionTest {
     void setUp() {
         openMocks(this);
         restRagIngestion = new RestRagIngestion(restRagStore, ragIngestionService, mock(RagSourceIngestionService.class),
-                mock(IngestedFileService.class), mock(ResourceAccessGuard.class));
+                mock(IngestedFileService.class), mock(KnowledgeBaseInspector.class), mock(ResourceAccessGuard.class));
     }
 
     @Test

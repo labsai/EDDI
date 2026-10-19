@@ -60,7 +60,7 @@ public final class UrlValidationUtils {
      * Validates URL safety using a custom host resolver. Returns the resolved
      * addresses for callers that wish to implement socket-level IP pinning.
      * <p>
-     * <b>Note:</b> The default {@link SafeHttpClient} code path does NOT pin the
+     * <b>Note:</b> The default {@code OutboundHttp} code path does NOT pin the
      * resolved addresses — the JDK {@code HttpClient} re-resolves DNS
      * independently. This means a short-TTL DNS rebinding attack is theoretically
      * possible between validation and connect. The risk is accepted because
@@ -145,7 +145,7 @@ public final class UrlValidationUtils {
      * Checks whether the hostname is a known internal/local hostname that should be
      * blocked.
      */
-    static boolean isBlockedHostname(String host) {
+    public static boolean isBlockedHostname(String host) {
         return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1") || host.endsWith(".local")
                 || host.endsWith(".internal") || host.equals("metadata.google.internal") || host.equals("169.254.169.254"); // Cloud metadata endpoint
     }

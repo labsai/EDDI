@@ -62,7 +62,7 @@ fixed `https://` endpoint and a fixed default model.
 - **Docs and Operator.** A "Self-hosted OpenAI-compatible servers" section with a migration
   note in [`docs/langchain.md`](../langchain.md), the provider matrix row, and notes in
   [`docs/metrics.md`](../metrics.md) and [`docs/model-cascade.md`](../model-cascade.md). The
-  Platform Operator prompt describes the type; `operator-revision.json` is bumped to 18.
+  Platform Operator prompt describes the type; `operator-revision.json` is bumped to 19.
 
 ### Design decisions
 

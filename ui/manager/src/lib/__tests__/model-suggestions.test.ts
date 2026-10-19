@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MODEL_SUGGESTIONS,
   acceptsOptionalApiKey,
+  groupModelSuggestions,
   acceptsOptionalToken,
   isBaseUrlRequired,
   isProvisionableBySetup,
@@ -168,5 +169,41 @@ describe("setup-provisionable providers", () => {
     expect(acceptsOptionalToken("jlama")).toBe(true);
     expect(acceptsOptionalToken("ollama")).toBe(false);
     expect(acceptsOptionalToken("anthropic")).toBe(false);
+  });
+});
+
+describe("groupModelSuggestions", () => {
+  const models = ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.5", "o3-mini"];
+
+  it("returns one section with everything for a blank query", () => {
+    expect(groupModelSuggestions(models, "  ")).toEqual([{ kind: "all", models }]);
+  });
+
+  it("splits matches from the rest without dropping anything", () => {
+    expect(groupModelSuggestions(models, "gpt 6")).toEqual([
+      { kind: "matching", models: ["gpt-6.1-sol", "gpt-6-luna"] },
+      { kind: "others", models: ["gpt-5.5", "o3-mini"] },
+    ]);
+  });
+
+  it("ignores separators and case", () => {
+    expect(groupModelSuggestions(models, "GPT-61")[0]).toEqual({ kind: "matching", models: ["gpt-6.1-sol"] });
+  });
+
+  it("returns only `others` when nothing matches, and only `matching` when all do", () => {
+    expect(groupModelSuggestions(models, "claude")).toEqual([{ kind: "others", models }]);
+    expect(groupModelSuggestions(["a-1", "a-2"], "a")).toEqual([{ kind: "matching", models: ["a-1", "a-2"] }]);
+  });
+
+  it("drops duplicate ids", () => {
+    expect(groupModelSuggestions(["x", "x", "y"], "")).toEqual([{ kind: "all", models: ["x", "y"] }]);
+  });
+});
+
+describe("catalog hygiene", () => {
+  it("lists no provider's model twice", () => {
+    for (const [provider, list] of Object.entries(MODEL_SUGGESTIONS)) {
+      expect(new Set(list).size, `${provider} has a duplicate suggestion`).toBe(list.length);
+    }
   });
 });

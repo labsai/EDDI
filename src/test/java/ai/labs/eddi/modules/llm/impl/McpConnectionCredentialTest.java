@@ -143,7 +143,8 @@ class McpConnectionCredentialTest {
     private McpToolProviderManager manager() {
         var callerContext = new CallerIdentityContext(null, null);
         return new McpToolProviderManager(globalVariableResolver, secretResolver, new CallerIdentityResolver(callerContext, true), callerContext,
-                false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS,
+                false, McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                McpToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS,
                 connectionResolver);
     }
 

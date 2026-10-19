@@ -159,7 +159,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             if (callable instanceof ILeaseAwareTask aware) {
                 aware.bindLease(lease);
             }
-            runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
+            runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
                 @Override
                 public void onComplete(Void result) {
                     leases.release(lease);

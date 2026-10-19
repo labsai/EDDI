@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.runtime.LogRecordRedactor;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
 import dev.langchain4j.model.chat.ChatModel;
@@ -131,10 +132,14 @@ public class ObservableChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
-        if (logRequests) {
+        if (logRequests && LOGGER.isDebugEnabled()) {
+            // DEBUG, and redacted: the last message is user input, which carries
+            // whatever the user typed — a credential included (L12 of the 2026-10-15
+            // security review). At INFO it reached every production log unasked.
             var messages = chatRequest.messages();
             var lastMsg = messages.isEmpty() ? "<empty>" : messages.getLast().toString();
-            LOGGER.infof("[%s] Chat request: %d messages, last: \"%s\"", modelType, messages.size(), truncate(lastMsg, 200));
+            LOGGER.debugf("[%s] Chat request: %d messages, last: \"%s\"", modelType, messages.size(),
+                    truncate(LogRecordRedactor.rewrite(lastMsg), 200));
         }
 
         long startMs = System.currentTimeMillis();
@@ -150,7 +155,7 @@ public class ObservableChatModel implements ChatModel {
 
         if (logResponses) {
             var text = response.aiMessage() != null ? response.aiMessage().text() : "<null>";
-            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(text, 500));
+            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(LogRecordRedactor.rewrite(text), 500));
         }
 
         return response;
@@ -229,6 +234,11 @@ public class ObservableChatModel implements ChatModel {
         }
     }
 
+    /**
+     * Redaction runs on the whole text first, truncation after: a credential that
+     * straddles the cutoff would otherwise leave its first characters in the log,
+     * because the filter only recognises a key it can see whole.
+     */
     private static String truncate(String text, int maxLen) {
         if (text == null)
             return "<null>";

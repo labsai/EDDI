@@ -224,6 +224,19 @@ better than pretending otherwise at runtime.
 **must** be `${vault:…}` or `${vars:…}`. A literal is refused with a 400 that
 names `PUT /secretstore/secrets/{tenantId}/{keyName}`, the call that stores it in the vault.
 
+**A `${vars:…}` here may only point at the vault.** The global variable store is
+readable by every editor (`GET /variablestore/variables`), so a variable holding
+the client secret itself would be the plaintext field in a different document.
+For `clientSecret` and `passwordRef` the variable must expand to exactly one
+`${vault:…}` reference; in a `valueTemplate` it must expand to a vault reference
+or to scaffolding that passes the literal-text rules below (`Bearer `, never a
+key). This is checked twice: at save, where a variable that exists and holds
+anything else is a 400 naming the field (a variable that does not exist yet is
+let through, since the connection may be saved first), and at every use, where
+`CredentialReferenceResolver` refuses the connection with `INVALID_CONFIGURATION`
+instead of sending the variable's value as the credential — so changing the
+variable afterwards cannot reopen the hole. Neither message quotes the value.
+
 This is not stylistic. A plaintext key in a connection document would sit outside
 the vault, outside export scrubbing, and outside `VaultGrantChecker`'s
 `${vault:}` scan — one field defeating three controls. `extraAuthParams` is
@@ -545,7 +558,7 @@ That is fail-closed on purpose: an unconfigured allowlist is far more likely tha
 an operator who meant "anywhere".
 
 **A listed origin may be on a private network.** The token request still goes
-through `SafeHttpClient`, but the SSRF address check — which refuses loopback,
+through `OutboundHttp`, but the SSRF address check — which refuses loopback,
 RFC 1918, link-local and cloud-metadata addresses — is not applied to the token
 endpoint. The allowlist is a stricter rule than that check: an exact origin an
 operator wrote down, not "anything public", and the operator who listed
@@ -967,11 +980,9 @@ treated as an administrator, exactly as `@RolesAllowed` is.
   whose credentials the approved call may spend; reading the request identity there
   ran approved calls against the approver's SaaS account, and the approval did not
   mean what the approver was shown.
-* **The token client goes through `SafeHttpClient`, and follows no redirect.**
-  This is the one new outbound path, so it starts compliant — and it uses the
-  client's no-redirect send deliberately. The ordinary `sendValidated` follows
-  redirects itself on top of `Redirect.NEVER`, preserving method and body on a
-  307/308, and checks the target only against the SSRF rules, never against the
+* **The token client goes through `OutboundHttp`, and follows no redirect.**
+  It sends with `RedirectPolicy.NEVER` deliberately. Ordinary redirect following
+  preserves method and body on a 307/308, and checks the target only against the SSRF rules, never against the
   credential-endpoint allowlist. A token request carries the client secret in an
   `Authorization` header or the form body, and always a refresh token or a code
   plus verifier in the body, so a followed redirect would hand all of that to

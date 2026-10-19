@@ -41,6 +41,8 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "nonce-replay-protection", "NONCES",
             "a2aTaskMapping", "A2A_TASKS",
             "a2aTaskMapping:context", "A2A_CONTEXTS",
+            "a2aTaskMapping:erasing", "A2A_ERASING",
+            "a2aTaskMapping:index", "A2A_INDEX",
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
             "channel-thread-locks", "CHANNEL");
@@ -96,6 +98,11 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     }
 
     private Duration defaultSharedTtl(String name) {
+        if ("a2aTaskMapping:erasing".equals(name)) {
+            // The GDPR erasure marker: shared so every node refuses the principal's
+            // A2A writes while the cascade runs, and short-lived by design.
+            return Duration.ofMinutes(5);
+        }
         if (name.startsWith("a2aTaskMapping")) {
             return clusterConfig.a2aTaskTtl();
         }

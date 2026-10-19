@@ -12,6 +12,7 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Base64;
 
 /**
@@ -60,6 +61,18 @@ public class VaultSaltManager {
      * same KEK and finishes the job.
      */
     static final String PENDING_SALT_META_KEY = "vault-kek-salt-pending";
+
+    /**
+     * Written the first time a boot adopts the legacy fixed salt, holding when that
+     * was. Its presence on a later boot is what turns the warning into an error:
+     * one boot on the shared salt is an upgrade in progress, a second is a rotation
+     * nobody ran (L12 of the 2026-10-15 security review). Removed once a
+     * per-deployment salt is persisted.
+     */
+    static final String LEGACY_SALT_SEEN_META_KEY = "vault-kek-legacy-salt-seen";
+
+    /** The KEK rotation that leaves the legacy salt behind. */
+    static final String ROTATION_COMMAND = "POST /secretstore/secrets/admin/rotate-kek";
 
     /** Salt length in bytes — 16 bytes (128 bits) is the NIST recommendation. */
     private static final int SALT_LENGTH = 16;
@@ -132,9 +145,20 @@ public class VaultSaltManager {
                 // or we'd fail to decrypt existing DEKs.
                 this.activeSalt = LEGACY_SALT.clone();
                 this.usingLegacySalt = true;
-                LOGGER.warn("[VAULT] ⚠️  Existing DEKs found but no per-deployment salt. "
-                        + "Using legacy fixed salt for backward compatibility. "
-                        + "Run the KEK migration to generate a per-deployment salt.");
+                String firstSeen = persistence.getMetaValue(LEGACY_SALT_SEEN_META_KEY);
+                if (firstSeen == null) {
+                    LOGGER.warn("[VAULT] ⚠️  Existing DEKs found but no per-deployment salt. "
+                            + "Using the legacy fixed salt for backward compatibility — every deployment on this version shares it, "
+                            + "so the KEK is derived from the master key alone. Run " + ROTATION_COMMAND
+                            + " to migrate to a per-deployment salt before the next restart.");
+                    persistence.setMetaValueIfAbsent(LEGACY_SALT_SEEN_META_KEY, Instant.now().toString());
+                } else {
+                    LOGGER.error("[VAULT] ❌ Still on the legacy fixed KEK salt, first adopted at " + firstSeen
+                            + ", and no per-deployment salt has been generated since. Every deployment on this version shares that "
+                            + "salt, so the vault's master key is the only secret protecting the stored DEKs. Run " + ROTATION_COMMAND
+                            + " with the current master key as both the old and the new key to migrate to a per-deployment salt; "
+                            + "this message is repeated on every start until then.");
+                }
                 if (persistence.getMetaValue(PENDING_SALT_META_KEY) != null) {
                     LOGGER.warn("[VAULT] A KEK rotation that was migrating to a per-deployment salt did not finish. Some DEKs may already be "
                             + "wrapped under the new master key. Re-run POST /secretstore/secrets/admin/rotate-kek with the same old and new "
@@ -181,6 +205,11 @@ public class VaultSaltManager {
             if (persistence.getMetaValue(PENDING_SALT_META_KEY) != null) {
                 LOGGER.warn("[VAULT] A pending-salt marker was left behind by a completed salt migration; removing it.");
                 persistence.deleteMetaValue(PENDING_SALT_META_KEY);
+            }
+            if (persistence.getMetaValue(LEGACY_SALT_SEEN_META_KEY) != null) {
+                // The per-deployment salt is in place: the legacy-salt boot record has
+                // served its purpose.
+                persistence.deleteMetaValue(LEGACY_SALT_SEEN_META_KEY);
             }
         } catch (PersistenceException e) {
             LOGGER.warn("[VAULT] Could not remove a stale pending-salt marker: " + e.getMessage());
@@ -292,6 +321,7 @@ public class VaultSaltManager {
                     + "Another rotation finished first; restart every replica and verify the vault before rotating again.");
         }
         persistence.deleteMetaValue(PENDING_SALT_META_KEY);
+        persistence.deleteMetaValue(LEGACY_SALT_SEEN_META_KEY);
         this.activeSalt = newSalt.clone();
         this.usingLegacySalt = false;
         LOGGER.info("[VAULT] Salt migration complete — per-deployment random salt activated (" + newSalt.length + " bytes).");

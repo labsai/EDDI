@@ -973,18 +973,21 @@ Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent
 | Layer | Component | What It Blocks |
 |-------|-----------|----------------|
 | **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
-| **Layer 2: Redirect Validation** | `SafeHttpClient.sendWithRedirects()` | Each redirect hop is validated against Layer 1 rules. `HttpClient.Redirect.NEVER` prevents the JDK from following redirects silently. Maximum 5 hops |
+| **Layer 2: Redirect Validation** | `OutboundHttp` (`engine/httpclient/outbound`) | Redirects are never followed by the HTTP engine; the facade follows them hop by hop, validates each hop against Layer 1 rules, and strips credentials (fixed names and any `${caller:...}`-derived header) on a cross-origin hop. Maximum 5 hops |
 | **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
 
 **Usage pattern:**
 ```java
-@Inject SafeHttpClient httpClient;
+@Inject OutboundHttp http;
 
-// For user-controlled URLs (LLM tools, web scraping):
-httpClient.sendValidated(request, bodyHandler);  // validates initial + redirect targets
+// For user-controlled URLs (LLM tools, web scraping): SsrfPolicy.STRICT, the
+// DEFAULT profile's default, validates the initial URL and every redirect hop.
+http.send(OutboundRequest.get(Profile.DEFAULT, uri).build(),
+        BodyMode.string(1_000_000, BodyMode.OnOverflow.TRUNCATE));
 
-// For config-controlled URLs (known APIs):
-httpClient.send(request, bodyHandler);            // validates redirect targets only
+// For config-controlled URLs (known APIs): the initial URL is trusted,
+// redirect hops are still validated.
+http.send(OutboundRequest.get(Profile.DEFAULT, uri).ssrf(SsrfPolicy.HOPS_ONLY).build(), mode);
 ```
 
 **DNS Rebinding:** EDDI validates hostnames at request time. A TOCTOU (time-of-check-time-of-use) gap exists between DNS validation and TCP connect. This is an accepted risk — exploitation requires a cooperating DNS server AND a successful race condition AND bypassing Layer 2 redirect validation. Defense-in-depth makes this impractical in practice.

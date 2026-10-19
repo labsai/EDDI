@@ -158,7 +158,7 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
               </div>
 
               {/* Window + Recall + Tokens */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.recentWindow", "Recent Window (steps)")}

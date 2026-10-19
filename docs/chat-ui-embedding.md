@@ -78,7 +78,8 @@ Send an access token issued for EDDI. That means its audience and roles must sat
 
 ### Other ways to pass a token
 
-- `?token=` in the iframe URL still works and is stripped from the address bar on load, but a crafted link can sign the widget in as somebody else (login CSRF), and the token passes through the host page's markup. Prefer the hand-off above.
+- `?token=` in the iframe URL is **off by default**. A crafted link could sign the widget in as somebody else (login CSRF), the token passes through the host page's markup, and the first request writes it into the server's access log before the widget strips it from the address bar. The widget ignores the parameter and logs a console warning naming the switch, `eddi.chat.url-token.enabled` (`EDDI_CHAT_URL_TOKEN_ENABLED=true`), which an operator sets on the EDDI server for an embedding that cannot use the hand-off. Enabled, the widget reads the token once and strips it from the address bar on load. Either way, prefer the hand-off above.
+- A `tokenOrigin` over plain `http` is accepted, since local development runs on one, but the widget warns in the console about any that is not `localhost`: the token the host page posts is only as private as that page's own transport.
 - A page that bundles the widget itself can set `ChatConfig.authToken`.
 
 ## 3. Images in agent output

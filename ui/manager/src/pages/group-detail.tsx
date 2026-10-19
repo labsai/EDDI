@@ -25,6 +25,7 @@ import {
   whenStreamAccepted,
 } from "@/hooks/use-group-discussion-stream";
 import { useCancelGroupDiscussion, useSubmitHumanInput } from "@/hooks/use-hitl";
+import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionPanel } from "@/components/groups/overview/discussion-panel";
 import { DiscussionInsights } from "@/components/groups/discussion-insights";
@@ -213,6 +214,9 @@ export function GroupDetailPage() {
   // An inline config editor is open in the panel (reported by the panel). Hiding
   // the panel, going fullscreen or closing the sheet unmounts it and its draft.
   const [configEditing, setConfigEditing] = useState(false);
+  // Leaving the page (a link, back, a tab close) unmounts the draft just the
+  // same as hiding the panel does.
+  useUnsavedChangesGuard(configEditing);
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
   const guardConfigDiscard = useCallback(
     (action: () => void) => {
@@ -864,7 +868,7 @@ export function GroupDetailPage() {
                     e.stopPropagation();
                     setDeleteTarget(conv.id);
                   }}
-                  className="ms-auto opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
+                  className="reveal-on-touch ms-auto opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
                   title={t("common.delete", "Delete")}
                   aria-label={t("common.delete", "Delete")}
                   data-testid={`delete-discussion-${conv.id}`}
@@ -882,7 +886,7 @@ export function GroupDetailPage() {
                       e.stopPropagation();
                       setCancelTarget(conv.id);
                     }}
-                    className="opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
+                    className="reveal-on-touch opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
                     title={t("hitl.cancelDiscussion", "Cancel discussion")}
                     aria-label={t("hitl.cancelDiscussion", "Cancel discussion")}
                     disabled={cancelDiscussionMutation.isPending}

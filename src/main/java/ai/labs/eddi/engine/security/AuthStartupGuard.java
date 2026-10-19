@@ -67,6 +67,13 @@ public class AuthStartupGuard {
     @ConfigProperty(name = "eddi.workspaces.groups-claim", defaultValue = "groups")
     String workspacesGroupsClaim;
 
+    /**
+     * Outbound SSRF protection for httpcalls, MCP and A2A targets. Off by default;
+     * production gets a startup WARN when it is — see {@link #ssrfDiagnostic()}.
+     */
+    @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false")
+    boolean ssrfProtectionEnabled;
+
     private volatile boolean warnMode = false;
 
     /**
@@ -98,6 +105,8 @@ public class AuthStartupGuard {
         }
 
         // Production mode (LaunchMode.NORMAL)
+        ssrfDiagnostic().ifPresent(LOGGER::warn);
+
         if (!oidcEnabled) {
             if (!allowUnauthenticated) {
                 throw new IllegalStateException(
@@ -179,6 +188,30 @@ public class AuthStartupGuard {
                     + "(QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH=realm_access/roles for Keycloak).");
         }
         return Optional.empty();
+    }
+
+    /**
+     * The production warning for
+     * {@code eddi.security.ssrf-protection.enabled=false}.
+     * <p>
+     * The default stays off because configured targets legitimately reach internal
+     * hosts (the rule-based reference agent calls {@code http://localhost:7070}),
+     * but with it off loopback and private addresses are reachable from every
+     * httpcall, and EDDI's own admin API listens on loopback. An operator should
+     * choose that, not inherit it. Templated hosts are refused while it is off
+     * ({@code ApiCallExecutor#rejectTemplatedAuthority}), so the remaining exposure
+     * is what agent editors write — which is why this warns rather than refuses.
+     *
+     * @return the WARN text, or {@link Optional#empty()} when protection is on
+     */
+    Optional<String> ssrfDiagnostic() {
+        if (ssrfProtectionEnabled) {
+            return Optional.empty();
+        }
+        return Optional.of("[SECURITY] eddi.security.ssrf-protection.enabled is false. Outbound httpcalls, MCP and A2A targets may "
+                + "reach loopback and private addresses, including EDDI's own admin API, so anyone who can edit an agent can "
+                + "reach internal services from this host. Set EDDI_SECURITY_SSRF_PROTECTION_ENABLED=true and list the internal hosts "
+                + "your httpcalls need in EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS (host or host:port, comma-separated).");
     }
 
     /**

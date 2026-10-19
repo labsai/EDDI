@@ -19,7 +19,7 @@ import { useHasRole } from "@/hooks/use-auth";
 import { groupAgentsByName } from "@/hooks/use-agents";
 import { getAgentDescriptors } from "@/lib/api/agents";
 import { agentKeys } from "@/lib/query-keys";
-import { SecretsError, SECRET_EXISTS, grantsAllAgents } from "@/lib/api/secrets";
+import { SecretsError, SECRET_EXISTS, grantsAllAgents, ALL_AGENTS } from "@/lib/api/secrets";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
@@ -168,10 +168,13 @@ function toVaultRef(keyName: string): string {
 function CreateSecretModal({
   onClose,
   tenantId,
+  agentId,
   onSuccess,
 }: {
   onClose: () => void;
   tenantId: string;
+  /** The agent the new secret is granted to; absent, it is granted to every agent. */
+  agentId?: string;
   onSuccess: (keyName: string) => void;
 }) {
   const { t } = useTranslation();
@@ -208,10 +211,14 @@ function CreateSecretModal({
         // Sent as typed: trimming changed the credential being stored.
         value: newValue,
         description: newDescription.trim() || undefined,
+        // Granted to the agent this picker edits when it is known, otherwise to
+        // every agent — said explicitly, because under grant-enforcement=enforce
+        // the backend refuses a create that leaves the grant to a default.
+        allowedAgents: agentId ? [agentId] : [ALL_AGENTS],
         // This dialog makes a NEW secret for the field it was opened from. The
-        // store endpoint is an upsert, and this dialog sends no grant, so typing
-        // an existing name here used to replace that secret's value — and, on a
-        // backend before the vault-key-safety fix, open it to every agent.
+        // store endpoint is an upsert, so typing an existing name here used to
+        // replace that secret's value — and, on a backend before the
+        // vault-key-safety fix, open it to every agent.
         createOnly: true,
       },
       {
@@ -239,14 +246,20 @@ function CreateSecretModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={handleClose}
       onKeyDown={(e) => {
-        if (e.key === "Escape") handleClose();
+        // preventDefault marks it handled: this modal is portalled, but React
+        // still bubbles the key to the dialog that hosts the picker, which
+        // must not close as well.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleClose();
+        }
       }}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -256,7 +269,9 @@ function CreateSecretModal({
             {t("secrets.createTitle", "Add Secret")}
           </h2>
           <button
+            type="button"
             onClick={handleClose}
+            aria-label={t("common.close", "Close")}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted transition-colors"
           >
             <X className="h-4 w-4" />
@@ -1291,6 +1306,7 @@ export function SecretKeyPicker({
       {/* Create secret modal */}
       {showCreateDialog && (
         <CreateSecretModal
+          agentId={agentId}
           onClose={() => {
             setShowCreateDialog(false);
             // "Create new secret" is the fourth way out of the popup, and it

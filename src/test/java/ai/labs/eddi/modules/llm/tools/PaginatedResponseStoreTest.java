@@ -25,6 +25,7 @@ import static org.mockito.MockitoAnnotations.openMocks;
 class PaginatedResponseStoreTest {
 
     private PaginatedResponseStore store;
+    private static final String CONV = "68f1c0ffee0000000000c0de";
 
     @Mock
     private ICacheFactory cacheFactory;
@@ -58,28 +59,68 @@ class PaginatedResponseStoreTest {
         @DisplayName("Should split response into correct number of pages")
         void testStoreCreatesPages() {
             String response = "A".repeat(300);
-            String responseId = store.store("testTool", response, 100);
+            String responseId = store.store(CONV, "testTool", response, 100);
 
             assertNotNull(responseId);
-            verify(cache).put(eq(responseId), any(), eq(900L), eq(TimeUnit.SECONDS));
+            verify(cache).put(eq(CONV + "/" + responseId), any(), eq(900L), eq(TimeUnit.SECONDS));
         }
 
         @Test
         @DisplayName("Should return null for null response")
         void testStoreNullResponse() {
-            assertNull(store.store("testTool", null, 100));
+            assertNull(store.store(CONV, "testTool", null, 100));
         }
 
         @Test
         @DisplayName("Should return null for empty response")
         void testStoreEmptyResponse() {
-            assertNull(store.store("testTool", "", 100));
+            assertNull(store.store(CONV, "testTool", "", 100));
         }
 
         @Test
         @DisplayName("Should return null for zero page size")
         void testStoreZeroPageSize() {
-            assertNull(store.store("testTool", "content", 0));
+            assertNull(store.store(CONV, "testTool", "content", 0));
+        }
+
+        @Test
+        @DisplayName("L13: without a conversation nothing is stored — pages that cannot be scoped are not kept")
+        void testStoreNeedsAConversation() {
+            assertNull(store.store(null, "testTool", "content", 100));
+            assertNull(store.store(" ", "testTool", "content", 100));
+            verify(cache, never()).put(any(), any(), anyLong(), any());
+        }
+    }
+
+    /**
+     * Security review 2026-10-15, L13: the store is one process-wide cache, and a
+     * responseId used to be enough to read any conversation's pages.
+     */
+    @Nested
+    @DisplayName("Conversation scoping")
+    class ScopingTests {
+
+        @Test
+        @DisplayName("another conversation cannot read the pages, by responseId or by count")
+        void otherConversationIsNotFound() {
+            var realStore = createStoreWithRealCache();
+            String responseId = realStore.store(CONV, "testTool", "A".repeat(250), 100);
+
+            assertNotNull(realStore.getPage(CONV, responseId, 1), "the owning conversation reads its page");
+            assertNull(realStore.getPage("ffffffffffffffffffffffff", responseId, 1), "a different conversation gets nothing");
+            assertEquals(0, realStore.getPageCount("ffffffffffffffffffffffff", responseId));
+            assertNull(realStore.getPage(null, responseId, 1));
+            assertNull(realStore.getPage(CONV, null, 1));
+        }
+
+        @Test
+        @DisplayName("the key cannot be forged by a responseId that carries another conversation's prefix")
+        void keyIsNotForgeable() {
+            var realStore = createStoreWithRealCache();
+            String responseId = realStore.store(CONV, "testTool", "A".repeat(250), 100);
+
+            assertNull(realStore.getPage("x", CONV + "/" + responseId, 1));
+            assertEquals(CONV + "/" + responseId, PaginatedResponseStore.key(CONV, responseId));
         }
     }
 
@@ -90,8 +131,8 @@ class PaginatedResponseStoreTest {
         @Test
         @DisplayName("Should return null for unknown responseId")
         void testGetPageUnknownId() {
-            when(cache.get("unknown")).thenReturn(null);
-            assertNull(store.getPage("unknown", 1));
+            when(cache.get(CONV + "/unknown")).thenReturn(null);
+            assertNull(store.getPage(CONV, "unknown", 1));
         }
 
         @Test
@@ -100,9 +141,9 @@ class PaginatedResponseStoreTest {
             // Create a real store and retrieve
             var realStore = createStoreWithRealCache();
             String response = "Hello World!";
-            String responseId = realStore.store("testTool", response, 5);
+            String responseId = realStore.store(CONV, "testTool", response, 5);
 
-            PaginatedResponseStore.PageResult result = realStore.getPage(responseId, 999);
+            PaginatedResponseStore.PageResult result = realStore.getPage(CONV, responseId, 999);
             assertNotNull(result);
             assertFalse(result.isSuccess());
             assertNotNull(result.error());
@@ -113,22 +154,22 @@ class PaginatedResponseStoreTest {
         void testGetPageCorrectContent() {
             var realStore = createStoreWithRealCache();
             String response = "ABCDEFGHIJ"; // 10 chars
-            String responseId = realStore.store("testTool", response, 4);
+            String responseId = realStore.store(CONV, "testTool", response, 4);
 
             // Page 1: "ABCD"
-            PaginatedResponseStore.PageResult page1 = realStore.getPage(responseId, 1);
+            PaginatedResponseStore.PageResult page1 = realStore.getPage(CONV, responseId, 1);
             assertNotNull(page1);
             assertTrue(page1.isSuccess());
             assertEquals("ABCD", page1.content());
             assertEquals(3, page1.totalPages());
 
             // Page 2: "EFGH"
-            PaginatedResponseStore.PageResult page2 = realStore.getPage(responseId, 2);
+            PaginatedResponseStore.PageResult page2 = realStore.getPage(CONV, responseId, 2);
             assertTrue(page2.isSuccess());
             assertEquals("EFGH", page2.content());
 
             // Page 3: "IJ"
-            PaginatedResponseStore.PageResult page3 = realStore.getPage(responseId, 3);
+            PaginatedResponseStore.PageResult page3 = realStore.getPage(CONV, responseId, 3);
             assertTrue(page3.isSuccess());
             assertEquals("IJ", page3.content());
         }
@@ -138,9 +179,9 @@ class PaginatedResponseStoreTest {
         void testGetPageTotalChars() {
             var realStore = createStoreWithRealCache();
             String response = "A".repeat(250);
-            String responseId = realStore.store("testTool", response, 100);
+            String responseId = realStore.store(CONV, "testTool", response, 100);
 
-            PaginatedResponseStore.PageResult page = realStore.getPage(responseId, 1);
+            PaginatedResponseStore.PageResult page = realStore.getPage(CONV, responseId, 1);
             assertTrue(page.isSuccess());
             assertEquals(250, page.totalCharacters());
             assertEquals("testTool", page.toolName());
@@ -154,16 +195,16 @@ class PaginatedResponseStoreTest {
         @Test
         @DisplayName("Should return 0 for unknown responseId")
         void testPageCountUnknown() {
-            when(cache.get("unknown")).thenReturn(null);
-            assertEquals(0, store.getPageCount("unknown"));
+            when(cache.get(CONV + "/unknown")).thenReturn(null);
+            assertEquals(0, store.getPageCount(CONV, "unknown"));
         }
 
         @Test
         @DisplayName("Should return correct count for stored response")
         void testPageCountCorrect() {
             var realStore = createStoreWithRealCache();
-            String responseId = realStore.store("testTool", "A".repeat(250), 100);
-            assertEquals(3, realStore.getPageCount(responseId));
+            String responseId = realStore.store(CONV, "testTool", "A".repeat(250), 100);
+            assertEquals(3, realStore.getPageCount(CONV, responseId));
         }
     }
 
@@ -181,12 +222,12 @@ class PaginatedResponseStoreTest {
         void pagesExpireAfterTtl() {
             var ticker = new FakeTicker();
             var realStore = createStoreWithRealCache(ticker);
-            String responseId = realStore.store("testTool", "A".repeat(250), 100);
+            String responseId = realStore.store(CONV, "testTool", "A".repeat(250), 100);
 
             ticker.advanceSeconds(901);
 
-            assertNull(realStore.getPage(responseId, 1), "a 15-minute-old responseId must no longer resolve");
-            assertEquals(0, realStore.getPageCount(responseId));
+            assertNull(realStore.getPage(CONV, responseId, 1), "a 15-minute-old responseId must no longer resolve");
+            assertEquals(0, realStore.getPageCount(CONV, responseId));
         }
 
         @Test
@@ -194,11 +235,11 @@ class PaginatedResponseStoreTest {
         void pagesSurviveUntilTtl() {
             var ticker = new FakeTicker();
             var realStore = createStoreWithRealCache(ticker);
-            String responseId = realStore.store("testTool", "A".repeat(250), 100);
+            String responseId = realStore.store(CONV, "testTool", "A".repeat(250), 100);
 
             ticker.advanceSeconds(899);
 
-            PaginatedResponseStore.PageResult page = realStore.getPage(responseId, 2);
+            PaginatedResponseStore.PageResult page = realStore.getPage(CONV, responseId, 2);
             assertNotNull(page);
             assertTrue(page.isSuccess());
         }
@@ -209,14 +250,14 @@ class PaginatedResponseStoreTest {
             var ticker = new FakeTicker();
             var realStore = createStoreWithRealCache(ticker);
 
-            String first = realStore.store("testTool", "A".repeat(250), 100);
+            String first = realStore.store(CONV, "testTool", "A".repeat(250), 100);
             ticker.advanceSeconds(600);
-            String second = realStore.store("testTool", "B".repeat(250), 100);
+            String second = realStore.store(CONV, "testTool", "B".repeat(250), 100);
 
             ticker.advanceSeconds(301); // 901s for the first, 301s for the second
 
-            assertNull(realStore.getPage(first, 1));
-            assertNotNull(realStore.getPage(second, 1));
+            assertNull(realStore.getPage(CONV, first, 1));
+            assertNotNull(realStore.getPage(CONV, second, 1));
         }
     }
 

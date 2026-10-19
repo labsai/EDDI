@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -225,7 +226,7 @@ class RemoteApiResourceSourceTest {
 
             // Create with trailing slash
             try (var source = new RemoteApiResourceSource(
-                    BASE_URL + "/", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient)) {
+                    BASE_URL + "/", AGENT_ID, 1, "Bearer token", jsonSerialization, JdkClientEngine.facade(mockHttpClient))) {
                 assertDoesNotThrow(source::readAgent);
             }
         }
@@ -253,7 +254,7 @@ class RemoteApiResourceSourceTest {
 
     private RemoteApiResourceSource createSource(String agentId, Integer version) {
         return new RemoteApiResourceSource(
-                BASE_URL, agentId, version, "Bearer test-token", jsonSerialization, mockHttpClient);
+                BASE_URL, agentId, version, "Bearer test-token", jsonSerialization, JdkClientEngine.facade(mockHttpClient));
     }
 
     private void setupAgentMock() throws Exception {
@@ -309,21 +310,21 @@ class RemoteApiResourceSourceTest {
             // normalizeBaseUrl(null) should return "" — constructor will succeed but calls
             // will fail
             assertDoesNotThrow(() -> new RemoteApiResourceSource(
-                    null, AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+                    null, AGENT_ID, 1, "Bearer token", jsonSerialization, JdkClientEngine.facade(mockHttpClient)));
         }
 
         @Test
         @DisplayName("should throw for non-http scheme")
         void nonHttpScheme() {
             assertThrows(IllegalArgumentException.class, () -> new RemoteApiResourceSource(
-                    "ftp://example.com", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+                    "ftp://example.com", AGENT_ID, 1, "Bearer token", jsonSerialization, JdkClientEngine.facade(mockHttpClient)));
         }
 
         @Test
         @DisplayName("should throw for URL with blank host")
         void blankHost() {
             assertThrows(IllegalArgumentException.class, () -> new RemoteApiResourceSource(
-                    "http:///path", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+                    "http:///path", AGENT_ID, 1, "Bearer token", jsonSerialization, JdkClientEngine.facade(mockHttpClient)));
         }
     }
 
@@ -356,7 +357,7 @@ class RemoteApiResourceSourceTest {
                     .thenReturn(agentConfig);
 
             try (var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient)) {
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, JdkClientEngine.facade(mockHttpClient))) {
                 AgentSourceData result = source.readAgent();
 
                 assertNotNull(result);
@@ -373,7 +374,7 @@ class RemoteApiResourceSourceTest {
                     .thenReturn(new DocumentDescriptor[0]);
 
             try (var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient)) {
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, JdkClientEngine.facade(mockHttpClient))) {
 
                 // "null version = latest" is the documented contract. Falling back to
                 // version 1 met it by reading an arbitrarily old configuration and
@@ -462,7 +463,7 @@ class RemoteApiResourceSourceTest {
                     .thenReturn(new DocumentDescriptor[0]);
 
             try (var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, 1, null, jsonSerialization, mockHttpClient)) {
+                    BASE_URL, AGENT_ID, 1, null, jsonSerialization, JdkClientEngine.facade(mockHttpClient))) {
                 assertDoesNotThrow(source::readAgent);
             }
         }
@@ -487,7 +488,7 @@ class RemoteApiResourceSourceTest {
                     .thenReturn(new DocumentDescriptor[0]);
 
             try (var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, 1, "   ", jsonSerialization, mockHttpClient)) {
+                    BASE_URL, AGENT_ID, 1, "   ", jsonSerialization, JdkClientEngine.facade(mockHttpClient))) {
                 assertDoesNotThrow(source::readAgent);
             }
         }

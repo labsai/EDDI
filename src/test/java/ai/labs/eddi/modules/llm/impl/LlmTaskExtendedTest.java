@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
@@ -92,7 +93,7 @@ class LlmTaskExtendedTest {
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.getTemplateData()).thenReturn(Map.of());
 
-        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null);
+        var chatModelRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
 
         promptSnippetService = mock(PromptSnippetService.class);
         when(promptSnippetService.getForAgent(any())).thenReturn(Collections.emptyMap());

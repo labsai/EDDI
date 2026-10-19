@@ -100,6 +100,13 @@ public class IngestionPipeline {
      */
     private static final Duration OWNERSHIP_CHECK_INTERVAL = Duration.ofSeconds(5);
 
+    /**
+     * How often a run writes its counters while it works. Throttled on purpose: one
+     * small update per source every couple of seconds is noise to the database, one
+     * per document is not. Not final only so a test can make every document report.
+     */
+    Duration progressReportInterval = Duration.ofSeconds(2);
+
     public static final String METADATA_DOCUMENT_ID = "documentId";
     public static final String METADATA_URL = "url";
     public static final String METADATA_TITLE = "title";
@@ -207,6 +214,16 @@ public class IngestionPipeline {
      */
     public IngestionReport run(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, Mode mode,
                                String reservedRunId) {
+        return run(ragConfigId, knowledgeBase, source, mode, reservedRunId, null);
+    }
+
+    /**
+     * @param trigger
+     *            what started the run, recorded on its history row; null when the
+     *            caller does not say
+     */
+    public IngestionReport run(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, Mode mode,
+                               String reservedRunId, IngestionRun.Trigger trigger) {
 
         String sourceKey = stateKey(ragConfigId, source);
         IngestionReport early;
@@ -255,7 +272,11 @@ public class IngestionPipeline {
         }
 
         Instant startedAt = Instant.now();
-        Collector collector = new Collector(knowledgeBase, ragConfigId, knowledgeBaseId, source, sourceKey, runId, mode);
+        Collector collector = new Collector(knowledgeBase, ragConfigId, knowledgeBaseId, source, sourceKey, runId, mode,
+                trigger);
+        // Written once at the start so the trigger is on the row before the first
+        // document, not only after the first progress interval.
+        collector.reportProgress(true);
 
         // Everything after the run is claimed is guarded, and by Throwable rather
         // than Exception. A claimed run that is never finished blocks its source for
@@ -286,13 +307,13 @@ public class IngestionPipeline {
             }
 
             IngestionReport report = collector.toReport(summary, null, startedAt);
-            finish(mode, runId, sourceKey, report, statusFor(collector));
+            finish(mode, runId, sourceKey, report, statusFor(collector), trigger);
             return report;
         } catch (Throwable t) {
             LOGGER.errorf(t, "Ingestion failed for source '%s'", LogSanitizer.sanitize(source.getName()));
             try {
                 IngestionReport report = collector.toReport(null, describe(t), startedAt);
-                finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED);
+                finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED, trigger);
                 if (t instanceof Error error) {
                     // Recorded, then rethrown: an Error says the JVM is in trouble and
                     // swallowing it would hide that.
@@ -541,13 +562,19 @@ public class IngestionPipeline {
 
     private void finish(Mode mode, String runId, String sourceKey, IngestionReport report,
                         IngestionRun.Status status) {
+        finish(mode, runId, sourceKey, report, status, null);
+    }
+
+    private void finish(Mode mode, String runId, String sourceKey, IngestionReport report,
+                        IngestionRun.Status status, IngestionRun.Trigger trigger) {
         if (mode != Mode.INGEST) {
             return;
         }
         stateStore.finishRun(new IngestionRun(runId, sourceKey, status, null, Instant.now(),
                 report.documentsSeen(), report.documentsIngested(), report.documentsUnchanged(),
                 report.documentsFailed(), report.documentsTombstoned(), report.segmentsStored(),
-                report.costUsd(), report.message()));
+                report.costUsd(), report.message(), report.documentsSkipped(),
+                report.stopReason() == null ? null : report.stopReason().name(), trigger));
     }
 
     /**
@@ -995,9 +1022,12 @@ public class IngestionPipeline {
          */
         private String storeRefused;
         private Instant nextOwnershipCheck = Instant.MIN;
+        private final IngestionRun.Trigger trigger;
+        private Instant nextProgressReport = Instant.MIN;
 
         private Collector(RagConfiguration knowledgeBase, String ragConfigId, String knowledgeBaseId,
-                IngestionSource source, String sourceKey, String runId, Mode mode) {
+                IngestionSource source, String sourceKey, String runId, Mode mode, IngestionRun.Trigger trigger) {
+            this.trigger = trigger;
             this.knowledgeBase = knowledgeBase;
             this.knowledgeBaseId = knowledgeBaseId;
             this.ragConfigId = ragConfigId;
@@ -1092,6 +1122,35 @@ public class IngestionPipeline {
             return !superseded;
         }
 
+        /**
+         * Writes the counters so far onto the run's row, at most every
+         * {@link #progressReportInterval} unless {@code force}d, so the Manager can
+         * show a run moving instead of a spinner. Never fails the run: a progress write
+         * that does not land is only a stale number until the next one.
+         */
+        void reportProgress(boolean force) {
+            if (mode != Mode.INGEST) {
+                return;
+            }
+            Instant clock = Instant.now();
+            if (!force && clock.isBefore(nextProgressReport)) {
+                return;
+            }
+            nextProgressReport = clock.plus(progressReportInterval);
+            try {
+                stateStore.reportProgress(new IngestionRun(runId, sourceKey, IngestionRun.Status.RUNNING, null, null,
+                        seen, ingested, unchanged, failed, tombstoned, segments, currentCost(), null, skipped, null,
+                        trigger));
+            } catch (RuntimeException e) {
+                LOGGER.debugf(e, "Could not record the progress of ingestion run %s", LogSanitizer.sanitize(runId));
+            }
+        }
+
+        private double currentCost() {
+            Double rate = source.settings().getCostPerThousandSegments();
+            return rate != null && rate > 0 ? (segments / 1000.0) * rate : 0.0;
+        }
+
         @Override
         public void onUnchanged(String documentId) {
             seen++;
@@ -1099,11 +1158,13 @@ public class IngestionPipeline {
             if (mode == Mode.INGEST) {
                 stateStore.recordSeen(sourceKey, documentId, runId);
             }
+            reportProgress(false);
         }
 
         @Override
         public void onError(CrawlError error) {
             failed++;
+            reportProgress(false);
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             if (error.contentUnknown()) {
                 inconclusive++;
@@ -1212,6 +1273,7 @@ public class IngestionPipeline {
             }
             failed++;
             inconclusive++;
+            reportProgress(false);
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             LOGGER.warnf(e, "Failed to ingest a document of source '%s'",
                     LogSanitizer.sanitize(source.getName()));
@@ -1226,6 +1288,16 @@ public class IngestionPipeline {
          */
         private void acceptDocument(String documentId, String url, String title, String markdown,
                                     String changeKey, String etag, String lastModified, boolean fromResponse) {
+            try {
+                acceptDocumentCounted(documentId, url, title, markdown, changeKey, etag, lastModified, fromResponse);
+            } finally {
+                reportProgress(false);
+            }
+        }
+
+        private void acceptDocumentCounted(String documentId, String url, String title, String markdown,
+                                           String changeKey, String etag, String lastModified,
+                                           boolean fromResponse) {
 
             if (markdown.isBlank()) {
                 // A page of pure navigation converts to nothing; storing an empty
@@ -1328,11 +1400,7 @@ public class IngestionPipeline {
         }
 
         IngestionReport toReport(WebCrawler.CrawlSummary summary, String error, Instant startedAt) {
-            double cost = 0.0;
-            Double rate = source.settings().getCostPerThousandSegments();
-            if (rate != null && rate > 0) {
-                cost = (segments / 1000.0) * rate;
-            }
+            double cost = currentCost();
             if (error == null && superseded) {
                 error = "The run stopped: its source was purged, removed or reaped while it was running";
             }

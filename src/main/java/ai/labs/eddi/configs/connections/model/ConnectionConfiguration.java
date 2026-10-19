@@ -492,6 +492,21 @@ public class ConnectionConfiguration {
     }
 
     /**
+     * Exactly one {@code ${vault:…}} (or legacy {@code ${eddivault:…}}) reference
+     * and nothing else.
+     */
+    private static final Pattern VAULT_REFERENCE_ONLY = Pattern.compile("\\$\\{(vault|eddivault):[^}]{1,256}}");
+
+    /**
+     * Whether a value is exactly one vault reference — what a {@code ${vars:…}} in
+     * a credential field must expand to, since the variable store is readable by
+     * every editor and must never hold the credential itself.
+     */
+    public static boolean isVaultReferenceOnly(String value) {
+        return value != null && VAULT_REFERENCE_ONLY.matcher(value.trim()).matches();
+    }
+
+    /**
      * Whether a {@code staticAuth.valueTemplate} passes the write-time template
      * rule — see {@link #requireTemplateIsReferenceOnly}.
      */
@@ -562,9 +577,9 @@ public class ConnectionConfiguration {
             throw new IllegalArgumentException(field + " is required, as a ${vault:…} reference.");
         }
         if (!isReferenceOnly(value)) {
-            throw new IllegalArgumentException(field + " must be a ${vault:…} or ${vars:…} reference, not a literal. Store the value with "
-                    + "PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here — a literal here bypasses the vault, export scrubbing and deploy-time "
-                    + "grant enforcement at once.");
+            throw new IllegalArgumentException(field + " must be a ${vault:…} reference (or a ${vars:…} whose variable holds one), not a "
+                    + "literal. Store the value with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here — a literal here "
+                    + "bypasses the vault, export scrubbing and deploy-time grant enforcement at once.");
         }
     }
 
