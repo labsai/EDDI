@@ -8,6 +8,7 @@ import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator
 import type { OperatorConfig } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 const authState = vi.hoisted(() => ({ roles: [] as string[], method: "none" as "none" | "keycloak" }));
 
@@ -55,6 +56,7 @@ describe("OperatorDrawer", () => {
     useOperatorChatStore.getState().reset();
     useOperatorDrawerStore.setState({ isOpen: false });
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),
@@ -139,8 +141,14 @@ describe("OperatorDrawer", () => {
     await userEvent.click(screen.getByTestId("operator-drawer-fab"));
 
     const panel = await screen.findByTestId("operator-drawer-panel");
-    expect(panel.className).toContain("absolute");
-    expect(panel.className).not.toContain("fixed");
+    // From sm up the panel is a popover anchored under its launcher.
+    const classes = panel.className.split(/\s+/);
+    expect(classes).toContain("sm:absolute");
+    expect(classes).toContain("sm:top-full");
+    // Below sm a 24rem popover overflowed the start edge, so it spans the
+    // viewport instead — but pinned under the header, never to a bottom corner.
+    expect(classes).toContain("fixed");
+    expect(classes).toContain("top-16");
     expect(container.querySelector('[class*="bottom-"]')).not.toBeInTheDocument();
   });
 
@@ -273,6 +281,7 @@ describe("OperatorDrawer — keyboard and pending-approval affordances", () => {
     useOperatorChatStore.getState().reset();
     useOperatorDrawerStore.setState({ isOpen: false });
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),

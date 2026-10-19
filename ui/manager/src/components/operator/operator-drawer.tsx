@@ -4,7 +4,8 @@ import { useLocation, Link } from "react-router-dom";
 import { Sparkles, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OperatorChat } from "@/components/operator/operator-chat";
-import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { useOperatorConfig, useOperatorTrust, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { OperatorUntrusted } from "@/components/operator/operator-untrusted";
 import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
@@ -60,6 +61,12 @@ export function OperatorDrawer() {
     authMethod === "none" || roles.includes("eddi-admin") || roles.includes("eddi-editor");
   const { data: config, isLoading: configLoading, isError: configError } = useOperatorConfig(canReadOperatorConfig);
   const chat = useOperatorChat(config);
+  // `platform.operator` is editor-writable, so the agent it names is only talked
+  // to once the Manager has confirmed it carries the operator marker and a
+  // verified approval gate. Deferred until the drawer is opened: this component
+  // is mounted on every page and the gate check reads every agent version.
+  const trust = useOperatorTrust(config, isOpen);
+  const trusted = trust.state === "trusted";
   // Mounted on every page, so this is also what fires the browser-console
   // warning for an out-of-date operator wherever the admin happens to be.
   const upgrade = useOperatorUpgradeAssessment(config);
@@ -94,9 +101,11 @@ export function OperatorDrawer() {
    * page has already hydrated — does nothing.
    */
   useEffect(() => {
-    if (isOpen && config?.enabled && config.agentId) void chat.hydrate();
+    // Never restores a conversation with an agent that has not passed the trust
+    // checks: the read itself would put its transcript on screen.
+    if (isOpen && config?.enabled && config.agentId && trusted) void chat.hydrate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, config?.enabled, config?.agentId, chat.hydrate]);
+  }, [isOpen, config?.enabled, config?.agentId, chat.hydrate, trusted]);
 
   /**
    * Escape closes, focus moves in on open and back to the launcher on close.
@@ -230,7 +239,10 @@ export function OperatorDrawer() {
           // the header instead of needing its own hardcoded offsets. The
           // height is capped against the viewport because the Workforce mobile
           // branch has far less room below the header than the desktop one.
-          className="absolute end-0 top-full z-50 mt-2 flex h-[32rem] max-h-[calc(100vh-6rem)] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+          // Below sm the launcher sits too close to the start edge for a 24rem
+          // popover to fit, so the panel spans the viewport instead (top-16
+          // clears both the 4rem app header and the 3.5rem Workforce one).
+          className="fixed inset-x-2 top-16 z-50 flex h-[32rem] max-h-[calc(100dvh-5rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl sm:absolute sm:inset-x-auto sm:end-0 sm:top-full sm:mt-2 sm:max-h-[calc(100dvh-6rem)] sm:w-96 sm:max-w-[calc(100vw-2rem)]"
           role="complementary"
           aria-label={t("operator.drawer.title", "Platform Operator")}
           data-testid="operator-drawer-panel"
@@ -256,6 +268,14 @@ export function OperatorDrawer() {
               <div className="flex flex-1 items-center justify-center">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
+            ) : isActive && !trusted ? (
+              <OperatorUntrusted
+                trust={trust}
+                agentId={config?.agentId ?? ""}
+                onRecheck={trust.recheck}
+                manageHref="/manage/operator"
+                compact
+              />
             ) : isActive ? (
               <>
               {upgrade?.needed && (

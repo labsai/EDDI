@@ -273,6 +273,7 @@ export function GroupWorkspacePage() {
             <Users className="h-4 w-4" />
             {t("groupWorkspace.perMemberStats", "Per-member reliability")}
           </h3>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-start text-xs text-muted-foreground">
@@ -296,6 +297,7 @@ export function GroupWorkspacePage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

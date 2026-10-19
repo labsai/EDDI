@@ -213,7 +213,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-xl border border-border bg-card shadow-2xl flex flex-col">
+      <div className="relative w-full max-w-2xl max-h-[85dvh] overflow-hidden rounded-xl border border-border bg-card shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h2 className="text-lg font-bold">{t("groups.createGroup", "Create Group")}</h2>
@@ -226,7 +226,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
         <div className="flex items-center gap-2 px-5 py-2 border-b border-border bg-secondary/20">
           {steps.map((s, i) => (
             <div key={s} className={cn("flex items-center gap-1", i > 0 && "ms-2")}>
-              {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+              {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground rtl:rotate-180" />}
               <span
                 className={cn(
                   "text-xs font-medium px-2 py-0.5 rounded-full transition-colors",
@@ -726,7 +726,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
           >
             {stepIdx > 0 ? (
               <>
-                <ChevronLeft className="h-4 w-4" /> {t("common.back", "Back")}
+                <ChevronLeft className="h-4 w-4 rtl:rotate-180" /> {t("common.back", "Back")}
               </>
             ) : (
               t("common.cancel", "Cancel")
@@ -743,7 +743,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
             </Button>
           ) : (
             <Button onClick={() => setStep(steps[stepIdx + 1]!)} disabled={!canNext}>
-              {t("common.next", "Next")} <ChevronRight className="h-4 w-4" />
+              {t("common.next", "Next")} <ChevronRight className="h-4 w-4 rtl:rotate-180" />
             </Button>
           )}
         </div>

@@ -225,7 +225,25 @@ EXPOSE 7070
 # fails the build if any of them loses it. The JVM prints one
 # "NOTE: Picked up JDK_JAVA_OPTIONS" and one "Using incubator modules" line at
 # startup; both are expected.
-ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector"
+#
+# -XX:+ExitOnOutOfMemoryError rides on the same variable, for the same reason: it must
+# survive an operator's JAVA_OPTS. A JVM that ran out of heap keeps half-working,
+# holding its conversation leases and in-flight turns; exiting lets the orchestrator
+# restart it and, in cluster mode, lets the leases expire to another node.
+ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError"
+# Heap = 75 % of the container memory limit (run-java's default is 50 %). Conversation
+# turns run on virtual threads, so heap, not threads, bounds how many turns a node holds,
+# and half the container idle is wasted capacity. The other 25 % covers metaspace,
+# thread stacks, Netty's direct buffers and the code cache. Running the in-process
+# `jlama` provider? Its weights are memory-mapped outside the heap: lower this
+# (e.g. JAVA_MAX_MEM_RATIO=50) and size the pod for the model, see docs/langchain.md.
+ENV JAVA_MAX_MEM_RATIO=75
+# G1 instead of run-java's default ParallelGC. ParallelGC is a batch-throughput
+# collector whose full collections stop every thread; with hundreds of in-flight turns
+# on a multi-GB heap one such pause stalls them all. G1 bounds pauses and is the JDK's
+# own server default. For heaps of 8 GB and more, generational ZGC (-XX:+UseZGC) keeps
+# pauses sub-millisecond; override this variable to choose it.
+ENV GC_CONTAINER_OPTIONS="-XX:+UseG1GC"
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
 # for debugging:
 # ENV JAVA_OPTS_APPEND="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"

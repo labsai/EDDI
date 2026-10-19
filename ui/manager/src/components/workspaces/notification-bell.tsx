@@ -73,8 +73,44 @@ function NotificationBellInner() {
 
   const markRead = useMutation({
     mutationFn: (ids?: string[]) => markNotificationsRead(ids),
-    onSuccess: refresh,
-    onError: (e) => toast.error(getErrorMessage(e)),
+    // Mark the items read and drop the badge at once; the server catches up
+    // behind it. Without ids it is "mark all read".
+    onMutate: async (ids) => {
+      const keys = [NOTIFICATION_KEYS.list, NOTIFICATION_KEYS.count];
+      await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+      const list = queryClient.getQueryData<WorkspaceNotification[]>(NOTIFICATION_KEYS.list);
+      const count = queryClient.getQueryData<number>(NOTIFICATION_KEYS.count);
+      const marked = (list ?? []).filter((n) => (!ids || ids.includes(n.id)) && !n.readAt).map((n) => n.id);
+      const readAt = new Date().toISOString();
+      if (list) {
+        queryClient.setQueryData<WorkspaceNotification[]>(
+          NOTIFICATION_KEYS.list,
+          list.map((n) => (marked.includes(n.id) ? { ...n, readAt } : n)),
+        );
+      }
+      // Without ids it is "mark all read": the badge drops to zero even for
+      // notifications the (20-item) list does not hold.
+      const cleared = typeof count === "number" ? (ids ? Math.min(marked.length, count) : count) : 0;
+      if (cleared > 0) queryClient.setQueryData<number>(NOTIFICATION_KEYS.count, count! - cleared);
+      return { marked, readAt, cleared };
+    },
+    // Undo exactly what this call did — its own items, still carrying its own
+    // stamp, and its own share of the badge — rather than restoring a whole
+    // snapshot, which would also undo a dismiss that started after this one.
+    onError: (e, _ids, ctx) => {
+      if (ctx) {
+        queryClient.setQueryData<WorkspaceNotification[]>(NOTIFICATION_KEYS.list, (list) =>
+          list?.map((n) => (ctx.marked.includes(n.id) && n.readAt === ctx.readAt ? { ...n, readAt: null } : n)),
+        );
+        if (ctx.cleared > 0) {
+          queryClient.setQueryData<number>(NOTIFICATION_KEYS.count, (count) =>
+            typeof count === "number" ? count + ctx.cleared : count,
+          );
+        }
+      }
+      toast.error(getErrorMessage(e));
+    },
+    onSettled: refresh,
   });
 
   const grant = useMutation({
@@ -151,7 +187,9 @@ function NotificationBellInner() {
               <NotificationItem
                 key={n.id}
                 notification={n}
-                busy={grant.isPending || markRead.isPending}
+                // Only the item whose grant is in flight; dismissing is
+                // optimistic and never blocks the list.
+                busy={grant.isPending && grant.variables?.id === n.id}
                 onGrant={() => grant.mutate(n)}
                 onDismiss={() => markRead.mutate([n.id])}
                 onNavigate={() => {

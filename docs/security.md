@@ -619,7 +619,9 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 
 A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
 
-`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`.
+`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. `str:fmt`/`str:format` and the `String.fmt`/`format` instance forms do the same: an upper bound for the formatted length is computed from the format specifiers (literal text, and per specifier the larger of its width and its content — the argument's length for `%s`, a numeric bound plus the precision for numbers) and refused before `String.format` runs, so `{str:fmt('%2000000000d', 1)}` fails in milliseconds instead of allocating 2 GB. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`; so is a `StackOverflowError` from a template that nests thousands of sections.
+
+`quarkus.qute.timeout` (default 10 s) bounds the wall-clock time of one render. EDDI's resolvers render synchronously, so the timeout is enforced from inside the render: every value resolution and every loop iteration checks the render's deadline and fails it once passed, which stops a CPU-bound template that stays under every size and iteration cap.
 
 ---
 

@@ -119,7 +119,7 @@ export function AppLayout() {
     // block, so no `overflow-hidden`/`overflow-y-auto` ancestor can clip it, it
     // extends the document's scroll height, and focusing it scrolls the WHOLE
     // layout. The shell must never scroll — only <main> does.
-    <div className="relative flex h-screen overflow-hidden" data-testid="app-layout">
+    <div className="relative flex h-dvh overflow-hidden" data-testid="app-layout">
       {/* Skip to main content — keyboard accessibility */}
       <a href="#main-content" className="skip-to-main">
         {t("common.skipToMain", "Skip to main content")}
@@ -177,7 +177,7 @@ export function AppLayout() {
             // clip turns the failure mode from "whole page pans" into "one
             // element is visibly clipped", which is both less harmful and
             // easier to spot and fix.
-            "flex-1 overflow-y-auto overflow-x-clip bg-background p-6",
+            "flex-1 overflow-y-auto overflow-x-clip bg-background p-4 md:p-6",
             "transition-all duration-300"
           )}
         >

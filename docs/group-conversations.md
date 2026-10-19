@@ -642,7 +642,10 @@ content. The failure mode is a retry, never a silent bad merge.
 contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
 config save time; at write time a failing validator refuses the write with its
 message and stores nothing. Content is additionally capped at 256 KB per
-artifact.
+artifact. A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
+the schema (`#/$defs/...`) or at a bundled JSON Schema meta-schema, never at an
+`http(s):`, `file:` or other external location — such a spec is refused at save
+time, and nothing is fetched or read.
 
 Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
@@ -703,6 +706,7 @@ Inline `data` is stored in the blob store owned by the group conversation, so it
 
 - The per-turn forwarding cap (`eddi.attachments.max-per-turn`, default 5) applies to each member turn. A discussion sharing more than that will have the surplus dropped for that turn, reported in the member's `attachments:errors` — visible in that member's conversation, **not** in the group transcript.
 - `url`-only attachments are not blob-backed and are not re-hydrated after a HITL resume; blob-backed ones are.
+- Inline files are held to the 1:1 limits — `eddi.attachments.max-size-bytes` per file, `max-per-conversation` and `max-total-bytes-per-conversation` per discussion, and the owner's per-user quotas — and a refusal answers `400` before the discussion runs. Deleting the discussion deletes its blobs.
 
 ## Nested Groups (Group-of-Groups)
 

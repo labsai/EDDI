@@ -21,7 +21,8 @@ import {
   isPauseChanged,
   type ShownPause,
 } from "@/lib/hitl-pause-binding";
-import { submitHumanInput } from "@/lib/api/groups";
+import { submitHumanInput, type GroupConversation } from "@/lib/api/groups";
+import { patchQueries, restoreQueries } from "@/lib/optimistic";
 import { useChatStore } from "@/hooks/use-chat";
 
 /** Clear a stale pause banner in the (persistent, app-wide) chat store when the
@@ -385,15 +386,23 @@ export function useSubmitHumanInput() {
       memberId: string;
       content: string;
     }) => submitHumanInput(groupId, gcId, memberId, content),
-    // Awaited, so the mutation stays pending until the refetched conversation
-    // is in: the backend resumes the discussion asynchronously, and without
-    // this the banner re-enabled for an instant on the stale AWAITING_HUMAN_INPUT
-    // document, with the typed text still in it.
-    onSuccess: async (_data, { groupId }) => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["groupConversations", groupId] }),
-        qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] }),
-      ]);
+    // The turn is the user's to hand over, so it leaves them at once: the
+    // cached conversation moves off AWAITING_HUMAN_INPUT before the request is
+    // even answered, and the banner goes with it. (This used to await two
+    // refetches instead, holding the button pending for an extra round trip —
+    // that was how the banner avoided re-enabling on the stale document.) A
+    // failure puts the document back, typed text and all.
+    onMutate: ({ groupId, gcId }) =>
+      patchQueries<GroupConversation | undefined>(qc, ["groupConversations", groupId, gcId], (conversation) =>
+        conversation?.state === "AWAITING_HUMAN_INPUT"
+          ? { ...conversation, state: "IN_PROGRESS", pendingHumanInput: null }
+          : conversation,
+      ),
+    onError: (_err, _vars, snapshot) => restoreQueries(qc, snapshot),
+    // In the background: the active-state poll then follows the resumed run.
+    onSettled: (_data, _err, { groupId }) => {
+      void qc.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+      void qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
     },
   });
 }

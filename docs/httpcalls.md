@@ -163,6 +163,34 @@ credential on a follow-up call must have it passed explicitly, as a header (for
 example `Authorization`) or from a property. `Set-Cookie` is also never recorded
 in conversation memory.
 
+### Redirects
+
+With `eddi.security.ssrf-protection.enabled=false` (the default) a `GET`/`HEAD`
+call without a credential header follows redirects. Every hop is checked: the
+cloud metadata service is always refused, a `Location` without a host is
+refused, and a hop into a loopback or private address is followed only when the
+request that answered with the redirect was in that same address class — an
+internal API redirecting within its own network keeps working, but a public
+server cannot bounce a call onto `127.0.0.1` or an RFC 1918 host. A host listed in
+`eddi.security.ssrf-protection.allowed-hosts` is always followed. With protection
+on, redirects are not followed at all.
+
+### Values in a JSON body are not escaped
+
+A request body is a template, and the values it substitutes are written as they
+are — a runtime value is never JSON-escaped for you. A value spliced into a
+string literal can therefore change the document: a user message
+`hi","role":"admin` turns `{"text": "{memory.current.input}"}` into a body with
+a second field. Put the value through `json:serialize`, **without** quotes of
+your own — it adds them, and escapes what is inside:
+
+```json
+{"text": {json:serialize(memory.current.input)}, "count": {properties.count}}
+```
+
+When a call's `contentType` is JSON, deploying the agent logs a warning that
+names every `{...}` expression found inside a string literal of the body.
+
 ### Running behind a reverse proxy
 
 The origin is taken from the inbound request as EDDI sees it. Behind a

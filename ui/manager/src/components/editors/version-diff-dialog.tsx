@@ -4,13 +4,9 @@ import { useTranslation } from "react-i18next";
 // Side-effect import: without it @monaco-editor/react falls back to the jsDelivr CDN.
 import "@/lib/monaco-setup";
 import { DiffEditor } from "@monaco-editor/react";
-import {
-  X,
-  GitCompareArrows,
-  RefreshCw,
-  ChevronDown,
-} from "lucide-react";
+import { RefreshCw, ChevronDown } from "lucide-react";
 import { useTheme } from "@/components/layout/theme-provider";
+import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 
 export interface VersionDiffDialogProps {
   open: boolean;
@@ -82,7 +78,8 @@ export function VersionDiffDialog({
       })
       .catch((e: unknown) => {
         if (!current) return;
-        setError(e instanceof Error ? e.message : "Failed to load versions");
+        // "" = no message of its own; the render shows a translated fallback.
+        setError(e instanceof Error ? e.message : "");
       })
       .finally(() => {
         if (current) setLoading(false);
@@ -96,35 +93,19 @@ export function VersionDiffDialog({
 
   const monacoTheme = theme === "dark" ? "vs-dark" : "light";
 
+  // The shared dialog supplies Escape, the focus trap and focus return, none of
+  // which the hand-rolled overlay had despite claiming aria-modal.
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" data-testid="version-diff-dialog">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-
-      {/* Dialog — full screen with padding */}
-      <div
-        className="relative z-10 flex flex-col m-4 rounded-xl border bg-card shadow-2xl overflow-hidden flex-1"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="diff-dialog-title"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-5 py-3 shrink-0">
-          <div className="flex items-center gap-2">
-            <GitCompareArrows className="h-5 w-5 text-primary" aria-hidden="true" />
-            <h3 id="diff-dialog-title" className="text-lg font-semibold text-foreground">
-              {t("editor.compareVersions", "Compare Versions")} — {typeName}
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
-            aria-label={t("common.close", "Close")}
-          >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
-
+    <AccessibleDialog
+      open={open}
+      onClose={onClose}
+      title={`${t("editor.compareVersions", "Compare Versions")} — ${typeName}`}
+      testId="version-diff-dialog"
+      maxWidth="max-w-[min(100rem,calc(100vw-2rem))]"
+    >
+      {/* A fixed height: the diff editor lays itself out to its container and
+          collapses to nothing inside a content-sized box. */}
+      <div className="flex h-[calc(100dvh-7rem)] flex-col">
         {/* Version selectors */}
         <div className="flex items-center gap-4 border-b border-border px-5 py-3 shrink-0 bg-muted/30">
           <VersionSelect
@@ -163,13 +144,15 @@ export function VersionDiffDialog({
             </div>
           )}
 
-          {error && (
+          {error !== null && (
             <div className="flex items-center justify-center h-full">
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-sm text-destructive">
+                {error || t("common.loadError", "Failed to load data")}
+              </p>
             </div>
           )}
 
-          {!loading && !error && leftData !== null && rightData !== null && (
+          {!loading && error === null && leftData !== null && rightData !== null && (
             <DiffEditor
               original={leftData}
               modified={rightData}
@@ -197,7 +180,7 @@ export function VersionDiffDialog({
           </p>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 
