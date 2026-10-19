@@ -377,9 +377,11 @@ class ConversationUpgradeServiceTest {
             done.countDown();
         });
 
-        while (queued.isEmpty()) {
+        long giveUp = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (queued.isEmpty() && System.nanoTime() < giveUp) {
             Thread.sleep(5);
         }
+        assertFalse(queued.isEmpty(), "the write must be queued on the conversation's coordinator");
         ((IDiscardableTask) queued.getFirst()).onDiscarded(new RejectedExecutionException("pool saturated"));
 
         assertTrue(done.await(10, TimeUnit.SECONDS), "must not wait the 60 s");
