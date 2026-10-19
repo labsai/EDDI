@@ -325,7 +325,8 @@ version can continue them, say so:
 | API endpoint | `/administration/{environment}/upgradeconversations/{agentId}` |
 | `dryRun` | (`Query parameter`, optional, **default `true`**): `true` only reports, `false` writes |
 | `fromVersion` | (`Query parameter`, optional, repeatable): only conversations stored on these versions. Default: every version whose conversations are on an older generation than the target |
-| `limit` | (`Query parameter`, optional, default `50000`, max `1000000`): the most conversations one call looks at. The response says when it stopped there |
+| `limit` | (`Query parameter`, optional, default `5000`, max `1000000`): the most conversations one call looks at. The response says when it stopped there |
+| `after` | (`Query parameter`, optional): continue after this conversation id — the `nextAfter` of a truncated response |
 | Roles | `eddi-admin` or `eddi-editor`, plus edit access to the agent. MCP: `upgrade_conversations`, the same dry-run default |
 
 **After a ZIP import or sync: dry run, check, then run it.**
@@ -348,6 +349,7 @@ POST /administration/production/upgradeconversations/{agentId}?dryRun=false
   "targetGeneration": 3,
   "servingVersion": 7,
   "truncated": false,
+  "nextAfter": null,
   "versions": [
     { "fromVersion": 5, "matched": 412, "eligible": 398, "upgraded": 0,
       "skipped": { "ended": 9, "awaitingHuman": 5 } },
@@ -381,11 +383,22 @@ POST /administration/production/upgradeconversations/{agentId}?dryRun=false
   rebuilt over the new document when it starts, and any other writer is refused with a store conflict
   rather than reverting it. A conversation whose turn does not finish within
   `eddi.conversation-upgrade.turn-wait-ms` (30 s) is reported as `busy`; run it again.
-- **Scale.** Conversations are listed as a projection, a page at a time — never loaded in full.
-  `truncated: true` means the `limit` stopped the call with candidates left; the call is idempotent,
-  so call it again. Dry run and real run share the shape, so the preview is the run. A dry run
+- **Scale, the limit and the cursor.** Conversations are listed as a projection, a page at a time —
+  never loaded in full. A call is synchronous and looks at no more than `limit` conversations
+  (default 5000). **Keep it small enough to finish inside your reverse proxy's or load balancer's
+  timeout** (often 60 s): when the proxy gives up the client sees a 504 but the server carries on,
+  and re-running blind makes the numbers hard to read. When the response says `truncated: true`,
+  call again with **`after=<nextAfter>`**. The cursor is needed because conversations that are
+  skipped without being changed (`awaitingHuman`, `inProgress`, `busy`) stay candidates; a call that
+  restarted from the beginning would meet them again before reaching new ones. `ended` conversations
+  are not scanned at all: they are counted per version with one query on every call, so the preview
+  still shows them. Dry run and real run share the shape, so the preview is the run. A dry run
   counts states as they are when listed; a real run may skip a few more (`changedConcurrently`,
   `busy`) if conversations change meanwhile.
+- **Undeploying old versions afterwards.** Run the dry run again first, and undeploy an old version
+  only when it reports `eligible: 0`. Conversations skipped as `busy`, `awaitingHuman` or
+  `inProgress` still run on the old version; undeploying it would end them or refuse (see
+  [Undeploying](#undeploying-old-versions-can-be-retired-freely)).
 - **Audit and metrics.** Every `POST` is recorded in the audit ledger by the administrative-action
   record (caller, path, status). Each run writes one INFO line with the counts, and real runs add the
   number moved to `eddi_conversation_generation_upgrade_count`.

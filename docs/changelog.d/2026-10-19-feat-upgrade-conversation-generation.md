@@ -12,7 +12,7 @@ previewable repair: "this agent's conversations on an older generation (or none)
 compatible with the current version, move them onto it."
 
 - **Endpoint.** `POST /administration/{environment}/upgradeconversations/{agentId}` with
-  `dryRun` (default `true`), repeatable `fromVersion` and `limit` (default 50000). Same path
+  `dryRun` (default `true`), repeatable `fromVersion`, `limit` (default 5000, so a call stays inside a proxy timeout) and `after` (the cursor: a truncated report carries `nextAfter`). Same path
   style, roles and EDIT access check as `undeploy`. The response has the same shape for dry
   and real runs: target version and generation, and per source version `matched`, `eligible`,
   `upgraded` and `skipped` by reason. MCP: `upgrade_conversations`, same dry-run default
@@ -61,4 +61,6 @@ version") and `docs/mcp-server.md`.
 
 - Order of preference: save or promote compatibly where possible; this action is for
   conversations that are already pinned.
-- Ended conversations are listed (not written) so the preview can count them.
+- Ended conversations are not scanned (they would stay candidates forever and crowd out the ones that
+  can move); they are counted per version with one query. The cursor exists because conversations
+  skipped without change (paused, in progress, busy) stay candidates.
