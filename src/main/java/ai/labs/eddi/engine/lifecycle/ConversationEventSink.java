@@ -110,6 +110,24 @@ public interface ConversationEventSink {
     }
 
     /**
+     * Called when an input or output guardrail of an LLM task fired (WS4). Sent
+     * before the turn's answer is delivered; with a {@code block} the answer that
+     * follows is the guardrail's block message.
+     *
+     * @param type
+     *            the guardrail type, e.g. {@code pii-redaction}
+     * @param phase
+     *            {@code input} or {@code output}
+     * @param action
+     *            what was done: {@code block}, {@code redact}, {@code reprompt} or
+     *            {@code warn}
+     * @param taskId
+     *            the id of the LLM task whose guardrail fired
+     */
+    default void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+    }
+
+    /**
      * Called when a pipeline task fails during execution. Provides structured error
      * information for admin monitoring.
      */

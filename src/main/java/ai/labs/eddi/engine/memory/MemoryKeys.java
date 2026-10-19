@@ -208,6 +208,18 @@ public final class MemoryKeys {
     public static final String AUDIT_PENDING_COST = "audit:pending_cost";
 
     /**
+     * Prefix of the guardrail evidence keys,
+     * {@code audit:guardrail:<phase>:<type>}: a {@code List} of {@code {phase,
+     * type, action, reason, retryCount, taskId}} records, one per time that
+     * guardrail fired this turn. Written by LlmTask, collected by LifecycleManager
+     * into {@code AuditEntry.output.guardrails}. Absent when no guardrail is
+     * configured or none fired.
+     *
+     * @since 6.6.0
+     */
+    public static final String AUDIT_GUARDRAIL_PREFIX = "audit:guardrail:";
+
+    /**
      * Confidence of the accepted cascade step, as a {@code Double}. Written by
      * LlmTask when a model cascade ran; read by LifecycleManager for both the
      * {@code task_complete} SSE summary and {@code llmDetail.confidence}.
