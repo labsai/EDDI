@@ -143,19 +143,16 @@ public final class SecretRedactionFilter {
             // Authorization: Basic|Token|Digest <credential>. The name-bound rules
             // below stop the value at the space after the scheme, which left the
             // credential itself legible.
-            new RedactionRule(Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|token|digest)\\s++[A-Za-z0-9+/=._~\\-]{6,}+"),
+            // No length floor: after an explicit scheme word the next token IS the
+            // credential, and "Basic YTpi" (a:b) is as real as a long one.
+            new RedactionRule(Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|token|digest)\\s++[A-Za-z0-9+/=._~\\-]++"),
                     "$1$2 " + REDACTED),
             // Azure API Management's subscription key header (api-key and x-api-key
             // are already matched by the name-bound rules below).
             new RedactionRule(Pattern.compile("(?i)(subscription-key[\"']?+\\s*+[:=]\\s*+[\"']?+)[^\\s,;\"'\\\\{}\\[\\]]{8,}+"),
-                    "$1" + REDACTED),
-            // The password in a database connection string's userinfo. No ceiling on
-            // either run: a 257-character password is still a password, and a
-            // possessive class is linear whatever its length.
-            new RedactionRule(Pattern.compile(
-                    "(?i)((?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:)"
-                            + "[^@/\\s\"'\\\\,{}\\[\\]]++@"),
-                    "$1" + REDACTED + "@"));
+                    "$1" + REDACTED));
+    // The password of a database connection string is not a rule above: see
+    // redactConnectionStringPasswords.
 
     /**
      * A whole vault reference, as an OPTIONAL, possessive prefix on an unquoted
@@ -627,7 +624,63 @@ public final class SecretRedactionFilter {
         for (RedactionRule rule : SHAPE_RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
-        return result;
+        return redactConnectionStringPasswords(result);
+    }
+
+    /**
+     * {@code scheme://user:} of a database connection string — where the password
+     * begins. The password is then walked by hand to the LAST {@code @} before the
+     * authority ends: a raw {@code @} inside a password is malformed (it should be
+     * percent-encoded), but a log line carries it anyway, and a pattern that
+     * stopped at the first one left {@code tail:pw@host} legible. A greedy class
+     * would find the last {@code @} too, but by backtracking — quadratic on a run
+     * of {@code mongodb://u:} prefixes; the walk is one pass. No ceiling on either
+     * run: a 257-character password is still a password.
+     */
+    private static final Pattern CONNECTION_STRING_PASSWORD = Pattern.compile(
+            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:");
+
+    private static String redactConnectionStringPasswords(String text) {
+        Matcher matcher = CONNECTION_STRING_PASSWORD.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int from = 0;
+        while (from <= text.length() && matcher.find(from)) {
+            int start = matcher.end();
+            int end = start;
+            int lastAt = -1;
+            while (end < text.length() && isAuthorityChar(text.charAt(end))) {
+                if (text.charAt(end) == '@') {
+                    lastAt = end;
+                }
+                end++;
+            }
+            if (lastAt >= 0) {
+                // Everything up to the last '@' is the password; the host after it stays.
+                out.append(text, copied, start).append(REDACTED);
+                copied = lastAt;
+            }
+            from = Math.max(end, start);
+        }
+        if (copied == 0) {
+            return text;
+        }
+        out.append(text, copied, text.length());
+        return out.toString();
+    }
+
+    /**
+     * A character the userinfo or host of a connection string may carry: anything
+     * up to the path, whitespace, a quote, or a JSON delimiter — so a carrier's
+     * closing quote, the next field, and a {@code ${vault:…}} reference (its brace)
+     * all end the walk.
+     */
+    private static boolean isAuthorityChar(char c) {
+        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != ',' && c != '{' && c != '}'
+                && c != '[' && c != ']';
     }
 
     public static String redact(String message) {
@@ -639,6 +692,7 @@ public final class SecretRedactionFilter {
         for (RedactionRule rule : SHAPE_RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
+        result = redactConnectionStringPasswords(result);
         result = redactQuotedValues(result);
         for (RedactionRule rule : RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
@@ -750,10 +804,27 @@ public final class SecretRedactionFilter {
             return -1;
         }
         if (first == '\\' && from + 1 < length && text.charAt(from + 1) == '"') {
-            // The directive's quotes as a JSON string carries them; the value runs to
-            // the next escaped quote.
-            int close = text.indexOf("\\\"", from + 2);
-            return close < 0 ? -1 : close + 2;
+            // The directive's quotes as a JSON string carries them: every raw character
+            // the header had is a JSON escape pair here, so \" is a raw quote and \\ a
+            // raw backslash. A raw backslash escapes the raw character after it (RFC
+            // 7230 quoted-pair), so \\\" is a quote INSIDE the value, and only an
+            // unescaped raw quote closes it.
+            int i = from + 2;
+            boolean rawEscaped = false;
+            while (i < length) {
+                boolean pair = text.charAt(i) == '\\' && i + 1 < length;
+                char raw = pair ? text.charAt(i + 1) : text.charAt(i);
+                int step = pair ? 2 : 1;
+                if (rawEscaped) {
+                    rawEscaped = false;
+                } else if (pair && raw == '\\') {
+                    rawEscaped = true;
+                } else if (pair && raw == '"') {
+                    return i + 2;
+                }
+                i += step;
+            }
+            return -1;
         }
         int i = from;
         while (i < length && isDirectiveTokenChar(text.charAt(i))) {

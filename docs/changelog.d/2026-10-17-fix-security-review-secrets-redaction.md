@@ -123,9 +123,12 @@ admits no quote, backslash or brace, so a match cannot cross a JSON string or ea
 so a lookbehind admits a start only where a token run begins — without it `eyJ` repeated
 60,000 times is quadratic (the mutation check timed out at 30 s).
 
-The connection-string rule had a 256-character ceiling on the user and on the password;
-a longer password went through unredacted. Both runs are now unbounded (possessive, so
-still linear). Two gaps found in review: a `Digest` header lost only `username=` — the scheme rule
+The connection-string rule had a 256-character ceiling on the user and on the password,
+and stopped at the first `@`, so a longer password — or a malformed one carrying a raw
+`@` (`u:abc@tail:pw@host`) — went through in part. The password is now walked by hand to
+the last `@` of the authority, in one pass. The labelled scheme rule lost its six-character
+floor (`Authorization: Basic YTpi` is `a:b`), and a quote escaped inside a JSON-carried
+Digest value no longer ends that credential early. Two gaps found in review: a `Digest` header lost only `username=` — the scheme rule
 took one unquoted token and left `response=`, the credential proper, legible — and now
 loses its whole directive list, walked by hand rather than by a pattern, since a
 quantified group recurses once per directive; and a bare `Basic <base64>` with no

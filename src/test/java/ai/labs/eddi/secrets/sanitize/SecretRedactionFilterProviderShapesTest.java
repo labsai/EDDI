@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -48,6 +49,7 @@ class SecretRedactionFilterProviderShapesTest {
                 Arguments.of("AWS access key id", "AKIAIOSFODNN7EXAMPLE", "IOSFODNN7EXAMPLE"),
                 Arguments.of("bare JWT", JWT, "eyJzdWIiOiIxIn0.fixturesig"),
                 Arguments.of("Basic authorization", "Authorization: Basic dXNlcjpodW50ZXIy", "dXNlcjpodW50ZXIy"),
+                Arguments.of("Basic authorization, four-character credential", "Authorization: Basic YTpi", "YTpi"),
                 Arguments.of("Token authorization", "authorization=token 0123456789abcdef", "0123456789abcdef"),
                 Arguments.of("Azure OpenAI api-key header", "api-key: fixturefixturefixturefixture", "fixturefixturefixturefixture"),
                 Arguments.of("APIM subscription key header", "Ocp-Apim-Subscription-Key: fixturefixturefixture", "fixturefixturefixture"),
@@ -71,6 +73,33 @@ class SecretRedactionFilterProviderShapesTest {
     @DisplayName("the host of a connection string stays legible")
     void connectionStringHostSurvives() {
         assertEquals("mongodb://eddi:<REDACTED>@db.internal:27017/eddi", SecretRedactionFilter.redact("mongodb://eddi:pw123@db.internal:27017/eddi"));
+    }
+
+    @Test
+    @DisplayName("a raw @ inside the password (malformed, but logged as it came) does not end the redaction early")
+    void malformedUserinfoWithRawAt() {
+        assertEquals("mongodb://u:<REDACTED>@host/db", SecretRedactionFilter.redact("mongodb://u:abc@tail:pw@host/db"));
+        assertEquals("{\"uri\":\"mongodb://u:<REDACTED>@host\",\"next\":\"x@y\"}",
+                SecretRedactionFilter.redact("{\"uri\":\"mongodb://u:abc@tail:pw@host\",\"next\":\"x@y\"}"),
+                "the carrier's closing quote ends the walk; the next field's @ is not the password's");
+        assertEquals("postgresql://u:<REDACTED>@h/db and mongodb://v:<REDACTED>@k",
+                SecretRedactionFilter.redact("postgresql://u:p@h/db and mongodb://v:q@k"),
+                "two connection strings are two passwords");
+    }
+
+    @Test
+    @DisplayName("a quote escaped inside a JSON-carried Digest value does not end the credential early")
+    void digestJsonInteriorEscapedQuote() throws Exception {
+        String header = "Digest username=\"al\\\"ice\", realm=\"eddi\", response=\"fixtureresponsehash\", algorithm=MD5";
+        String json = new ObjectMapper().writeValueAsString(Map.of("Authorization", header, "next", "x@y"));
+
+        String result = SecretRedactionFilter.redact(json);
+
+        var tree = new ObjectMapper().readTree(result);
+        assertFalse(result.contains("fixtureresponsehash"), result);
+        assertTrue(tree.get("Authorization").asText().contains(SecretRedactionFilter.REDACTED), result);
+        assertEquals("x@y", tree.get("next").asText(), result);
+        assertEquals(result, SecretRedactionFilter.redact(result), "idempotent");
     }
 
     @ParameterizedTest
@@ -143,7 +172,9 @@ class SecretRedactionFilterProviderShapesTest {
                 "mongodb://" + "u".repeat(300) + ":".repeat(50_000), "mongodb://".repeat(30_000), "mongodb://u:" + "p".repeat(200_000),
                 ("postgresql://u:p" + "@".repeat(10)).repeat(10_000), "Authorization: Digest " + "a=b,".repeat(100_000),
                 "Authorization: Digest a=\"" + "x".repeat(200_000), "Authorization: Digest a=\\\"" + "x".repeat(200_000),
-                "Authorization: Digest a=b ".repeat(20_000), "Basic " + "A".repeat(200_000), "Basic ".repeat(50_000));
+                "Authorization: Digest a=b ".repeat(20_000), "Basic " + "A".repeat(200_000), "Basic ".repeat(50_000),
+                "mongodb://u:" + "a@".repeat(100_000) + "h", "mongodb://u:".repeat(30_000), "mongodb://u:" + "@".repeat(200_000),
+                "Authorization: Digest a=\\\"" + "\\\\\\\"".repeat(50_000));
 
         for (String attack : attacks) {
             assertTimeoutPreemptively(Duration.ofSeconds(30), () -> assertDoesNotThrow(() -> SecretRedactionFilter.redact(attack)),
