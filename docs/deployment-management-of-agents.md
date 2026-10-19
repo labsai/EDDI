@@ -217,7 +217,7 @@ Every agent version carries a `compatibilityGeneration`, assigned by the server 
 | --- | --- |
 | New agent (create, duplicate, import of a new agent) | `1` |
 | Update with `compatible=true` | the previous version's |
-| Update without it (the default), and every import or sync of an existing agent | the previous version's + 1 — a breaking change |
+| Update without it (the default), and every import or sync of an existing agent | the previous version's + 1 — a breaking change (running conversations can be moved afterwards, see [Moving running conversations onto the current version](#moving-running-conversations-onto-the-current-version)) |
 | Any update of a version stored before generations existed | `1` — a new chain starts |
 
 Versions with the same generation are compatible. A value for the field in the request body is
@@ -304,6 +304,95 @@ There is no separate policy to configure; the existing options cover it:
 - **Keep them**: leave the old version deployed. It serves its conversations until they end.
 - **End them**: `undeploy?endAllActiveConversations=true`. They record `agent-version-retired`,
   and the channels that can start a fresh conversation do so (see above).
+- **Move them**: declare them compatible after the fact with
+  [`upgradeconversations`](#moving-running-conversations-onto-the-current-version) — for the
+  case where the save could not say so itself, such as a promotion by ZIP import.
+
+### Moving running conversations onto the current version
+
+**Order of preference.** Declare compatibility when you save: use `compatible=true` on an update,
+and the compatible option of the ZIP upgrade-import and of agent sync when promoting an agent from
+a staging instance, so running conversations follow the new version from the start. This section
+is the **repair path for conversations that are already pinned**: the legacy conversations without
+a generation that every installation from before generations existed still has, and breaking saves
+(an import or sync made without the compatible option) that you later judge safe. Ending those
+conversations is a poor answer for a user in the middle of a conversation. If you know the new
+version can continue them, say so:
+
+| Element | Value |
+| --- | --- |
+| HTTP Method | `POST` |
+| API endpoint | `/administration/{environment}/upgradeconversations/{agentId}` |
+| `dryRun` | (`Query parameter`, optional, **default `true`**): `true` only reports, `false` writes |
+| `fromVersion` | (`Query parameter`, optional, repeatable): only conversations stored on these versions. Default: every version whose conversations are on an older generation than the target |
+| `limit` | (`Query parameter`, optional, default `50000`, max `1000000`): the most conversations one call looks at. The response says when it stopped there |
+| Roles | `eddi-admin` or `eddi-editor`, plus edit access to the agent. MCP: `upgrade_conversations`, the same dry-run default |
+
+**After a ZIP import or sync: dry run, check, then run it.**
+
+```
+# 1. Import (or sync) the agent, then deploy its new version and wait for READY
+# 2. Preview. Nothing is written
+POST /administration/production/upgradeconversations/{agentId}
+
+# 3. Read the counts. If they match what you expect, run it
+POST /administration/production/upgradeconversations/{agentId}?dryRun=false
+```
+
+```json
+{
+  "agentId": "5aaf98e19f7dd421ac3c7de9",
+  "environment": "production",
+  "dryRun": true,
+  "currentVersion": 7,
+  "targetGeneration": 3,
+  "servingVersion": 7,
+  "truncated": false,
+  "versions": [
+    { "fromVersion": 5, "matched": 412, "eligible": 398, "upgraded": 0,
+      "skipped": { "ended": 9, "awaitingHuman": 5 } },
+    { "fromVersion": 6, "matched": 40, "eligible": 40, "upgraded": 0, "skipped": {} }
+  ],
+  "totals": { "matched": 452, "eligible": 438, "upgraded": 0, "skipped": { "ended": 9, "awaitingHuman": 5 } }
+}
+```
+
+- **Target.** The generation of the agent's **latest** version. A version of that generation must be
+  `READY` in the environment on the node that handles the request; otherwise the call answers `409`
+  and does nothing — a conversation moved onto a generation nothing serves would fall back to its old
+  version or deploy one on demand. A latest version stored before generations existed has no
+  generation to move onto either (`409`; save the agent once).
+- **What is written.** One field of the conversation, `compatibilityGeneration`. Nothing else — not
+  its steps, not its version. The conversation's **next turn** runs on the newest `READY` version of
+  the generation and records the move (`agent:switch`, the descriptor, the
+  `eddi_conversation_agent_version_switch_count` metric), exactly as after a `compatible=true` save.
+  A generation is **never lowered**, and conversations already on the target generation are not
+  touched.
+- **Which conversations.** `matched` counts every conversation on the chosen versions with no
+  generation or a lower one. `eligible` are those in a state a turn can run from: `READY`, `ERROR`
+  and `EXECUTION_INTERRUPTED`. **`ERROR` is included on purpose**: a failed turn does not block the
+  next one (`say` refuses only ended and paused conversations), so such a conversation is live — and
+  the new version is often what repairs it. **Skipped and counted**: `ended`; `awaitingHuman` (a
+  resume must finish on the version that paused it); `inProgress` (a resume is running).
+- **Concurrency.** Each conversation is moved by a task in *that conversation's own queue*, the one
+  every turn goes through (cluster-wide, under its lease, with NATS), so the write never overlaps a
+  running turn — it waits behind it. The write also moves the conversation's revision, so a turn that
+  had loaded the conversation earlier cannot silently put the old generation back: a queued one is
+  rebuilt over the new document when it starts, and any other writer is refused with a store conflict
+  rather than reverting it. A conversation whose turn does not finish within
+  `eddi.conversation-upgrade.turn-wait-ms` (30 s) is reported as `busy`; run it again.
+- **Scale.** Conversations are listed as a projection, a page at a time — never loaded in full.
+  `truncated: true` means the `limit` stopped the call with candidates left; the call is idempotent,
+  so call it again. Dry run and real run share the shape, so the preview is the run. A dry run
+  counts states as they are when listed; a real run may skip a few more (`changedConcurrently`,
+  `busy`) if conversations change meanwhile.
+- **Audit and metrics.** Every `POST` is recorded in the audit ledger by the administrative-action
+  record (caller, path, status). Each run writes one INFO line with the counts, and real runs add the
+  number moved to `eddi_conversation_generation_upgrade_count`.
+
+Only do this when the new version really can continue the old conversations — the same test as
+[What "compatible" means](#what-compatible-means). A conversation moved onto a version that
+requires state it does not have stays moved.
 
 
 ## **Check the deployment status of an agent:**
