@@ -43,6 +43,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -193,6 +194,27 @@ public class MemberTurnExecutor {
         }
         listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
                 attributionKey, displayName, attributed, gc.getTotalCost()));
+    }
+
+    /**
+     * Fires {@code member_tool_call} for one tool a member's loop is about to run.
+     * Name only — the arguments never reach the group stream.
+     * <p>
+     * Runs on a COORDINATOR thread (the member's own turn), so it can fire after
+     * the orchestrator cancelled this speaker; a cancelled turn's event is dropped,
+     * as is one with no listener or no name. A listener that throws must not break
+     * the member's tool loop, so failures are swallowed here.
+     */
+    static void announceToolCall(GroupMember member, String toolName, GroupDiscussionEventListener listener,
+                                 GroupConversationService.MemberTurnCancellation cancellation) {
+        if (listener == null || toolName == null || (cancellation != null && cancellation.isCancelled())) {
+            return;
+        }
+        try {
+            listener.onMemberToolCall(new GroupConversationEventSink.MemberToolCallEvent(member.agentId(), member.displayName(), toolName));
+        } catch (RuntimeException e) {
+            LOGGER.debug("member_tool_call listener failed; ignoring", e);
+        }
     }
 
     /**
@@ -403,7 +425,8 @@ public class MemberTurnExecutor {
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
-                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
+                Consumer<String> toolObserver = listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
+                ConversationResponseHandler memberHandler = snapshot -> {
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                         memberPaused[0] = true;
                         pausedSnapshot[0] = snapshot;
@@ -455,7 +478,9 @@ public class MemberTurnExecutor {
                     announceCost(gc, convKey, member.displayName(), listener);
 
                     responseFuture.complete(response);
-                });
+                };
+                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false,
+                        toolObserver == null ? memberHandler : IConversationService.observing(toolObserver, memberHandler));
 
                 // The only await point of a member turn — and therefore the lever for
                 // cancelling it. Registering the future means an aborting orchestrator

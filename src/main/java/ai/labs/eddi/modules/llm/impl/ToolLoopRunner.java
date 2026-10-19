@@ -953,6 +953,15 @@ class ToolLoopRunner {
         if (memory != null && memory.getEventSink() != null) {
             memory.getEventSink().onToolCall(toolRequest.name());
         }
+        // Name-only observer for plain (non-streamed) turns, e.g. a group member's.
+        // An observer must never break the tool loop.
+        if (memory != null && memory.getToolCallObserver() != null) {
+            try {
+                memory.getToolCallObserver().accept(toolRequest.name());
+            } catch (RuntimeException e) {
+                LOGGER.debug("Tool-call observer failed; ignoring", e);
+            }
+        }
 
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {

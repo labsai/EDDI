@@ -267,6 +267,8 @@ public interface IGroupConversationService {
         }
         default void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
         }
+        default void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
+        }
     }
 
     // --- Exceptions ---

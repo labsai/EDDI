@@ -2890,6 +2890,7 @@
     "question": "คำถาม",
     "readyToDiscuss": "พร้อมอภิปราย",
     "responding": "กำลังตอบกลับ…",
+    "usingTool": "กำลังใช้ {{tool}}…",
     "reviewMemberRoster": "รายชื่อสมาชิก",
     "reviewMembers": "สมาชิก",
     "reviewModerator": "ผู้ดูแล",
