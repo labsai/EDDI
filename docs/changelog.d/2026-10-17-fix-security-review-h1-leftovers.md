@@ -71,3 +71,31 @@ still omit the list. The user agreed to the break before it was made.
 ```decision-log
 | 2026-10-17 | A secret create under grant-enforcement=enforce requires allowedHosts; ["*"] is the explicit opt-out, [] is refused | allowedAgents limits which agent references a secret, not where it is sent; every editor can choose the destination (security review 2026-10-17, H1) | A [SECURITY] warning only, which keeps scripts working but leaves the default open; requiring hosts in every mode, which overrides the warn/off opt-out |
 ```
+
+### Folded in when this branch was synced with `main` (2026-10-19)
+
+#1079 merged as a squash while this branch still carried its earlier commits,
+and `main` had moved on, so the sync merge resolves the overlap (operator
+revision 20, `main`'s dialog sizing, `nameSeg` encoding in `space-resources.ts`)
+and carries five fixes that would otherwise have needed PRs of their own:
+
+- **`main` was red.** #1066 sums `audit:cost` over every step of the response
+  snapshot, and #1093 (merged after it without a re-sync) converts only the
+  newest step and pins that with `convertsOnlyCurrentStep`; the cost sum walked
+  the lazy step list and converted every step again. `conversationCost` now reads
+  a lazily converted list's total from the live steps
+  (`getExactDataPerStep("audit:cost")`, one entry per step), so the total is
+  unchanged and no step is converted. New test: the current-step total equals the
+  full conversion's, with a NaN entry skipped, and no older step is read.
+- **`/setup-api` apiAuth was locked to the LLM host** by an explicit
+  `allowedHosts` (#1079): the request's list names where the LLM key may go, so it
+  no longer applies to `apiAuth`, which keeps the generated calls' target hosts;
+  only an explicit `["*"]` carries over (`AgentSetupService.apiAuthRequestedHosts`).
+- **Timing limits** in `ModelOutputParserFenceTest` and `ConversationRecallToolTest`
+  rose from 100 ms to 1 s: the cubic case they guard against takes seconds, and
+  100 ms was a flake on a loaded CI runner.
+- **Workspaces → space secret Save** stays disabled until the secret list has
+  loaded: while it was loading or had failed, a save went out as a create with an
+  open agent grant and could widen a key someone had narrowed.
+- **The #1079 fragment** now says its decision about REST creates is superseded
+  here, and that its operator revision landed as 19.

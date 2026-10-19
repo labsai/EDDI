@@ -170,7 +170,12 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
      for every list it is not sent, so neither is required here. */
   const existing = !!data?.some((s) => s.keyName === name);
 
+  /* Until the list has loaded, `existing` cannot be known: a save would go out as a
+     create carrying an open agent grant, widening a key someone had narrowed. */
+  const listReady = !!data && !isError;
+
   const save = () => {
+    if (!listReady) return;
     let allowedHosts: string[] | undefined;
     // Untouched on a rotation: send nothing, so the stored hosts are kept. An
     // explicit choice is still sent — that is the one way to change them here.
@@ -259,7 +264,7 @@ function SpaceSecrets({ space }: { space: SpaceInfo }) {
         />
         <Button
           onClick={save}
-          disabled={!name || !value || (!existing && allowedHostsMissing(hosts)) || store.isPending}
+          disabled={!listReady || !name || !value || (!existing && allowedHostsMissing(hosts)) || store.isPending}
           data-testid="space-secret-save"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />

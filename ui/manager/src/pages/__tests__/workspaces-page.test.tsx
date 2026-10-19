@@ -156,6 +156,20 @@ describe("WorkspacesPage — storing a space secret", () => {
     });
   });
 
+  it("stays unsubmittable when the secret list could not be read, so it cannot widen an existing key's grant", async () => {
+    enableWorkspaces();
+    const writes = captureSecretWrites();
+    server.use(http.get("*/spacestore/secrets", () => HttpResponse.json({ error: "unavailable" }, { status: 503 })));
+    renderPage("/manage/workspaces", <WorkspacesPage />);
+    const user = userEvent.setup();
+    await fillNameAndValue(user);
+    await user.click(screen.getByTestId("space-secret-hosts-mode-any"));
+
+    expect(screen.getByTestId("space-secret-save")).toBeDisabled();
+    await user.click(screen.getByTestId("space-secret-save"));
+    expect(writes).toEqual([]);
+  });
+
   it("sends [\"*\"] as allowedHosts for Any host", async () => {
     enableWorkspaces();
     const writes = captureSecretWrites();
