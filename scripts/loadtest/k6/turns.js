@@ -70,12 +70,18 @@ function nodeTags(res) {
   return upstream ? { node: upstream.split(',').pop().trim() } : {};
 }
 
-// Retry-After in seconds (EDDI sends delta-seconds), capped, with ±JITTER so that refused VUs
-// do not come back in lockstep. Missing or unparsable: RETRY_DEFAULT_MS.
+// Retry-After (RFC 9110: delta-seconds or an HTTP-date), capped, with ±JITTER so that refused VUs
+// do not come back in lockstep. EDDI sends delta-seconds; a proxy in front may send a date. Missing,
+// unparsable or a date already past: RETRY_DEFAULT_MS.
+function retryAfterMs(header) {
+  const text = header === undefined || header === null ? '' : String(header).trim();
+  if (/^\d+$/.test(text)) return parseInt(text, 10) * 1000;  // strictly digits: "5abc" is not 5 s
+  const at = Date.parse(text);
+  return Number.isFinite(at) && at > Date.now() ? at - Date.now() : RETRY_DEFAULT_MS;
+}
+
 function backoffMs(res) {
-  const header = res.headers['Retry-After'] || res.headers['retry-after'];
-  const seconds = parseFloat(header);
-  const base = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : RETRY_DEFAULT_MS;
+  const base = retryAfterMs(res.headers['Retry-After'] || res.headers['retry-after']);
   const capped = Math.min(base, RETRY_CAP_MS);
   return Math.max(0, capped * (1 + RETRY_JITTER * (2 * Math.random() - 1)));
 }
@@ -127,8 +133,9 @@ function startConversation(tag) {
   // Starts are admitted like turns, so in retry mode a refused start backs off the same way.
   for (let attempt = 1; ; attempt++) {
     res = http.post(`${BASE}/agents/${AGENT}/start?userId=loadtest-${tag}`, null, { timeout: TIMEOUT, tags: { kind: 'start' } });
-    if (res.status !== 503 || RETRY_503 === 0 || attempt >= RETRY_503) break;
-    startsRefused.add(1);
+    if (res.status !== 503 || RETRY_503 === 0) break;
+    startsRefused.add(1);  // every refusal, the last one of an abandoned start included
+    if (attempt >= RETRY_503) break;
     sleep(backoffMs(res) / 1000);
   }
   const loc = res.headers['Location'] || res.headers['location'] || '';

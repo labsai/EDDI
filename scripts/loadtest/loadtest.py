@@ -846,7 +846,8 @@ def cmd_gate(args):
     per_collection = {c: {k: round(v / ok, 2) for k, v in d.items()} for c, d in r["db"]["detail"].items()} if ok else {}
     expected_turns = sc["vus"] * sc["turns"]
     failures, lines = [], ["| Counter | Per turn | Ceiling | |", "|---|---|---|---|"]
-    if ok != expected_turns or any(r["errors"].values()):
+    run_failed = ok != expected_turns or any(r["errors"].values())
+    if run_failed:
         failures.append(f"{ok:.0f} of {expected_turns} turns succeeded; errors {r['errors']}")
 
     headroom = spec.get("headroom", {})
@@ -894,6 +895,10 @@ def cmd_gate(args):
     with open(os.path.join(RESULTS, "gate-summary.md"), "w", encoding="utf-8") as f:
         f.write(text)
     print(text)
+    if args.record and run_failed:
+        # Ceilings from a partial run describe that run (with 0 turns, every ceiling would be its
+        # headroom alone); a counter over its old ceiling, on the other hand, is what --record is for.
+        raise SystemExit("not recording: the run had failed or missing turns, see above")
     if args.record:
         def ceil(op, v):
             return math.ceil((v + room(op)) * 10) / 10

@@ -167,8 +167,10 @@ as artifacts and written to the job summary, never gated.
 
 What is gated, and what is not:
 
-- **`max_ops_per_turn`** caps `serverStatus().opcounters`. MongoDB counts inserted, updated and
-  deleted *documents* there, which the fixed scenario reproduces. The audit ledger is written from a
+- **`max_ops_per_turn`** caps `serverStatus().opcounters`, which the fixed scenario reproduces. Its
+  `insert` counts inserted *documents* (one multi-document insert adds one per document: `top` showed
+  about 23 insert commands where `opcounters.insert` rose by 320); `update` and `delete` count
+  statements, not the documents they match. The audit ledger is written from a
   queue every 3 s, so without care a short run catches the warm-up's last batch or loses its own
   (runner runs showed 3.8 and 2.66 inserts per turn against 3.2). Every measurement therefore
   *settles* before both snapshots: it waits until each node's `eddi_audit_queue_depth` is 0, then
