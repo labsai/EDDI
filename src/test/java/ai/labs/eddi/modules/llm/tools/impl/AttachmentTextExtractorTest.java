@@ -6,10 +6,12 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -17,6 +19,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -217,7 +223,83 @@ class AttachmentTextExtractorTest {
         }
     }
 
+    // ==================== Decode budgets (security review M11)
+    // ====================
+
+    @Nested
+    class DecodeBudgets {
+
+        private static final long ONE_MB = 1024L * 1024;
+
+        @Test
+        void shouldRefuseAFlateStreamThatExpandsPastTheCap() throws Exception {
+            var bounded = new AttachmentTextExtractor(10_000, 500, ONE_MB);
+            byte[] bomb = pdfWithFlateContents(3 * (int) ONE_MB);
+            assertTrue(bomb.length < 100_000, "the bomb is small on disk: " + bomb.length);
+
+            var e = assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(bomb));
+            assertTrue(e.getMessage().contains("expands to more than"), e.getMessage());
+            assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(bomb, 1, 1, 10_000));
+            assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfInfo(bomb));
+        }
+
+        @Test
+        void shouldRefuseStreamsThatTogetherExpandPastTheDocumentBudget() throws Exception {
+            // each stream passes the per-stream pre-scan; together they pass twice the cap
+            var bounded = new AttachmentTextExtractor(10_000, 500, ONE_MB);
+            int each = (int) (ONE_MB * 9 / 10);
+            byte[] pdf = pdfWithFlateContents(each, each, each);
+
+            var e = assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(pdf));
+            assertTrue(e.getMessage().contains("expands to more than 2 MB"), e.getMessage());
+        }
+
+        @Test
+        void shouldStillReadAnOrdinaryPdfUnderTheBudget() throws Exception {
+            var bounded = new AttachmentTextExtractor(10_000, 500, ONE_MB);
+            assertTrue(bounded.extractPdfText(createPdf("small and fine")).contains("small and fine"));
+        }
+
+        @Test
+        void shouldApplyThePageCapToAPageRange() throws Exception {
+            var twoPages = new AttachmentTextExtractor(10_000, 2, ONE_MB);
+            byte[] pdf = createMultiPagePdf("Alpha page", "Bravo page", "Charlie page", "Delta page", "Echo page");
+
+            String result = twoPages.extractPdfText(pdf, 2, 5, 10_000);
+
+            assertTrue(result.contains("Bravo page"), result);
+            assertTrue(result.contains("Charlie page"), result);
+            assertFalse(result.contains("Delta page"), "only maxPages pages are read from the start page: " + result);
+            assertFalse(result.contains("Echo page"), result);
+        }
+    }
+
     // ==================== Helpers ====================
+
+    /**
+     * One page whose content streams are FlateDecode-compressed runs of spaces
+     * (valid, empty page content) of the given decoded sizes, after a line of text
+     * — a deflate bomb in miniature.
+     */
+    private static byte[] pdfWithFlateContents(int... decodedSizes) throws Exception {
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var page = new PDPage();
+            doc.addPage(page);
+            List<PDStream> contents = new ArrayList<>();
+            for (int size : decodedSizes) {
+                var stream = new PDStream(doc);
+                try (OutputStream os = stream.createOutputStream(COSName.FLATE_DECODE)) {
+                    byte[] spaces = new byte[size];
+                    Arrays.fill(spaces, (byte) ' ');
+                    os.write(spaces);
+                }
+                contents.add(stream);
+            }
+            page.setContents(contents);
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
 
     private static byte[] createPdf(String text) throws Exception {
         return createMultiPagePdf(text);

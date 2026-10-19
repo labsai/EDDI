@@ -7,6 +7,7 @@ import { OperatorDrawer } from "../operator-drawer";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
@@ -27,6 +28,7 @@ describe("OperatorDrawer — Escape and the unsent draft", () => {
     useOperatorChatStore.getState().reset();
     useOperatorChatStore.setState({ draft: "" });
     useOperatorDrawerStore.setState({ isOpen: true });
+    serveTrustedOperator("op-1");
     server.use(
       http.get(`*/variablestore/variables/default/${OPERATOR_VARIABLE_KEY}`, () =>
         HttpResponse.json({

@@ -187,6 +187,28 @@ public final class AuditHmac {
     }
 
     /**
+     * Prefix of a pseudonym keyed under a per-deployment random salt rather than an
+     * audit signing key — what GDPR erasure writes into the database logs when the
+     * ledger does not sign (no vault master key, no {@code eddi.audit.hmac-key}).
+     * Begins with {@link #GDPR_PSEUDONYM_PREFIX}, so every "already pseudonymised"
+     * check recognises it.
+     */
+    public static final String SALTED_PSEUDONYM_PREFIX = GDPR_PSEUDONYM_PREFIX + "s1:";
+
+    /**
+     * {@value #SALTED_PSEUDONYM_PREFIX} followed by the hex HMAC of the identifier
+     * under {@code salt}. Like {@link #keyedPseudonymFor}, and unlike
+     * {@link #pseudonymFor}, it cannot be recomputed from a list of candidate ids
+     * without the salt.
+     */
+    public static String saltedPseudonymFor(String userId, byte[] salt) {
+        if (userId == null) {
+            throw new IllegalArgumentException("userId must not be null when deriving a GDPR pseudonym");
+        }
+        return SALTED_PSEUDONYM_PREFIX + hmacSha256(userId, salt);
+    }
+
+    /**
      * The value v5 signs in place of the raw {@code userId}: its keyed pseudonym,
      * or the identifier verbatim when it already is a pseudonym. Same
      * signature-preserving property as {@link #identityToken}, with a keyed

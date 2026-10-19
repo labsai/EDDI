@@ -242,6 +242,29 @@ export function applyColorOverrides(params: URLSearchParams): void {
 }
 
 /**
+ * True when `raw` parses, against this page's origin, to a URL on that same
+ * origin whose pathname is exactly `raw` and which carries no query or fragment.
+ * `http.ts` builds request URLs by concatenating `${base}${path}`, so a `?` or
+ * `#` in the base turns the real path into a query string
+ * (`/administration/cluster/caches/resync?` + `/agents/...`) and the widget
+ * fires a state-changing request at a path the page owner never named. `..`
+ * segments fail the pathname comparison because the URL parser collapses them.
+ */
+function isCleanSameOriginPath(raw: string): boolean {
+  try {
+    const url = new URL(raw, window.location.origin);
+    return (
+      url.origin === window.location.origin &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.pathname === raw
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Sanitize the `?apiServer=` param so it can never redirect API traffic
  * off-origin. This is an ALLOW-list, not a deny-list: the value must be a clean
  * same-origin absolute path (a single leading `/`, as the dev proxy and sub-path
@@ -250,7 +273,10 @@ export function applyColorOverrides(params: URLSearchParams): void {
  * URL parser strips before resolving, turning `${base}${path}` into the attacker
  * origin and leaking the bearer token. So anything carrying a control character
  * or whitespace (the smuggling vector), a backslash, or not starting with a
- * single `/` is rejected.
+ * single `/` is rejected. Beyond that the value must round-trip through
+ * `new URL(raw, origin)` unchanged with no `?`, `#` or `%` (see
+ * `isCleanSameOriginPath`), so it cannot smuggle a query string into the
+ * concatenated request URL.
  */
 export function sanitizeApiServer(raw: string | null): string | null {
   if (!raw) return null;
@@ -259,8 +285,9 @@ export function sanitizeApiServer(raw: string | null): string | null {
     // eslint-disable-next-line no-control-regex
     /[\u0000- \u007f\\]/.test(raw) || // control chars, whitespace, DEL, backslash
     !raw.startsWith("/") || // must be an absolute path...
-    raw.startsWith("//"); // ...but not a protocol-relative //host
-  if (rejected) {
+    raw.startsWith("//") || // ...but not a protocol-relative //host
+    raw.includes("%"); // no percent-encoded segments (%2F, %2e%2e, %09 ...)
+  if (rejected || !isCleanSameOriginPath(raw)) {
     console.warn(
       "[eddi-chat] ignoring apiServer query param: only a clean same-origin path (single leading '/') is allowed",
     );

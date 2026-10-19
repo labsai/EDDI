@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.SharedArtifact;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -61,6 +63,19 @@ import java.util.Map;
  *            what each {@link IGdprParticipant} holds on the user — the user
  *            directory entry, workspace notifications — keyed by the
  *            participant's name. Empty when none of them holds anything
+ * @param groupConversations
+ *            the group discussions the user started: the question and the
+ *            transcript, capped like the conversations
+ * @param groupConversationsTruncated
+ *            true when that cap bit — the bundle is then incomplete
+ * @param sharedArtifacts
+ *            the shared artifacts of the user's discussions (I17), with their
+ *            revision history, capped
+ * @param sharedArtifactsTruncated
+ *            true when that cap bit — the bundle is then incomplete
+ * @param failedCategories
+ *            categories whose export failed outright (a store error), so they
+ *            are absent rather than empty. Counts against {@link #complete()}
  *
  * @author ginccc
  * @since 6.0.0
@@ -77,12 +92,34 @@ public record UserDataExport(
         boolean conversationsTruncated,
         List<String> failedConversationIds,
         List<ConnectionGrantExportEntry> connectionGrants,
-        Map<String, Object> additionalData) {
+        Map<String, Object> additionalData,
+        List<GroupConversationExportEntry> groupConversations,
+        boolean groupConversationsTruncated,
+        List<SharedArtifactExportEntry> sharedArtifacts,
+        boolean sharedArtifactsTruncated,
+        List<String> failedCategories) {
 
     public UserDataExport {
         failedConversationIds = failedConversationIds == null ? List.of() : List.copyOf(failedConversationIds);
         connectionGrants = connectionGrants == null ? List.of() : List.copyOf(connectionGrants);
         additionalData = additionalData == null ? Map.of() : Map.copyOf(additionalData);
+        groupConversations = groupConversations == null ? List.of() : List.copyOf(groupConversations);
+        sharedArtifacts = sharedArtifacts == null ? List.of() : List.copyOf(sharedArtifacts);
+        failedCategories = failedCategories == null ? List.of() : List.copyOf(failedCategories);
+    }
+
+    /**
+     * Backward-compatible constructor for the shape that predates the group
+     * conversation and shared artifact sections — neither is present.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries, List<AttachmentExportEntry> attachments,
+            int totalConversations, boolean conversationsTruncated, List<String> failedConversationIds,
+            List<ConnectionGrantExportEntry> connectionGrants, Map<String, Object> additionalData) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, attachments,
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData,
+                List.of(), false, List.of(), false, List.of());
     }
 
     /**
@@ -149,13 +186,14 @@ public record UserDataExport(
      * erasure cascade names them in {@code GdprDeletionResult}.
      * <p>
      * The two halves of the feature disagree about what the user's data is:
-     * {@code deleteUserData} erases group discussion transcripts, shared artifacts,
-     * schedules and HITL tool journal entries as this user's personal data, and the
-     * export omits all four (closing the gap needs read-by-user methods those
-     * stores do not have — see {@code IRestGdprAdmin}). Until it is closed, the
-     * omission is part of the answer rather than a footnote in the interface
-     * Javadoc: a data subject whose data lives only in these categories would
-     * otherwise be handed an empty bundle described as complete.
+     * {@code deleteUserData} erases schedules and HITL tool journal entries as this
+     * user's personal data, and the export omits both (closing the gap needs
+     * read-by-user methods those stores do not have — see {@code IRestGdprAdmin}).
+     * Group discussion transcripts and shared artifacts were on this list too and
+     * are exported now. Until the rest is closed, the omission is part of the
+     * answer rather than a footnote in the interface Javadoc: a data subject whose
+     * data lives only in these categories would otherwise be handed an empty bundle
+     * described as complete.
      */
     /**
      * The section a participant contributes when its export failed — present, so
@@ -163,7 +201,7 @@ public record UserDataExport(
      */
     public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
 
-    public static final List<String> OMITTED_CATEGORIES = List.of("groupConversations", "sharedArtifacts", "schedules", "journalEntries");
+    public static final List<String> OMITTED_CATEGORIES = List.of("schedules", "journalEntries");
 
     /**
      * The categories this bundle is known not to cover.
@@ -189,18 +227,20 @@ public record UserDataExport(
      * lives <em>only</em> in {@link #OMITTED_CATEGORIES} got an empty one. A DPO
      * answering an Art. 15/20 request needs the honest answer, so the omitted
      * categories count against completeness exactly as the cap does. False until
-     * those four stores are exportable.
+     * the remaining stores are exportable.
      * <p>
      * {@link #failedConversationIds()} counts too, and for the same reason: a
      * conversation the exporter could not load is missing from the bundle whether
      * the cap or a failed read is why. That third term is masked today by the
      * omitted categories always being non-empty — it becomes the load-bearing one
-     * the moment those four exporters land.
+     * the moment the remaining exporters land. So do the group-conversation and
+     * shared-artifact caps and {@link #failedCategories()}.
      */
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     public boolean complete() {
         return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty()
-                && !additionalData.containsValue(EXPORT_FAILED);
+                && !additionalData.containsValue(EXPORT_FAILED) && !groupConversationsTruncated && !sharedArtifactsTruncated
+                && failedCategories.isEmpty();
     }
 
     /**
@@ -228,6 +268,37 @@ public record UserDataExport(
             Instant updatedAt,
             Instant lastRefreshAt,
             Instant accessTokenExpiresAt) {
+    }
+
+    /**
+     * A group discussion the user started, for export: the question and the
+     * transcript (every agent turn), without the orchestration internals.
+     */
+    public record GroupConversationExportEntry(
+            String groupConversationId,
+            String groupId,
+            String state,
+            String originalQuestion,
+            List<GroupConversation.TranscriptEntry> transcript,
+            Instant created,
+            Instant lastModified) {
+    }
+
+    /**
+     * A shared artifact of one of the user's discussions, for export, with its
+     * superseded revisions.
+     */
+    public record SharedArtifactExportEntry(
+            String artifactId,
+            String groupConversationId,
+            String name,
+            String type,
+            String status,
+            long version,
+            String content,
+            List<SharedArtifact.ArtifactRevision> history,
+            Instant createdAt,
+            Instant updatedAt) {
     }
 
     /**

@@ -2921,6 +2921,7 @@
     "question": "Pergunta",
     "readyToDiscuss": "Pronto para discutir",
     "responding": "respondendo…",
+    "usingTool": "Usando {{tool}}…",
     "reviewMemberRoster": "Lista de membros",
     "reviewMembers": "Membros",
     "reviewModerator": "Moderador",
@@ -5010,6 +5011,7 @@
       "action": "Ativar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instruções vieram da configuração salva, que qualquer pessoa que possa editar as configurações da plataforma pode ter alterado. Eu as li acima e quero instalá-las.",
       "title": "Ativar o operador da plataforma",
       "subtitle": "Escolha o modelo que executará o operador, reveja as suas instruções e implante.",
       "modelStep": "Modelo",
@@ -5112,7 +5114,11 @@
       "gateUnverifiedHelp": "Não foi possível verificar a barreira de aprovação no documento deste agente.",
       "agentId": "Agente",
       "platformBaseUrl": "Chama a plataforma em",
-      "platformBaseUrlUnknown": "não registada"
+      "platformBaseUrlUnknown": "não registada",
+      "unregister": "Anular registo do operador",
+      "unregisterConfirmTitle": "Anular o registo do operador da plataforma?",
+      "unregisterConfirmBody": "Apenas a configuração guardada do operador é removida. Não foi possível verificar que o agente registado é um operador configurado por este Manager, por isso não é implementado, retirado nem eliminado — reveja-o no ecrã Agentes.",
+      "unverifiedActions": "Não foi possível verificar que este agente é um operador configurado pelo Manager, por isso este ecrã não o sonda, retira nem elimina. «Reconfigurar» aprovisiona um novo operador e deixa este agente como está."
     },
     "chat": {
       "empty": "Pergunte sobre a sua instalação. O operador consulta e mostra-lhe cada chamada que faz.",
@@ -5202,7 +5208,8 @@
       "activatedChecking": "Operador de plataforma ativado. As verificações de conexão estão em execução em segundo plano.",
       "writeProbeVerified": "Acesso de escrita verificado — uma escrita real protegida pausou para aprovação.",
       "writeProbeFailed": "O portão de aprovação não resistiu — o operador foi removido.",
-      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva."
+      "writeProbeInconclusive": "A sonda de escrita ao vivo foi inconclusiva.",
+      "unregistered": "Registo do operador da plataforma anulado"
     },
     "canary": {
       "genericFailure": "A verificação de ligação não foi bem-sucedida.",
@@ -5243,7 +5250,22 @@
     "superseded": {
       "title": "O agente operador anterior continua implantado."
     },
+    "trust": {
+      "checking": "Verificando o operador antes de abrir o chat…",
+      "title": "Não foi possível verificar o operador da plataforma",
+      "body": "O chat está desativado porque o agente registrado como operador ({{agentId}}) não é comprovadamente o que este Manager configurou. Quem pode editar as configurações da plataforma pode mudar qual é esse agente.",
+      "reasonMarker": "Ele não possui a marca de operador da plataforma, então pode não ser o agente provisionado pelo Manager.",
+      "reasonGate": "Não foi possível verificar o portão de aprovação dele: {{detail}}",
+      "reasonUnreadable": "Não foi possível concluir as verificações: {{detail}}",
+      "recheck": "Verificar novamente",
+      "manage": "Abrir a tela do operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar as instruções armazenadas",
+      "reviewBody": "Estas instruções foram salvas antes e serão instaladas no novo operador. Quem pode editar as configurações da plataforma pode tê-las alterado, então leia o que difere do padrão antes de continuar.",
+      "reviewSummary": "{{added}} linhas adicionadas, {{removed}} linhas padrão removidas",
+      "reviewFull": "Mostrar o texto armazenado completo",
+      "reviewConfirm": "Li estas instruções e quero instalá-las",
       "hint": "Há uma atualização disponível para o Platform Operator.",
       "blockerBaseUrl": "O endereço do servidor de modelos não foi guardado — introduza-o novamente para atualizar.",
       "addedTools_other": "{{count}} ferramentas novas",

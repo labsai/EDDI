@@ -223,6 +223,28 @@ class SharedArtifactStoreTest {
     }
 
     @Test
+    @DisplayName("listAllForUser (GDPR export) keeps exact owners only and fails on an unreadable row")
+    void export_exactMatchDecides() throws Exception {
+        var ownedResource = resource("a-1", artifact("a-1", "gc-1", "user-1", 1));
+        var nearMissResource = resource("a-2", artifact("a-2", "gc-2", "user-10", 1));
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("createdAt"), eq(0), eq(5)))
+                .thenReturn(List.of(resourceId("a-1"), resourceId("a-2")));
+        when(storage.read("a-1", 1)).thenReturn(ownedResource);
+        when(storage.read("a-2", 1)).thenReturn(nearMissResource);
+
+        var listed = store.listAllForUser("user-1", 5);
+
+        assertEquals(1, listed.size());
+        assertEquals("a-1", listed.getFirst().getId());
+        assertTrue(store.listAllForUser(" ", 5).isEmpty());
+
+        IResourceStorage.IResource<SharedArtifact> broken = mock(IResourceStorage.IResource.class);
+        when(broken.getData()).thenThrow(new IOException("corrupt"));
+        when(storage.read("a-1", 1)).thenReturn(broken);
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.listAllForUser("user-1", 5));
+    }
+
+    @Test
     @DisplayName("an owned row that cannot be read fails the erasure loudly — never a partial success")
     void erasure_unreadableRow_failsLoudly() throws Exception {
         when(storage.findResources(any(IResourceFilter.QueryFilters[].class), eq("createdAt"), eq(0), eq(IResourceStorage.MAX_RESULT_LIMIT)))

@@ -14935,6 +14935,24 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
+              "expr": "1000 * sum(rate(eddi_datastore_pool_wait_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum(rate(eddi_datastore_pool_wait_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "refId": "G",
+              "legendFormat": "MongoDB mean wait for a connection (ms)"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(eddi_datastore_pool_wait_timeouts_total{job=~\"$job\"}[$__rate_interval]))",
+              "refId": "H",
+              "legendFormat": "MongoDB checkouts timed out /s"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
               "expr": "sum(agroal_active_count{job=~\"$job\"})",
               "refId": "D",
               "legendFormat": "PostgreSQL active"

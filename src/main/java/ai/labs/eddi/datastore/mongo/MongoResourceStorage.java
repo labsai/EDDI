@@ -390,6 +390,17 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public boolean setNumberField(String id, String fieldName, long value) {
+        checkNotNull(id, "id");
+        IResourceStorage.requireTopLevelFieldName(fieldName);
+        if (!ObjectId.isValid(id)) {
+            return false;
+        }
+        // One updateOne $set on the live row: no read, and no other field is rewritten.
+        return currentCollection.updateOne(Filters.eq(ID_FIELD, new ObjectId(id)), Updates.set(fieldName, value)).getMatchedCount() > 0;
+    }
+
+    @Override
     public void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
             throws IResourceStore.ResourceModifiedException {
         Resource resource = checkInternalResource(newResource);

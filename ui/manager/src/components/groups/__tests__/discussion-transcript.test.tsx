@@ -229,6 +229,7 @@ describe("DiscussionTranscript", () => {
       artifactUpdates: [],
       memberCosts: new Map(),
       stances: new Map(),
+      memberToolCalls: new Map(),
       interrupted: false,
       connected: true,
       cancelRequested: false,
@@ -279,6 +280,7 @@ describe("DiscussionTranscript", () => {
       artifactUpdates: [],
       memberCosts: new Map(),
       stances: new Map(),
+      memberToolCalls: new Map(),
       interrupted: false,
       connected: true,
       cancelRequested: false,
@@ -408,6 +410,7 @@ describe("DiscussionTranscript — the group approval card", () => {
       hitlPause: { reason: "Needs sign-off", phaseName: "Review", granularity: "TASK" },
       memberCosts: new Map(),
       stances: new Map(),
+      memberToolCalls: new Map(),
       retroRecorded: [],
       artifactUpdates: [],
     } as unknown as GroupStreamState;
@@ -487,6 +490,7 @@ describe("DiscussionTranscript — the card survives the stream taking over", ()
       hitlPause: null,
       memberCosts: new Map(),
       stances: new Map(),
+      memberToolCalls: new Map(),
       retroRecorded: [],
       artifactUpdates: [],
     }) as unknown as GroupStreamState;
