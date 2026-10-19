@@ -263,17 +263,41 @@ store_vault_key() {
         exit 1
     fi
 
+    if [ -z "$VAULT_KEY_HOST" ]; then
+        echo "[seed] ERROR: no known endpoint for EDDI_DEMO_LLM_TYPE=${EDDI_DEMO_LLM_TYPE:-openai}." >&2
+        echo "[seed] Set EDDI_DEMO_LLM_ALLOWED_HOST to the host the key may be sent to, or to * for any host." >&2
+        exit 1
+    fi
+
     echo "[seed] Storing the provider key in the vault as '$VAULT_KEY_NAME'…"
     # Fail hard rather than fall back to embedding the key: a silent downgrade
     # to a plaintext credential is the wrong way to be helpful.
+    # Both lists are required on a create under eddi.vault.grant-enforcement=enforce
+    # (the default). allowedHosts is where the key may be sent: the provider's own
+    # endpoint, so an edited config cannot send it anywhere else.
     curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME" \
         -H 'Content-Type: application/json' \
-        -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\"}" \
+        -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\", \"allowedAgents\": [\"*\"], \"allowedHosts\": [\"$VAULT_KEY_HOST\"]}" \
         -o /dev/null
+}
+
+# Where the provider key may be sent. EDDI_DEMO_LLM_ALLOWED_HOST overrides it,
+# and "*" stores the key with no destination restriction. Any other type has no
+# known endpoint here, so it needs EDDI_DEMO_LLM_ALLOWED_HOST: an unrestricted key
+# is never the silent default.
+demo_llm_host() {
+    case "${EDDI_DEMO_LLM_TYPE:-openai}" in
+        openai) echo "api.openai.com" ;;
+        anthropic) echo "api.anthropic.com" ;;
+        gemini) echo "generativelanguage.googleapis.com" ;;
+        mistral) echo "api.mistral.ai" ;;
+        *) echo "" ;;
+    esac
 }
 
 # ── What to seed ──
 VAULT_KEY_NAME="demo-llm-api-key"
+VAULT_KEY_HOST="${EDDI_DEMO_LLM_ALLOWED_HOST:-$(demo_llm_host)}"
 
 if has_model "eddi-demo-agent-"; then
     echo "[seed] Rule-based demo agent already deployed — skipping."

@@ -2316,7 +2316,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The outcomes of `ToolExecutionService.executeToolWrapped()`. `success` and `failure` partition every wrapped call between them; `cached` refines `success`, and `ratelimited` and `timeout` refine `failure`, so those three series are counted twice in the stack rather than being alternatives.",
+          "description": "The outcomes of `ToolExecutionService.executeToolWrapped()`. `success` and `failure` partition every wrapped call between them; `cached` refines `success`, and `ratelimited` and `timeout` refine `failure`, so those three series are counted twice in the stack rather than being alternatives. `repeat refused` counts calls the tool repeat guard refused before execution; they never reach `executeToolWrapped()` and are additive to the partition.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -2378,6 +2378,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "timeout"
+            },
+            {
+              "refId": "F",
+              "expr": "sum(rate(eddi_tool_repeat_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "repeat refused"
             }
           ],
           "fieldConfig": {

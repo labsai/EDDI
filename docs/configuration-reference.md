@@ -171,6 +171,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
+| `eddi.coordinator.dead-letter.max-bytes` | `1073741824` | Size cap of the dead-letter stream in bytes (`<= 0`: none). When full, new dead letters are refused — the oldest are kept for the operator — and stay in the node-local ring (audit entries go to the JSONL file) until there is room |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---
@@ -300,8 +301,8 @@ Full guide: [workspaces.md](workspaces.md).
 | `eddi.workspaces.groups-claim` | `groups` | The JWT claim listing the caller's teams. Needs a group-membership protocol mapper on the `eddi-backend` client; without one every user simply gets a personal space and no teams, which is a correct answer rather than a failure |
 | `eddi.workspaces.legacy-visibility` | *(unset → `shared`)* | Who may see resources with no recorded owner: `shared` (everyone, so an upgrade hides nothing) or `admin-only` (only `eddi-admin`, so an operator migrates deliberately and then closes the door). **Changeable at runtime** in the Manager or with `PUT /workspaces/settings`; setting the property *pins* it, and the API then refuses to change it. A pinned value other than the two fails startup rather than picking a policy by guessing |
 | `eddi.workspaces.default-space` | *(empty)* | Where new resources are filed when a request names no space. Empty means the creator's personal space; a Keycloak group name gives a team-first deployment — for that group's members, while everyone else keeps their personal space. **Changeable at runtime** like `legacy-visibility`, and pinned the same way. A request's `X-EDDI-Space` header — the Manager's "Create in" choice — wins over it for that request |
-| `eddi.workspaces.directory.enabled` | `true` | Records every signed-in user (principal, name, username, email and whether the identity provider verified it, teams) so a share can be addressed by name or **verified** email and resolves to a real account, with autocomplete. Off: shares are taken exactly as typed, as before the directory existed. Covered by GDPR erasure and export |
-| `eddi.workspaces.directory.expose-email` | `true` | Whether share-box suggestions show people's email addresses. Off shows the username instead |
+| `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Records every signed-in user (principal, name, username, email and whether the identity provider verified it, teams) so a share can be addressed by name or **verified** email and resolves to a real account, with autocomplete. Off: shares are taken exactly as typed, as before the directory existed. Unset, it is on exactly when workspaces are enforced. Suggestions start at three characters, and a non-admin is offered only their own teams and their members. Covered by GDPR erasure and export |
+| `eddi.workspaces.directory.expose-email` | `true` | Whether share-box suggestions show people's email addresses. Off shows the username instead. Even on, an address is shown only to `eddi-admin` or to somebody who shares a team with that person |
 
 ### Secrets vault
 
@@ -339,7 +340,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign agent configurations for provenance |
+| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds one under `agent-signing-key:{agentId}`. An agent without a key is not looked up again for 60 s, so a key written into the vault by hand is used within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |

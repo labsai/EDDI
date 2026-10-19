@@ -265,6 +265,11 @@ public class ConversationMemoryUtilities {
         if (steps == null) {
             return null;
         }
+        if (steps instanceof LazyStepSnapshots lazy) {
+            // The current-step projection must not convert every step just to price
+            // the conversation: the cost comes straight from the live steps.
+            return lazy.conversationCost();
+        }
         double total = 0.0;
         boolean found = false;
         for (var step : steps) {
@@ -986,6 +991,25 @@ public class ConversationMemoryUtilities {
         private LazyStepSnapshots(IConversationStepStack steps) {
             this.steps = steps;
             this.converted = new ConversationStepSnapshot[steps.size()];
+        }
+
+        /**
+         * What {@link ConversationMemoryUtilities#conversationCost(List)} returns for
+         * the fully converted steps, read from the live steps' {@code audit:cost}
+         * entries alone — one stack-level read, no step converted. A step holds at most
+         * one value per key, which is all the full conversion sums per step.
+         */
+        Double conversationCost() {
+            double total = 0.0;
+            boolean found = false;
+            for (IData<Object> data : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
+                if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
+                        && cost.doubleValue() >= 0.0) {
+                    total += cost.doubleValue();
+                    found = true;
+                }
+            }
+            return found ? total : null;
         }
 
         @Override

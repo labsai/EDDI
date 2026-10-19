@@ -200,12 +200,35 @@ a nameless caller with `403` as a second line of defence. Background work
 (schedule fires, group members, sub-agents) never authenticates a request and is
 unaffected.
 
+The principal is also the id a share is stored under and the `subject` the
+[user directory](workspaces.md#finding-people-the-user-directory) returns beside a
+person's name, so whatever claim it comes from is visible to anyone who can share
+with that person. Where `preferred_username` is an email address, set
+`quarkus.oidc.token.principal-claim` to a stable, non-address claim such as `sub`
+if colleagues' addresses are not everyone's business; the directory hides
+addresses it holds as *email* or *username*, but cannot hide the principal itself.
+
 If you see that WARN, either add one of those claims to the access token — for the
 shipped realm, [Identity claims, and realms imported from EDDI
 6.1.0–6.4.0](#identity-claims-and-realms-imported-from-eddi-610640) below is the
 repair — or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` to a claim your provider does
 emit. Pick a claim that is stable and unique per user: ownership is keyed on its
 value, so a changed name orphans everything filed under the old one.
+
+**Some names are EDDI's own.** EDDI also files work under principals it makes up
+for callers that bring no token: `slack:<team>:<user>` for a Slack user,
+`openwebui:…` for a header-named Open WebUI user, `group:<id>` for a group's
+shared memory, `system:…` for the scheduler and other engine work, `a2a:…`,
+`mcp:…`, `webhook:…`, `agent-test:…`, `anonymous-…` and `anonymous`, and the
+`gdpr-erased:…` pseudonym. Because ownership is a string comparison, a token
+whose principal were `slack:T1:U2` would own that Slack user's conversations.
+EDDI therefore **rejects a token whose principal starts with any of these
+prefixes (case-insensitively) with `401`**, and logs a `[SECURITY]` WARN naming
+the prefix and the issuer, throttled like the one above. Only an identity
+provider that allows `:` in usernames can issue such a name; if you see the WARN,
+rename the account or point `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` at a claim that
+cannot take that value. The list lives in `ReservedPrincipals`, and a unit test
+fails when the code starts minting a new prefix without adding it there.
 
 > **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
 > *every* configuration in the deployment. To scope agents, workflows and the

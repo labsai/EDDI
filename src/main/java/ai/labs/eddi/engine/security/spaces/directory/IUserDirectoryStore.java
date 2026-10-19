@@ -53,6 +53,17 @@ public interface IUserDirectoryStore {
     List<DirectoryUser> search(String prefix, int limit);
 
     /**
+     * As {@link #search}, restricted to entries that belong to at least one of
+     * {@code teamSubjects} ({@code team:<group>}). What a non-administrator's share
+     * box searches, so the restriction runs in the query rather than over a page
+     * that may hold nobody from the caller's teams.
+     *
+     * @param teamSubjects
+     *            team subjects; empty matches nobody
+     */
+    List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, int limit);
+
+    /**
      * Team subjects ({@code team:<group>}) any recorded user belongs to, whose
      * group name starts with {@code prefix}, ignoring case. A blank prefix lists
      * teams in no particular order.
