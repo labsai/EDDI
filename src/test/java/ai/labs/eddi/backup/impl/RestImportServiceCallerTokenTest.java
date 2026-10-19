@@ -23,8 +23,10 @@ import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -119,6 +121,10 @@ class RestImportServiceCallerTokenTest {
     }
 
     private void importExpectingForbidden(String strategy) throws Exception {
+        importExpecting(ForbiddenException.class, strategy);
+    }
+
+    private void importExpecting(Class<? extends Throwable> refusal, String strategy) throws Exception {
         try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
             CDI cdi = mock(CDI.class);
             cdiMock.when(CDI::current).thenReturn(cdi);
@@ -127,7 +133,7 @@ class RestImportServiceCallerTokenTest {
             stubBean(cdi, IWorkflowStore.class, workflowStore);
             stubBean(cdi, IAgentStore.class, agentStore);
 
-            assertThrows(ForbiddenException.class,
+            assertThrows(refusal,
                     () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), strategy, null, null, null));
         }
         verify(apiCallsStore, never()).create(any());
@@ -141,6 +147,14 @@ class RestImportServiceCallerTokenTest {
         doThrow(new ForbiddenException("caller token")).when(policy).requireMayAuthor(same(httpCalls), anyString());
 
         importExpectingForbidden("create");
+    }
+
+    @Test
+    @DisplayName("a config carrying the read-redaction marker fails the import before it is stored")
+    void redactionMarkerFailsTheImport() throws Exception {
+        httpCalls.setTargetServerUrl("https://svc:" + ConfigSecretRedactor.IN_STRING_REDACTED + "@api.example.com");
+
+        importExpecting(BadRequestException.class, "create");
     }
 
     @Test

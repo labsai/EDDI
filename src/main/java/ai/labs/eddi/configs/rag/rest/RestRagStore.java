@@ -20,6 +20,8 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -48,6 +50,7 @@ public class RestRagStore implements IRestRagStore {
     private final IRagStore ragStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RagSourceIngestionService sourceIngestionService;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final KnowledgeBaseStorageGuard storageGuard;
@@ -58,6 +61,7 @@ public class RestRagStore implements IRestRagStore {
             EmbeddingStoreFactory embeddingStoreFactory) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, ragStore, documentDescriptorStore, resourceAccessGuard);
         this.ragStore = ragStore;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.sourceIngestionService = sourceIngestionService;
         this.embeddingStoreFactory = embeddingStoreFactory;
@@ -82,6 +86,22 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public RagConfiguration readRag(String id, Integer version) {
+        RagConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin() ? stored : ConfigSecretRedactor.redact(stored, RagConfiguration.class);
+    }
+
+    /**
+     * {@link #readRag} without the redaction, for the server-side work an editor's
+     * request starts: ingestion builds the embedding model and store from this
+     * document (a redacted {@code apiKey} would fail it), and upgrade and sync
+     * compare against it and write it back. The same access check applies, and the
+     * document never leaves the server.
+     */
+    public RagConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
@@ -304,6 +324,9 @@ public class RestRagStore implements IRestRagStore {
             // RestVersionInfo rejects null with its own error message.
             return;
         }
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(ragConfiguration);
 
         normalizeLegacyChunkStrategy(ragConfiguration);
         warnOnPlaintextSecrets(ragConfiguration);
@@ -508,6 +531,7 @@ public class RestRagStore implements IRestRagStore {
     public Response duplicateRag(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
+        RedactionMarkerGuard.requireNone(config);
         // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
         // document must not be refused just because the rules tightened after it was
         // stored.

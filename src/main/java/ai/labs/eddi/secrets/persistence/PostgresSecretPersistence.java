@@ -279,6 +279,28 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        ensureSchema();
+        // Guarded on the IV the reader saw: a concurrent store draws a new one.
+        String sql = """
+                UPDATE secret_vault_secrets
+                   SET encrypted_value = ?, iv = ?
+                 WHERE tenant_id = ? AND key_name = ? AND dek_id IS NOT DISTINCT FROM ? AND iv = ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, encryptedValue);
+            ps.setString(2, iv);
+            ps.setString(3, tenantId);
+            ps.setString(4, keyName);
+            ps.setString(5, dekId);
+            ps.setString(6, expectedIv);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to re-seal secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
     public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
         ensureSchema();
         // Two columns in the SET list, and no INSERT branch. encrypted_value, iv,

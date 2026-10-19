@@ -264,6 +264,19 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        try {
+            // Guarded on the IV the reader saw (and the generation, which the AAD
+            // names): a concurrent store draws a new IV, so it is never overwritten.
+            var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName), eq(FIELD_DEK_ID, dekId), eq(FIELD_IV, expectedIv));
+            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, encryptedValue), Updates.set(FIELD_IV, iv));
+            return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to re-seal secret " + tenantId + "/" + keyName, e);
+        }
+    }
+
+    @Override
     public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
         try {
             var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName));
