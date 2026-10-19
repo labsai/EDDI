@@ -19,7 +19,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DisplayName("EmbeddingStoreFactory addresses stores by knowledge base id")
 class EmbeddingStoreFactoryIsolationTest {
@@ -109,5 +111,42 @@ class EmbeddingStoreFactoryIsolationTest {
     void retrievalFilter() {
         assertNotNull(EmbeddingStoreFactory.retrievalFilter(ALPHA_ID, kb("alpha", "id")));
         assertNull(EmbeddingStoreFactory.retrievalFilter(ALPHA_ID, kb("alpha", null)));
+    }
+
+    /**
+     * Security review M9.2: pgjdbc puts server names into its JDBC URL unencoded,
+     * so a host carrying a path, query or comma list injected driver properties or
+     * a second, unchecked host.
+     */
+    @Test
+    @DisplayName("a pgvector/qdrant host must be one hostname or IP literal — JDBC URL injection is refused")
+    void hostMustBePlain() {
+        for (String injected : new String[]{
+                "db.example.com/eddi?sslmode=disable&sslfactory=org.postgresql.ssl.NonValidatingFactory&x=",
+                "a.com,10.0.0.5", "db.example.com:5432", "db example.com", "db.example.com?socketFactory=x", "db.example.com#x",
+                "jdbc:postgresql://x", "", "-db.example.com", "[::1", "db\n.example.com"}) {
+            var e = assertThrows(IllegalArgumentException.class, () -> EmbeddingStoreFactory.requirePlainHost(injected, "pgvector"),
+                    "must refuse: " + injected);
+            assertTrue(e.getMessage().contains("single hostname"), e.getMessage());
+        }
+        for (String plain : new String[]{"localhost", "db.example.com", "eddi_postgres", "10.0.0.5", "::1", "[::1]", "fd00::5",
+                "pg-1.internal."}) {
+            assertEquals(plain, EmbeddingStoreFactory.requirePlainHost(plain, "pgvector"));
+        }
+    }
+
+    @Test
+    @DisplayName("an injected pgvector host fails the store build before any connection is attempted")
+    void injectedHostFailsTheBuild() {
+        GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        SecretResolver secrets = mock(SecretResolver.class);
+        when(variables.resolveAll(anyMap())).thenAnswer(inv -> inv.getArgument(0));
+        when(secrets.resolveSecrets(anyMap())).thenAnswer(inv -> inv.getArgument(0));
+        var factory = new EmbeddingStoreFactory(variables, secrets);
+        var config = kb("alpha", "id");
+        config.setStoreType("pgvector");
+        config.setStoreParameters(Map.of("host", "a.com,10.0.0.5", "password", "pw"));
+        var e = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(ALPHA_ID, config));
+        assertTrue(e.getMessage().contains("single hostname"), e.getMessage());
     }
 }

@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -30,6 +31,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -72,6 +74,21 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final HitlAccessGuard hitlAccessGuard;
     private final ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * The limits a 1:1 upload is held to, re-checked for a discussion's inline
+     * attachments before anything is decoded or stored — see
+     * {@link GroupAttachmentLimits}. Field-injected so the constructor the tests
+     * use stays as it is; the initialisers are the shipped defaults.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520")
+    long maxAttachmentBytes = 20_971_520L;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-conversation", defaultValue = "50")
+    int maxAttachmentsPerConversation = 50;
+
+    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600")
+    long maxAttachmentBytesPerConversation = 104_857_600L;
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
@@ -189,6 +206,22 @@ public class RestGroupConversation implements IRestGroupConversation {
         return null;
     }
 
+    /** {@link GroupAttachmentLimits} with this deployment's limits. */
+    private String attachmentRejectionReason(DiscussRequest request) {
+        return GroupAttachmentLimits.rejectionReason(request.attachments(), maxAttachmentBytes, maxAttachmentsPerConversation,
+                maxAttachmentBytesPerConversation);
+    }
+
+    /**
+     * Client-safe text for a quota refusal at materialization — names the scope,
+     * never the store's message.
+     */
+    private static String quotaRejection(IGroupConversationService.GroupAttachmentRejectedException e) {
+        return "user".equals(e.getScope())
+                ? "Attachment refused: the per-user attachment quota is exhausted."
+                : "Attachment refused: the discussion's attachment quota would be exceeded.";
+    }
+
     private static Response badRequest(String reason) {
         return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN).entity(reason).build();
     }
@@ -200,6 +233,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             return badRequest("A request body is required.");
         }
         String rejection = rejectionReason(request.question(), request.userId());
+        if (rejection == null) {
+            rejection = attachmentRejectionReason(request);
+        }
         if (rejection != null) {
             return badRequest(rejection);
         }
@@ -214,6 +250,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                     : groupConversationService.discuss(groupId, request.question(), userId, 0, null, attachments);
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
+        } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
+            LOGGER.infof("Group discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
+            return badRequest(quotaRejection(e));
         } catch (IGroupConversationService.GroupDepthExceededException e) {
             // Curated bodies throughout this class: the raw exception text is never
             // returned to the caller (CodeQL: information exposure / reflected value —
@@ -245,6 +284,9 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
+        if (rejection == null) {
+            rejection = attachmentRejectionReason(request);
+        }
         if (rejection != null) {
             sendErrorEvent(eventSink, sse, rejection);
             closeQuietly(eventSink);
@@ -267,6 +309,10 @@ public class RestGroupConversation implements IRestGroupConversation {
                 groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener, attachments);
             }
 
+        } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
+            LOGGER.infof("Group streaming discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
+            sendErrorEvent(eventSink, sse, quotaRejection(e));
+            closeQuietly(eventSink);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Curated event text: the SSE body is rendered by the chat UI, so never push
             // the raw message (it used to embed the caller-supplied groupId).
@@ -1095,6 +1141,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
                 // Not terminal — a stance is recomputed at every phase boundary.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
+            }
+
+            @Override
+            public void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
+                // Not terminal — liveness signal while a member's tool loop runs.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
             }
         };
     }

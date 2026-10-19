@@ -137,6 +137,11 @@ class ArtifactToolsTest {
             byId.values().removeIf(a -> userId.equals(a.getOwnerUserId()));
             return before - byId.size();
         }
+
+        @Override
+        public List<SharedArtifact> listAllForUser(String userId, int limit) {
+            return byId.values().stream().filter(a -> userId.equals(a.getOwnerUserId())).limit(limit).toList();
+        }
     }
 
     @BeforeEach

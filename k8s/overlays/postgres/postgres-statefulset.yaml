@@ -24,11 +24,24 @@ spec:
       # PostgreSQL never calls the Kubernetes API, so the pod does not mount the
       # service account token — nothing to steal for a process that gets in.
       automountServiceAccountToken: false
+      # Runs as the image's postgres user from the start, so the entrypoint has
+      # no chown or su-exec step and the container can drop every capability.
+      # PGDATA is a subdirectory of the volume, which initdb creates and owns.
+      # 70 is `postgres` in the alpine image; a Debian-based postgres image uses 999.
       securityContext:
-        fsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: postgres:16.15-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 5432
               name: postgres

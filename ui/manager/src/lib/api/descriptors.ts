@@ -1,6 +1,7 @@
 import { api, isApiError } from "../api-client";
 import type { AgentDescriptor } from "./agents";
 import { mapWithConcurrency } from "../concurrency";
+import { seg } from "./path-segment";
 
 export interface PatchInstruction<T> {
   operation: "SET" | "DELETE";
@@ -18,7 +19,7 @@ export function updateDescriptor(
     document: descriptor,
   };
   return api.patch(
-    `/descriptorstore/descriptors/${id}?version=${version}`,
+    `/descriptorstore/descriptors/${seg(id)}?version=${version}`,
     patch
   );
 }
@@ -40,7 +41,7 @@ export function getDescriptor(
   // `#` or `..` in it would otherwise re-point the request at another path.
   const params = new URLSearchParams({ version: String(version) });
   return api.get<AgentDescriptor>(
-    `/descriptorstore/descriptors/${encodeURIComponent(id)}?${params.toString()}`
+    `/descriptorstore/descriptors/${seg(id)}?${params.toString()}`
   );
 }
 

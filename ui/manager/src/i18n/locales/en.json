@@ -2951,6 +2951,7 @@
     "question": "Question",
     "readyToDiscuss": "Ready to discuss",
     "responding": "responding…",
+    "usingTool": "using {{tool}}…",
     "reviewMemberRoster": "Member Roster",
     "reviewMembers": "Members",
     "reviewModerator": "Moderator",
@@ -4969,6 +4970,7 @@
       "action": "Activate"
     },
     "activation": {
+      "storedPromptConfirm": "These instructions were carried over from the saved configuration, which anyone who can edit platform settings may have changed. I have read them above and want to install them.",
       "title": "Activate the Platform Operator",
       "subtitle": "Choose the model that will run the operator, review its instructions, and deploy.",
       "modelStep": "Model",
@@ -5071,7 +5073,11 @@
       "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
       "agentId": "Agent",
       "platformBaseUrl": "Calls platform at",
-      "platformBaseUrlUnknown": "not recorded"
+      "platformBaseUrlUnknown": "not recorded",
+      "unregister": "Unregister operator",
+      "unregisterConfirmTitle": "Unregister the Platform Operator?",
+      "unregisterConfirmBody": "Only the saved operator configuration is removed. The registered agent could not be verified as one this Manager set up, so it is not deployed, undeployed or deleted — review it on the Agents screen.",
+      "unverifiedActions": "This agent could not be verified as an operator the Manager set up, so this screen will not probe, undeploy or delete it. Reconfigure provisions a new operator and leaves this agent in place."
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -5161,7 +5167,8 @@
       "activatedChecking": "Platform Operator activated. Connection checks are running in the background.",
       "writeProbeVerified": "Write access verified — a real gated write paused for approval.",
       "writeProbeFailed": "The approval gate did not hold — the operator was removed.",
-      "writeProbeInconclusive": "The live write probe was inconclusive."
+      "writeProbeInconclusive": "The live write probe was inconclusive.",
+      "unregistered": "Platform Operator unregistered"
     },
     "canary": {
       "genericFailure": "The connection check did not succeed.",
@@ -5200,7 +5207,22 @@
     "superseded": {
       "title": "The previous operator agent is still deployed."
     },
+    "trust": {
+      "checking": "Verifying the operator before opening chat…",
+      "title": "The Platform Operator could not be verified",
+      "body": "Chat is switched off because the agent registered as the operator ({{agentId}}) is not provably the one this Manager set up. Anyone who can edit platform settings can change which agent that is.",
+      "reasonMarker": "It does not carry the Platform Operator marker, so it may not be the agent the Manager provisioned.",
+      "reasonGate": "Its approval gate could not be verified: {{detail}}",
+      "reasonUnreadable": "The checks could not be completed: {{detail}}",
+      "recheck": "Check again",
+      "manage": "Open the operator screen"
+    },
     "upgrade": {
+      "reviewTitle": "Review the stored instructions",
+      "reviewBody": "These instructions were saved earlier and will be installed on the new operator. Anyone who can edit platform settings could have changed them, so read what differs from the default before you continue.",
+      "reviewSummary": "{{added}} lines added, {{removed}} default lines removed",
+      "reviewFull": "Show the full stored text",
+      "reviewConfirm": "I have read these instructions and want to install them",
       "hint": "An update for the Platform Operator is available.",
       "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
       "addedTools_other": "{{count}} new tools",

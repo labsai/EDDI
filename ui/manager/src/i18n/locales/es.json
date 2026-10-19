@@ -2928,6 +2928,7 @@
     "question": "Pregunta",
     "readyToDiscuss": "Listo para debatir",
     "responding": "respondiendo…",
+    "usingTool": "Usando {{tool}}…",
     "reviewMemberRoster": "Lista de miembros",
     "reviewMembers": "Miembros",
     "reviewModerator": "Moderador",
@@ -5024,6 +5025,7 @@
       "action": "Activar"
     },
     "activation": {
+      "storedPromptConfirm": "Estas instrucciones proceden de la configuración guardada, que pudo haber cambiado cualquiera que pueda editar los ajustes de la plataforma. Las he leído arriba y quiero instalarlas.",
       "title": "Activar el operador de plataforma",
       "subtitle": "Elige el modelo que ejecutará el operador, revisa sus instrucciones y despliégalo.",
       "modelStep": "Modelo",
@@ -5126,7 +5128,11 @@
       "gateUnverifiedHelp": "No se pudo verificar la puerta de aprobación en el documento de este agente.",
       "agentId": "Agente",
       "platformBaseUrl": "Llama a la plataforma en",
-      "platformBaseUrlUnknown": "no registrada"
+      "platformBaseUrlUnknown": "no registrada",
+      "unregister": "Anular registro del operador",
+      "unregisterConfirmTitle": "¿Anular el registro del operador de plataforma?",
+      "unregisterConfirmBody": "Solo se elimina la configuración guardada del operador. No se pudo verificar que el agente registrado sea un operador configurado por este Manager, así que no se despliega, retira ni elimina: revísalo en la pantalla Agentes.",
+      "unverifiedActions": "No se pudo verificar que este agente sea un operador configurado por el Manager, así que esta pantalla no lo sondeará, retirará ni eliminará. «Reconfigurar» aprovisiona un operador nuevo y deja este agente intacto."
     },
     "chat": {
       "empty": "Pregunta sobre tu instalación. El operador lo consulta y te muestra cada llamada que hace.",
@@ -5216,7 +5222,8 @@
       "activatedChecking": "Operador de plataforma activado. Las comprobaciones de conexión se ejecutan en segundo plano.",
       "writeProbeVerified": "Acceso de escritura verificado — una escritura real protegida se pausó para aprobación.",
       "writeProbeFailed": "La puerta de aprobación no resistió — el operador fue eliminado.",
-      "writeProbeInconclusive": "La prueba de escritura en vivo no fue concluyente."
+      "writeProbeInconclusive": "La prueba de escritura en vivo no fue concluyente.",
+      "unregistered": "Registro del operador de plataforma anulado"
     },
     "canary": {
       "genericFailure": "La comprobación de conexión no se completó correctamente.",
@@ -5257,7 +5264,22 @@
     "superseded": {
       "title": "El agente operador anterior sigue desplegado."
     },
+    "trust": {
+      "checking": "Verificando el operador antes de abrir el chat…",
+      "title": "No se pudo verificar el operador de plataforma",
+      "body": "El chat está desactivado porque el agente registrado como operador ({{agentId}}) no es demostrablemente el que configuró este Manager. Quien pueda editar los ajustes de la plataforma puede cambiar de qué agente se trata.",
+      "reasonMarker": "No lleva la marca de operador de plataforma, por lo que puede no ser el agente que aprovisionó el Manager.",
+      "reasonGate": "No se pudo verificar su puerta de aprobación: {{detail}}",
+      "reasonUnreadable": "No se pudieron completar las comprobaciones: {{detail}}",
+      "recheck": "Comprobar de nuevo",
+      "manage": "Abrir la pantalla del operador"
+    },
     "upgrade": {
+      "reviewTitle": "Revisar las instrucciones almacenadas",
+      "reviewBody": "Estas instrucciones se guardaron antes y se instalarán en el nuevo operador. Quien pueda editar los ajustes de la plataforma pudo haberlas cambiado, así que lea lo que difiere del valor predeterminado antes de continuar.",
+      "reviewSummary": "{{added}} líneas añadidas, {{removed}} líneas predeterminadas eliminadas",
+      "reviewFull": "Mostrar el texto almacenado completo",
+      "reviewConfirm": "He leído estas instrucciones y quiero instalarlas",
       "hint": "Hay una actualización disponible para el Platform Operator.",
       "blockerBaseUrl": "La dirección de su servidor de modelos no se guardó: vuelve a introducirla para actualizar.",
       "addedTools_other": "{{count}} herramientas nuevas",

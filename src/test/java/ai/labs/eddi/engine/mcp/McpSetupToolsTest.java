@@ -293,7 +293,8 @@ class McpSetupToolsTest {
 
         // Verify the API key was stored in the vault
         var refCaptor = ArgumentCaptor.forClass(SecretReference.class);
-        verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any());
+        verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any(),
+                eq(List.of("api.openai.com")));
         assertTrue(refCaptor.getValue().keyName().startsWith("setup.vault-agent."),
                 "Vault key should start with 'setup.<sanitized-name>.'");
         assertTrue(refCaptor.getValue().keyName().endsWith(".apiKey"),

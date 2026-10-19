@@ -6,7 +6,6 @@ package ai.labs.eddi.modules.llm.impl.builder;
 
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -166,7 +165,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     public ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters) {
-        return build(parameters, customParameters, JdkHttpClient.builder());
+        return build(parameters, customParameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -251,7 +250,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
 
     public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
         Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
+        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder());
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)

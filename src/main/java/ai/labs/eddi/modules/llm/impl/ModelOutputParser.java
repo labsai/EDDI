@@ -11,8 +11,6 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Turns a model's raw reply into the object a {@code convertToObject} task
@@ -104,7 +102,11 @@ public final class ModelOutputParser {
         }
     }
 
-    private static final Pattern FENCE = Pattern.compile("^```(?:json)?[ \\t]*\\r?\\n?(.*?)\\s*```$", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
+    /** A Markdown code fence: three backticks. */
+    private static final String FENCE = "```";
+
+    /** The info string a JSON fence may carry, matched ASCII case-insensitively. */
+    private static final String JSON_TAG = "json";
 
     private final IJsonSerialization jsonSerialization;
     private final ResponseShapeValidator shapeValidator = new ResponseShapeValidator();
@@ -186,9 +188,48 @@ public final class ModelOutputParser {
         return new JsonOutcome(Kind.INVALID, raw, false, reason, raw);
     }
 
+    /**
+     * The body of a reply wrapped in one Markdown code fence, optionally tagged
+     * {@code json}; anything else unchanged.
+     * <p>
+     * String operations, not a regex. The pattern this replaces,
+     * {@code ^```(?:json)?[ \t]*\r?\n?(.*?)\s*```$}, had three quantifiers
+     * competing for one whitespace run, so a reply of three backticks, N spaces and
+     * a letter cost O(N³): 3.7 s at 2,000 spaces, about an hour at 16,000, on the
+     * turn thread of any {@code convertToObject} agent whose model can be talked
+     * into emitting it (security review 2026-10-17, H3). The result is the same for
+     * every input: the pattern's leading {@code [ \t]*\r?\n?} and trailing
+     * {@code \s*} only moved whitespace that {@code trim()} removed anyway, and its
+     * optional {@code json} was taken whenever it was there.
+     */
     static String stripFence(String trimmed) {
-        Matcher m = FENCE.matcher(trimmed);
-        return m.matches() ? m.group(1).trim() : trimmed;
+        int length = trimmed.length();
+        if (length < 2 * FENCE.length() || !trimmed.startsWith(FENCE) || !trimmed.endsWith(FENCE)) {
+            return trimmed;
+        }
+        int start = FENCE.length();
+        if (hasJsonTag(trimmed, start)) {
+            start += JSON_TAG.length();
+        }
+        return trimmed.substring(start, length - FENCE.length()).trim();
+    }
+
+    /**
+     * {@code json} at {@code at}, ASCII letters in either case: what the old
+     * pattern's {@code CASE_INSENSITIVE} (without {@code UNICODE_CASE}) admitted.
+     * {@code c | 0x20} folds exactly {@code J S O N} onto {@code j s o n}; no other
+     * character maps there.
+     */
+    private static boolean hasJsonTag(String text, int at) {
+        if (text.length() - FENCE.length() < at + JSON_TAG.length()) {
+            return false;
+        }
+        for (int i = 0; i < JSON_TAG.length(); i++) {
+            if ((text.charAt(at + i) | 0x20) != JSON_TAG.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

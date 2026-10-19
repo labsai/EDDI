@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
@@ -57,7 +58,7 @@ class HttpClientModuleCookieTest {
     void setCookieIsNotReplayed() throws Exception {
         HttpClientModule module = new HttpClientModule();
         module.vertx = vertx;
-        VertxHttpClient client = module.provideHttpClient(5, 5, 0, 5000);
+        VertxHttpClient client = module.provideHttpClient(5, 5, 0, 5000, Optional.empty());
 
         int port = server.getAddress().getPort();
         for (int i = 0; i < 2; i++) {
