@@ -829,7 +829,7 @@ export function GroupWizardPage() {
       )}
 
       {/* Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
           disabled={currentStep === 0}
@@ -841,7 +841,7 @@ export function GroupWizardPage() {
           )}
           data-testid="group-wizard-back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("common.back", "Back")}
         </button>
 
@@ -854,7 +854,7 @@ export function GroupWizardPage() {
             data-testid="group-wizard-next"
           >
             {t("common.next", "Next")}
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 rtl:rotate-180" />
           </button>
         ) : (
           <button

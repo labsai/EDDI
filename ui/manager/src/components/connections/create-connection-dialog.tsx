@@ -370,7 +370,7 @@ export function CreateConnectionDialog({
               disabled={isFirst}
               className={isFirst ? "invisible" : ""}
             >
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              <ChevronLeft className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />
               {t("common.back", "Back")}
             </Button>
             {isLast ? (
@@ -386,7 +386,7 @@ export function CreateConnectionDialog({
             ) : (
               <Button onClick={handleNext} data-testid="create-connection-next">
                 {t("common.next", "Next")}
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                <ChevronRight className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />
               </Button>
             )}
           </div>

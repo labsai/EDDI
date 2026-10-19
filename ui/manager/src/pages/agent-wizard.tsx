@@ -516,7 +516,7 @@ export function AgentWizardPage() {
           to="/manage/agents"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("setupWizard.backToAgents", "Back to Agents")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
@@ -642,7 +642,7 @@ export function AgentWizardPage() {
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
           disabled={currentStep === 0}
@@ -654,7 +654,7 @@ export function AgentWizardPage() {
           )}
           data-testid="wizard-back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("setupWizard.back", "Back")}
         </button>
 
@@ -666,7 +666,7 @@ export function AgentWizardPage() {
             data-testid="wizard-next"
           >
             {t("setupWizard.next", "Next")}
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 rtl:rotate-180" />
           </button>
         ) : (
           <div className="flex items-center gap-2">
@@ -1809,7 +1809,7 @@ function FeatureToggle({
         <span
           className={cn(
             "absolute h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
-            checked ? "translate-x-4" : "translate-x-0.5",
+            checked ? "translate-x-4 rtl:-translate-x-4" : "translate-x-0.5 rtl:-translate-x-0.5",
           )}
         />
         <input

@@ -146,6 +146,7 @@ export function ExportAgentDialog({
               {t("exportDialog.title", "Export Agent")}
             </h2>
             <button
+              aria-label={t("common.close", "Close")}
               onClick={handleClose}
               disabled={isExporting}
               className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
