@@ -141,7 +141,7 @@ class ToolLoopRunner {
                 externalCount++;
             }
         }
-        LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
+        LOGGER.debugf("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
                 activeSpecs.size(), externalCount);
         return activeSpecs;
     }
@@ -401,6 +401,14 @@ class ToolLoopRunner {
                 if (Thread.interrupted()) {
                     throw new LifecycleException("Agent execution cancelled (interrupted)");
                 }
+                // The turn's own cancel flag, which nothing below can clear: raised by a
+                // caller's cancel, a GDPR stop, the watchdog and a lost cluster lease (whose
+                // conversation another node now runs). Without this check a tool loop ran
+                // all its remaining rounds after any of those — more model calls and more
+                // side-effectful tools for a turn whose result is discarded.
+                if (memory.isCancelled()) {
+                    throw new LifecycleException("Agent execution cancelled");
+                }
 
                 // Keep the accumulated tool traffic inside its aggregate ceiling BEFORE
                 // the request is built — this is the only point at which the loop knows
@@ -581,6 +589,9 @@ class ToolLoopRunner {
                         // Thread.interrupted() clears the flag so it cannot leak to later work.
                         if (Thread.interrupted()) {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
+                        }
+                        if (memory.isCancelled()) {
+                            throw new LifecycleException("Agent execution cancelled before tool: " + toolRequest.name());
                         }
 
                         // "An agent may not send a request to its own conversation" is
@@ -1044,6 +1055,15 @@ class ToolLoopRunner {
         if (memory != null && memory.getEventSink() != null) {
             memory.getEventSink().onToolCall(toolRequest.name());
         }
+        // Name-only observer for plain (non-streamed) turns, e.g. a group member's.
+        // An observer must never break the tool loop.
+        if (memory != null && memory.getToolCallObserver() != null) {
+            try {
+                memory.getToolCallObserver().accept(toolRequest.name());
+            } catch (RuntimeException e) {
+                LOGGER.debug("Tool-call observer failed; ignoring", e);
+            }
+        }
 
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {
@@ -1428,6 +1448,12 @@ class ToolLoopRunner {
     }
 
     /**
+     * Shared, because an ObjectMapper is expensive to build and was built anew for
+     * every discover_tools result; reading a tree is thread-safe.
+     */
+    private static final ObjectMapper DISCOVERY_MAPPER = new ObjectMapper();
+
+    /**
      * Parses the discover_tools JSON result and activates matching built-in tool
      * specs so the LLM can call them on subsequent iterations.
      */
@@ -1435,8 +1461,7 @@ class ToolLoopRunner {
                                         List<ToolSpecification> builtInSpecs,
                                         List<ToolSpecification> activeSpecs) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode root = mapper.readTree(discoverResult);
+            JsonNode root = DISCOVERY_MAPPER.readTree(discoverResult);
             JsonNode toolsNode = root.get("tools");
             if (toolsNode == null || !toolsNode.isArray()) {
                 return;
@@ -1463,7 +1488,7 @@ class ToolLoopRunner {
                 }
             }
 
-            LOGGER.infof("LAZY activation: %d tools activated from discovery (%s)",
+            LOGGER.debugf("LAZY activation: %d tools activated from discovery (%s)",
                     activated, discoveredNames);
         } catch (Exception e) {
             LOGGER.warnf("Failed to parse discover_tools result for LAZY activation: %s",

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri } from "@/lib/api/channels";
@@ -60,23 +61,30 @@ function TargetCard({
 
   return (
     <div data-testid={`target-card-${index}`} className="rounded-xl border border-border/50 bg-card overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+      {/* A button, not a clickable div: the card could not be opened from the keyboard. */}
+      <button
+        type="button"
+        className="flex w-full items-center gap-3 px-4 py-3 bg-muted/30 cursor-pointer text-start"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={`${uid}-target-content`}
+      >
         <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${target.type === "GROUP" ? "bg-secondary text-secondary-foreground ring-1 ring-border" : "bg-primary/10 text-primary"}`}>
           {target.type === "GROUP" ? <Users className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
         </div>
         <div className="flex-1 min-w-0">
-          <span className="font-medium text-sm truncate">{target.name || `Target ${index + 1}`}</span>
+          <span className="font-medium text-sm truncate">{target.name || t("channelDetail.targetFallback", { number: index + 1, defaultValue: "Target {{number}}" })}</span>
         </div>
         <div className="flex items-center gap-1.5">
           {isDefault && <Badge className="text-xs bg-primary/10 text-primary border-primary/20">{t("channelDetail.isDefault", "default")}</Badge>}
 
-          {target.triggers.length > 0 && <Badge variant="secondary" className="text-xs">{target.triggers.length} {t("channelDetail.triggers", "triggers")}</Badge>}
-          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          {target.triggers.length > 0 && <Badge variant="secondary" className="text-xs">{t("channelDetail.triggerCount", { count: target.triggers.length, defaultValue: "{{count}} triggers" })}</Badge>}
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
         </div>
-      </div>
+      </button>
 
       {expanded && (
-        <div className="p-4 space-y-4 border-t border-border/30">
+        <div id={`${uid}-target-content`} className="p-4 space-y-4 border-t border-border/30">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label htmlFor={`${uid}-name`} className="text-xs font-medium">{t("channelDetail.targetName", "Name")}</label>
@@ -140,7 +148,7 @@ function TargetCard({
               ))}
             </div>
             <div className="flex gap-1">
-              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTrigger())} />
+              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addTrigger(); } }} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTrigger}>{t("common.add", "Add")}</Button>
             </div>
           </div>
@@ -439,10 +447,10 @@ export function ChannelDetailPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/manage/channels")}><ArrowLeft className="h-4 w-4" /></Button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold tracking-tight truncate">{draft.name || "Untitled Channel"}</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={() => navigate("/manage/channels")} aria-label={t("common.back", "Back")}><ArrowLeft className="h-4 w-4 rtl:rotate-180" /></Button>
+        <div className="min-w-0 flex-1 basis-48">
+          <h1 className="text-xl font-bold tracking-tight truncate">{draft.name || t("channelDetail.untitledChannel", "Untitled Channel")}</h1>
           <p className="text-xs text-muted-foreground">v{version} · {draft.channelType}</p>
         </div>
         <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteOpen(true)} data-testid="delete-channel-btn">
@@ -456,7 +464,7 @@ export function ChannelDetailPage() {
       {/* General */}
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Cable className="h-4 w-4 text-primary" />{t("channelDetail.general", "General")}</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <label htmlFor={`${uid}-name`} className="text-xs font-medium">{t("channelDetail.name", "Name")}</label>
             <Input id={`${uid}-name`} data-testid="channel-name-input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
@@ -546,8 +554,8 @@ export function ChannelDetailPage() {
 
       {/* Targets */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold flex items-center gap-2"><Bot className="h-4 w-4 text-primary" />{t("channelDetail.targets", "Message Routing Targets")}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="min-w-0 text-sm font-semibold flex items-center gap-2"><Bot className="h-4 w-4 text-primary" />{t("channelDetail.targets", "Message Routing Targets")}</h2>
           <Button size="sm" variant="outline" className="gap-1" onClick={addTarget} data-testid="add-target-btn">
             <Plus className="h-3.5 w-3.5" /> {t("channelDetail.addTarget", "Add Target")}
           </Button>

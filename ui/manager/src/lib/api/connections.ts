@@ -1,6 +1,7 @@
 import { api, isApiError } from "../api-client";
 import { bindingFor } from "../connection-validation";
 import { parseResourceUri, type AgentDescriptor } from "./agents";
+import { seg, nameSeg } from "./path-segment";
 
 /**
  * Connections — how EDDI authenticates to an external system.
@@ -285,7 +286,7 @@ export function getConnection(
   version?: number,
 ): Promise<ConnectionConfiguration> {
   const suffix = version !== undefined ? `?version=${version}` : "";
-  return api.get<ConnectionConfiguration>(`${STORE}/${id}${suffix}`);
+  return api.get<ConnectionConfiguration>(`${STORE}/${seg(id)}${suffix}`);
 }
 
 export function createConnection(
@@ -299,7 +300,7 @@ export function updateConnection(
   version: number,
   config: ConnectionConfiguration,
 ): Promise<{ location: string }> {
-  return api.put(`${STORE}/${id}?version=${version}`, config);
+  return api.put(`${STORE}/${seg(id)}?version=${version}`, config);
 }
 
 /**
@@ -315,14 +316,14 @@ export function deleteConnection(
     version: String(version),
     permanent: String(permanent),
   });
-  return api.delete(`${STORE}/${id}?${params}`);
+  return api.delete(`${STORE}/${seg(id)}?${params}`);
 }
 
 export function duplicateConnection(
   id: string,
   version: number,
 ): Promise<{ location: string }> {
-  return api.post<{ location: string }>(`${STORE}/${id}?version=${version}`);
+  return api.post<{ location: string }>(`${STORE}/${seg(id)}?version=${version}`);
 }
 
 // ─── Per-user grants (any signed-in user) ───────────────────────
@@ -345,7 +346,7 @@ export async function authorizeConnection(
 ): Promise<{ authorizationUrl: string }> {
   try {
     return await api.post<{ authorizationUrl: string }>(
-      `/connections/${encodeURIComponent(name)}/authorize?returnTo=${encodeURIComponent(returnTo)}`,
+      `/connections/${nameSeg(name)}/authorize?returnTo=${encodeURIComponent(returnTo)}`,
     );
   } catch (error) {
     // A 404 here is ambiguous in a way it is not on `/connections/mine`: the
@@ -383,7 +384,7 @@ export async function listMyConnections(): Promise<LinkedAccount[]> {
 export async function disconnectConnection(name: string): Promise<void> {
   try {
     await api.delete<void>(
-      `/connections/${encodeURIComponent(name)}/grant`,
+      `/connections/${nameSeg(name)}/grant`,
     );
   } catch (error) {
     return asConnectionsError(error, "unlink account");

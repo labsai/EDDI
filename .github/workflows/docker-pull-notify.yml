@@ -95,7 +95,7 @@ jobs:
           # history" then leaves the day's row to a later run: on a cache miss
           # the carried value is 0, and a 0 row would become a digest baseline.
           OK=true
-          PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
+          PULLS=$(curl -sf --connect-timeout 10 --max-time 30 https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
           case "${PULLS:-}" in
             ''|*[!0-9]*)
               echo "::warning::Docker Hub returned no usable pull_count - carrying the previous value forward"
@@ -109,6 +109,48 @@ jobs:
           echo "pulls=$PULLS" >> "$GITHUB_OUTPUT"
           echo "ok=$OK" >> "$GITHUB_OUTPUT"
           echo "Docker pulls: $PULLS"
+
+      # Every tag with the time it was last pulled. pull_count alone cannot
+      # tell people from bots: since 2026-10-18 something pulls all of the
+      # image's tags at once every ~2 h (every tag_last_pulled within one
+      # millisecond), which put ~1,800 "pulls" a day into the digest while
+      # the real rate was a few. "Persist metrics history" compares these
+      # timestamps with the previous run's to tell such a sweep from real
+      # pulls, and which tags the real ones were.
+      #
+      # Fetched after pull_count on purpose, and `checked_at` is taken last:
+      # a sweep landing between the two reads then shows up as tags now and
+      # as count next run, which the run log's bot_debt absorbs. The
+      # opposite order would count that sweep as real pulls.
+      - name: Fetch Docker Hub tags
+        id: tags
+        run: |
+          set -uo pipefail
+          OK=true
+          URL="https://hub.docker.com/v2/repositories/labsai/eddi/tags?page_size=100"
+          : > tags.ndjson
+          PAGES=0
+          while [ -n "$URL" ]; do
+            PAGES=$(( PAGES + 1 ))
+            # 100 per page; 20 pages is far beyond the ~200 tags there are.
+            if [ "$PAGES" -gt 20 ]; then OK=false; break; fi
+            # A deadline per page: an accepted-but-stalled connection would
+            # otherwise hold the job (and, through the concurrency group,
+            # every later run) until GitHub's 6-hour job limit.
+            PAGE=$(curl -sf --connect-timeout 10 --max-time 30 "$URL") || { OK=false; break; }
+            printf '%s' "$PAGE" | jq -c '.results[] | {name, pulled: .tag_last_pulled}' >> tags.ndjson \
+              || { OK=false; break; }
+            URL=$(printf '%s' "$PAGE" | jq -r '.next // ""')
+          done
+          TOTAL=$(wc -l < tags.ndjson | tr -d ' ')
+          [ "$TOTAL" -gt 0 ] || OK=false
+          [ "$OK" = true ] || echo "::warning::Docker Hub tag list incomplete - no run-log entry this run"
+          {
+            echo "ok=$OK"
+            echo "total=$TOTAL"
+            echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+          echo "Docker Hub tags: $TOTAL"
 
       - name: Fetch GitHub stats
         id: github
@@ -334,6 +376,10 @@ jobs:
           VIEWS: ${{ steps.traffic.outputs.views }}
           UNIQUES: ${{ steps.traffic.outputs.uniques }}
           CLONES: ${{ steps.traffic.outputs.clones }}
+          DOCKER_OK: ${{ steps.docker.outputs.ok }}
+          TAGS_OK: ${{ steps.tags.outputs.ok }}
+          TAG_TOTAL: ${{ steps.tags.outputs.total }}
+          CHECKED_AT: ${{ steps.tags.outputs.checked_at }}
         run: |
           set -euo pipefail
 
@@ -419,7 +465,141 @@ jobs:
           }
 
           TODAY=$(date -u +%F)
-          append_today || true
+          ROW_ADDED=false
+          if append_today; then ROW_ADDED=true; fi
+
+          # ── Run log: one line per run, for the real-pull estimate ──
+          # pull_count counts a bot sweep of every tag the same as a person.
+          # Each line covers the interval since the previous line and splits
+          # its pull_count increase three ways:
+          #
+          #   bot   ≥ SWEEP_MIN_TAGS tags pulled in the interval: a sweep, and
+          #         each sweep costs one pull per tag. A long gap (GitHub
+          #         drops runs) can hold several; the timestamps keep only
+          #         the last, so their number is estimated as delta / tags.
+          #   ci    otherwise, each `-b<N>` build tag pulled once — ci.yml's
+          #         post-push check pulls every build it publishes.
+          #   real  the rest. real_tags names the other tags pulled, i.e.
+          #         which versions people use; a sweep overwrites every
+          #         timestamp, so sweep intervals name none.
+          #
+          # bot_debt: Docker Hub can show a sweep's tag timestamps before its
+          # pull_count catches up, so a sweep can land in the count one or
+          # more runs after its timestamps. What could not be subtracted yet
+          # is carried, and always applied to the next interval — which holds
+          # the late count however long that interval is. A remainder is
+          # carried further only while it is younger than DEBT_MAX_AGE (from
+          # debt_since): an expected pull that never arrives must not eat real
+          # pulls for ever. The two errors are not symmetric — dropping debt
+          # too early books a whole sweep (~200) as real, keeping it too long
+          # hides a few real pulls — hence a generous age.
+          #
+          # The previous line is the baseline, so this needs no cache. A run
+          # with a failed fetch writes nothing and the next interval is
+          # simply longer; a failed push heals the same way. A malformed last
+          # line starts a new baseline rather than blocking the log for good.
+          RUNS=data/runs.csv
+          RUNS_HEADER="checked_at,docker_pulls,tags,tags_pulled,sweeps,bot_pulls,ci_pulls,real_pulls,real_total,bot_debt,debt_since,real_tags"
+          SWEEP_MIN_TAGS=20
+          DEBT_MAX_AGE=7200
+          [ -f "$RUNS" ] || echo "$RUNS_HEADER" > "$RUNS"
+          if [ -s "$RUNS" ] && [ -n "$(tail -c1 "$RUNS")" ]; then
+            echo >> "$RUNS"
+          fi
+
+          append_run() {
+            local last p_at p_pulls p_total p_debt p_debt_since x delta counts pulled ci_tags real_tags
+            local sweeps=0 bot=0 ci=0 avail old_left=0 new_left=0 real debt debt_since=""
+            local iso='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+            if [ "$DOCKER_OK" != "true" ] || [ "$TAGS_OK" != "true" ]; then
+              echo "::warning::Docker Hub fetch incomplete — no run-log line this run"
+              return 1
+            fi
+            for x in "$PULLS" "$TAG_TOTAL"; do
+              case "$x" in ''|*[!0-9]*) echo "::warning::Run log: non-numeric input '${x}'"; return 1 ;; esac
+            done
+            if [[ ! "$CHECKED_AT" =~ $iso ]]; then
+              echo "::warning::Run log: bad check time '${CHECKED_AT}'"
+              return 1
+            fi
+
+            last=$(tail -n1 "$RUNS")
+            if [ "$last" != "$RUNS_HEADER" ]; then
+              IFS=, read -r p_at p_pulls _ _ _ _ _ _ p_total p_debt p_debt_since _ <<< "$last"
+              for x in "$p_pulls" "$p_total" "$p_debt"; do
+                case "$x" in ''|*[!0-9]*) p_at="" ;; esac
+              done
+              if [[ ! "$p_at" =~ $iso ]] || { [ -n "$p_debt_since" ] && [[ ! "$p_debt_since" =~ $iso ]]; }; then
+                echo "::warning::Last line of ${RUNS} is malformed — starting a new baseline: ${last}"
+                last=$RUNS_HEADER
+              fi
+            fi
+            if [ "$last" = "$RUNS_HEADER" ]; then
+              # A baseline only: its interval is unknown, so it counts nothing.
+              echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},0,0,0,0,0,0,0,," >> "$RUNS"
+              echo "Run log baseline at ${CHECKED_AT}"
+              return 0
+            fi
+            if [[ ! "$CHECKED_AT" > "$p_at" ]]; then
+              echo "::warning::Run log already has a line at or after ${CHECKED_AT}"
+              return 1
+            fi
+
+            delta=$(( PULLS - p_pulls ))
+            if [ "$delta" -lt 0 ]; then delta=0; fi
+
+            # Tags pulled in (p_at, CHECKED_AT]: count, build tags, the others.
+            # Fractional seconds are dropped so fromdateiso8601 accepts them.
+            counts=$(jq -rs --arg from "$p_at" --arg to "$CHECKED_AT" '
+              def epoch: sub("\\.[0-9]+"; "") | fromdateiso8601;
+              ($from | epoch) as $f | ($to | epoch) as $t
+              | [ .[] | select(.pulled != null and ((.pulled | epoch) as $e | $e > $f and $e <= $t)) ] as $p
+              | ($p | map(select(.name | test("-b[0-9]+$")))) as $ci
+              | [ ($p | length), ($ci | length),
+                  ($p | map(select(.name | test("-b[0-9]+$") | not) | .name) | sort | join(";")) ]
+              | map(tostring) | join(",")' ../tags.ndjson)
+            IFS=, read -r pulled ci_tags real_tags <<< "$counts"
+            # set -e does not reach inside a function called as `f || true`.
+            for x in "$pulled" "$ci_tags"; do
+              case "$x" in ''|*[!0-9]*) echo "::warning::Run log: could not read the tag list"; return 1 ;; esac
+            done
+
+            # The carried debt is paid first: its count arrives before this
+            # interval's. What it leaves unpaid stays only while young enough.
+            avail=$(( delta - p_debt ))
+            if [ "$avail" -lt 0 ]; then
+              old_left=$(( -avail )); avail=0
+              if [ $(( $(date -u -d "$CHECKED_AT" +%s) - $(date -u -d "$p_debt_since" +%s) )) -ge "$DEBT_MAX_AGE" ]; then
+                echo "Run log: dropping ${old_left} expected pulls that never arrived (owed since ${p_debt_since})"
+                old_left=0
+              fi
+            fi
+
+            # Sweeps from what is left once the debt is paid, so a late count
+            # in the same interval as a new sweep is not taken for a second one.
+            if [ "$pulled" -ge "$SWEEP_MIN_TAGS" ]; then
+              sweeps=$(( avail / pulled ))
+              if [ "$sweeps" -lt 1 ]; then sweeps=1; fi
+              bot=$(( sweeps * pulled ))
+              real_tags=""
+            else
+              ci=$ci_tags
+            fi
+
+            if [ "$avail" -ge $(( bot + ci )) ]; then
+              real=$(( avail - bot - ci ))
+            else
+              real=0; new_left=$(( bot + ci - avail ))
+            fi
+            debt=$(( old_left + new_left ))
+            if [ "$old_left" -gt 0 ]; then debt_since=$p_debt_since
+            elif [ "$new_left" -gt 0 ]; then debt_since=$CHECKED_AT
+            fi
+
+            echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},${pulled},${sweeps},${bot},${ci},${real},$(( p_total + real )),${debt},${debt_since},${real_tags}" >> "$RUNS"
+            echo "Run log: +${delta} pulls since ${p_at} = ${bot} bot (${sweeps} sweeps) + ${ci} ci + ${real} real${real_tags:+ (${real_tags})}, ${debt} owed"
+          }
+          append_run || true
 
           # Data minimisation: the per-person stargazer roster is no longer
           # collected, and a copy left at the branch tip by an older run is
@@ -443,6 +623,12 @@ jobs:
           - `data/metrics.csv` — one row per UTC day: Docker pulls, stars,
             forks, and GitHub's rolling 14-day views/clones. Aggregate counts
             only; nothing here identifies a person.
+          - `data/runs.csv` — one line per workflow run (~every 15-60 min):
+            how much pull_count rose since the previous line, split into bot
+            sweeps of every tag, this repo's own CI pulls of `-b<N>` build
+            tags, and the rest ("real"), plus which other tags those real
+            pulls were. Estimates, from tag pull timestamps; the workflow's
+            "Persist metrics history" step documents the method.
           - `data/digests.json` — the last daily and weekly Slack digest
             sent, by window end date. Deleting it re-sends both.
 
@@ -474,7 +660,11 @@ jobs:
           if git diff --quiet --cached; then
             echo "Nothing changed"
           else
-            git commit -q -m "chore(metrics): ${TODAY} — ${PULLS} pulls, ${STARS} stars"
+            if [ "$ROW_ADDED" = true ]; then
+              git commit -q -m "chore(metrics): ${TODAY} — ${PULLS} pulls, ${STARS} stars"
+            else
+              git commit -q -m "chore(metrics): run ${CHECKED_AT:-$TODAY}"
+            fi
             git push -q origin "$BRANCH"
             echo "Pushed to '$BRANCH'"
           fi
@@ -525,6 +715,7 @@ jobs:
           fi
 
           CSV=hist/data/metrics.csv
+          RUNS_CSV=hist/data/runs.csv
           MARKERS=hist/data/digests.json
           DUE_HOUR=7
           read -r TODAY HOUR DOW <<< "$(date -u '+%F %H %u')"
@@ -612,7 +803,58 @@ jobs:
             if [ "$sv" -gt 0 ] && [ "$ev" -gt 0 ]; then view_delta=$(signed $(( ev - sv ))); fi
             if [ "$sc" -gt 0 ] && [ "$ec" -gt 0 ]; then clone_delta=$(signed $(( ec - sc ))); fi
 
+            # The run log's estimate for the same span as the delta above.
+            # Rows are first-run-of-the-day snapshots, so that span runs from
+            # the first run on the `from` day to the first run on the `to` day.
+            # Each log line covers (previous run, its run], so the window is
+            # every line after the first one dated `from`, up to and including
+            # the first one dated `to`. Consecutive windows therefore share no
+            # line and miss none — an interval crossing midnight lands in
+            # exactly one, as the row delta does. A log that starts inside the
+            # window gives a partial figure labelled with when it starts; none
+            # at all gives no line. Neither does a log with no line on the
+            # `from` day: the first line it has is past the window, so the
+            # window is empty rather than borrowing an interval after it.
+            #
+            # `base` is the line the window starts after. The figure is partial,
+            # and labelled with it, when that line is the log's first (the log
+            # began inside the window) or falls after the `from` day (a
+            # multi-day weekly window whose first days have no line).
+            local real="" sweeps="" real_since="" versions="" summary window
+            # Lines that are not timestamped (a damaged line the run log then
+            # restarted after) are skipped: "g…" sorts after any date and
+            # would otherwise close the window early.
+            # shellcheck disable=SC2016  # an awk program: its $1 is awk's
+            window='
+              $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { next }
+              first == "" { first = $1 }
+              state == 2 { next }
+              state == 0 { if ($1 >= from) { base = $1; state = ($1 >= to ? 2 : 1) } next }
+              $1 >= to { state = 2 }'
+            if [ -f "$RUNS_CSV" ]; then
+              summary=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'
+                { real += $8; sweeps += $5; n++ }
+                END {
+                  if (n) printf "%d,%d,%s", real, sweeps,
+                    (base == first || substr(base, 1, 10) > substr(from, 1, 10) ? base : "")
+                }' "$RUNS_CSV")
+              if [ -n "$summary" ]; then
+                IFS=, read -r real sweeps real_since <<< "$summary"
+                real=$(signed "$real")
+                # Each tag with the number of intervals it was pulled in —
+                # not a pull count, which Docker Hub does not publish per tag.
+                versions=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'
+                  $12 != "" { n = split($12, t, ";"); for (i = 1; i <= n; i++) print t[i] }' "$RUNS_CSV" \
+                  | sort | uniq -c | sort -k1,1nr -k2,2 | head -n 5 \
+                  | awk '{ printf "%s%s ×%d", sep, $2, $1; sep = ", " }')
+              fi
+            fi
+
             {
+              echo "${kind}_real=$real"
+              echo "${kind}_sweeps=$sweeps"
+              echo "${kind}_real_since=$real_since"
+              echo "${kind}_versions=$versions"
               echo "${kind}_send=true"
               echo "${kind}_from=$sd"
               echo "${kind}_to=$ed"
@@ -711,6 +953,10 @@ jobs:
           FORK_DELTA: ${{ steps.plan.outputs.weekly_fork_delta }}
           VIEW_DELTA: ${{ steps.plan.outputs.weekly_view_delta }}
           CLONE_DELTA: ${{ steps.plan.outputs.weekly_clone_delta }}
+          REAL: ${{ steps.plan.outputs.weekly_real }}
+          SWEEPS: ${{ steps.plan.outputs.weekly_sweeps }}
+          REAL_SINCE: ${{ steps.plan.outputs.weekly_real_since }}
+          VERSIONS: ${{ steps.plan.outputs.weekly_versions }}
         run: |
           set -uo pipefail
           if [ -z "$SLACK_WEBHOOK" ]; then
@@ -722,6 +968,20 @@ jobs:
 
           view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=", ${VIEW_DELTA}"
           clone_delta=""; [ -z "$CLONE_DELTA" ] || clone_delta=" (${CLONE_DELTA})"
+
+          # Estimates from the run log (see "Persist metrics history"); left
+          # out until the log covers part of the window.
+          real_text=""
+          if [ -n "$REAL" ]; then
+            real_text="$REAL"
+            [ "${SWEEPS:-0}" = 0 ] || real_text="${real_text}, ${SWEEPS} bot sweeps of every tag filtered out"
+            [ -z "$REAL_SINCE" ] || real_text="${real_text} (counted since ${REAL_SINCE})"
+          fi
+          extra_fields=""
+          [ -z "$real_text" ] || extra_fields="${extra_fields},
+                    { \"type\": \"mrkdwn\", \"text\": \"*🧑‍💻 Likely Real Pulls*\n${real_text}\" }"
+          [ -z "$VERSIONS" ] || extra_fields="${extra_fields},
+                    { \"type\": \"mrkdwn\", \"text\": \"*🏷️ Versions Pulled (runs seen in)*\n${VERSIONS}\" }"
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
@@ -738,7 +998,7 @@ jobs:
                     { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${STAR_DELTA})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${FORK_DELTA})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique${view_delta})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }${extra_fields}
                   ]
                 },
                 {
@@ -768,6 +1028,10 @@ jobs:
           FORK_DELTA: ${{ steps.plan.outputs.daily_fork_delta }}
           VIEW_DELTA: ${{ steps.plan.outputs.daily_view_delta }}
           CLONE_DELTA: ${{ steps.plan.outputs.daily_clone_delta }}
+          REAL: ${{ steps.plan.outputs.daily_real }}
+          SWEEPS: ${{ steps.plan.outputs.daily_sweeps }}
+          REAL_SINCE: ${{ steps.plan.outputs.daily_real_since }}
+          VERSIONS: ${{ steps.plan.outputs.daily_versions }}
         run: |
           set -uo pipefail
           if [ -z "$SLACK_WEBHOOK" ]; then
@@ -779,6 +1043,17 @@ jobs:
 
           view_delta="";  [ -z "$VIEW_DELTA" ]  || view_delta=" (${VIEW_DELTA})"
           clone_delta=""; [ -z "$CLONE_DELTA" ] || clone_delta=" (${CLONE_DELTA})"
+
+          # Same estimate as the weekly digest; see there.
+          real_text=""
+          if [ -n "$REAL" ]; then
+            real_text="$REAL"
+            [ "${SWEEPS:-0}" = 0 ] || real_text="${real_text}, ${SWEEPS} bot sweeps of every tag filtered out"
+            [ -z "$REAL_SINCE" ] || real_text="${real_text} (counted since ${REAL_SINCE})"
+          fi
+          extra=""
+          [ -z "$real_text" ] || extra="${extra}\n🧑‍💻 *Likely real pulls:* ${real_text}"
+          [ -z "$VERSIONS" ] || extra="${extra}\n🏷️ *Versions pulled (runs seen in):* ${VERSIONS}"
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
@@ -792,7 +1067,7 @@ jobs:
                   \"type\": \"section\",
                   \"text\": {
                     \"type\": \"mrkdwn\",
-                    \"text\": \"🐳 *Pulls:* ${PULLS} (${PULL_DELTA})  ·  ⭐ *Stars:* ${STARS} (${STAR_DELTA})  ·  🍴 *Forks:* ${FORKS} (${FORK_DELTA})\"
+                    \"text\": \"🐳 *Pulls:* ${PULLS} (${PULL_DELTA})  ·  ⭐ *Stars:* ${STARS} (${STAR_DELTA})  ·  🍴 *Forks:* ${FORKS} (${FORK_DELTA})${extra}\"
                   }
                 },
                 {

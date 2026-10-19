@@ -46,7 +46,7 @@ import java.util.Map;
  * What text extraction never decodes — image data — is never counted, because
  * it is never written.
  */
-final class PdfDecodeBudget {
+public final class PdfDecodeBudget {
 
     private static final Logger LOGGER = Logger.getLogger(PdfDecodeBudget.class);
 
@@ -64,7 +64,7 @@ final class PdfDecodeBudget {
      *             when the filters could not be wrapped, in which case no PDF is
      *             read at all rather than read without a bound
      */
-    static Budget open(long maxDecodedBytes) {
+    public static Budget open(long maxDecodedBytes) {
         install();
         var budget = new Budget(maxDecodedBytes);
         CURRENT.set(budget);
@@ -91,7 +91,7 @@ final class PdfDecodeBudget {
     }
 
     /** One document's allowance. */
-    static final class Budget implements AutoCloseable {
+    public static final class Budget implements AutoCloseable {
         private final long max;
         private long used;
         private boolean exceeded;
@@ -100,11 +100,11 @@ final class PdfDecodeBudget {
             this.max = max;
         }
 
-        boolean exceeded() {
+        public boolean exceeded() {
             return exceeded;
         }
 
-        long max() {
+        public long max() {
             return max;
         }
 

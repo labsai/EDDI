@@ -21,19 +21,34 @@ spec:
     name: {{ include "eddi.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  {{- $a := .Values.autoscaling }}
+  {{- if not (or $a.targetCPUUtilizationPercentage $a.targetMemoryUtilizationPercentage $a.extraMetrics) }}
+  {{- fail "autoscaling.enabled=true needs at least one metric: targetCPUUtilizationPercentage, targetMemoryUtilizationPercentage or extraMetrics" }}
+  {{- end }}
   metrics:
+    {{- if $a.targetCPUUtilizationPercentage }}
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+          averageUtilization: {{ $a.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $a.targetMemoryUtilizationPercentage }}
     - type: Resource
       resource:
         name: memory
         target:
           type: Utilization
-          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+          averageUtilization: {{ $a.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- with $a.extraMetrics }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $a.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 ---
 {{- end }}
 {{- if .Values.podDisruptionBudget.enabled }}

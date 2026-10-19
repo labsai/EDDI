@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 /**
  * How much of a shared resource a subject may do something with.
@@ -130,7 +131,7 @@ function changeParams(base: Record<string, string>, options: ShareOptions = {}):
 }
 
 const basePath = (resourceId: string) =>
-  `/descriptorstore/descriptors/${encodeURIComponent(resourceId)}/shares`;
+  `/descriptorstore/descriptors/${seg(resourceId)}/shares`;
 
 /** Read how a resource is shared. Requires read access to it. */
 export function getShareInfo(resourceId: string): Promise<ShareInfo> {

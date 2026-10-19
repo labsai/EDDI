@@ -334,6 +334,13 @@
     "maxForksHint": "pro Gespräch",
     "maxRecallEntries": "Max. Abruf",
     "memoryPolicy": "Speicher-Richtlinie",
+    "limits": "Limits",
+    "limitsDesc": "Begrenzt, was eine einzelne Unterhaltung mit diesem Agenten kosten darf. Ist das Limit erreicht, ruft der Agent sein Modell nicht mehr auf und liefert seine Ersatzantwort.",
+    "maxCostPerConversation": "Max. Kosten pro Unterhaltung (USD)",
+    "unlimited": "Unbegrenzt",
+    "maxCostHint": "Leer = unbegrenzt. 0 = keinerlei berechnete Ausgaben.",
+    "maxCostInvalid": "Gib einen Betrag ab 0 ein oder lass das Feld für unbegrenzt leer.",
+    "maxCostPricedOnly": "Nur Modelle mit Preis zählen für dieses Limit. Ein Modell ohne Ein-/Ausgabepreis in seiner LLM-Konfiguration addiert 0 $, wird aber trotzdem gestoppt, sobald andere Ausgaben das Limit erreicht haben.",
     "memoryPolicyDesc": "Die strikte Schreibdisziplin regelt, was geschieht, wenn Eigenschafts-Updates während eines Gesprächsschritts fehlschlagen. Wählen Sie, wie die Engine mit teilweise übernommenen Daten umgeht.",
     "onCapReached": "Bei erreichter Obergrenze",
     "onFailure": "Fehlerstrategie",
@@ -2897,6 +2904,7 @@
     "question": "Frage",
     "readyToDiscuss": "Bereit zur Diskussion",
     "responding": "antwortet…",
+    "usingTool": "Verwendet {{tool}} …",
     "reviewMemberRoster": "Mitgliederliste",
     "reviewMembers": "Mitglieder",
     "reviewModerator": "Moderator",
@@ -3755,7 +3763,7 @@
     "intent": "Absicht",
     "deployments": "Agentenbereitstellungen",
     "addDeployment": "Agent hinzufügen",
-    "agents": "Agenten",
+    "intentPlaceholder": "z. B. booking_request",
     "empty": "Noch keine Auslöser konfiguriert",
     "created": "Auslöser erstellt",
     "updated": "Auslöser aktualisiert",
@@ -3987,7 +3995,10 @@
     "targetType": "Typ",
     "triggerHint": "Benutzer geben „Schlüsselwort: Nachricht“ ein, um an dieses Ziel weiterzuleiten",
     "triggerKeywords": "Trigger-Schlüsselwörter",
-    "triggers": "Trigger",
+    "targetFallback": "Ziel {{number}}",
+    "untitledChannel": "Unbenannter Kanal",
+    "triggerCount_one": "{{count}} Auslöser",
+    "triggerCount_other": "{{count}} Auslöser",
     "type": "Kanaltyp",
     "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
     "webhookUrl": "Webhook-URL",
@@ -4281,6 +4292,13 @@
     "tenantId": "Mandanten-ID",
     "title": "Mandanten-Kontingente",
     "limitHintEmpty": "Leer oder -1 = unbegrenzt, 0 = gesperrt",
+    "costPricedOnly": "Zählt nur berechnete Ausgaben: Ein Modell ohne inputPricePer1M / outputPricePer1M in seiner LLM-Konfiguration addiert 0 $ zur Summe, wird aber wie jedes andere abgelehnt, sobald das Budget aufgebraucht ist.",
+    "budgetTitle": "Monatliches Kostenbudget",
+    "budgetUnlimited": "Es ist kein monatliches Kostenbudget gesetzt – die Ausgaben werden erfasst, aber nie begrenzt.",
+    "budgetNotEnforced": "Ein Budget von {{limit}} ist gesetzt, die Durchsetzung ist aber aus – es wird nicht angewendet.",
+    "budgetReached": "Budget erreicht ({{spent}} von {{limit}}). LLM-Tasks liefern ihre Ersatzantwort, statt das Modell aufzurufen, und Tool-Aufrufe werden abgelehnt – bis der Monat wechselt oder das Limit erhöht wird.",
+    "budgetRemaining": "{{spent}} von {{limit}} in diesem Monat verbraucht. Noch {{remaining}}, bevor Modelle nicht mehr aufgerufen werden.",
+    "budgetNote": "Zählt berechnete Modellaufrufe und erfasste Tool-Kosten pro UTC-Kalendermonat. Modelle ohne Preis, Unterhaltungszusammenfassungen und Embeddings werden nicht erfasst. Ein Turn, der das Limit überschreitet, läuft noch zu Ende – die Summe kann also leicht darüber liegen. Abgelehnte Aufrufe zählt die Metrik eddi.llm.spend.refused.",
     "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer."
   },
@@ -4959,6 +4977,7 @@
       "action": "Aktivieren"
     },
     "activation": {
+      "storedPromptConfirm": "Diese Anweisungen stammen aus der gespeicherten Konfiguration, die jeder ändern konnte, der Plattformeinstellungen bearbeiten darf. Ich habe sie oben gelesen und möchte sie installieren.",
       "title": "Plattform-Operator aktivieren",
       "subtitle": "Wählen Sie das Modell für den Operator, prüfen Sie seine Anweisungen und starten Sie das Deployment.",
       "modelStep": "Modell",
@@ -5061,7 +5080,11 @@
       "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden.",
       "agentId": "Agent",
       "platformBaseUrl": "Ruft Plattform auf unter",
-      "platformBaseUrlUnknown": "nicht erfasst"
+      "platformBaseUrlUnknown": "nicht erfasst",
+      "unregister": "Operator abmelden",
+      "unregisterConfirmTitle": "Plattform-Operator abmelden?",
+      "unregisterConfirmBody": "Nur die gespeicherte Operator-Konfiguration wird entfernt. Der registrierte Agent konnte nicht als ein von diesem Manager eingerichteter Operator verifiziert werden, daher wird er weder bereitgestellt noch zurückgezogen oder gelöscht – prüfen Sie ihn auf der Agenten-Seite.",
+      "unverifiedActions": "Dieser Agent konnte nicht als ein vom Manager eingerichteter Operator verifiziert werden. Diese Seite prüft, zieht zurück oder löscht ihn daher nicht. „Neu konfigurieren“ richtet einen neuen Operator ein und lässt diesen Agenten unverändert."
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
@@ -5151,7 +5174,8 @@
       "activatedChecking": "Platform Operator aktiviert. Verbindungsprüfungen laufen im Hintergrund.",
       "writeProbeVerified": "Schreibzugriff verifiziert — ein echter, geschützter Schreibvorgang wurde zur Freigabe angehalten.",
       "writeProbeFailed": "Das Freigabe-Gate hat nicht gehalten — der Operator wurde entfernt.",
-      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos."
+      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos.",
+      "unregistered": "Plattform-Operator abgemeldet"
     },
     "canary": {
       "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",
@@ -5190,7 +5214,22 @@
     "superseded": {
       "title": "Der vorherige Operator-Agent ist weiterhin deployed."
     },
+    "trust": {
+      "checking": "Der Operator wird geprüft, bevor der Chat geöffnet wird …",
+      "title": "Der Plattform-Operator konnte nicht verifiziert werden",
+      "body": "Der Chat ist deaktiviert, weil der als Operator registrierte Agent ({{agentId}}) nicht nachweislich der ist, den dieser Manager eingerichtet hat. Wer Plattformeinstellungen bearbeiten darf, kann ändern, welcher Agent das ist.",
+      "reasonMarker": "Er trägt die Plattform-Operator-Markierung nicht und ist daher möglicherweise nicht der vom Manager bereitgestellte Agent.",
+      "reasonGate": "Sein Freigabe-Gate konnte nicht verifiziert werden: {{detail}}",
+      "reasonUnreadable": "Die Prüfungen konnten nicht abgeschlossen werden: {{detail}}",
+      "recheck": "Erneut prüfen",
+      "manage": "Operator-Bildschirm öffnen"
+    },
     "upgrade": {
+      "reviewTitle": "Gespeicherte Anweisungen prüfen",
+      "reviewBody": "Diese Anweisungen wurden zuvor gespeichert und werden auf dem neuen Operator installiert. Wer Plattformeinstellungen bearbeiten darf, könnte sie geändert haben – lesen Sie daher, was vom Standard abweicht, bevor Sie fortfahren.",
+      "reviewSummary": "{{added}} Zeilen hinzugefügt, {{removed}} Standardzeilen entfernt",
+      "reviewFull": "Gesamten gespeicherten Text anzeigen",
+      "reviewConfirm": "Ich habe diese Anweisungen gelesen und möchte sie installieren",
       "hint": "Für den Platform Operator ist ein Update verfügbar.",
       "blockerBaseUrl": "Die Adresse seines Modellservers wurde nicht gespeichert — gib sie für das Update erneut ein.",
       "addedTools_other": "{{count}} neue Werkzeuge",
@@ -6312,5 +6351,14 @@
     "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
+  },
+  "modelCombobox": {
+    "toggle": "Modellvorschläge anzeigen",
+    "listLabel": "Modellvorschläge",
+    "matching": "Passend zu „{{query}}“",
+    "otherModels": "Weitere Modelle",
+    "default": "Standard",
+    "noMatch": "Kein Vorschlag passt zu „{{query}}“ – der Wert wird wie eingegeben verwendet.",
+    "customHint": "Nicht dabei? Gib eine beliebige Modell-ID ein, die dein Anbieter unterstützt."
   }
 }

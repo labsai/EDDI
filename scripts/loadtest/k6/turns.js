@@ -9,6 +9,10 @@
 //   THINK_MS   pause between a VU's turns
 //   RAMP       burst: ramp-up duration (default 30s); HOLD: time at peak (default 60s)
 //   OUT        summary file name under /results
+//   NODE_ADDRS cluster runs: comma-separated ip:port of every replica behind the load balancer.
+//              The balancer names the replica that answered in X-Loadtest-Upstream; each turn
+//              metric is tagged with it, and a no-op threshold per node makes k6 put the per-node
+//              submetrics in the summary, which is how the driver reports latency per node.
 //
 // Every VU owns one conversation (except same-conversation), started on its first iteration,
 // so concurrent conversations == VUS and each in-flight turn is a distinct conversation.
@@ -24,6 +28,7 @@ const VUS = parseInt(__ENV.VUS || '50', 10);
 const TURNS = parseInt(__ENV.TURNS || (SCENARIO === 'long-conversation' ? '200' : '10'), 10);
 const THINK_MS = parseInt(__ENV.THINK_MS || '0', 10);
 const TIMEOUT = __ENV.HTTP_TIMEOUT || '180s';
+const NODE_ADDRS = (__ENV.NODE_ADDRS || '').split(',').filter((a) => a);
 
 const turnDuration = new Trend('turn_duration', true);
 const turnsOk = new Counter('turns_ok');
@@ -61,8 +66,21 @@ function executor() {
   }
 }
 
+// Thresholds that always pass: they exist only so the summary carries the per-node submetrics.
+function perNodeThresholds() {
+  const t = {};
+  for (const addr of NODE_ADDRS) {
+    t[`turn_duration{node:${addr}}`] = ['max>=0'];
+    for (const c of ['turns_ok', 'turns_503', 'turns_409', 'turns_5xx_other', 'turns_app_error']) {
+      t[`${c}{node:${addr}}`] = ['count>=0'];
+    }
+  }
+  return t;
+}
+
 export const options = {
   scenarios: { turns: executor() },
+  thresholds: perNodeThresholds(),
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   // Requests are only issued to EDDI; nothing here is a threshold, the driver reads the numbers.
   discardResponseBodies: false,
@@ -107,6 +125,9 @@ export default function (data) {
     tags: { kind: 'turn' },
   });
   const s = res.status;
+  // The replica that answered (cluster runs); untagged when there is no balancer in front.
+  const upstream = res.headers['X-Loadtest-Upstream'] || res.headers['x-loadtest-upstream'];
+  const tags = upstream ? { node: upstream.split(',').pop().trim() } : {};
   if (s === 200) {
     let error = null;
     try {
@@ -115,16 +136,16 @@ export default function (data) {
       error = 'unparsable response';
     }
     if (error) {
-      turnsAppError.add(1);
+      turnsAppError.add(1, tags);
     } else {
-      turnsOk.add(1);
-      turnDuration.add(res.timings.duration);
+      turnsOk.add(1, tags);
+      turnDuration.add(res.timings.duration, tags);
     }
-  } else if (s === 503) turns503.add(1);
+  } else if (s === 503) turns503.add(1, tags);
   else if (s === 429) turns429.add(1);
   else if (s === 408) turns408.add(1);
-  else if (s === 409) turns409.add(1);
-  else if (s >= 500) turns5xx.add(1);
+  else if (s === 409) turns409.add(1, tags);
+  else if (s >= 500) turns5xx.add(1, tags);
   else if (s === 0) turnsNoResponse.add(1);
   else turnsOther.add(1);
   if (THINK_MS > 0) sleep(THINK_MS / 1000);

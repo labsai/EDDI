@@ -204,13 +204,22 @@ eddi:
       # deployment reachable by name.
       resource: ""
 
+  # Sized for production, one node. EDDI waits on LLMs far more than it computes, so
+  # memory, not CPU, decides how many conversation turns a node runs at once: the heap
+  # is 75 % of the memory limit (JAVA_MAX_MEM_RATIO in the image), about 2.25 GB here,
+  # and each in-flight turn holds its conversation (~1 MB for short ones). Memory request
+  # equals the limit (Guaranteed QoS: not the first pod evicted under node pressure).
+  # Keep a CPU limit: the JVM sizes its GC, carrier and Jlama threads from it, and
+  # without one it sees every core on the node. 4 leaves headroom for bursts of JSON
+  # (de)serialisation and GC; the request reserves one core. Scale up for more turns
+  # per node (e.g. 6Gi) or out with cluster mode; see docs/kubernetes.md#sizing-a-node.
   resources:
     requests:
-      cpu: 250m
-      memory: 384Mi
+      cpu: "1"
+      memory: 3Gi
     limits:
-      cpu: "2"
-      memory: 1Gi
+      cpu: "4"
+      memory: 3Gi
 
   # Startup probe. It checks LIVENESS, not readiness, on purpose. Readiness is
   # false for as long as the startup migrations run, and the first boot of a
@@ -315,7 +324,11 @@ postgres:
   enabled: false
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "16.15-alpine"
+  # The uid (and gid, and fsGroup) PostgreSQL runs as. 70 is `postgres` in the
+  # alpine image; set 999 for a Debian-based postgres image. Running as it from
+  # the start lets the container drop every capability.
+  runAsUser: 70
   database: eddi
   username: eddi
   # REQUIRED when postgres.enabled=true — no default is shipped.
@@ -494,12 +507,36 @@ ingress:
 # where EDDI cannot run more than one replica. While enabled the HPA owns the
 # replica count and eddi.replicas is not rendered.
 
+#
+# CPU is a weak load signal for EDDI: a node waiting on LLM answers is busy
+# with hundreds of turns at little CPU, so a CPU-only HPA may never scale up
+# while turns queue or are refused with 503. The signal that matches the work
+# is in-flight turns per pod — eddi_runtime_executor_active{pool="turn"}
+# against eddi_conversation_max_in_flight_turns — exposed to the HPA through
+# a custom-metrics adapter (prometheus-adapter or KEDA) and added under
+# extraMetrics. Set a target to null to drop that metric. Before raising
+# maxReplicas, size the database for it: every replica opens its own pool
+# (see "Sizing" in docs/clustering.md).
+
 autoscaling:
   enabled: false
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+  # Further autoscaling/v2 metric entries, appended as given. Example, with a
+  # prometheus-adapter rule that exposes eddi_runtime_executor_active{pool="turn"}
+  # as the pod metric eddi_turns_in_flight:
+  #   - type: Pods
+  #     pods:
+  #       metric:
+  #         name: eddi_turns_in_flight
+  #       target:
+  #         type: AverageValue
+  #         averageValue: "700"   # ~70 % of a 3 GiB pod's ~1000 in-flight limit
+  extraMetrics: []
+  # autoscaling/v2 behavior (scale-up/down policies and stabilization), as given.
+  behavior: {}
 
 # ── Pod Disruption Budget ──────────────────────────────────
 #

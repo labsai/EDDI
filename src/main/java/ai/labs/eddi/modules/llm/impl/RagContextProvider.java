@@ -183,7 +183,7 @@ public class RagContextProvider {
                 // Step 5: Retrieve
                 List<Content> relevant = retriever.retrieve(Query.from(userQuery));
 
-                LOGGER.infof("RAG retrieval from KB '%s': %d results (maxResults=%d, minScore=%.2f)", kbName, relevant.size(), maxResults, minScore);
+                LOGGER.debugf("RAG retrieval from KB '%s': %d results (maxResults=%d, minScore=%.2f)", kbName, relevant.size(), maxResults, minScore);
 
                 // Build trace entry
                 Map<String, Object> traceEntry = new HashMap<>();

@@ -1,4 +1,5 @@
 import { api, isApiError } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -57,7 +58,7 @@ const BASE = "/administration/quotas";
  */
 export async function getQuota(tenantId: string): Promise<TenantQuota> {
   try {
-    return await api.get<TenantQuota>(`${BASE}/${tenantId}`);
+    return await api.get<TenantQuota>(`${BASE}/${nameSeg(tenantId)}`);
   } catch (err) {
     if (isApiError(err) && err.status === 404) {
       return defaultQuota(tenantId);
@@ -71,7 +72,7 @@ export async function updateQuota(
   tenantId: string,
   quota: TenantQuota,
 ): Promise<TenantQuota> {
-  return api.put<TenantQuota>(`${BASE}/${tenantId}`, quota);
+  return api.put<TenantQuota>(`${BASE}/${nameSeg(tenantId)}`, quota);
 }
 
 /**
@@ -80,7 +81,7 @@ export async function updateQuota(
  */
 export async function getUsage(tenantId: string): Promise<TenantUsage> {
   try {
-    return await api.get<TenantUsage>(`${BASE}/${tenantId}/usage`);
+    return await api.get<TenantUsage>(`${BASE}/${nameSeg(tenantId)}/usage`);
   } catch (err) {
     if (isApiError(err) && err.status === 404) {
       return emptyUsage(tenantId);
@@ -91,6 +92,6 @@ export async function getUsage(tenantId: string): Promise<TenantUsage> {
 
 /** Reset usage counters for a tenant. */
 export async function resetUsage(tenantId: string): Promise<void> {
-  await api.post(`${BASE}/${tenantId}/usage/reset`, undefined);
+  await api.post(`${BASE}/${nameSeg(tenantId)}/usage/reset`, undefined);
 }
 

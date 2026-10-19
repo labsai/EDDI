@@ -334,6 +334,13 @@
     "maxForksHint": "会話ごと",
     "maxRecallEntries": "最大リコール数",
     "memoryPolicy": "メモリポリシー",
+    "limits": "上限",
+    "limitsDesc": "このエージェントとの 1 つの会話で使える金額を制限します。上限に達すると、エージェントはモデルを呼び出さず、フォールバック回答を返します。",
+    "maxCostPerConversation": "会話あたりの最大コスト（USD）",
+    "unlimited": "無制限",
+    "maxCostHint": "空欄 = 無制限。0 = 料金が発生する利用を一切許可しない。",
+    "maxCostInvalid": "0 以上の金額を入力するか、無制限にするには空欄にしてください。",
+    "maxCostPricedOnly": "料金が設定されたモデルだけがこの上限に計上されます。LLM 設定に入力/出力の料金がないモデルは $0 ですが、他の支出が上限に達すると同様に停止されます。",
     "memoryPolicyDesc": "厳格な書き込み規律は、会話ステップ中にプロパティの更新が失敗したときの動作を制御します。部分的にコミットされたデータをエンジンがどう扱うかを選択します。",
     "onCapReached": "上限到達時",
     "onFailure": "失敗時の戦略",
@@ -2897,6 +2904,7 @@
     "question": "質問",
     "readyToDiscuss": "議論の準備完了",
     "responding": "応答中…",
+    "usingTool": "{{tool}} を使用中…",
     "reviewMemberRoster": "メンバー一覧",
     "reviewMembers": "メンバー",
     "reviewModerator": "モデレーター",
@@ -3534,7 +3542,7 @@
     "intent": "インテント",
     "deployments": "エージェントデプロイメント",
     "addDeployment": "エージェントを追加",
-    "agents": "エージェント",
+    "intentPlaceholder": "例: booking_request",
     "empty": "トリガーはまだ設定されていません",
     "created": "トリガーを作成しました",
     "updated": "トリガーを更新しました",
@@ -3987,7 +3995,10 @@
     "targetType": "タイプ",
     "triggerHint": "ユーザーが「キーワード: メッセージ」と入力するとこのターゲットにルーティングされます",
     "triggerKeywords": "トリガーキーワード",
-    "triggers": "トリガー",
+    "targetFallback": "ターゲット {{number}}",
+    "untitledChannel": "無題のチャネル",
+    "triggerCount_one": "{{count}} 件のトリガー",
+    "triggerCount_other": "{{count}} 件のトリガー",
     "type": "チャネルタイプ",
     "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
     "webhookUrl": "Webhook URL",
@@ -4281,6 +4292,13 @@
     "tenantId": "テナント ID",
     "title": "テナントクォータ",
     "limitHintEmpty": "空欄または -1 = 無制限、0 = ブロック",
+    "costPricedOnly": "料金が設定された支出のみを計上します。LLM 設定に inputPricePer1M / outputPricePer1M がないモデルは合計に $0 を加えますが、予算を使い切ると他のモデルと同様に拒否されます。",
+    "budgetTitle": "月間コスト予算",
+    "budgetUnlimited": "月間コスト予算が設定されていないため、支出は計測のみで制限されません。",
+    "budgetNotEnforced": "{{limit}} の予算が設定されていますが、適用が無効なため反映されません。",
+    "budgetReached": "予算に達しました（{{spent}} / {{limit}}）。LLM タスクはモデルを呼び出さずフォールバック回答を返し、ツール呼び出しは拒否されます。月が替わるか上限を引き上げるまで続きます。",
+    "budgetRemaining": "今月は {{limit}} のうち {{spent}} を使用。モデルが呼び出されなくなるまで残り {{remaining}} です。",
+    "budgetNote": "UTC の暦月ごとに、料金が設定されたモデル呼び出しと追跡済みのツールコストを計上します。料金のないモデル、会話の要約、埋め込みは計測されません。上限を超えるターンも最後まで実行されるため、合計が上限をわずかに超えることがあります。拒否された呼び出しは eddi.llm.spend.refused メトリクスに計上されます。",
     "invalidInteger": "0 以上の整数を入力するか、空欄で無制限にしてください。",
     "invalidAmount": "0 以上の金額を入力するか、空欄で無制限にしてください。"
   },
@@ -4959,6 +4977,7 @@
       "action": "有効にする"
     },
     "activation": {
+      "storedPromptConfirm": "これらの指示は保存済みの設定から引き継がれたもので、プラットフォーム設定を編集できる人が変更した可能性があります。上の内容を読み、インストールすることに同意します。",
       "title": "プラットフォームオペレーターを有効にする",
       "subtitle": "オペレーターを動かすモデルを選び、指示内容を確認してデプロイします。",
       "modelStep": "モデル",
@@ -5061,7 +5080,11 @@
       "gateUnverifiedHelp": "このエージェントのドキュメントで承認ゲートを確認できませんでした。",
       "agentId": "エージェント",
       "platformBaseUrl": "プラットフォームの呼び出し先",
-      "platformBaseUrlUnknown": "記録なし"
+      "platformBaseUrlUnknown": "記録なし",
+      "unregister": "オペレーターの登録を解除",
+      "unregisterConfirmTitle": "プラットフォームオペレーターの登録を解除しますか？",
+      "unregisterConfirmBody": "保存されたオペレーター設定のみが削除されます。登録されたエージェントがこの Manager で設定したオペレーターであることを確認できなかったため、デプロイ、アンデプロイ、削除は行われません。エージェント画面で確認してください。",
+      "unverifiedActions": "このエージェントが Manager で設定したオペレーターであることを確認できなかったため、この画面では接続確認、アンデプロイ、削除を行いません。「再設定」は新しいオペレーターを作成し、このエージェントはそのまま残します。"
     },
     "chat": {
       "empty": "ご自身の環境について質問してください。オペレーターが調べ、行ったすべての呼び出しを表示します。",
@@ -5151,7 +5174,8 @@
       "activatedChecking": "プラットフォームオペレーターを有効化しました。接続チェックはバックグラウンドで実行中です。",
       "writeProbeVerified": "書き込みアクセスを検証しました — 実際のゲート付き書き込みが承認のため一時停止しました。",
       "writeProbeFailed": "承認ゲートが機能しませんでした — オペレーターは削除されました。",
-      "writeProbeInconclusive": "ライブ書き込みプローブは結論が出ませんでした。"
+      "writeProbeInconclusive": "ライブ書き込みプローブは結論が出ませんでした。",
+      "unregistered": "プラットフォームオペレーターの登録を解除しました"
     },
     "canary": {
       "genericFailure": "接続確認に失敗しました。",
@@ -5190,7 +5214,22 @@
     "superseded": {
       "title": "以前のオペレーターエージェントがまだデプロイされています。"
     },
+    "trust": {
+      "checking": "チャットを開く前にオペレーターを確認しています…",
+      "title": "プラットフォームオペレーターを確認できませんでした",
+      "body": "オペレーターとして登録されているエージェント（{{agentId}}）が、このマネージャーが設定したものであると確認できないため、チャットは無効です。プラットフォーム設定を編集できる人は、どのエージェントを指すかを変更できます。",
+      "reasonMarker": "プラットフォームオペレーターのマーカーがないため、マネージャーがプロビジョニングしたエージェントではない可能性があります。",
+      "reasonGate": "承認ゲートを確認できませんでした: {{detail}}",
+      "reasonUnreadable": "確認を完了できませんでした: {{detail}}",
+      "recheck": "再確認",
+      "manage": "オペレーター画面を開く"
+    },
     "upgrade": {
+      "reviewTitle": "保存されている指示を確認",
+      "reviewBody": "これらの指示は以前に保存されたもので、新しいオペレーターにインストールされます。プラットフォーム設定を編集できる人が変更した可能性があるため、続行する前にデフォルトとの差分をお読みください。",
+      "reviewSummary": "{{added}} 行追加、デフォルトの {{removed}} 行を削除",
+      "reviewFull": "保存されているテキスト全体を表示",
+      "reviewConfirm": "これらの指示を読み、インストールすることに同意します",
       "hint": "Platform Operator のアップデートがあります。",
       "blockerBaseUrl": "モデルサーバーのアドレスが記録されていません。アップグレードするには再入力してください。",
       "addedTools_other": "{{count}} 件の新しいツール",
@@ -6312,5 +6351,14 @@
     "cancelled": "デプロイされていません: 保管庫キーが付与されませんでした。エージェントは作成済みです。もう一度試して付与とデプロイを行うか、各エージェントのページからデプロイしてください。",
     "failed": "作成済みですが未デプロイ: {{names}}。{{reason}} もう一度試すか、各エージェントのページからデプロイしてください。",
     "memberCancelled": "デプロイされていません: 保管庫キーが付与されませんでした"
+  },
+  "modelCombobox": {
+    "toggle": "モデル候補を表示",
+    "listLabel": "モデル候補",
+    "matching": "「{{query}}」に一致",
+    "otherModels": "その他のモデル",
+    "default": "デフォルト",
+    "noMatch": "「{{query}}」に一致する候補はありません。入力したとおりに使用されます。",
+    "customHint": "一覧にない場合は、プロバイダーがサポートする任意のモデル ID を入力できます。"
   }
 }

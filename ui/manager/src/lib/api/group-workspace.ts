@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { SharedTaskList, TaskItem } from "./groups";
+import { seg } from "./path-segment";
 
 // ─────────────────────────────────────────────────────────────────
 // I13 — standing teams: a persistent workspace (backlog + metrics +
@@ -111,7 +112,7 @@ export interface AddCadenceRequest {
  */
 export function getGroupWorkspace(groupId: string): Promise<GroupWorkspace> {
   return api.get<GroupWorkspace>(
-    `/groupstore/groups/${encodeURIComponent(groupId)}/workspace`,
+    `/groupstore/groups/${seg(groupId)}/workspace`,
   );
 }
 
@@ -123,7 +124,7 @@ export function getGroupWorkspace(groupId: string): Promise<GroupWorkspace> {
  */
 export function getGroupWorkspaceBacklog(groupId: string): Promise<TaskItem[]> {
   return api.get<TaskItem[]>(
-    `/groupstore/groups/${encodeURIComponent(groupId)}/workspace/backlog`,
+    `/groupstore/groups/${seg(groupId)}/workspace/backlog`,
   );
 }
 
@@ -144,7 +145,7 @@ export function addWorkspaceBacklogTask(
   request: AddBacklogTaskRequest,
 ): Promise<TaskItem> {
   return api.post<TaskItem>(
-    `/groupstore/groups/${encodeURIComponent(groupId)}/workspace/backlog`,
+    `/groupstore/groups/${seg(groupId)}/workspace/backlog`,
     request,
   );
 }
@@ -163,7 +164,7 @@ export function addWorkspaceCadence(
   request: AddCadenceRequest,
 ): Promise<Cadence> {
   return api.post<Cadence>(
-    `/groupstore/groups/${encodeURIComponent(groupId)}/workspace/cadences`,
+    `/groupstore/groups/${seg(groupId)}/workspace/cadences`,
     request,
   );
 }
@@ -180,6 +181,6 @@ export function deleteWorkspaceCadence(
   cadenceId: string,
 ): Promise<void> {
   return api.delete(
-    `/groupstore/groups/${encodeURIComponent(groupId)}/workspace/cadences/${encodeURIComponent(cadenceId)}`,
+    `/groupstore/groups/${seg(groupId)}/workspace/cadences/${seg(cadenceId)}`,
   );
 }

@@ -2,6 +2,7 @@ import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
 import { repairNegotiationArbitration } from "../hitl-config";
+import { seg } from "./path-segment";
 
 // ─── Enums & Types ───────────────────────────────────────────────
 
@@ -1131,7 +1132,7 @@ export function getGroup(
   // Backend requires version — omitting it causes 400 (RuntimeUtilities.checkNotNull)
   const versionSuffix = version != null ? `?version=${version}` : "";
   return api
-    .get<AgentGroupConfiguration>(`/groupstore/groups/${id}${versionSuffix}`)
+    .get<AgentGroupConfiguration>(`/groupstore/groups/${seg(id)}${versionSuffix}`)
     .then(normalizeGroupConfig);
 }
 
@@ -1143,7 +1144,7 @@ export function getGroup(
  * original name, members and phases — for any group that had ever been saved.
  */
 export function getGroupCurrentVersion(id: string): Promise<number> {
-  return api.get<number>(`/groupstore/groups/${encodeURIComponent(id)}/currentversion`);
+  return api.get<number>(`/groupstore/groups/${seg(id)}/currentversion`);
 }
 
 export function createGroup(
@@ -1157,7 +1158,7 @@ export function updateGroup(
   version: number,
   config: AgentGroupConfiguration
 ): Promise<{ location: string }> {
-  return api.put(`/groupstore/groups/${id}?version=${version}`, config);
+  return api.put(`/groupstore/groups/${seg(id)}?version=${version}`, config);
 }
 
 /**
@@ -1176,7 +1177,7 @@ export function deleteGroup(
     version: String(version),
     permanent: String(permanent),
   });
-  return api.delete(`/groupstore/groups/${id}?${params}`);
+  return api.delete(`/groupstore/groups/${seg(id)}?${params}`);
 }
 
 export function duplicateGroup(
@@ -1184,7 +1185,7 @@ export function duplicateGroup(
   version: number
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `/groupstore/groups/${id}?version=${version}`
+    `/groupstore/groups/${seg(id)}?version=${version}`
   );
 }
 
@@ -1293,7 +1294,7 @@ export function startGroupDiscussion(
   attachments?: GroupAttachmentRef[],
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
-    `/groups/${groupId}/conversations`,
+    `/groups/${seg(groupId)}/conversations`,
     discussBody(question, userId, attachments),
   );
 }
@@ -1303,7 +1304,7 @@ export function getGroupConversation(
   conversationId: string
 ): Promise<GroupConversation> {
   return api.get<GroupConversation>(
-    `/groups/${groupId}/conversations/${conversationId}`
+    `/groups/${seg(groupId)}/conversations/${seg(conversationId)}`
   );
 }
 
@@ -1317,7 +1318,7 @@ export function listGroupConversations(
     index: String(index),
   });
   return api.get<GroupConversation[]>(
-    `/groups/${groupId}/conversations?${params.toString()}`
+    `/groups/${seg(groupId)}/conversations?${params.toString()}`
   );
 }
 
@@ -1326,7 +1327,7 @@ export function deleteGroupConversation(
   conversationId: string
 ): Promise<void> {
   return api.delete(
-    `/groups/${groupId}/conversations/${conversationId}`
+    `/groups/${seg(groupId)}/conversations/${seg(conversationId)}`
   );
 }
 
@@ -1357,7 +1358,7 @@ export function followupGroupMember(
   userId?: string,
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
-    `/groups/${groupId}/conversations/${gcId}/followup`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/followup`,
     { question, targetAgentId, ...userIdField(userId) },
   );
 }
@@ -1374,7 +1375,7 @@ export function closeGroupConversation(
   gcId: string,
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
-    `/groups/${groupId}/conversations/${gcId}/close`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/close`,
   );
 }
 
@@ -1398,7 +1399,7 @@ export function submitHumanInput(
   content: string,
 ): Promise<GroupConversation> {
   return api.post<GroupConversation>(
-    `/groups/${groupId}/conversations/${gcId}/human-input`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/human-input`,
     { memberId, content },
   );
 }
@@ -1453,7 +1454,10 @@ export type GroupSSEEventType =
   | "cost_updated"
   // A member's one-line stance was recomputed at a phase boundary. NOT
   // terminal, and fires only when the stance TEXT actually changed.
-  | "stance_updated";
+  | "stance_updated"
+  // A member's tool loop is about to run a tool. NOT terminal. Name only, never
+  // arguments; a best-effort liveness signal for a turn that is not streamed.
+  | "member_tool_call";
 //
 // `token` and `synthesis_complete` are declared in the backend's
 // GroupConversationEventSink but no producer emits them; they are deliberately
@@ -1632,6 +1636,13 @@ export interface CostUpdatedPayload {
   totalCost: number;
 }
 
+/** Payload of `member_tool_call` — the tool's name, never its arguments. */
+export interface MemberToolCallPayload {
+  agentId: string;
+  displayName: string | null;
+  tool: string;
+}
+
 /** Payload of `stance_updated`. */
 export interface StanceUpdatedPayload {
   agentId: string;
@@ -1807,7 +1818,7 @@ export async function* streamGroupDiscussion(
   attachments?: GroupAttachmentRef[],
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
-    `/groups/${groupId}/conversations/stream`,
+    `/groups/${seg(groupId)}/conversations/stream`,
     discussBody(question, userId, attachments),
     signal,
   );
@@ -1832,7 +1843,7 @@ export async function* streamGroupContinue(
   signal?: AbortSignal,
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
-    `/groups/${groupId}/conversations/${gcId}/continue/stream`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/continue/stream`,
     { question, ...userIdField(userId) },
     signal,
   );
@@ -1851,7 +1862,7 @@ export async function* streamGroupApproval(
   signal?: AbortSignal,
 ): AsyncGenerator<GroupSSEEvent> {
   const response = await postSSE(
-    `/groups/${groupId}/conversations/${gcId}/approve/stream`,
+    `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve/stream`,
     request,
     signal,
   );
@@ -2110,7 +2121,7 @@ function humanizeEntryType(type: string): string {
 async function getCurrentAgentVersion(agentId: string): Promise<number> {
   try {
     const version = await api.get<number>(
-      `/agentstore/agents/${agentId}/currentversion`,
+      `/agentstore/agents/${seg(agentId)}/currentversion`,
     );
     return version ?? 1;
   } catch {

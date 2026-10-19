@@ -103,7 +103,12 @@ public class McpGroupTools {
      * read or mutated by its owner (or an admin). The MCP role check alone is a
      * coarse gate — without this, any caller holding the baseline MCP role could
      * read, append to, re-run or close ANOTHER user's group conversation, while the
-     * equivalent REST endpoints all enforce {@code requireOwnerOrAdmin} (403).
+     * equivalent REST endpoints all enforce {@code requireOwnerOrAdminStrict}
+     * (403).
+     * <p>
+     * Strict, like REST (L2): a record with no owner is an administrator's alone.
+     * The lenient check admitted every caller holding the baseline MCP role —
+     * {@code eddi-viewer} included — to read, continue, close or delete it.
      *
      * @return the conversation the check was made against, so a caller that needs
      *         more of it reads the same state rather than loading it again
@@ -111,7 +116,7 @@ public class McpGroupTools {
     private GroupConversation requireConversationOwner(String groupConversationId)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
-        ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+        ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
         return gc;
     }
 
@@ -475,7 +480,7 @@ public class McpGroupTools {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             return jsonSerialization.serialize(gc);
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);
