@@ -27,4 +27,18 @@ class IdempotentStreamingHandlerForwardingTest {
 
         verify(delegate).onLlmRetry("invalid_json", 1);
     }
+
+    @Test
+    @DisplayName("guardrail_triggered reaches the caller's stream for a keyed request too")
+    void guardrailTriggeredIsForwarded() throws Exception {
+        var delegate = mock(StreamingResponseHandler.class);
+        var type = Class.forName("ai.labs.eddi.engine.internal.ConversationService$IdempotentStreamingHandler");
+        var constructor = type.getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        var handler = (StreamingResponseHandler) constructor.newInstance(delegate, mock(TurnIdempotencyService.class), "conv", "key");
+
+        handler.onGuardrailTriggered("prompt-injection", "input", "block", "support");
+
+        verify(delegate).onGuardrailTriggered("prompt-injection", "input", "block", "support");
+    }
 }

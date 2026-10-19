@@ -1211,6 +1211,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+                streamingHandler.onGuardrailTriggered(type, phase, action, taskId);
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }
@@ -1974,6 +1979,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         @Override
         public void onLlmRetry(String reason, int attempt) {
             delegate.onLlmRetry(reason, attempt);
+        }
+
+        @Override
+        public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+            delegate.onGuardrailTriggered(type, phase, action, taskId);
         }
 
         @Override
