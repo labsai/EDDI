@@ -787,6 +787,34 @@ class McpGroupToolsTest {
     }
 
     @Test
+    void unownedConversation_refusedToNonAdmin_onEveryTool() throws Exception {
+        // L2: a record with no owner is an administrator's alone. The lenient check
+        // admitted every CONVERSE-role caller, eddi-viewer included.
+        ownedBy(null);
+        var viewer = toolsAsUser("bob", "eddi-viewer");
+        var editor = toolsAsUser("bob", "eddi-editor");
+
+        assertTrue(viewer.read_group_conversation("gc1").contains("Access denied"));
+        assertTrue(viewer.followup_with_member("gc1", "Analyst", "why?").contains("Access denied"));
+        assertTrue(viewer.continue_group_discussion("gc1", "next?").contains("Access denied"));
+        assertTrue(editor.close_group_conversation("gc1").contains("Access denied"));
+        assertTrue(editor.delete_group_conversation("gc1").contains("Access denied"));
+        verify(groupConversationService, never()).followUpWithMember(any(), any(), any());
+        verify(groupConversationService, never()).continueDiscussion(any(), any(), any());
+        verify(groupConversationService, never()).closeGroupConversation(any());
+        verify(groupConversationService, never()).deleteGroupConversation(any());
+        verify(jsonSerialization, never()).serialize(any());
+    }
+
+    @Test
+    void unownedConversation_stillReadableByAdmin() throws Exception {
+        GroupConversation gc = ownedBy("");
+        when(jsonSerialization.serialize(gc)).thenReturn("{\"id\":\"gc1\"}");
+
+        assertFalse(toolsAsAdmin("root").read_group_conversation("gc1").contains("Access denied"));
+    }
+
+    @Test
     void deleteGroupConversation_deniedForNonOwner() throws Exception {
         ownedBy("alice");
 

@@ -231,7 +231,8 @@ public class RestAgentEngine implements IRestAgentEngine {
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
         conversationService.refuseIfAtCapacity(conversationId);
-        validateConversationOwnership(conversationId);
+        // Runs a turn, so the agent's USE is re-checked as for say() (L4).
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         // language is optional, as it is on say(). Requiring it here 400'd every
         // rerun call that followed the endpoint's own description, which never
@@ -259,10 +260,13 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
-        // Before the ownership check: under overload a turn that is going to be
+        // Before the access check: under overload a turn that is going to be
         // refused should not first spend database reads on its descriptor.
         conversationService.refuseIfAtCapacity(conversationId);
-        validateConversationOwnership(conversationId);
+        // Owner or admin, and — under enforced workspaces — still allowed to USE the
+        // conversation's agent (L4): a revoked share stops the next turn, not only the
+        // next conversation.
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
                 response);

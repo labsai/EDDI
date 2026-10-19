@@ -43,6 +43,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <p>
  * A misconfigured realm fails every request, so the explanatory WARN is emitted
  * at most once every five minutes; the rejections in between log at DEBUG.
+ *
+ * <h3>Reserved principal names (L3)</h3> An identity whose principal starts
+ * with one of {@link ReservedPrincipals#PREFIXES} — {@code slack:},
+ * {@code group:}, {@code system:} and the rest of the names EDDI makes up for
+ * callers without a token — is refused the same way. Ownership is a string
+ * comparison, so a token named {@code slack:T1:U2} would otherwise own that
+ * Slack user's conversations. Only an identity provider that admits {@code :}
+ * in usernames can produce one; the refusal is a {@code [SECURITY]} WARN,
+ * throttled like the one above.
  */
 @ApplicationScoped
 public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
@@ -51,11 +60,16 @@ public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
 
     static final long WARN_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(5);
     static final String FAILURE_MESSAGE = "The authenticated identity has no principal name";
+    static final String RESERVED_FAILURE_MESSAGE = "The authenticated identity's principal name is reserved";
 
     private final Optional<String> principalClaim;
     private final LongSupplier nanoClock;
     /** When the last WARN was emitted; {@code null} until the first. */
     private final AtomicReference<Long> lastWarnNanos = new AtomicReference<>();
+    /**
+     * The same, for reserved-name rejections, so one kind cannot mute the other.
+     */
+    private final AtomicReference<Long> lastReservedWarnNanos = new AtomicReference<>();
 
     @Inject
     public NamelessPrincipalAugmentor(@ConfigProperty(name = "quarkus.oidc.token.principal-claim") Optional<String> principalClaim) {
@@ -69,8 +83,16 @@ public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
 
     @Override
     public Uni<SecurityIdentity> augment(SecurityIdentity identity, AuthenticationRequestContext context) {
-        if (identity == null || identity.isAnonymous() || OwnershipValidator.principalName(identity) != null) {
+        if (identity == null || identity.isAnonymous()) {
             return Uni.createFrom().item(identity);
+        }
+        String name = OwnershipValidator.principalName(identity);
+        if (name != null) {
+            String reserved = ReservedPrincipals.reservedPartOf(name);
+            if (reserved == null) {
+                return Uni.createFrom().item(identity);
+            }
+            return rejectReserved(identity, name, reserved);
         }
         String detail = describe(identity);
         if (shouldWarn()) {
@@ -81,7 +103,25 @@ public class NamelessPrincipalAugmentor implements SecurityIdentityAugmentor {
         return Uni.createFrom().failure(new AuthenticationFailedException(FAILURE_MESSAGE));
     }
 
+    private Uni<SecurityIdentity> rejectReserved(SecurityIdentity identity, String name, String reserved) {
+        String shown = name.length() > 80 ? name.substring(0, 80) + "…" : name;
+        String issuer = identity.getPrincipal() instanceof JsonWebToken jwt ? safeString(claim(jwt, "iss")) : "<not a JWT>";
+        String message = "Rejected an authenticated request (401): the principal '%s' uses the reserved prefix '%s', which EDDI uses for "
+                + "identities it creates itself (Slack, Open WebUI, group memory, the scheduler, …). Issuer='%s'. Rename the account, or "
+                + "point quarkus.oidc.token.principal-claim at a claim that cannot take such a value.";
+        if (shouldWarn(lastReservedWarnNanos)) {
+            LOGGER.warnf("[SECURITY] " + message, sanitize(shown), sanitize(reserved), sanitize(issuer));
+        } else {
+            LOGGER.debugf(message, sanitize(shown), sanitize(reserved), sanitize(issuer));
+        }
+        return Uni.createFrom().failure(new AuthenticationFailedException(RESERVED_FAILURE_MESSAGE));
+    }
+
     boolean shouldWarn() {
+        return shouldWarn(lastWarnNanos);
+    }
+
+    boolean shouldWarn(AtomicReference<Long> lastWarnNanos) {
         long now = nanoClock.getAsLong();
         Long last = lastWarnNanos.get();
         if (last != null && now - last < WARN_INTERVAL_NANOS) {
