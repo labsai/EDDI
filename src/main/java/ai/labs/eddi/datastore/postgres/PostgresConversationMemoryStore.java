@@ -47,6 +47,8 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IConversationMemoryStore}.
  * <p>
@@ -653,6 +655,25 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
      */
     private static final String GENERATION_BELOW = "(data->>'compatibilityGeneration' IS NULL OR (data->>'compatibilityGeneration')::int < ?)";
 
+    /**
+     * The stored {@code compatibilityGeneration} JSON text as a number, or
+     * {@code null} when absent or not a number. The candidate query casts the field
+     * in SQL, so a malformed value fails there first; this keeps the Java side from
+     * throwing on one regardless, and treats it like a conversation without a
+     * generation.
+     */
+    static Integer parseGeneration(String conversationId, String generation) {
+        if (generation == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(generation.trim());
+        } catch (NumberFormatException e) {
+            LOGGER.warnf("Conversation %s has a malformed compatibilityGeneration; treating it as none", sanitize(conversationId));
+            return null;
+        }
+    }
+
     @Override
     public List<ConversationGenerationCandidate> loadGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions,
                                                                                  int belowGeneration, String afterConversationId, int limit)
@@ -687,7 +708,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 while (rs.next()) {
                     String generation = rs.getString("generation");
                     batch.add(new ConversationGenerationCandidate(rs.getString("id"), stateOrNull(rs.getString("conversation_state")),
-                            rs.getObject("AGENT_VERSION", Integer.class), generation == null ? null : Integer.valueOf(generation)));
+                            rs.getObject("AGENT_VERSION", Integer.class), parseGeneration(rs.getString("id"), generation)));
                 }
                 return batch;
             }
@@ -769,7 +790,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     }
                     String generation = rs.getString("generation");
                     return GenerationUpgradeOutcome.whyNotUpgraded(true, agentId != null && agentId.equals(rs.getString("AGENT_ID")),
-                            generation == null ? null : Integer.valueOf(generation), targetGeneration,
+                            parseGeneration(conversationId, generation), targetGeneration,
                             stateOrNull(rs.getString("conversation_state")));
                 }
             }

@@ -533,4 +533,13 @@ class PostgresConversationMemoryStoreUnitTest {
         snapshot.setConversationSteps(Collections.emptyList());
         return snapshot;
     }
+
+    @Test
+    void parseGenerationTreatsAbsentOrMalformedAsNone() {
+        assertNull(PostgresConversationMemoryStore.parseGeneration("c1", null));
+        assertNull(PostgresConversationMemoryStore.parseGeneration("c1", "not-a-number"));
+        assertNull(PostgresConversationMemoryStore.parseGeneration("c1", ""));
+        assertEquals(3, PostgresConversationMemoryStore.parseGeneration("c1", "3"));
+        assertEquals(7, PostgresConversationMemoryStore.parseGeneration("c1", " 7 "));
+    }
 }
