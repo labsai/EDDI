@@ -377,6 +377,37 @@ class MongoSecretPersistenceTest {
         assertFalse(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
     }
 
+    // ==================== resealSecretInPlace (L10) ====================
+
+    @Test
+    @DisplayName("resealSecretInPlace — guarded on the IV the reader saw, rewrites ONLY the ciphertext and the IV")
+    void resealSecretInPlaceIsGuardedOnTheIv() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.resealSecretInPlace(TENANT, "my-key", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(filter.capture(), update.capture());
+        String filterJson = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(filterJson.contains("\"iv\": \"old-iv\""), filterJson);
+        assertTrue(filterJson.contains("\"dekId\": \"dek-0\""), filterJson);
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).getDocument("$set");
+        assertEquals(Set.of("encryptedValue", "iv"), set.keySet(), "not a rotation: dekId and lastRotatedAt stay");
+    }
+
+    @Test
+    @DisplayName("resealSecretInPlace — a row a concurrent store changed is left alone")
+    void resealSecretInPlaceLosesTheGuard() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.resealSecretInPlace(TENANT, "my-key", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+    }
+
     // ==================== updateSecretGrant ====================
 
     @Test
