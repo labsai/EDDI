@@ -364,7 +364,10 @@ public class RestGroupConversation implements IRestGroupConversation {
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
             GroupConversation gc = loadInGroup(groupId, groupConversationId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict (L2): an unowned record is an administrator's to read, as it already
+            // is to continue, close or delete — a transcript is not less private than
+            // the right to append to it.
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             return gc;
         } catch (ForbiddenException e) {
             throw e;
@@ -492,7 +495,7 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response cancelDiscussion(String groupId, String gcId) {
-        validateGroupConversationOwnership(groupId, gcId, true);
+        validateGroupConversationOwnership(groupId, gcId);
         try {
             boolean cancelled = groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             if (!cancelled) {
@@ -539,7 +542,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
-        validateGroupConversationOwnership(groupId, gcId, true);
+        validateGroupConversationOwnership(groupId, gcId);
         requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         try {
@@ -779,7 +782,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             return;
         }
         try {
-            validateGroupConversationOwnership(groupId, gcId, true);
+            validateGroupConversationOwnership(groupId, gcId);
         } catch (NotFoundException e) {
             // Streaming endpoint has no Response to return — surface the mismatch as
             // a terminal SSE error instead of letting a WebApplicationException abort
@@ -944,41 +947,22 @@ public class RestGroupConversation implements IRestGroupConversation {
     /**
      * Validates that the caller owns the group conversation (or is admin/approver)
      * and — when {@code groupId} is non-null — that the target conversation belongs
-     * to that group. Mirrors the pattern in
-     * RestAgentEngine.validateConversationOwnership.
+     * to that group: the strict HITL check (group membership, then
+     * owner/admin/approver, fail-closed) shared with the MCP surface via
+     * {@link HitlAccessGuard}.
+     * <p>
+     * Every caller is a HITL operation. The lenient branch this used to have —
+     * {@code requireOwnerOrAdmin}, which admits anyone to an unowned record — had
+     * no caller left, and was removed rather than kept as a trap (L2).
      *
      * @param groupId
      *            when non-null, also verifies the target conversation belongs to
      *            this group — a mismatch (or unknown conversation) yields 404 so
      *            approve/cancel/status cannot act on a conversation under the wrong
      *            group path (CodeQL: unused path param → consistency hole).
-     * @param hitlOperation
-     *            if true, uses strict ownership + approver role check
      */
-    private void validateGroupConversationOwnership(String groupId, String gcId, boolean hitlOperation) {
-        if (hitlOperation) {
-            // Strict HITL ownership (group-membership check + owner/admin/approver,
-            // fail-closed) is shared with the MCP surface via HitlAccessGuard.
-            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
-            return;
-        }
-        GroupConversation gc;
-        try {
-            gc = groupConversationService.readGroupConversation(gcId);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            // Let the actual operation handle the 404
-            LOGGER.debugf("Group conversation not found for ownership check: %s", gcId);
-            return;
-        } catch (Exception e) {
-            throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
-        }
-        // Membership check first: a wrong-group path must look like "not found" here,
-        // never leak the conversation's existence or owner via an authz error.
-        if (groupId != null && !groupId.equals(gc.getGroupId())) {
-            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
-            throw new NotFoundException("Group conversation not found.");
-        }
-        ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+    private void validateGroupConversationOwnership(String groupId, String gcId) {
+        hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
     }
 
     /**

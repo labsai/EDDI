@@ -4,12 +4,15 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ContextNotActiveException;
@@ -68,6 +71,15 @@ public class ConversationAccessGuard {
      */
     @Inject
     Instance<IConversationMemoryStore> conversationMemoryStoreInstance;
+
+    /**
+     * The workspace guard that answers "may this caller still use the agent this
+     * conversation runs on?" before every turn — see
+     * {@link #requireConversationTurnAccess}. Field-injected and lazy for the same
+     * reasons as {@link #reviewPolicyInstance}; without it no USE re-check runs.
+     */
+    @Inject
+    Instance<ResourceAccessGuard> resourceAccessGuardInstance;
 
     /**
      * Shares one descriptor read between the checks of a request — see
@@ -145,6 +157,89 @@ public class ConversationAccessGuard {
         String owner = ownerOf(descriptor, conversationId, null);
         ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
         return owner;
+    }
+
+    /**
+     * {@link #requireConversationOwner}, plus — under enforced workspaces — the
+     * {@code USE} check on the agent the conversation runs on, for every request
+     * that runs a turn ({@code say}, its streaming twin, a rerun, MCP
+     * {@code talk_to_agent}).
+     * <p>
+     * {@code USE} used to be checked only when a conversation was started (L4).
+     * Revoking a share, or turning an agent private, then stopped nobody who
+     * already had a conversation open: they could go on talking to it for as long
+     * as the conversation lived. Owner and administrator semantics are unchanged —
+     * this adds a check, never an admission — and nothing is cached across
+     * requests, so a revocation takes effect at the next turn.
+     * <p>
+     * The agent is read from the conversation descriptor ({@code agentResource}),
+     * else from the conversation memory. When neither names one, a
+     * non-administrator under enforcement is refused: an agent that cannot be named
+     * cannot be checked.
+     *
+     * @return the conversation owner, as {@link #requireConversationOwner} returns
+     *         it
+     */
+    public String requireConversationTurnAccess(String conversationId) {
+        var descriptor = resolveDescriptor(conversationId);
+        if (descriptor == null) {
+            if (ownershipValidator.isAdmin(identity)) {
+                LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
+                return null;
+            }
+            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
+            throw new NotFoundException("Conversation not found");
+        }
+        String owner = ownerOf(descriptor, conversationId, null);
+        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
+        requireUseOfConversationAgent(descriptor, conversationId);
+        return owner;
+    }
+
+    private void requireUseOfConversationAgent(ConversationDescriptor descriptor, String conversationId) {
+        ResourceAccessGuard guard = resourceAccessGuardInstance != null && resourceAccessGuardInstance.isResolvable()
+                ? resourceAccessGuardInstance.get()
+                : null;
+        if (guard == null || guard.seesEverything()) {
+            return;
+        }
+        String agentId = agentIdOf(descriptor, conversationId);
+        if (agentId == null) {
+            LOGGER.warnf("Conversation %s names no agent — refusing the turn, since access to its agent cannot be checked",
+                    sanitize(conversationId));
+            throw new ForbiddenException("Access denied: unable to verify access to this conversation's agent");
+        }
+        guard.requireAgentUseAccess(agentId);
+    }
+
+    /**
+     * The id of the agent the conversation runs on: from the descriptor's
+     * {@code agentResource}, else from the conversation memory, else {@code null}.
+     */
+    private String agentIdOf(ConversationDescriptor descriptor, String conversationId) {
+        URI agentResource = descriptor.getAgentResource();
+        if (agentResource != null) {
+            try {
+                IResourceId resourceId = RestUtilities.extractResourceId(agentResource);
+                if (resourceId != null && resourceId.getId() != null && !resourceId.getId().isBlank()) {
+                    return resourceId.getId();
+                }
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Could not read the agent id of conversation %s from its descriptor: %s", sanitize(conversationId),
+                        sanitize(e.getMessage()));
+            }
+        }
+        if (conversationMemoryStoreInstance == null || !conversationMemoryStoreInstance.isResolvable()) {
+            return null;
+        }
+        try {
+            var summary = conversationMemoryStoreInstance.get().loadListingSummaries(List.of(conversationId)).get(conversationId);
+            return summary == null || summary.agentId() == null || summary.agentId().isBlank() ? null : summary.agentId();
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the agent id of conversation %s from its memory: %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     /**

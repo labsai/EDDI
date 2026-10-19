@@ -108,6 +108,23 @@ interface UserDirectoryStoreContract {
     }
 
     @Test
+    @DisplayName("a team-scoped search finds only members of the given teams, still as a literal prefix")
+    default void searchWithinTeams() {
+        String engineering = Subjects.team("engineering");
+        String finance = Subjects.team("finance");
+        store().upsert(user("sam-eng", "sam-eng", "sam.eng@example.com", true, "Sam", List.of(engineering), 2000));
+        store().upsert(user("sam-fin", "sam-fin", "sam.fin@example.com", true, "Sam", List.of(finance), 3000));
+        store().upsert(user("sam-none", "sam-none", null, false, "Sam", List.of(), 4000));
+
+        assertEquals(Set.of("sam-eng"), principals(store().searchWithinTeams("SAM", List.of(engineering), 10)));
+        assertEquals(List.of("sam-fin", "sam-eng"),
+                store().searchWithinTeams("sam", List.of(engineering, finance), 10).stream().map(DirectoryUser::principal).toList());
+        assertEquals(Set.of(), principals(store().searchWithinTeams("s.m", List.of(engineering), 10)), "a dot is a dot");
+        assertTrue(store().searchWithinTeams("sam", List.of(), 10).isEmpty(), "no teams match nobody");
+        assertEquals(1, store().searchWithinTeams("sam", List.of(engineering, finance), 1).size());
+    }
+
+    @Test
     @DisplayName("findAll returns exactly the known principals, and delete removes one")
     default void findAllAndDelete() {
         store().upsert(user("alice", "alice", null, false, "Alice", List.of(), 2000));
