@@ -6452,8 +6452,8 @@
     "history": "Historique des exécutions",
     "historyError": "Impossible de charger l’historique des exécutions.",
     "noRuns": "Aucune exécution pour cet agent pour l’instant.",
-    "agentVersion": "agent v{{version}}",
-    "casesPassed": "{{passed}}/{{total}} conversations",
+    "agentVersion": "version {{version}} de l’agent",
+    "casesPassed": "{{passed}}/{{total}} conversations réussies",
     "runsVersion": "Exécute la version enregistrée {{version}} de l’agent par rapport à la version actuelle de la suite.",
     "result": {
       "passedIcon": "Réussi",
@@ -6482,7 +6482,7 @@
       "repetition": "Répétition {{index}}",
       "repetitionsPassed": "{{passed}}/{{total}} réussies ({{needed}} requises)"
     },
-    "suiteVersion": "suite v{{version}}",
+    "suiteVersion": "version {{version}} de la suite",
     "status": {
       "PASSED": "Réussi",
       "FAILED": "Échoué",

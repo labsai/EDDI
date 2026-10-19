@@ -6482,7 +6482,7 @@
       "repetition": "Repetición {{index}}",
       "repetitionsPassed": "{{passed}}/{{total}} superadas (se necesitan {{needed}})"
     },
-    "suiteVersion": "suite v{{version}}",
+    "suiteVersion": "versión {{version}} de la suite",
     "status": {
       "PASSED": "Superada",
       "FAILED": "Fallida",
