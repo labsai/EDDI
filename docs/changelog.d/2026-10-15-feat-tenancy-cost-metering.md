@@ -48,7 +48,7 @@ stayed at zero and the pre-call gate never tripped. It is now real.
   running total is corrected (it is per step).
 - **Docs/Operator.** `tenant-quotas.md`, `langchain.md` (prices drive the budget),
   `metrics.md`, `configuration-reference.md`; the Platform Operator prompt says the cap is enforced
-  and priced-only (operator revision bumped; 18 at merge time).
+  and priced-only (operator revision bumped; 20 at merge time).
 
 **Tests:** `TurnCostMeterTest` (delta, pause→persist→resume once, prefix trap, outage retry,
 exception swallowed, over-budget marked, in-memory end to end), `ConversationServiceCostMeteringTest`
@@ -60,12 +60,11 @@ the gate then refuses; and a priced turn that pauses, is persisted to and reload
 conversation store, and resumes with further cost is charged exactly the step total, with
 `audit:metered_cost` on the persisted step).
 
-### Known gap / follow-up
+### Group cost
 
-`GroupCostLedger` reads the member conversation's **last step's** `audit:cost` and replaces the
-member's entry with it, so a member that spoke in several turns is attributed only its latest turn
-— the group's `totalCost` (and `maxCostPerDiscussion`) under-counts. Not changed here (tenant
-metering does not use it).
+`GroupCostLedger` used to read only the member conversation's last step's `audit:cost`; main
+fixed that independently (#1066, the snapshot now carries the conversation's summed cost). Tenant
+metering does not go through it either way — member turns settle through `say`.
 
 ```decision-log
 | 2026-10-15 | Tenant cost is metered per settled step from the completion callback, with an `audit:metered_cost` marker; LLM tasks get a soft pre-call gate (fallback answer) | `recordCost` had no caller; the tool-call gate alone never stopped a tool-less agent | Metering per LLM task (double counts — `audit:cost` is already a per-step total); metering in `GroupCostLedger` (member turns already settle through `say`); failing the turn on refusal (the tool gate is soft; a deterministic reply is friendlier) |
