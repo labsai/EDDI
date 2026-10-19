@@ -267,25 +267,34 @@ const BODY_CAPACITY = `Turn capacity — "why was my turn refused?", "why do my 
   1. It had used the whole budget before reaching the engine: answered 408 at
      once and nothing was queued — \`eddi_turn_rejected_total{reason="caller_timed_out"}\`.
   2. It was still waiting in its conversation's queue: it is dropped unrun when
-     its place comes up, and its input is not consumed, so sending the message
-     again runs it exactly once — \`eddi_turn_skipped_total{reason="caller_timed_out"}\`.
-     This is \`eddi.conversation.skip-turns-of-timed-out-callers\` (default
-     \`true\`); \`false\` runs such turns anyway, which only spends model calls
-     on answers nobody receives.
-  3. It had already started: it is abandoned (the conversation becomes
-     \`EXECUTION_INTERRUPTED\`, no further lifecycle tasks run, no long-term
-     properties are written), but a model call already in flight still runs
-     and is billed. Only this case can leave side effects, such as an HTTP call
-     made before the timeout, so check those before advising a retry.
-  So a 408 means the turn did NOT run, unless it had already started. The next
-  message on the conversation runs normally either way.
+     its place comes up, and its input is not consumed —
+     \`eddi_turn_skipped_total{reason="caller_timed_out"}\`. Only then does
+     sending the message again run it exactly once. This is
+     \`eddi.conversation.skip-turns-of-timed-out-callers\` (default \`true\`).
+     With \`false\` the queued turn still runs after its caller got the 408, so
+     a retry can run the same input twice.
+  3. It had already started: its outcome is UNKNOWN at the moment of the 408.
+     The execution watchdog counts \`agentTimeoutInSeconds\` from when the turn
+     started, not from when the request arrived, so a turn that started late
+     can still finish and store its result after the 408. One that runs past
+     the watchdog is abandoned (the conversation becomes
+     \`EXECUTION_INTERRUPTED\`), but a model call already in flight still runs
+     and is billed. Check the conversation (its last step and state) before
+     advising a retry; an HTTP call or other side effect may already have
+     happened.
+  So with the default setting a 408 means the turn did NOT run, unless it had
+  already started — then look before retrying. The next message on the
+  conversation runs normally either way.
 - Either \`caller_timed_out\` counter rising means the node takes longer to
   START a turn than its callers wait: it is overloaded. Raising
   \`agentTimeoutInSeconds\` only makes users wait longer for the same outcome.
   Add nodes, or lower \`eddi.conversation.max-in-flight-turns\` so excess turns
   get a fast 503 with \`Retry-After\` instead of a 60-second wait ending in a
-  408. 408s while both counters stay flat are turns that started in time and
-  ran past the limit: a slow model provider or tool, not overload.
+  408. Flat counters do NOT prove the node is healthy: a turn that waited in
+  its queue until just before the deadline, then started, gets its 408 during
+  even a short model or tool call and is counted by neither. So compare how
+  long turns wait before they start with how long they run once started:
+  long runs point to a slow model provider or tool, long waits to overload.
 - \`eddi.conversation.max-in-flight-turns\` (default \`auto\`) counts turns
   queued or executing on ONE node. Turns run on virtual threads, so memory, not
   threads, decides how many fit: \`auto\` is (max heap − 256 MB) ÷

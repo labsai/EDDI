@@ -17,11 +17,13 @@ behaviour, or none. AGENTS.md §4.6 asks for this check whenever behaviour chang
     prompt gives the three cases and whether the turn ran in each: rejected before queueing
     (`eddi_turn_rejected_total{reason="caller_timed_out"}`), dropped unrun from the queue with its
     input unconsumed (`eddi_turn_skipped_total{reason="caller_timed_out"}`,
-    `eddi.conversation.skip-turns-of-timed-out-callers`), or already started and abandoned. A `408`
-    means the turn did not run unless it had already started.
+    `eddi.conversation.skip-turns-of-timed-out-callers`; only then is a retry exactly-once, and with
+    the setting off the queued turn still runs), or already started, whose outcome is unknown at the
+    `408` because the execution watchdog times from the turn's start, not the request's arrival.
   - What a rising `caller_timed_out` means: the node is overloaded. The fix is more nodes or a lower
     `max-in-flight-turns`, which turns a 60 s wait into a fast `503`. Raising the timeout does not
-    help. A `408` while both counters stay flat is a slow model provider or tool.
+    help. Flat counters do not prove health: a turn that queued until just before its deadline and
+    then started is counted by neither, so compare wait-before-start with run time.
   - `/q/metrics` answers on dedicated threads (`eddi.metrics.dedicated-scrape-threads`).
   - The logs section: pool-wait refusals are WARN lines, and both `408` paths log at DEBUG only, so
     the logs do not show them.

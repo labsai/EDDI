@@ -504,12 +504,27 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
     expect(body).toContain('eddi_turn_rejected_total{reason="caller_timed_out"}');
     expect(body).toContain('eddi_turn_skipped_total{reason="caller_timed_out"}');
     expect(body).toContain("eddi.conversation.skip-turns-of-timed-out-callers");
-    expect(body).toContain("So a 408 means the turn did NOT run, unless it had already started.");
+    expect(body).toMatch(/So with the default setting a 408 means the turn did NOT run, unless it had\s+already started/);
+  });
+
+  it.each(bodies)("%s: promises an exactly-once retry only for a skipped turn", (_label, body) => {
+    // With skip-turns-of-timed-out-callers=false the queued turn still runs.
+    expect(body).toMatch(/Only then does\s+sending the message again run it exactly once/);
+    expect(body).toMatch(/a retry can run the same input twice/);
+  });
+
+  it.each(bodies)("%s: calls a started turn's outcome unknown, the watchdog timing from its start", (_label, body) => {
+    // ConversationStepRunner arms future.get(agentTimeout) at execution, not arrival.
+    expect(body).toContain("its outcome is UNKNOWN at the moment of the 408");
+    expect(body).toMatch(/counts `agentTimeoutInSeconds` from when the turn\s+started, not from when the request arrived/);
   });
 
   it.each(bodies)("%s: reads rising caller_timed_out as overload, not a reason to raise the timeout", (_label, body) => {
     expect(body).toMatch(/Either `caller_timed_out` counter rising means the node takes longer to\s+START a turn/);
     expect(body).toMatch(/Add nodes, or lower `eddi\.conversation\.max-in-flight-turns`/);
+    // A turn that queued until just before its deadline, then started, is
+    // counted by neither counter — flat counters do not rule out overload.
+    expect(body).toContain("Flat counters do NOT prove the node is healthy");
   });
 
   it.each(bodies)("%s: states the heap-derived auto formula and the per-turn budget", (_label, body) => {
