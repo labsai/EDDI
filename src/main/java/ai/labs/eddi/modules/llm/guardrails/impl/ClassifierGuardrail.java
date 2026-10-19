@@ -121,6 +121,12 @@ public class ClassifierGuardrail implements ContentGuardrail {
      * unexpectedly huge reply.
      */
     static final int MAX_LABEL_SCAN_CHARS = 4096;
+    /**
+     * How long an author's {@code labelPattern} may run over one answer. The 4 KB
+     * cap bounds the input, not the work: a pattern such as {@code (a+)+$}
+     * backtracks exponentially on it. Past this budget the answer is undecided.
+     */
+    static final long LABEL_MATCH_BUDGET_MS = 250;
     static final int DEFAULT_TIMEOUT_MS = 3000;
     /** Ceiling on {@code timeoutMs}: a classifier sits on every turn's path. */
     static final int MAX_TIMEOUT_MS = 60_000;
@@ -190,6 +196,10 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 && isBlank(p.get(PARAM_SAFE_LABEL))) {
             return "classifier guardrail: parameter 'safeLabel' is required when 'unsafeLabel' is set to anything but 'yes' — "
                     + "an answer is only treated as safe when it matches safeLabel";
+        }
+        String labelPattern = p.get(PARAM_LABEL_PATTERN);
+        if (!isBlank(labelPattern) && PatternCache.compile(labelPattern).isEmpty()) {
+            return "classifier guardrail: parameter 'labelPattern' is not a valid regular expression";
         }
         return null;
     }
@@ -398,10 +408,15 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 return null;
             }
             String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
-            Matcher matcher = pattern.get().matcher(tail);
+            Matcher matcher = pattern.get().matcher(new BudgetedCharSequence(tail, TimeUnit.MILLISECONDS.toNanos(LABEL_MATCH_BUDGET_MS)));
             String found = null;
-            while (matcher.find()) {
-                found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
+            try {
+                while (matcher.find()) {
+                    found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
+                }
+            } catch (MatchBudgetExceededException e) {
+                LOGGER.warnf("Classifier labelPattern exceeded its %d ms match budget — the answer is undecided", LABEL_MATCH_BUDGET_MS);
+                return null;
             }
             return found != null ? found.trim() : null;
         }
@@ -479,6 +494,57 @@ public class ClassifierGuardrail implements ContentGuardrail {
     private static final class ClassifierTimeoutException extends RuntimeException {
         ClassifierTimeoutException() {
             super("classifier timed out", null, false, false);
+        }
+    }
+
+    /** Thrown from {@link BudgetedCharSequence} to abort a runaway match. */
+    private static final class MatchBudgetExceededException extends RuntimeException {
+        MatchBudgetExceededException() {
+            super(null, null, false, false);
+        }
+    }
+
+    /**
+     * A view of the text that gives up after a time budget: the regex engine reads
+     * it character by character, so a catastrophically backtracking pattern hits
+     * the check instead of running for minutes. The clock is read every 256 reads.
+     */
+    private static final class BudgetedCharSequence implements CharSequence {
+        private final CharSequence text;
+        private final long deadlineNanos;
+        private int reads;
+
+        BudgetedCharSequence(CharSequence text, long budgetNanos) {
+            this.text = text;
+            this.deadlineNanos = System.nanoTime() + budgetNanos;
+        }
+
+        private BudgetedCharSequence(CharSequence text, long deadlineNanos, boolean absolute) {
+            this.text = text;
+            this.deadlineNanos = deadlineNanos;
+        }
+
+        @Override
+        public char charAt(int index) {
+            if ((++reads & 0xFF) == 0 && System.nanoTime() - deadlineNanos > 0) {
+                throw new MatchBudgetExceededException();
+            }
+            return text.charAt(index);
+        }
+
+        @Override
+        public int length() {
+            return text.length();
+        }
+
+        @Override
+        public CharSequence subSequence(int start, int end) {
+            return new BudgetedCharSequence(text.subSequence(start, end), deadlineNanos, true);
+        }
+
+        @Override
+        public String toString() {
+            return text.toString();
         }
     }
 }

@@ -40,10 +40,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -199,6 +201,17 @@ class ClassifierGuardrailTest {
         }
 
         @Test
+        @DisplayName("a catastrophically backtracking labelPattern is cut off and the answer is undecided")
+        void pathologicalPatternIsBounded() {
+            Map<String, String> p = params("labelPattern", "(a+)+$", "safeLabel", "no");
+            String answer = "a".repeat(3_000) + "b";
+            long start = System.nanoTime();
+            assertEquals(ClassifierGuardrail.Label.UNPARSEABLE, ClassifierGuardrail.classify(answer, input(p)));
+            long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue(elapsedMs < ClassifierGuardrail.LABEL_MATCH_BUDGET_MS * 8, "took " + elapsedMs + " ms");
+        }
+
+        @Test
         @DisplayName("a null answer is undecided")
         void nullAnswer() {
             assertEquals(ClassifierGuardrail.Label.UNPARSEABLE, ClassifierGuardrail.classify(null, input(params())));
@@ -233,6 +246,15 @@ class ClassifierGuardrailTest {
             p.remove("provider");
             String problem = classifier.validate(p);
             assertTrue(problem != null && problem.contains("'provider'"), problem);
+        }
+
+        @Test
+        @DisplayName("a labelPattern that does not compile is refused, naming the parameter")
+        void uncompilableLabelPattern() {
+            String problem = classifier.validate(params("labelPattern", "(["));
+            assertNotNull(problem);
+            assertTrue(problem.contains("labelPattern"), problem);
+            assertNull(classifier.validate(params("labelPattern", "<score>\\s*(\\w+)\\s*</score>")));
         }
 
         @Test
