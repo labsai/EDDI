@@ -812,7 +812,9 @@ jobs:
             # line and miss none — an interval crossing midnight lands in
             # exactly one, as the row delta does. A log that starts inside the
             # window gives a partial figure labelled with when it starts; none
-            # at all gives no line.
+            # at all gives no line. Neither does a log with no line on the
+            # `from` day: the first line it has is past the window, so the
+            # window is empty rather than borrowing an interval after it.
             local real="" sweeps="" real_since="" versions="" summary window
             # Lines that are not timestamped (a damaged line the run log then
             # restarted after) are skipped: "g…" sorts after any date and
@@ -822,7 +824,7 @@ jobs:
               $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { next }
               first == "" { first = $1 }
               state == 2 { next }
-              state == 0 { if ($1 >= from) state = 1; next }
+              state == 0 { if ($1 >= from) state = ($1 >= to ? 2 : 1); next }
               $1 >= to { state = 2 }'
             if [ -f "$RUNS_CSV" ]; then
               summary=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'

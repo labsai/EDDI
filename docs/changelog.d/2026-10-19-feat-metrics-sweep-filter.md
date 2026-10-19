@@ -47,7 +47,9 @@ How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-
   every line after the first run of the `from` day, up to and including the
   first run of the `to` day (the daily rows are first-run-of-the-day
   snapshots). Consecutive windows share no line and miss none, so an interval
-  crossing midnight is counted exactly once. A log younger than the
+  crossing midnight is counted exactly once. If the log has no line on the
+  `from` day, the window is empty rather than borrowing an interval from after
+  it. A log younger than the
   window gives a figure labelled "counted since …". With no log, the line is
   left out and the digest is otherwise unchanged.
 
