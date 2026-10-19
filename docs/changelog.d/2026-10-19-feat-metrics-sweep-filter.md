@@ -27,13 +27,19 @@ How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-
 - **Persist metrics history** appends one line per run to `data/runs.csv` on
   the `metrics` branch. Each line splits the increase since the previous line
   three ways. An interval in which ≥ 20 tags were pulled is a sweep, costing one
-  pull per tag; a long gap holding several sweeps is estimated as
-  `delta / tags`. Otherwise each `-b<N>` build tag pulled counts as one CI pull,
-  because `ci.yml`'s post-push check pulls every build it publishes. The rest
-  is real, and the other tags pulled are recorded.
-- `bot_debt` covers Docker Hub showing a sweep's timestamps a run before its
-  pull_count catches up. What can't be subtracted carries to the next line once
-  and is then dropped, so a missed count never eats real pulls indefinitely.
+  pull per tag. A long gap holding several sweeps is estimated from what is
+  left once any carried debt is paid, divided by the tag count. Otherwise each
+  `-b<N>` build tag pulled counts as one CI pull, because `ci.yml`'s post-push
+  check pulls every build it publishes. The rest is real, and the other tags
+  pulled are recorded.
+- `bot_debt` / `debt_since` cover Docker Hub showing a sweep's timestamps
+  before its pull_count catches up, possibly by more than one run. Debt that
+  can't be subtracted yet is always applied to the next interval, which holds
+  the late count however long it is. Anything still unpaid carries further only
+  while it is younger than 2 hours. The two failure modes are lopsided:
+  dropping debt too early books a whole sweep (~200) as real pulls, while
+  holding it too long hides a few real ones. A malformed last line starts a new
+  baseline instead of blocking the log.
 - **Plan digests** sums the log over the digest window. A log younger than the
   window gives a figure labelled "counted since …". With no log, the line is
   left out and the digest is otherwise unchanged.
@@ -56,7 +62,10 @@ How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-
 The changed step scripts were extracted from the workflow and run in
 `ubuntu:24.04` with the runner's tools. They were tested against the live
 Docker Hub tag API (198 tags) and a synthetic sequence: quiet interval, CI
-build-tag pull, one sweep, a sweep whose count lags a run, two sweeps in one
-gap, debt dropped after one carry, a refused duplicate timestamp, and a failed
-fetch. Every Slack payload variant was parsed as JSON. actionlint reports only
-the four SC2129 style notes `main` already had.
+build-tag pull, one sweep, a sweep whose count lags one run and then two, two
+sweeps in one gap, a late count in the same interval as a new sweep, debt kept
+while young and dropped after 2 hours, a refused duplicate timestamp, a failed
+fetch, and a malformed last line. Mutants restoring one-run carry, no expiry,
+and sweeps counted from the raw delta each fail the suite. Every Slack payload
+variant was parsed as JSON. actionlint reports only the four SC2129 style notes
+`main` already had.

@@ -480,25 +480,34 @@ jobs:
           #         which versions people use; a sweep overwrites every
           #         timestamp, so sweep intervals name none.
           #
-          # bot_debt: Docker Hub can show a sweep's tag timestamps a run
-          # before its pull_count catches up. What could not be subtracted is
-          # carried to the next line, once, and then dropped — an expected
-          # pull that never arrives must not eat real pulls for ever.
+          # bot_debt: Docker Hub can show a sweep's tag timestamps before its
+          # pull_count catches up, so a sweep can land in the count one or
+          # more runs after its timestamps. What could not be subtracted yet
+          # is carried, and always applied to the next interval — which holds
+          # the late count however long that interval is. A remainder is
+          # carried further only while it is younger than DEBT_MAX_AGE (from
+          # debt_since): an expected pull that never arrives must not eat real
+          # pulls for ever. The two errors are not symmetric — dropping debt
+          # too early books a whole sweep (~200) as real, keeping it too long
+          # hides a few real pulls — hence a generous age.
           #
           # The previous line is the baseline, so this needs no cache. A run
           # with a failed fetch writes nothing and the next interval is
-          # simply longer; a failed push heals the same way.
+          # simply longer; a failed push heals the same way. A malformed last
+          # line starts a new baseline rather than blocking the log for good.
           RUNS=data/runs.csv
-          RUNS_HEADER="checked_at,docker_pulls,tags,tags_pulled,sweeps,bot_pulls,ci_pulls,real_pulls,real_total,bot_debt,real_tags"
+          RUNS_HEADER="checked_at,docker_pulls,tags,tags_pulled,sweeps,bot_pulls,ci_pulls,real_pulls,real_total,bot_debt,debt_since,real_tags"
           SWEEP_MIN_TAGS=20
+          DEBT_MAX_AGE=7200
           [ -f "$RUNS" ] || echo "$RUNS_HEADER" > "$RUNS"
           if [ -s "$RUNS" ] && [ -n "$(tail -c1 "$RUNS")" ]; then
             echo >> "$RUNS"
           fi
 
           append_run() {
-            local last p_at p_pulls p_total p_debt x delta counts pulled ci_tags real_tags
-            local sweeps=0 bot=0 ci=0 avail real debt
+            local last p_at p_pulls p_total p_debt p_debt_since x delta counts pulled ci_tags real_tags
+            local sweeps=0 bot=0 ci=0 avail old_left=0 new_left=0 real debt debt_since=""
+            local iso='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
             if [ "$DOCKER_OK" != "true" ] || [ "$TAGS_OK" != "true" ]; then
               echo "::warning::Docker Hub fetch incomplete — no run-log line this run"
               return 1
@@ -506,18 +515,28 @@ jobs:
             for x in "$PULLS" "$TAG_TOTAL"; do
               case "$x" in ''|*[!0-9]*) echo "::warning::Run log: non-numeric input '${x}'"; return 1 ;; esac
             done
+            if [[ ! "$CHECKED_AT" =~ $iso ]]; then
+              echo "::warning::Run log: bad check time '${CHECKED_AT}'"
+              return 1
+            fi
 
             last=$(tail -n1 "$RUNS")
+            if [ "$last" != "$RUNS_HEADER" ]; then
+              IFS=, read -r p_at p_pulls _ _ _ _ _ _ p_total p_debt p_debt_since _ <<< "$last"
+              for x in "$p_pulls" "$p_total" "$p_debt"; do
+                case "$x" in ''|*[!0-9]*) p_at="" ;; esac
+              done
+              if [[ ! "$p_at" =~ $iso ]] || { [ -n "$p_debt_since" ] && [[ ! "$p_debt_since" =~ $iso ]]; }; then
+                echo "::warning::Last line of ${RUNS} is malformed — starting a new baseline: ${last}"
+                last=$RUNS_HEADER
+              fi
+            fi
             if [ "$last" = "$RUNS_HEADER" ]; then
-              # First line: a baseline only. Its interval is unknown.
-              echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},0,0,0,0,0,0,0," >> "$RUNS"
-              echo "Run log started at ${CHECKED_AT}"
+              # A baseline only: its interval is unknown, so it counts nothing.
+              echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},0,0,0,0,0,0,0,," >> "$RUNS"
+              echo "Run log baseline at ${CHECKED_AT}"
               return 0
             fi
-            IFS=, read -r p_at p_pulls _ _ _ _ _ _ p_total p_debt _ <<< "$last"
-            for x in "$p_pulls" "$p_total" "$p_debt"; do
-              case "$x" in ''|*[!0-9]*) echo "::error::Last line of ${RUNS} is malformed: ${last}"; return 1 ;; esac
-            done
             if [[ ! "$CHECKED_AT" > "$p_at" ]]; then
               echo "::warning::Run log already has a line at or after ${CHECKED_AT}"
               return 1
@@ -542,8 +561,21 @@ jobs:
               case "$x" in ''|*[!0-9]*) echo "::warning::Run log: could not read the tag list"; return 1 ;; esac
             done
 
+            # The carried debt is paid first: its count arrives before this
+            # interval's. What it leaves unpaid stays only while young enough.
+            avail=$(( delta - p_debt ))
+            if [ "$avail" -lt 0 ]; then
+              old_left=$(( -avail )); avail=0
+              if [ $(( $(date -u -d "$CHECKED_AT" +%s) - $(date -u -d "$p_debt_since" +%s) )) -ge "$DEBT_MAX_AGE" ]; then
+                echo "Run log: dropping ${old_left} expected pulls that never arrived (owed since ${p_debt_since})"
+                old_left=0
+              fi
+            fi
+
+            # Sweeps from what is left once the debt is paid, so a late count
+            # in the same interval as a new sweep is not taken for a second one.
             if [ "$pulled" -ge "$SWEEP_MIN_TAGS" ]; then
-              sweeps=$(( delta / pulled ))
+              sweeps=$(( avail / pulled ))
               if [ "$sweeps" -lt 1 ]; then sweeps=1; fi
               bot=$(( sweeps * pulled ))
               real_tags=""
@@ -551,17 +583,18 @@ jobs:
               ci=$ci_tags
             fi
 
-            # Pay the carried debt first; whatever it cannot cover is dropped.
-            avail=$(( delta - p_debt ))
-            if [ "$avail" -lt 0 ]; then avail=0; fi
             if [ "$avail" -ge $(( bot + ci )) ]; then
-              real=$(( avail - bot - ci )); debt=0
+              real=$(( avail - bot - ci ))
             else
-              real=0; debt=$(( bot + ci - avail ))
+              real=0; new_left=$(( bot + ci - avail ))
+            fi
+            debt=$(( old_left + new_left ))
+            if [ "$old_left" -gt 0 ]; then debt_since=$p_debt_since
+            elif [ "$new_left" -gt 0 ]; then debt_since=$CHECKED_AT
             fi
 
-            echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},${pulled},${sweeps},${bot},${ci},${real},$(( p_total + real )),${debt},${real_tags}" >> "$RUNS"
-            echo "Run log: +${delta} pulls since ${p_at} = ${bot} bot (${sweeps} sweeps) + ${ci} ci + ${real} real${real_tags:+ (${real_tags})}"
+            echo "${CHECKED_AT},${PULLS},${TAG_TOTAL},${pulled},${sweeps},${bot},${ci},${real},$(( p_total + real )),${debt},${debt_since},${real_tags}" >> "$RUNS"
+            echo "Run log: +${delta} pulls since ${p_at} = ${bot} bot (${sweeps} sweeps) + ${ci} ci + ${real} real${real_tags:+ (${real_tags})}, ${debt} owed"
           }
           append_run || true
 
@@ -783,7 +816,7 @@ jobs:
                 # Each tag with the number of intervals it was pulled in —
                 # not a pull count, which Docker Hub does not publish per tag.
                 versions=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" '
-                  NR > 1 && $1 >= from && $1 < to && $11 != "" { n = split($11, t, ";"); for (i = 1; i <= n; i++) print t[i] }' "$RUNS_CSV" \
+                  NR > 1 && $1 >= from && $1 < to && $12 != "" { n = split($12, t, ";"); for (i = 1; i <= n; i++) print t[i] }' "$RUNS_CSV" \
                   | sort | uniq -c | sort -k1,1nr -k2,2 | head -n 5 \
                   | awk '{ printf "%s%s ×%d", sep, $2, $1; sep = ", " }')
               fi
