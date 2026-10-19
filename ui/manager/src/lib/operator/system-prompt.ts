@@ -1020,6 +1020,10 @@ const BODY_HOW_TO_WORK = `How to work:
   entry with status \`circuit_open\` means that model's circuit breaker is open.
   The logs hold one "LLM recovery" line per recovery. The page "llm-resilience"
   explains each.
+- To find which tool made a turn slow, tracing must be on
+  (\`QUARKUS_OTEL_SDK_DISABLED=false\` plus an OTLP endpoint): each tool call is an
+  \`execute_tool <tool>\` span carrying \`eddi.tool.source\`, and its traceparent is
+  passed to the httpcall, MCP or A2A service it calls. The page "metrics" covers it.
 - Be brief. An administrator wants the finding, not a narration of your steps.
 - When something is outside what you can see, say what you would need.`;
 
