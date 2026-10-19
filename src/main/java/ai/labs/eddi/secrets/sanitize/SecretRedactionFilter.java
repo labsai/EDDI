@@ -9,6 +9,8 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -108,7 +110,49 @@ public final class SecretRedactionFilter {
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
             // dotted JWTs; min length 20 avoids redacting short benign words.
             new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
-                    "Bearer " + REDACTED));
+                    "Bearer " + REDACTED),
+
+            // Provider key shapes the rules above did not know (L6 of the 2026-10-17
+            // security review). Each is a fixed prefix followed by ONE possessive,
+            // bounded-below character class, so each scans linearly; none of the
+            // classes admits a quote, a backslash or a brace, so a match can never
+            // run across a JSON string boundary or into a ${vault:…} reference. The
+            // replacement is the bare marker: the shape-specific hints above are
+            // what notAlreadyRedacted() recognises, and a new hint would need it to.
+            //
+            // Google API keys (Gemini, Maps): AIza + 35.
+            new RedactionRule(Pattern.compile("AIza[0-9A-Za-z_\\-]{35,}+"), REDACTED),
+            // xAI.
+            new RedactionRule(Pattern.compile("xai-[A-Za-z0-9_\\-]{20,}+"), REDACTED),
+            // Groq.
+            new RedactionRule(Pattern.compile("gsk_[A-Za-z0-9]{20,}+"), REDACTED),
+            // GitHub classic and fine-grained tokens.
+            new RedactionRule(Pattern.compile("gh[pousr]_[A-Za-z0-9]{30,}+"), REDACTED),
+            new RedactionRule(Pattern.compile("github_pat_[A-Za-z0-9_]{20,}+"), REDACTED),
+            // Slack bot, user, app, refresh and config tokens.
+            new RedactionRule(Pattern.compile("xox[baprse]-[A-Za-z0-9\\-]{10,}+"), REDACTED),
+            // AWS access key ids: exactly 16 after the prefix, not inside a longer run.
+            new RedactionRule(Pattern.compile("(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])"), REDACTED),
+            // A bare JWT (header.payload.signature) outside a Bearer header. Unlike the
+            // rules above, this one can FAIL after consuming a long run (no second
+            // dot), so the lookbehind admits a start only where a run begins: without
+            // it "eyJ" repeated would be rescanned from every occurrence, which is
+            // quadratic.
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_\\-])eyJ[A-Za-z0-9_\\-]{8,}+\\.eyJ[A-Za-z0-9_\\-]{8,}+\\.[A-Za-z0-9_\\-]*+"),
+                    REDACTED),
+            // Authorization: Basic|Token|Digest <credential>. The name-bound rules
+            // below stop the value at the space after the scheme, which left the
+            // credential itself legible.
+            // No length floor: after an explicit scheme word the next token IS the
+            // credential, and "Basic YTpi" (a:b) is as real as a long one.
+            new RedactionRule(Pattern.compile("(?i)(authorization[\"']?+\\s*+[:=]\\s*+[\"']?+)(basic|token|digest)\\s++[A-Za-z0-9+/=._~\\-]++"),
+                    "$1$2 " + REDACTED),
+            // Azure API Management's subscription key header (api-key and x-api-key
+            // are already matched by the name-bound rules below).
+            new RedactionRule(Pattern.compile("(?i)(subscription-key[\"']?+\\s*+[:=]\\s*+[\"']?+)[^\\s,;\"'\\\\{}\\[\\]]{8,}+"),
+                    "$1" + REDACTED));
+    // The password of a database connection string is not a rule above: see
+    // redactConnectionStringPasswords.
 
     /**
      * A whole vault reference, as an OPTIONAL, possessive prefix on an unquoted
@@ -580,7 +624,63 @@ public final class SecretRedactionFilter {
         for (RedactionRule rule : SHAPE_RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
-        return result;
+        return redactConnectionStringPasswords(result);
+    }
+
+    /**
+     * {@code scheme://user:} of a database connection string — where the password
+     * begins. The password is then walked by hand to the LAST {@code @} before the
+     * authority ends: a raw {@code @} inside a password is malformed (it should be
+     * percent-encoded), but a log line carries it anyway, and a pattern that
+     * stopped at the first one left {@code tail:pw@host} legible. A greedy class
+     * would find the last {@code @} too, but by backtracking — quadratic on a run
+     * of {@code mongodb://u:} prefixes; the walk is one pass. No ceiling on either
+     * run: a 257-character password is still a password.
+     */
+    private static final Pattern CONNECTION_STRING_PASSWORD = Pattern.compile(
+            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:");
+
+    private static String redactConnectionStringPasswords(String text) {
+        Matcher matcher = CONNECTION_STRING_PASSWORD.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int from = 0;
+        while (from <= text.length() && matcher.find(from)) {
+            int start = matcher.end();
+            int end = start;
+            int lastAt = -1;
+            while (end < text.length() && isAuthorityChar(text.charAt(end))) {
+                if (text.charAt(end) == '@') {
+                    lastAt = end;
+                }
+                end++;
+            }
+            if (lastAt >= 0) {
+                // Everything up to the last '@' is the password; the host after it stays.
+                out.append(text, copied, start).append(REDACTED);
+                copied = lastAt;
+            }
+            from = Math.max(end, start);
+        }
+        if (copied == 0) {
+            return text;
+        }
+        out.append(text, copied, text.length());
+        return out.toString();
+    }
+
+    /**
+     * A character the userinfo or host of a connection string may carry: anything
+     * up to the path, whitespace, a quote, or a JSON delimiter — so a carrier's
+     * closing quote, the next field, and a {@code ${vault:…}} reference (its brace)
+     * all end the walk.
+     */
+    private static boolean isAuthorityChar(char c) {
+        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != ',' && c != '{' && c != '}'
+                && c != '[' && c != ']';
     }
 
     public static String redact(String message) {
@@ -588,15 +688,202 @@ public final class SecretRedactionFilter {
             return message;
         }
 
-        String result = message;
+        String result = redactDigestCredentials(message);
         for (RedactionRule rule : SHAPE_RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
+        result = redactConnectionStringPasswords(result);
         result = redactQuotedValues(result);
         for (RedactionRule rule : RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
-        return result;
+        return redactBareBasicCredentials(result);
+    }
+
+    /**
+     * {@code Authorization: Digest} with its directive list behind it. The scheme
+     * rule in {@link #SHAPE_RULES} takes one unquoted token after the scheme word,
+     * which on a Digest header is {@code username=} — and left {@code response=},
+     * the credential proper, legible. Only the scheme is found by pattern; the
+     * directives are walked by hand in {@link #endOfDigestDirectives}, because a
+     * pattern would have to quantify a group once per directive and a directive
+     * list is caller-sized (see the note above {@link #SHAPE_RULES}).
+     */
+    private static final Pattern DIGEST_SCHEME = Pattern.compile("(?i)authorization[\"']?+\\s*+[:=]\\s*+[\"']?+digest\\s++");
+
+    private static String redactDigestCredentials(String text) {
+        Matcher matcher = DIGEST_SCHEME.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int from = 0;
+        while (from <= text.length() && matcher.find(from)) {
+            int start = matcher.end();
+            int end = endOfDigestDirectives(text, start);
+            if (end > start) {
+                out.append(text, copied, start).append(REDACTED);
+                copied = end;
+            }
+            // A bare token after the scheme word (no directive list) is the scheme
+            // rule's job; move on either way.
+            from = Math.max(end, start);
+        }
+        if (copied == 0) {
+            return text;
+        }
+        out.append(text, copied, text.length());
+        return out.toString();
+    }
+
+    /**
+     * The end of the directive list starting at {@code from}, or {@code from} when
+     * none starts there. A directive is a name, {@code =} and a value — quoted as
+     * {@code "…"} in plain text or as {@code \"…\"} when the carrier is itself a
+     * JSON string, or an unquoted token — and directives are separated by a comma
+     * with optional whitespace. The walk stops before anything else, so a JSON
+     * carrier's closing quote and the fields after it stay where they were. One
+     * forward pass, linear in the input.
+     */
+    private static int endOfDigestDirectives(String text, int from) {
+        int length = text.length();
+        int end = from;
+        int pos = from;
+        while (true) {
+            int nameEnd = pos;
+            while (nameEnd < length && isDirectiveNameChar(text.charAt(nameEnd))) {
+                nameEnd++;
+            }
+            if (nameEnd == pos || nameEnd >= length || text.charAt(nameEnd) != '=') {
+                break;
+            }
+            int valueEnd = endOfDirectiveValue(text, nameEnd + 1);
+            if (valueEnd < 0) {
+                break;
+            }
+            end = valueEnd;
+            int next = valueEnd;
+            while (next < length && Character.isWhitespace(text.charAt(next))) {
+                next++;
+            }
+            if (next >= length || text.charAt(next) != ',') {
+                break;
+            }
+            next++;
+            while (next < length && Character.isWhitespace(text.charAt(next))) {
+                next++;
+            }
+            pos = next;
+        }
+        return end;
+    }
+
+    /**
+     * The index after the directive value starting at {@code from}, or -1 when
+     * there is none.
+     */
+    private static int endOfDirectiveValue(String text, int from) {
+        int length = text.length();
+        if (from >= length) {
+            return -1;
+        }
+        char first = text.charAt(from);
+        if (first == '"') {
+            int i = from + 1;
+            while (i < length) {
+                char c = text.charAt(i);
+                if (c == '\\') {
+                    i += 2;
+                } else if (c == '"') {
+                    return i + 1;
+                } else {
+                    i++;
+                }
+            }
+            return -1;
+        }
+        if (first == '\\' && from + 1 < length && text.charAt(from + 1) == '"') {
+            // The directive's quotes as a JSON string carries them: every raw character
+            // the header had is a JSON escape pair here, so \" is a raw quote and \\ a
+            // raw backslash. A raw backslash escapes the raw character after it (RFC
+            // 7230 quoted-pair), so \\\" is a quote INSIDE the value, and only an
+            // unescaped raw quote closes it.
+            int i = from + 2;
+            boolean rawEscaped = false;
+            while (i < length) {
+                boolean pair = text.charAt(i) == '\\' && i + 1 < length;
+                char raw = pair ? text.charAt(i + 1) : text.charAt(i);
+                int step = pair ? 2 : 1;
+                if (rawEscaped) {
+                    rawEscaped = false;
+                } else if (pair && raw == '\\') {
+                    rawEscaped = true;
+                } else if (pair && raw == '"') {
+                    return i + 2;
+                }
+                i += step;
+            }
+            return -1;
+        }
+        int i = from;
+        while (i < length && isDirectiveTokenChar(text.charAt(i))) {
+            i++;
+        }
+        return i == from ? -1 : i;
+    }
+
+    private static boolean isDirectiveNameChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    }
+
+    private static boolean isDirectiveTokenChar(char c) {
+        return isDirectiveNameChar(c) || c == '+' || c == '/' || c == '.' || c == '~' || c == '=';
+    }
+
+    /**
+     * {@code Basic <base64>} with no {@code Authorization} name in front of it — a
+     * header value logged on its own, or an argument whose key was lost. The word
+     * is ordinary English and {@code configuration} is base64 alphabet too, so the
+     * shape alone is not enough: the token is decoded, and taken for a credential
+     * only when it reads as {@code user:password} — printable text around a colon,
+     * which is what RFC 7617 puts there and prose never is.
+     */
+    private static final Pattern BARE_BASIC = Pattern.compile("(?i)(?<![A-Za-z0-9])(basic)\\s++([A-Za-z0-9+/]{8,}+={0,2}+)(?![A-Za-z0-9+/=])");
+
+    private static String redactBareBasicCredentials(String text) {
+        Matcher matcher = BARE_BASIC.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        do {
+            String replacement = decodesToUserinfo(matcher.group(2)) ? matcher.group(1) + " " + REDACTED : matcher.group();
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        } while (matcher.find());
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static boolean decodesToUserinfo(String base64) {
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(base64);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        String decoded = new String(bytes, StandardCharsets.UTF_8);
+        if (decoded.indexOf(':') <= 0) {
+            return false;
+        }
+        for (int i = 0; i < decoded.length(); i++) {
+            char c = decoded.charAt(i);
+            // control characters, DEL, or the replacement character of an invalid byte
+            if (c < ' ' || c == 0x7f || c == 0xFFFD) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

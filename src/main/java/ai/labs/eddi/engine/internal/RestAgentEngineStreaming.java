@@ -260,6 +260,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         }
 
                         @Override
+                        public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+                            stream.sendJson("guardrail_triggered", new GuardrailTriggeredEvent(type, phase, action, taskId));
+                        }
+
+                        @Override
                         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
                             stream.markTerminal();
                             try {
@@ -582,6 +587,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /** Typed payload for the {@code llm_retry} SSE event. */
     private record LlmRetryEvent(String reason, int attempt) {
+    }
+
+    /** Typed payload for the {@code guardrail_triggered} SSE event. */
+    private record GuardrailTriggeredEvent(String type, String phase, String action, String taskId) {
     }
 
     /** Typed payload for the {@code cascade_escalation} SSE event. */

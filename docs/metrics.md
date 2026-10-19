@@ -653,7 +653,13 @@ eddi_counterweight_activation_count_total   # Counterweight activations; tag: le
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
+eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
 ```
+
+`eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that
+passes the text records nothing. Unknown guardrail types are skipped before they are
+counted, so `type` only ever carries a registered guardrail. See
+[Input and Output Guardrails](langchain.md#input-and-output-guardrails).
 
 ### Agent Identity & Signing Metrics
 
