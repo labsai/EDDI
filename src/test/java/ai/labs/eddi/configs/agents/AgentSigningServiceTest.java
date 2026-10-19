@@ -199,6 +199,27 @@ class AgentSigningServiceTest {
         }
 
         @Test
+        void generatingAVersionedKeyClearsThatVersionsMarkerAtOnce() throws Exception {
+            var envelope = SignedEnvelope.forSigning("a1", "a2", Map.of("message", "hello"));
+            assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signEnvelope("t1", "a1", envelope, 2));
+
+            String publicKey = service.generateKeyPairVersioned("t1", "a1", 2);
+
+            var signed = service.signEnvelope("t1", "a1", envelope, 2);
+            assertTrue(service.verifyEnvelope(signed, publicKey));
+        }
+
+        @Test
+        void remembersAtMostMaxMissingKeys() throws Exception {
+            for (int i = 0; i < AgentSigningService.MAX_MISSING_KEYS + 50; i++) {
+                assertNull(service.signIfKeyPresent("t1", "agent-" + i, "p"));
+            }
+
+            assertTrue(service.missingKeyCount() <= AgentSigningService.MAX_MISSING_KEYS,
+                    "missing-key markers exceeded the bound: " + service.missingKeyCount());
+        }
+
+        @Test
         void deletingTheKeysClearsTheMarker() throws Exception {
             assertNull(service.signIfKeyPresent("t1", "a1", "p"));
             service.deleteKeyPair("t1", "a1");

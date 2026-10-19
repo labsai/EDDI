@@ -12,11 +12,12 @@ signs each entry with the agent's Ed25519 key, on the turn's own thread. Almost 
 wrote one into the vault by hand. Each entry therefore queried `secretvault_secrets`, got
 `SecretNotFoundException` and threw two more exceptions on the way out, about three times per turn.
 
-- `AgentSigningService` remembers a vault miss for 60 s (`MISSING_KEY_RECHECK`) in a clock-driven
-  marker per key. `generateKeyPair` and `deleteKeyPair` clear it at once on the node that ran them. A key
-  written into the vault by hand, possibly through another node, is used within a minute. Only
-  `SecretNotFoundException` is remembered: a vault that could not answer is asked again on the next
-  call.
+- `AgentSigningService` remembers a vault miss for 60 s (`MISSING_KEY_RECHECK`) in a Caffeine cache
+  capped at 10,000 keys (`MAX_MISSING_KEYS`). The cap is there because an audit entry can name any
+  well-formed agent id. `generateKeyPair`, `generateKeyPairVersioned` (for that version) and
+  `deleteKeyPair` clear the marker at once on the node that ran them. A key written into the vault by
+  hand, possibly through another node, is used within a minute. Only `SecretNotFoundException` is
+  remembered: a vault that could not answer is asked again on the next call.
 - New `signIfKeyPresent`, used by the audit ledger, returns `null` for a known-missing key without
   throwing. `sign` keeps its contract and still throws.
 - Measured with `loadtest.py gate` (PR #1086): `secretvault_secrets` queries per turn went from 3.0 to
@@ -31,7 +32,7 @@ wrote one into the vault by hand. Each entry therefore queried `secretvault_secr
   configuration and the private key in the vault are set independently, and reading the agent
   configuration per entry would cost what this removes. 60 s bounds how long a newly written key goes
   unused.
-- Tests: `AgentSigningServiceTest$MissingKey` (seven cases). Mutation-checked: dropping the marker fails
+- Tests: `AgentSigningServiceTest$MissingKey` (nine cases, including the size bound and versioned generation). Mutation-checked: dropping the marker fails
   three of them, and caching vault outages as misses fails the outage case.
 
 ### What's next

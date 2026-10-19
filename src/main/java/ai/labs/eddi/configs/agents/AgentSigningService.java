@@ -7,6 +7,8 @@ import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -26,6 +28,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -88,12 +91,19 @@ public class AgentSigningService {
     private final Clock clock;
     private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
     /**
-     * Cache key → epoch millis until which the vault is not asked again. Only
-     * {@link ISecretProvider.SecretNotFoundException} is remembered: a vault that
-     * could not answer is retried on the next call. Bounded by the number of agents
-     * and key versions that are actually signed for.
+     * Upper bound on remembered misses. An audit entry can name any well-formed
+     * agent id (the admin grant path does not check that the agent exists), so the
+     * cache is capped as well as expired.
      */
-    private final ConcurrentHashMap<String, Long> missingKeyUntil = new ConcurrentHashMap<>();
+    static final int MAX_MISSING_KEYS = 10_000;
+
+    /**
+     * Cache keys the vault reported missing, each kept for
+     * {@link #MISSING_KEY_RECHECK}. Only
+     * {@link ISecretProvider.SecretNotFoundException} is remembered: a vault that
+     * could not answer is retried on the next call.
+     */
+    private final Cache<String, Boolean> missingKeys;
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -107,6 +117,14 @@ public class AgentSigningService {
         this.secretProvider = secretProvider;
         this.meterRegistry = meterRegistry;
         this.clock = clock;
+        this.missingKeys = Caffeine.newBuilder()
+                .expireAfterWrite(MISSING_KEY_RECHECK)
+                .maximumSize(MAX_MISSING_KEYS)
+                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
+                // Evict on the caller's thread: the work is tiny, and the bound then holds
+                // the moment a put returns instead of whenever a pool thread gets to it.
+                .executor(Runnable::run)
+                .build();
     }
 
     @PostConstruct
@@ -144,7 +162,7 @@ public class AgentSigningService {
             // Evict cached private key so the new key is used immediately
             // (prevents stale key on re-generation / rotation)
             privateKeyCache.remove(cacheKey(tenantId, agentId));
-            missingKeyUntil.remove(cacheKey(tenantId, agentId));
+            missingKeys.invalidate(cacheKey(tenantId, agentId));
 
             LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
             return publicKeyB64;
@@ -424,7 +442,7 @@ public class AgentSigningService {
             }
         } finally {
             privateKeyCache.remove(cacheKeyStr);
-            missingKeyUntil.remove(cacheKeyStr);
+            missingKeys.invalidate(cacheKeyStr);
         }
     }
 
@@ -471,12 +489,12 @@ public class AgentSigningService {
             KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
             loaded = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes));
         } catch (ISecretProvider.SecretNotFoundException e) {
-            missingKeyUntil.put(cacheKeyStr, clock.millis() + MISSING_KEY_RECHECK.toMillis());
+            missingKeys.put(cacheKeyStr, Boolean.TRUE);
             throw new PrivateKeyLoadException(agentId, e);
         } catch (Exception e) {
             throw new PrivateKeyLoadException(agentId, e);
         }
-        missingKeyUntil.remove(cacheKeyStr);
+        missingKeys.invalidate(cacheKeyStr);
 
         PrivateKey raced = privateKeyCache.putIfAbsent(cacheKeyStr, loaded);
         return raced != null ? raced : loaded;
@@ -486,16 +504,14 @@ public class AgentSigningService {
      * Whether the vault reported this key missing within
      * {@link #MISSING_KEY_RECHECK}.
      */
+    /** Remembered misses, for tests pinning the bound. */
+    long missingKeyCount() {
+        missingKeys.cleanUp();
+        return missingKeys.estimatedSize();
+    }
+
     private boolean isKnownMissing(String cacheKeyStr) {
-        Long until = missingKeyUntil.get(cacheKeyStr);
-        if (until == null) {
-            return false;
-        }
-        if (clock.millis() < until) {
-            return true;
-        }
-        missingKeyUntil.remove(cacheKeyStr, until);
-        return false;
+        return missingKeys.getIfPresent(cacheKeyStr) != null;
     }
 
     private String vaultKeyName(String agentId) {
@@ -548,6 +564,8 @@ public class AgentSigningService {
             privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + version);
             // Also evict the legacy unversioned entry (if any)
             privateKeyCache.remove(cacheKey(tenantId, agentId));
+            // And forget a miss recorded for this version before it existed
+            missingKeys.invalidate(cacheKey(tenantId, agentId) + ";v=" + version);
 
             LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
             return publicKeyB64;
