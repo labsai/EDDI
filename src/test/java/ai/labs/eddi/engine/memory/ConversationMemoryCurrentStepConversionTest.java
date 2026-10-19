@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -106,6 +107,26 @@ class ConversationMemoryCurrentStepConversionTest {
         assertTrue(result.isUndoAvailable());
         // The stack is newest-first: index 0 is the current step.
         verify(stack, atLeastOnce()).get(0);
+        verify(stack, never()).get(intThat(index -> index != 0));
+    }
+
+    @Test
+    @DisplayName("current-step path prices the whole conversation without converting earlier steps")
+    void currentStepPathSumsCostWithoutConvertingOtherSteps() {
+        var real = memory("plain");
+        for (int i = 0; i < real.getAllSteps().size(); i++) {
+            ((IWritableConversationStep) real.getAllSteps().get(i)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.25 * (i + 1)));
+        }
+        var expected = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                ConversationMemoryUtilities.convertConversationMemory(real), true, true, null).getConversationCost();
+        IConversationStepStack stack = mock(IConversationStepStack.class, delegatesTo(real.getAllSteps()));
+        var memory = spy(real);
+        doReturn(stack).when(memory).getAllSteps();
+
+        var actual = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, true, true, null).getConversationCost();
+
+        assertEquals(2.5, expected, 1e-9);
+        assertEquals(expected, actual);
         verify(stack, never()).get(intThat(index -> index != 0));
     }
 
