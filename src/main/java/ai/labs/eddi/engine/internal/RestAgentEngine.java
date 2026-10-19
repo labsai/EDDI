@@ -147,6 +147,12 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response startConversationWithContext(String agentId, Environment environment, String userId, Map<String, Context> context) {
+        // As on say(): a start that is going to be refused for capacity must not first
+        // spend the access check, the GDPR read and the agent lookup. Under a burst
+        // every
+        // refused client comes back after Retry-After, so that work repeats per refusal
+        // and takes the CPU the admitted turns need. admitTurn stays the real check.
+        conversationService.refuseIfAtCapacity("(new conversation of agent " + agentId + ")");
         try {
             // USE, not VIEW: talking to an agent is not reading how it was built. Checked
             // here rather than in ConversationService, because the system-initiated starts
@@ -224,6 +230,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
+        conversationService.refuseIfAtCapacity(conversationId);
         validateConversationOwnership(conversationId);
 
         // language is optional, as it is on say(). Requiring it here 400'd every
@@ -252,6 +259,9 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
+        // Before the ownership check: under overload a turn that is going to be
+        // refused should not first spend database reads on its descriptor.
+        conversationService.refuseIfAtCapacity(conversationId);
         validateConversationOwnership(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,

@@ -492,3 +492,25 @@
   border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
   vertical-align: top;
 }
+
+/* Companion to `opacity-0 group-hover:opacity-100` on row/card actions.
+   Tailwind v4 only applies `hover:` / `group-hover:` under
+   `@media (hover: hover)`, so on a touch screen those controls were never
+   revealed at all — the kebab menus and delete buttons simply did not exist
+   for a phone or tablet user. This keeps them visible wherever the device
+   cannot hover, and whenever they (or something inside them) hold keyboard
+   focus. It deliberately leaves the hover half to the call site, because some
+   sites reveal on a named group (`group-hover/item:`).
+   The `:nth-child(n)` only raises specificity above `.opacity-0`, so the
+   result does not depend on the order utilities are emitted in. */
+@utility reveal-on-touch {
+  &:focus-visible,
+  &:focus-within {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    &:nth-child(n) {
+      opacity: 1;
+    }
+  }
+}

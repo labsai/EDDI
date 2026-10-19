@@ -162,9 +162,11 @@ class RestGdprAdminTest {
         Response response = restAdmin.exportUserData("user-1");
 
         assertEquals(RestGdprAdmin.MULTI_STATUS, response.getStatus(),
-                "nothing was truncated, but four whole categories are missing — that is not a complete bundle");
+                "nothing was truncated, but two whole categories are missing — that is not a complete bundle");
         assertFalse(untruncated.complete());
-        assertEquals(List.of("groupConversations", "sharedArtifacts", "schedules", "journalEntries"),
+        // Group conversations and shared artifacts are exported since the 2026-10-17
+        // review (L9); schedules and journal entries are still not.
+        assertEquals(List.of("schedules", "journalEntries"),
                 untruncated.omittedCategories(),
                 "and the caller is told which categories, not merely that something is missing");
     }
@@ -185,7 +187,7 @@ class RestGdprAdminTest {
 
         assertTrue(json.contains("\"complete\":false"),
                 "a bundle whose incompleteness lives only in the status line gets filed as complete: " + json);
-        assertTrue(json.contains("\"omittedCategories\":[\"groupConversations\""), json);
+        assertTrue(json.contains("\"omittedCategories\":[\"schedules\""), json);
     }
 
     /**

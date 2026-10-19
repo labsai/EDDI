@@ -47,6 +47,40 @@ describe("sanitizeApiServer", () => {
     expect(sanitizeApiServer("eddi")).toBe(null);
     vi.restoreAllMocks();
   });
+
+  it("accepts the legitimate sub-path deployments", () => {
+    expect(sanitizeApiServer("/api")).toBe("/api");
+    expect(sanitizeApiServer("/eddi/api")).toBe("/eddi/api");
+    expect(sanitizeApiServer("/eddi/api/")).toBe("/eddi/api/");
+  });
+
+  it("refuses a query string or fragment (confused-deputy via concatenated URLs)", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sanitizeApiServer("/x?")).toBe(null);
+    expect(sanitizeApiServer("/x#")).toBe(null);
+    expect(sanitizeApiServer("/administration/cluster/caches/resync?")).toBe(null);
+    expect(sanitizeApiServer("/x?a=b")).toBe(null);
+    expect(sanitizeApiServer("/x#frag")).toBe(null);
+    vi.restoreAllMocks();
+  });
+
+  it("refuses dot-segments and percent-encoded segments", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sanitizeApiServer("/a/../b")).toBe(null);
+    expect(sanitizeApiServer("/a/./b")).toBe(null);
+    expect(sanitizeApiServer("/a%2Fb")).toBe(null);
+    expect(sanitizeApiServer("/%2e%2e/admin")).toBe(null);
+    expect(sanitizeApiServer("%09https://attacker.example")).toBe(null);
+    vi.restoreAllMocks();
+  });
+
+  it("refuses protocol-relative and backslash hosts", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(sanitizeApiServer("//evil")).toBe(null);
+    expect(sanitizeApiServer("\\\\evil")).toBe(null);
+    expect(sanitizeApiServer("/\\evil")).toBe(null);
+    vi.restoreAllMocks();
+  });
 });
 
 describe("parseAllowedTokenOrigins", () => {

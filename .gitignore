@@ -11,6 +11,7 @@ tmp_botfather/
 *.war
 *.ear
 hs_err_pid*
+replay_pid*
 .mtj.tmp/
 
 # === Maven ===

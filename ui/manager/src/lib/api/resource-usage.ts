@@ -1,5 +1,9 @@
 import { getWorkflowDescriptors, getWorkflow } from "./workflows";
 import { getAgentDescriptors, getAgent, parseResourceUri } from "./agents";
+import { mapWithConcurrency } from "@/lib/concurrency";
+
+/** Parallel requests per scan: fast, without exhausting the browser's connection pool. */
+const USAGE_FETCH_CONCURRENCY = 8;
 
 export interface ResourceUsage {
   workflowId: string;
@@ -29,53 +33,49 @@ export async function findResourceUsage(
     getAgentDescriptors(200, 0, ""),
   ]);
 
-  // Cache for agent configs (avoid re-fetching the same agent)
-  const agentCache = new Map<string, Awaited<ReturnType<typeof getAgent>>>();
-
-  for (const wfDesc of wfDescriptors) {
-    const { id: wfId, version: wfVersion } = parseResourceUri(wfDesc.resource);
-
+  // 2. Load the workflows a few at a time instead of one round trip after
+  //    another: with 200 workflows the sequential scan took long enough that the
+  //    usage dialog appeared seconds after the save it belonged to.
+  const needle = `/${resourceStore}/${resourcePlural}/${resourceId}`;
+  const referencing = await mapWithConcurrency(wfDescriptors, USAGE_FETCH_CONCURRENCY, async (wfDesc) => {
+    const { id, version } = parseResourceUri(wfDesc.resource);
     try {
-      const wf = await getWorkflow(wfId, wfVersion);
-      // Check if any extension references this resource
-      const hasReference = wf.workflowSteps.some((ext) => {
+      const wf = await getWorkflow(id, version);
+      return wf.workflowSteps.some((ext) => {
         const uri = ext.config?.uri;
-        return (
-          typeof uri === "string" &&
-          uri.includes(`/${resourceStore}/${resourcePlural}/${resourceId}`)
-        );
+        return typeof uri === "string" && uri.includes(needle);
       });
-
-      if (!hasReference) continue;
-
-      // 2. Find agents that reference this workflow
-      for (const agentDesc of agentDescriptors) {
-        const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
-        try {
-          const cacheKey = `${agentId}@${agentVersion}`;
-          let agent = agentCache.get(cacheKey);
-          if (!agent) {
-            agent = await getAgent(agentId, agentVersion);
-            agentCache.set(cacheKey, agent);
-          }
-          const wfUri = wfDesc.resource;
-          if (agent.workflows?.some((uri) => uri === wfUri)) {
-            usages.push({
-              workflowId: wfId,
-              workflowVersion: wfVersion,
-              workflowName: wfDesc.name || wfId,
-              agentId,
-              agentVersion,
-              agentName: agentDesc.name || agentId,
-            });
-          }
-        } catch {
-          // Skip agents that can't be loaded
-        }
-      }
     } catch {
-      // Skip workflows that can't be loaded
+      return false; // Skip workflows that can't be loaded
     }
+  });
+  const matchedWorkflows = wfDescriptors.filter((_, i) => referencing[i]);
+  if (matchedWorkflows.length === 0) return usages;
+
+  // 3. Load every agent once (not once per matching workflow), then match.
+  const agents = await mapWithConcurrency(agentDescriptors, USAGE_FETCH_CONCURRENCY, async (agentDesc) => {
+    const { id, version } = parseResourceUri(agentDesc.resource);
+    try {
+      return await getAgent(id, version);
+    } catch {
+      return null; // Skip agents that can't be loaded
+    }
+  });
+
+  for (const wfDesc of matchedWorkflows) {
+    const { id: wfId, version: wfVersion } = parseResourceUri(wfDesc.resource);
+    agentDescriptors.forEach((agentDesc, i) => {
+      if (!agents[i]?.workflows?.some((uri) => uri === wfDesc.resource)) return;
+      const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
+      usages.push({
+        workflowId: wfId,
+        workflowVersion: wfVersion,
+        workflowName: wfDesc.name || wfId,
+        agentId,
+        agentVersion,
+        agentName: agentDesc.name || agentId,
+      });
+    });
   }
 
   return usages;

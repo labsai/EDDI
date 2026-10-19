@@ -428,6 +428,21 @@ public class GroupConversationService implements IGroupConversationService, User
     public GroupConversation discuss(String groupId, String question, String userId, int depth,
                                      GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, listener, attachments, inheritedCostCeiling, null);
+    }
+
+    /**
+     * The nested-group overload: {@code attachmentSourceConversationId} is the
+     * parent discussion the {@code storageRef}-only {@code attachments} were taken
+     * from. A reference is shared with this discussion's members only when that
+     * conversation can read it — see
+     * {@link GroupAttachmentBinder#materializeAttachments(GroupConversation, List, String)}.
+     * Every other caller passes {@code null}, which refuses bare references.
+     */
+    public GroupConversation discuss(String groupId, String question, String userId, int depth,
+                                     GroupDiscussionEventListener listener, List<Attachment> attachments, Double inheritedCostCeiling,
+                                     String attachmentSourceConversationId)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
@@ -455,7 +470,7 @@ public class GroupConversationService implements IGroupConversationService, User
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
-        materializeAttachments(gc, attachments);
+        materializeAttachments(gc, attachments, attachmentSourceConversationId);
         gc.setInheritedCostCeiling(inheritedCostCeiling);
         // Artifacts live in their own collection and are attached at read time; the
         // discuss response is a read of the finished discussion too, and without this
@@ -517,7 +532,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
         // Create the conversation synchronously so we can return its ID
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
-        materializeAttachments(gc, attachments);
+        materializeAttachments(gc, attachments, null);
 
         // Register the control token BEFORE submitting: the caller already has the
         // conversation ID, so a cancel can arrive before the executor thread runs —
@@ -675,8 +690,25 @@ public class GroupConversationService implements IGroupConversationService, User
      * Constructed per call (not cached) since {@link #attachmentStore} is a
      * field-injected, test-mutable dependency (see field comment).
      */
-    void materializeAttachments(GroupConversation gc, List<Attachment> incoming) {
-        attachmentBinder().materializeAttachments(gc, incoming);
+    void materializeAttachments(GroupConversation gc, List<Attachment> incoming) throws GroupAttachmentRejectedException {
+        materializeAttachments(gc, incoming, null);
+    }
+
+    /**
+     * As {@link #materializeAttachments(GroupConversation, List)}, with the
+     * conversation server code took any {@code storageRef}s from. A quota refusal
+     * fails the just-created discussion — it has not run and never will — and is
+     * rethrown as {@link GroupAttachmentRejectedException} for the caller to answer
+     * 400; the binder has already removed what the request stored.
+     */
+    void materializeAttachments(GroupConversation gc, List<Attachment> incoming, String trustedSourceConversationId)
+            throws GroupAttachmentRejectedException {
+        try {
+            attachmentBinder().materializeAttachments(gc, incoming, trustedSourceConversationId);
+        } catch (IAttachmentStore.AttachmentQuotaExceededException e) {
+            failConversation(gc);
+            throw new GroupAttachmentRejectedException(e.getScope(), "Attachment refused: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -1910,7 +1942,7 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private GroupLifecycleOps lifecycleOps() {
         return new GroupLifecycleOps(conversationStore, groupStore, conversationService, agentFactory, agentStore,
-                deploymentStore, sharedArtifactStore, operationsInProgress, discussionControls, this,
+                deploymentStore, sharedArtifactStore, attachmentStore, operationsInProgress, discussionControls, this,
                 counterGroupFollowUp, counterGroupContinue, counterGroupClose, counterGroupFailure);
     }
 

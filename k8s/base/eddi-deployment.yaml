@@ -152,10 +152,14 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+          # Production-sized: heap = 75 % of the memory limit (the image's
+          # JAVA_MAX_MEM_RATIO), which bounds the turns a node runs at once; memory
+          # request = limit for Guaranteed QoS; a CPU limit so the JVM sizes its
+          # threads from it. See docs/kubernetes.md#sizing-a-node.
           resources:
             requests:
-              cpu: 250m
-              memory: 384Mi
+              cpu: "1"
+              memory: 3Gi
             limits:
-              cpu: "2"
-              memory: 1Gi
+              cpu: "4"
+              memory: 3Gi

@@ -204,7 +204,9 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
                 <ChevronRight
                   className={cn(
                     "h-3 w-3 shrink-0 transition-transform duration-200",
-                    !collapsedSections.has(section.id) && "rotate-90"
+                    // Expanded points down (direction-neutral); collapsed
+                    // points toward the content, which is leftward in RTL.
+                    collapsedSections.has(section.id) ? "rtl:rotate-180" : "rotate-90"
                   )}
                   aria-hidden="true"
                 />
@@ -430,9 +432,9 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
           className="flex w-full items-center justify-center rounded-lg p-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
         >
           {collapsed ? (
-            <PanelLeft className="h-5 w-5" />
+            <PanelLeft className="h-5 w-5 rtl:-scale-x-100" />
           ) : (
-            <PanelLeftClose className="h-5 w-5" />
+            <PanelLeftClose className="h-5 w-5 rtl:-scale-x-100" />
           )}
         </button>
       </div>

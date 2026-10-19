@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   getWorkflowDescriptors,
   getWorkflow,
@@ -19,6 +19,9 @@ export function useWorkflowDescriptors(limit = 100, index = 0, filter = "") {
   return useQuery({
     queryKey: [...WORKFLOWS_KEY, "descriptors", { limit, index, filter }],
     queryFn: () => getWorkflowDescriptors(limit, index, filter),
+    // Keep showing the previous results while a new filter loads, instead of
+    // dropping the list back to its loading skeleton on every keystroke.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -30,6 +33,9 @@ export function useInfiniteWorkflowDescriptors(filter = "") {
   return useInfiniteQuery({
     queryKey: [...WORKFLOWS_KEY, "descriptors-infinite", { filter }],
     queryFn: ({ pageParam = 0 }) => getWorkflowDescriptors(PAGE_SIZE, pageParam, filter),
+    // Keep showing the previous results while a new filter loads, instead of
+    // dropping the list back to its loading skeleton on every keystroke.
+    placeholderData: keepPreviousData,
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.length === PAGE_SIZE) {

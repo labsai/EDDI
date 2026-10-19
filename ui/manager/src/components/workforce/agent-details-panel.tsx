@@ -207,6 +207,7 @@ export function AgentDetailsPanel({
           </h3>
           {onClose && (
             <button
+              aria-label={t("common.close", "Close")}
               type="button"
               onClick={onClose}
               className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"

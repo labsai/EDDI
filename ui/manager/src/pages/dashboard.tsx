@@ -65,8 +65,22 @@ export function DashboardPage() {
     error: statsErr,
     refetch: refetchStats,
   } = useDashboardStats();
-  const { data: recentAgentsRaw, isLoading: agentsLoading } = useRecentAgents();
-  const { data: recentConversations, isLoading: convsLoading } = useRecentConversations(5);
+  // A failed load used to fall through to the empty state — "No conversations
+  // yet" over a dead server. Without data to show, the error is shown instead.
+  const {
+    data: recentAgentsRaw,
+    isLoading: agentsLoading,
+    isError: agentsFailed,
+    error: agentsErr,
+    refetch: refetchAgents,
+  } = useRecentAgents();
+  const {
+    data: recentConversations,
+    isLoading: convsLoading,
+    isError: convsFailed,
+    error: convsErr,
+    refetch: refetchConvs,
+  } = useRecentConversations(5);
   // Coordinator status and vault health are eddi-admin endpoints. For a user
   // whose token shows other EDDI roles they are not requested at all, and the
   // strip says "requires admin" — it used to fire both, get two 403s, and show
@@ -399,6 +413,12 @@ export function DashboardPage() {
               </Card>
             ))}
           </div>
+        ) : convsFailed && !recentConversations ? (
+          <ErrorState
+            error={convsErr}
+            message={t("common.error")}
+            onRetry={() => void refetchConvs()}
+          />
         ) : !recentConversations || recentConversations.length === 0 ? (
           <Card>
             <CardContent className="flex items-center gap-3 py-6 text-muted-foreground">
@@ -472,6 +492,12 @@ export function DashboardPage() {
               </Card>
             ))}
           </div>
+        ) : agentsFailed && !recentAgentsRaw ? (
+          <ErrorState
+            error={agentsErr}
+            message={t("common.error")}
+            onRetry={() => void refetchAgents()}
+          />
         ) : recentAgents.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center py-8">

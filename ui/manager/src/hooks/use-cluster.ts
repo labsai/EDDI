@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createClusterActivitySource,
@@ -66,6 +66,9 @@ export function useClusterLeases(q: string, flagged: boolean, enabled = true) {
   return useQuery({
     queryKey: CLUSTER_KEYS.leases(q, flagged),
     queryFn: withTimeout(() => getClusterLeases(q || undefined, flagged)),
+    // Keep showing the previous results while a new filter loads, instead of
+    // dropping the list back to its loading skeleton on every keystroke.
+    placeholderData: keepPreviousData,
     refetchInterval: 5000,
     enabled,
   });
@@ -79,6 +82,9 @@ export function useClusterDeadLetters(filter: DeadLetterFilter, after: string | 
   return useQuery({
     queryKey: CLUSTER_KEYS.deadLetters(filter, after),
     queryFn: withTimeout(() => getClusterDeadLetters(filter, after)),
+    // Keep showing the previous results while a new filter loads, instead of
+    // dropping the list back to its loading skeleton on every keystroke.
+    placeholderData: keepPreviousData,
     refetchInterval: 15000,
     enabled,
   });
@@ -100,7 +106,7 @@ function useClusterMutation<TArg, TResult>(fn: (arg: TArg) => Promise<TResult>) 
   return useMutation({
     mutationFn: fn,
     // Every action changes something another panel shows: refresh the console.
-    onSettled: () => qc.invalidateQueries({ queryKey: CLUSTER_KEYS.all }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: CLUSTER_KEYS.all }),
   });
 }
 

@@ -304,6 +304,32 @@ describe("LinkedAccountsPanel — starting a link", () => {
     );
   });
 
+  it.each([
+    ["a javascript: URL", "javascript:alert(document.cookie)"],
+    ["a data: URL", "data:text/html,<script>alert(1)</script>"],
+    ["plain http to a remote host", "http://provider.example/authorize"],
+    ["a relative path", "/authorize"],
+    ["embedded credentials", "https://user:pw@provider.example/authorize"],
+  ])("never navigates to %s", async (_what, authorizationUrl) => {
+    mine([]);
+    server.use(
+      http.post("*/connections/:name/authorize", () =>
+        HttpResponse.json({ authorizationUrl }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<LinkedAccountsPanel connectable={[{ name: "jira" }]} />);
+
+    await user.click(await screen.findByTestId("connect-jira"));
+
+    await waitFor(() =>
+      expect(toastSpy.error).toHaveBeenCalledWith("Could not start linking."),
+    );
+    expect(assign).not.toHaveBeenCalled();
+    // The button is free again, so the user can retry rather than being stuck.
+    expect(screen.getByTestId("connect-jira")).not.toBeDisabled();
+  });
+
   it("frees the buttons again when the browser comes Back from the provider", async () => {
     // `leavingFor` is deliberately left set after navigateAway — while the page
     // really is leaving, the lock and the spinner should hold. But Back from

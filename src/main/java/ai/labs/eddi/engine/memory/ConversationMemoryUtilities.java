@@ -249,6 +249,41 @@ public class ConversationMemoryUtilities {
      * prompts), raw model traces and raw error bodies — none of which are meant for
      * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
      */
+    /**
+     * Sums {@code audit:cost} over every step of the conversation. The value is per
+     * step — {@code LlmTask} accumulates it on the current step, and each new step
+     * starts without one — so the conversation's spend is the sum, never any single
+     * step's value. {@code null} when no step carried a cost, so a consumer can
+     * tell "nothing priced ran" apart from a genuine total. Non-finite and negative
+     * values are skipped: one NaN would poison the total and silently disable every
+     * ceiling compared against it.
+     */
+    static Double conversationCost(List<ConversationStepSnapshot> steps) {
+        if (steps == null) {
+            return null;
+        }
+        double total = 0.0;
+        boolean found = false;
+        for (var step : steps) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var result : workflow.getLifecycleTasks()) {
+                    if (result != null && AUDIT_COST.equals(result.getKey()) && result.getResult() instanceof Number cost
+                            && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
+                        total += cost.doubleValue();
+                        found = true;
+                    }
+                }
+            }
+        }
+        return found ? total : null;
+    }
+
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -414,6 +449,7 @@ public class ConversationMemoryUtilities {
         }
 
         newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
+        newSnapshot.setConversationCost(conversationCost(allSteps));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
