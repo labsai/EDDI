@@ -287,6 +287,10 @@ public class ConversationUpgradeService {
             seen += page.size();
             after = page.getLast().conversationId();
             processPage(agentId, targetGeneration, dryRun, page, tallies);
+            if (Thread.currentThread().isInterrupted()) {
+                // Stop queueing writes; the cursor lets the operator resume from here.
+                return after;
+            }
         }
         // The limit was reached: is there anything left? If so, the cursor to continue
         // from.
@@ -399,9 +403,20 @@ public class ConversationUpgradeService {
                 return Attempt.skipped(SkipReason.FAILED);
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            task.phase.compareAndSet(UpgradeTask.PENDING, UpgradeTask.WITHDRAWN);
-            return Attempt.skipped(SkipReason.BUSY);
+            if (task.phase.compareAndSet(UpgradeTask.PENDING, UpgradeTask.WITHDRAWN)) {
+                Thread.currentThread().interrupt();
+                return Attempt.skipped(SkipReason.BUSY);
+            }
+            // The write already started: report what it did, not "busy". Wait briefly
+            // for it with the flag cleared (a set flag would end the wait at once),
+            // then restore the flag so the scan stops after this page.
+            try {
+                return task.result.get(5, TimeUnit.SECONDS);
+            } catch (TimeoutException | ExecutionException | InterruptedException late) {
+                return Attempt.skipped(SkipReason.FAILED);
+            } finally {
+                Thread.currentThread().interrupt();
+            }
         } catch (ExecutionException e) {
             return Attempt.skipped(SkipReason.FAILED);
         }

@@ -521,4 +521,68 @@ class ConversationUpgradeServiceTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    @DisplayName("an interrupt stops the scan after the current page and hands back the cursor")
+    void interruptStopsTheScanWithACursor() throws Exception {
+        List<ConversationGenerationCandidate> first = IntStream.range(0, ConversationUpgradeService.PAGE_SIZE)
+                .mapToObj(i -> candidate("a" + i, 5, READY)).toList();
+        String last = "a" + (ConversationUpgradeService.PAGE_SIZE - 1);
+        when(store.loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), isNull(), anyInt())).thenReturn(first);
+        when(store.upgradeCompatibilityGeneration(eq("a0"), eq(AGENT), eq(TARGET_GENERATION))).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return GenerationUpgradeOutcome.UPGRADED;
+        });
+
+        try {
+            var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
+
+            assertEquals(ConversationUpgradeService.PAGE_SIZE, report.totals().upgraded());
+            assertTrue(report.truncated());
+            assertEquals(last, report.nextAfter());
+            verify(store, never()).loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), eq(last), anyInt());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    @DisplayName("an interrupted wait reports what a write that already started did, not busy")
+    void interruptedWaitReportsTheStartedWrite() throws Exception {
+        runInline = false;
+        candidates(candidate("c1", 5, READY));
+        var writing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        when(store.upgradeCompatibilityGeneration(eq("c1"), eq(AGENT), eq(TARGET_GENERATION))).thenAnswer(invocation -> {
+            writing.countDown();
+            release.await(5, TimeUnit.SECONDS);
+            return GenerationUpgradeOutcome.UPGRADED;
+        });
+        var caller = new AtomicReference<Thread>();
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<ConversationUpgradeReport> run = pool.submit(() -> {
+                caller.set(Thread.currentThread());
+                return service(10_000).upgrade(Environment.production, AGENT, null, false, null, null);
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (queued.isEmpty() && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertEquals(1, queued.size());
+            pool.submit(() -> queued.getFirst().call()); // the conversation's queue reaches the write
+            assertTrue(writing.await(5, TimeUnit.SECONDS));
+
+            caller.get().interrupt(); // the write is running: the withdrawal must fail
+            Thread.sleep(200);
+            release.countDown();
+            var report = run.get(10, TimeUnit.SECONDS);
+
+            assertEquals(1, report.totals().upgraded());
+            assertEquals(Map.of(), report.totals().skipped());
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
 }
