@@ -390,7 +390,8 @@ eddi_coordinator_dead_letters_retained      # The same gauge under the name the 
 eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
-eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit|conversation_queue)
+eddi_turn_rejected_total                    # Turns refused before they were queued; tag: reason (in_flight_limit|conversation_queue = 503 capacity_exceeded, caller_timed_out = 408)
+eddi_turn_skipped_total                     # Queued turns dropped unrun; tag: reason (caller_timed_out)
 eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
 eddi_datastore_pool_wait_seconds            # Wait for a pooled MongoDB connection, per checkout (timer; PostgreSQL: agroal_blocking_time_*)
 eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for a connection
@@ -438,6 +439,15 @@ operations wait for a connection, and `eddi_datastore_pool_wait_timeouts_total`
 how many gave up at the effective pool-wait limit: `waitQueueTimeoutMS` when the
 connection string sets it, otherwise `eddi.mongodb.max-wait-time-ms` (10 s by
 default; `0` leaves the driver's own 120 s).
+
+`reason="caller_timed_out"` counts REST turns whose caller had already given up:
+`systemRuntime.agentTimeoutInSeconds` had passed since the request arrived. In
+`eddi_turn_rejected_total` the request had used up that time before it reached
+the engine, and was answered `408` without queueing a turn; in
+`eddi_turn_skipped_total` the turn was queued and dropped when its turn came
+(`eddi.conversation.skip-turns-of-timed-out-callers`). Either one rising means
+the node takes longer to start a turn than its callers wait: it is overloaded,
+so add nodes or shed load earlier with a lower `max-in-flight-turns`.
 
 ### Pipeline Metrics
 

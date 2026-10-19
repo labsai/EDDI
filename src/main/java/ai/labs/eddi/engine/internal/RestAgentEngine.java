@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.datastore.ConnectionWaitTimeouts;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -41,7 +42,9 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import io.quarkus.security.ForbiddenException;
@@ -117,6 +120,13 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Inject
     IdempotencyKeyHeaderReader idempotencyKeyHeaderReader;
 
+    /**
+     * Counts turns refused because their caller had already timed out; nullable in
+     * unit tests.
+     */
+    @Inject
+    MeterRegistry meterRegistry;
+
     @Inject
     public RestAgentEngine(IConversationService conversationService,
             IConversationMemoryStore conversationMemoryStore,
@@ -169,8 +179,18 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.warn("Agent not ready: " + e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity("Agent is not deployed or not ready").build();
         } catch (ResourceStoreException | ResourceNotFoundException e) {
+            if (ConnectionWaitTimeouts.isConnectionWaitTimeout(e)) {
+                LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
+                return datastoreBusy();
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
+        } catch (RuntimeException e) {
+            if (ConnectionWaitTimeouts.isConnectionWaitTimeout(e)) {
+                LOGGER.warnf("Conversation start refused for agent %s: no database connection within the pool's wait limit", sanitize(agentId));
+                return datastoreBusy();
+            }
+            throw e;
         }
     }
 
@@ -227,6 +247,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
+    @RunOnVirtualThread
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
@@ -247,6 +268,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
+    @RunOnVirtualThread
     public void say(final String conversationId, final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
                     final List<String> returningFields, final String message, final AsyncResponse response) {
 
@@ -254,6 +276,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
+    @RunOnVirtualThread
     public void sayWithinContext(final String conversationId, final Boolean returnDetailed, final Boolean returnCurrentStepOnly,
                                  final List<String> returningFields, final InputData inputData, final AsyncResponse response) {
 
@@ -272,15 +295,68 @@ public class RestAgentEngine implements IRestAgentEngine {
                 response);
     }
 
+    /**
+     * Arms the {@code 408} at {@code systemRuntime.agentTimeoutInSeconds} after the
+     * request <em>arrived</em>, and stamps on {@code inputData} when that is, so a
+     * turn still queued by then is not run for nobody.
+     * <p>
+     * Measured from here instead, the wait for a request thread was free: under
+     * saturation requests waited up to a minute before the timeout was armed, and
+     * were answered {@code 200} well after it. A request whose budget is already
+     * spent when it gets here is answered at once, without queueing a turn its
+     * caller will not wait for.
+     *
+     * @return {@code false} when the request was answered here
+     */
+    private boolean armCallerTimeout(InputData inputData, AsyncResponse response) {
+        response.setTimeoutHandler(asyncResp -> asyncResp.resume(requestTimeout()));
+        Long arrival = inputData != null ? inputData.getRequestArrivalEpochMs() : null;
+        if (agentTimeout <= 0 || arrival == null) {
+            // No arrival (a direct call, not over HTTP): the budget starts now, as it
+            // always did.
+            response.setTimeout(agentTimeout, TimeUnit.SECONDS);
+            return true;
+        }
+        long givesUpAt = arrival + TimeUnit.SECONDS.toMillis(agentTimeout);
+        long remainingMs = givesUpAt - System.currentTimeMillis();
+        if (remainingMs <= 0) {
+            LOGGER.debugf("Turn not queued: the request waited %d ms for a thread, beyond systemRuntime.agentTimeoutInSeconds=%d",
+                    System.currentTimeMillis() - arrival, agentTimeout);
+            if (meterRegistry != null) {
+                meterRegistry.counter("eddi.turn.rejected", "reason", "caller_timed_out").increment();
+            }
+            response.resume(requestTimeout());
+            return false;
+        }
+        inputData.setCallerGivesUpAtEpochMs(givesUpAt);
+        response.setTimeout(remainingMs, TimeUnit.MILLISECONDS);
+        return true;
+    }
+
+    /**
+     * 503 for a database pool that had no connection in time; mirrors the capacity
+     * refusal.
+     */
+    private static Response datastoreBusy() {
+        return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                .entity(Map.of("error", "capacity_exceeded", "message", "The database is busy: no connection was free in time — retry shortly"))
+                .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build();
+    }
+
+    private static Response requestTimeout() {
+        return Response.status(Response.Status.REQUEST_TIMEOUT).build();
+    }
+
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, boolean rerunOnly, AsyncResponse response) {
 
-        response.setTimeout(agentTimeout, TimeUnit.SECONDS);
-        response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
-
-        // The caller's own budget for this turn — read here, on the request thread.
+        // The caller's own budget for this turn and the request's arrival — read
+        // here, on the request thread.
         if (turnDeadlineHeaderReader != null) {
             turnDeadlineHeaderReader.apply(inputData);
+        }
+        if (!armCallerTimeout(inputData, response)) {
+            return;
         }
         if (idempotencyKeyHeaderReader != null) {
             try {
@@ -308,6 +384,14 @@ public class RestAgentEngine implements IRestAgentEngine {
                 } else {
                     response.resume(snapshot);
                 }
+            }
+
+            @Override
+            public void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
+                // Normally a no-op: the timeout answered the caller already. It is
+                // not when the timeout's own timer is late, and then this is the
+                // answer the caller was owed.
+                response.resume(requestTimeout());
             }
 
             @Override
@@ -436,6 +520,15 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.debugf("Rejected turn for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
             response.resume(IllegalArgumentExceptionMapper.responseOf(e));
         } catch (Exception e) {
+            if (ConnectionWaitTimeouts.isConnectionWaitTimeout(e)) {
+                // The database pool had no connection for this turn in time: the node is
+                // overloaded, not broken, so the caller is told to come back (as for the
+                // in-flight limit) instead of being handed a 500 and an ERROR trace each.
+                LOGGER.warnf("Turn refused for conversation %s: no database connection within the pool's wait limit",
+                        sanitize(conversationId));
+                response.resume(datastoreBusy());
+                return;
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             // Still a 500, now with the structured body — and never the exception's text.
             throw new InternalServerErrorException("An internal error occurred",
