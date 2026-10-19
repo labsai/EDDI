@@ -38,3 +38,10 @@ data:
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
   EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
+  # While authentication is off EDDI answers only requests addressed to localhost,
+  # an IP address (kubelet probes, Prometheus, port-forward) or a host listed here,
+  # and refuses cross-site POST/PUT/PATCH/DELETE — the DNS-rebinding defence of
+  # UnauthenticatedRequestGuard (docs/security.md, "Running without
+  # authentication"). These are the Service's in-cluster names; add an Ingress
+  # host here if you publish one. Ignored once OIDC is on.
+  EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: "eddi,eddi.eddi,eddi.eddi.svc,eddi.eddi.svc.cluster.local"

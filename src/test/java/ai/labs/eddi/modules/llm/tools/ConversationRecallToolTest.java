@@ -250,4 +250,42 @@ class ConversationRecallToolTest {
         assertTrue(result.contains("Turn 4"), "Should include the clamped turn");
         assertFalse(result.contains("Turn 8"), "Should NOT include turn beyond summary boundary");
     }
+
+    /**
+     * Security review 2026-10-17, H3: the model writes {@code query}, and the range
+     * pattern backtracks quadratically over a long digit run — 10.9 s at 40,000
+     * characters. Only the first {@link ConversationRecallTool#MAX_QUERY_LENGTH}
+     * characters are read now.
+     */
+    @Test
+    void recallConversationDetail_hostileLongQuery_isBounded() {
+        var tool = new ConversationRecallTool(createOutputs(10), 8, 20);
+        tool.recallConversationDetail("turns 1-2");
+
+        long start = System.nanoTime();
+        String result = tool.recallConversationDetail("1".repeat(40_000));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(elapsedMillis < 100, "recall took " + elapsedMillis + " ms on a 40,000-digit query");
+        assertTrue(result.contains("Recalled conversation turns"), result);
+    }
+
+    @Test
+    void recallConversationDetail_turnRangeBeforeLongTail_stillParsed() {
+        var tool = new ConversationRecallTool(createOutputs(10), 8, 20);
+
+        String result = tool.recallConversationDetail("turns 3-5 " + "x".repeat(40_000));
+
+        assertTrue(result.contains("turns 3-5"), result);
+        assertTrue(result.contains("Turn 5 — User:** User message 5"), result);
+    }
+
+    @Test
+    void recallConversationDetail_nullQuery_returnsLastSummarizedTurns() {
+        var tool = new ConversationRecallTool(createOutputs(10), 8, 20);
+
+        String result = tool.recallConversationDetail(null);
+
+        assertTrue(result.contains("Recalled conversation turns 0-7"), result);
+    }
 }

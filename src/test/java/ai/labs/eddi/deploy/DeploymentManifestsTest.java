@@ -2335,6 +2335,112 @@ class DeploymentManifestsTest {
             assertTrue(security.contains("`eddi-frontend`"),
                     "docs/security.md should name eddi-frontend, the id the Manager SPA requests tokens for");
         }
+
+        /**
+         * Security review 2026-10-17, L7: the realm had no password policy and no event
+         * log, {@code eddi-mcp} — a public client on wildcard loopback redirects —
+         * issued tokens with every realm role and no consent screen, and the seeded
+         * accounts claimed verified placeholder e-mails, which the user directory
+         * resolves shares by.
+         */
+        @Test
+        @DisplayName("the realm enforces a password policy, logs events, scopes the MCP client and verifies no e-mail")
+        void realmIsHardened() throws IOException {
+            for (Path realmFile : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode realm = JSON.readTree(realmFile.toFile());
+                String policy = realm.path("passwordPolicy").asText();
+                assertTrue(policy.matches(".*\\blength\\((1[2-9]|[2-9]\\d)\\).*"),
+                        realmFile + ": passwordPolicy must require at least 12 characters, was `" + policy + "`");
+                assertTrue(policy.contains("notUsername") && policy.contains("notEmail"), realmFile + ": " + policy);
+                assertTrue(realm.path("eventsEnabled").asBoolean(), realmFile + ": login events must be recorded");
+                assertTrue(realm.path("adminEventsEnabled").asBoolean(), realmFile + ": admin events must be recorded");
+
+                JsonNode mcp = client(realm, "eddi-mcp");
+                assertTrue(mcp.path("consentRequired").asBoolean(),
+                        realmFile + ": eddi-mcp redirects to any loopback port, so the user must see which client asks");
+                assertTrue(mcp.has("fullScopeAllowed") && !mcp.path("fullScopeAllowed").asBoolean(),
+                        realmFile + ": eddi-mcp must not carry every realm role into its tokens");
+                Set<String> scoped = new TreeSet<>();
+                for (JsonNode mapping : realm.path("scopeMappings")) {
+                    if ("eddi-mcp".equals(mapping.path("client").asText())) {
+                        scoped.addAll(stringList(mapping.get("roles")));
+                    }
+                }
+                Set<String> eddiRoles = new TreeSet<>();
+                realm.path("roles").path("realm").forEach(role -> {
+                    String name = role.path("name").asText();
+                    if (name.startsWith("eddi-")) {
+                        eddiRoles.add(name);
+                    }
+                });
+                assertFalse(eddiRoles.isEmpty(), realmFile + ": no eddi-* realm roles found — the check would be vacuous");
+                assertEquals(eddiRoles, scoped, realmFile + ": with fullScopeAllowed=false, eddi-mcp's tokens carry only the "
+                        + "roles in its scope mapping — exactly the eddi-* roles, or MCP tools refuse their callers");
+
+                for (JsonNode user : realm.path("users")) {
+                    assertFalse(user.path("emailVerified").asBoolean(), realmFile + ": `" + user.path("username").asText()
+                            + "` claims a verified e-mail (" + user.path("email").asText() + ") nobody verified");
+                }
+            }
+        }
+    }
+
+    /**
+     * Security review 2026-10-17, L7: the MongoDB, PostgreSQL and Keycloak pods had
+     * no container-level securityContext. Each now runs as its image's own user
+     * from the start and drops every capability, with no privilege escalation and
+     * the RuntimeDefault seccomp profile — in the chart, the kustomize overlays and
+     * the quickstart alike.
+     */
+    @Test
+    @DisplayName("database and identity-provider pods drop every capability")
+    void datastoreAndKeycloakPodsAreHardened() throws IOException {
+        List<Path> workloads = List.of(HELM_TEMPLATES.resolve("mongodb.yaml"), HELM_TEMPLATES.resolve("postgres.yaml"),
+                HELM_KEYCLOAK, K8S.resolve("overlays/mongodb/mongodb-statefulset.yaml"),
+                K8S.resolve("overlays/postgres/postgres-statefulset.yaml"), KUSTOMIZE_KEYCLOAK, K8S.resolve("quickstart.yaml"));
+        List<String> required = List.of("allowPrivilegeEscalation: false", "drop: [\"ALL\"]", "type: RuntimeDefault",
+                "runAsNonRoot: true");
+        for (Path workload : workloads) {
+            String text = read(workload).replace("\r\n", "\n");
+            // Checked per workload document, not per file: k8s/quickstart.yaml holds the
+            // EDDI deployment too, and a setting dropped from MongoDB would otherwise
+            // still be "found" in the EDDI block. A Helm template is one workload with
+            // templated image lines, so there the file is the document.
+            List<String> documents = workload.startsWith(HELM_TEMPLATES)
+                    ? List.of(text)
+                    : hardenedWorkloadDocuments(text);
+            assertFalse(documents.isEmpty(), workload + " holds no MongoDB/PostgreSQL/Keycloak workload document to check");
+            for (String document : documents) {
+                for (String setting : required) {
+                    assertTrue(document.contains(setting), workload + " lacks `" + setting + "` in a workload document");
+                }
+            }
+        }
+        String policy = read(K8S.resolve("overlays/production/network-policy.yaml")).replace("\r\n", "\n");
+        assertFalse(policy.contains("- namespaceSelector: {}\n          podSelector:"),
+                "the ingress rule must not admit a controller-labelled pod from ANY namespace — the label is forgeable");
+        assertTrue(policy.contains("kubernetes.io/metadata.name: ingress-nginx"),
+                "the ingress rule must pin the controller's namespace by its API-server-set name");
+        String configMap = read(HELM_TEMPLATES.resolve("configmap.yaml")).replace("\r\n", "\n");
+        assertTrue(configMap.contains("{{- if and .Values.ingress.enabled .Values.ingress.tls }}\n  EDDI_SECURITY_HSTS_ENABLED: \"true\""),
+                "the chart must turn HSTS on when the ingress terminates TLS");
+    }
+
+    /**
+     * The YAML documents of {@code text} that are a Deployment or StatefulSet
+     * running a MongoDB, PostgreSQL or Keycloak image.
+     */
+    private static List<String> hardenedWorkloadDocuments(String text) {
+        List<String> found = new ArrayList<>();
+        for (String document : text.split("(?m)^---[ \t]*$")) {
+            boolean workload = document.contains("kind: StatefulSet") || document.contains("kind: Deployment");
+            boolean datastoreOrIdp = Pattern.compile("(?m)^\\s*image:\\s*\\S*(mongo|postgres|keycloak)", Pattern.CASE_INSENSITIVE)
+                    .matcher(document).find();
+            if (workload && datastoreOrIdp) {
+                found.add(document);
+            }
+        }
+        return found;
     }
 
     // ─────────────────────────────────────────────────────────────

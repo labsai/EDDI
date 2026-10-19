@@ -116,6 +116,18 @@ This ordering is important: vault secrets can contain global variable references
 
 All endpoints require the `eddi-admin` or `eddi-editor` role.
 
+**Keys starting with `platform.` are reserved for administrators.** They hold the
+platform's own settings — `platform.operator` is the Platform Operator's
+configuration, which the Manager trusts to decide which agent is the operator and
+which prompt an Upgrade re-provisions. A `PUT` or `DELETE` of such a key (in any
+tenant, matched case-insensitively) by anyone but `eddi-admin` answers `403` with
+`{"error": "...", "reservedPrefix": "platform."}`. Reads are unchanged. A
+write or delete, refused or not, is recorded on the audit ledger as an
+administrative action like every other `PUT`/`DELETE` here — when
+`eddi.audit.admin-actions.enabled` is on (the default) and the ledger is
+available; a record that cannot be written is logged and does not change the
+answer, so do not treat the ledger as a complete list of attempts.
+
 ### Endpoints
 
 | Method | Path | Description |

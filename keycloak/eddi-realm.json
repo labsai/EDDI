@@ -45,6 +45,11 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
+  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notEmail and passwordHistory(3)",
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
   "defaultRole": {
     "name": "default-roles-eddi",
     "description": "Default role for every new user — least privilege. Elevated roles (eddi-admin, eddi-editor) are granted explicitly.",
@@ -561,6 +566,8 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
+      "consentRequired": true,
+      "fullScopeAllowed": false,
       "redirectUris": [
         "http://localhost:*",
         "http://127.0.0.1:*"
@@ -616,6 +623,18 @@
       ]
     }
   ],
+  "scopeMappings": [
+    {
+      "client": "eddi-mcp",
+      "roles": [
+        "eddi-admin",
+        "eddi-editor",
+        "eddi-user",
+        "eddi-viewer",
+        "eddi-approver"
+      ]
+    }
+  ],
   "users": [
     {
       "username": "eddi",
@@ -623,7 +642,7 @@
       "lastName": "Admin",
       "email": "eddi@localhost",
       "enabled": true,
-      "emailVerified": true,
+      "emailVerified": false,
       "realmRoles": [
         "eddi-admin",
         "eddi-editor",
@@ -639,7 +658,7 @@
       "lastName": "Viewer",
       "email": "viewer@localhost",
       "enabled": true,
-      "emailVerified": true,
+      "emailVerified": false,
       "realmRoles": [
         "eddi-viewer"
       ]
@@ -650,7 +669,7 @@
       "lastName": "User",
       "email": "user@localhost",
       "enabled": true,
-      "emailVerified": true,
+      "emailVerified": false,
       "realmRoles": [
         "eddi-user"
       ]

@@ -165,7 +165,7 @@ API behind it, and why each action is safe, is in
 
 | Symptom | Look at | Action |
 |---|---|---|
-| `eddi_cluster_degraded == 1` | `/q/health/ready` (`cluster` check: `nats`, `degradedSince`), node log | Restore NATS reachability; the node recovers by itself. |
+| `eddi_cluster_degraded == 1` | `/q/health/ready` (`cluster` check: `nats`, `degradedSince` — reported only with `eddi.health.verbose=true`), `GET /administration/cluster/overview`, node log | Restore NATS reachability; the node recovers by itself. |
 | Rising `eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` | `GET /administration/coordinator/status?scope=cluster` (queue depths per node) | A conversation is hammered from several clients at once, or turns are slower than the acquire timeout. |
 | `eddi_cluster_fence_rejected_total` increases | Dead letters | Every refusal is a turn that was dead-lettered; replay or discard it. Frequent refusals mean nodes lose leases — check GC pauses and NATS latency (`natsRtt` in presence). |
 | `eddi_coordinator_dead_letters > 0` | `GET /administration/coordinator/dead-letters` | Replay (`POST …/{id}/replay`) or discard (`DELETE …/{id}`) — see [Coordinator Admin](coordinator-admin.md). |

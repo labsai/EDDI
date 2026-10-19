@@ -2890,6 +2890,7 @@
     "question": "问题",
     "readyToDiscuss": "准备讨论",
     "responding": "正在响应…",
+    "usingTool": "正在使用 {{tool}}…",
     "reviewMemberRoster": "成员名单",
     "reviewMembers": "成员",
     "reviewModerator": "主持人",

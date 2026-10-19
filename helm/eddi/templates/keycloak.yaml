@@ -155,9 +155,15 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: keycloak
           image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           # --import-realm reads /opt/keycloak/data/import. Import is ONE-SHOT:
           # it seeds an empty database and is skipped once the realm exists, so
           # console edits survive restarts and ConfigMap edits do not reach an

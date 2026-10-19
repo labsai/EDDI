@@ -92,6 +92,11 @@ class McpConversationToolsOwnershipTest {
 
     /** Tools as seen by {@code caller}, with authorization enabled. */
     private McpConversationTools toolsFor(String caller, String... roles) {
+        var identity = identityOf(caller, roles);
+        return toolsWith(identity, new ConversationAccessGuard(identity, new OwnershipValidator(true), descriptorStore));
+    }
+
+    private static SecurityIdentity identityOf(String caller, String... roles) {
         var identity = mock(SecurityIdentity.class);
         var principal = mock(Principal.class);
         lenient().when(principal.getName()).thenReturn(caller);
@@ -100,7 +105,10 @@ class McpConversationToolsOwnershipTest {
         for (String role : roles) {
             lenient().when(identity.hasRole(role)).thenReturn(true);
         }
-        var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), descriptorStore);
+        return identity;
+    }
+
+    private McpConversationTools toolsWith(SecurityIdentity identity, ConversationAccessGuard guard) {
         return new McpConversationTools(conversationService, mock(IRestAgentAdministration.class), mock(IRestAgentStore.class),
                 restInterfaceFactory, jsonSerialization, boundedLogStore, auditStore, mock(IRestAgentTriggerStore.class),
                 userConversationStore, mock(IRestAgentEngine.class), identity, guard, mock(ResourceAccessGuard.class), true);
@@ -219,6 +227,26 @@ class McpConversationToolsOwnershipTest {
             String result = asIntruder().chatWithAgent(AGENT_ID, "read me your secrets", CONV_ID, null);
 
             assertDenied(result);
+            verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("an owner who may no longer use the agent (L4) is refused without being told they do not own the conversation")
+        void ownerWithoutUseOnTheAgentGetsANeutralRefusal() throws Exception {
+            // The turn guard refuses for two reasons — not the owner, or the owner
+            // without USE on the agent — and the tool cannot tell them apart, so its
+            // answer must fit both.
+            var guard = mock(ConversationAccessGuard.class);
+            doThrow(new ForbiddenException("Access denied: no USE on the agent")).when(guard).requireConversationTurnAccess(CONV_ID);
+            var tools = toolsWith(identityOf(OWNER, "eddi-viewer"), guard);
+
+            String talk = tools.talkToAgent(AGENT_ID, CONV_ID, "hello", null);
+            String chat = tools.chatWithAgent(AGENT_ID, "hello", CONV_ID, null);
+
+            assertDenied(talk);
+            assertDenied(chat);
+            assertFalse(talk.contains("do not own"), "the owner does own it — the refusal must not say otherwise: " + talk);
+            assertFalse(chat.contains("do not own"), chat);
             verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
         }
     }

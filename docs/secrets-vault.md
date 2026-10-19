@@ -252,7 +252,7 @@ The agent document itself plus each workflow's LLM, HTTP-call, MCP-call, and RAG
 On most deployments this control is inert, for two reasons worth confirming rather than assuming:
 
 1. **No master key, no check.** With `eddi.vault.master-key` unset the vault is disabled and the checker reports no violations without looking at anything.
-2. **Auto-vaulted keys are unrestricted.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]` — written out by the wizard, which says why in its source: the agent being set up has no id yet.
+2. **Auto-vaulted keys are unrestricted by agent.** Every key the setup wizard vaults is stored with `allowedAgents = ["*"]` — written out by the wizard, which says why in its source: the agent being set up has no id yet. Their *destination* is restricted instead — see [Where a wizard key may be sent](#where-a-wizard-key-may-be-sent).
 
 The deployments that *are* affected have **both** a master key and a grant an operator has deliberately narrowed. There, enforcement is a behavior change with no warning phase — the first symptom is an agent refusing to deploy. Before enabling it, run once with `warn` and confirm the log is free of:
 
@@ -646,6 +646,25 @@ When creating agents through the Manager's agent wizard, the Platform Operator, 
 2. `AgentSetupService.vaultApiKey()` resolves it against the vault (see *Reusing one key across agents* below)
 3. A vault reference (`${vault:setup.<agent-name>.<timestamp>-<random>.apiKey}`, or the name you chose) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
+5. The entry is stored with an [`allowedHosts`](#destination-allow-list-allowedhosts) list — see *Where a wizard key may be sent* below
+
+### Where a wizard key may be sent
+
+Every editor can read the LLM configuration that holds the reference, so a key stored with no destination list could be copied into a configuration pointed at an editor's own host and received there on the first turn (security review 2026-10-17, H1). Every secret the setup wizard **creates** — the LLM `apiKey`, and on `/setup-api` the `apiAuth` it vaults — is therefore stored with the destinations it was meant for:
+
+| Request | `allowedHosts` stored |
+| --- | --- |
+| a base URL (`baseUrl` on `/setup`, `llmBaseUrl` on `/setup-api`) | that URL's host, with its port when the URL spells one |
+| no base URL, a provider with a known endpoint | the provider's host: `api.openai.com`, `api.anthropic.com`, `generativelanguage.googleapis.com`, `api.mistral.ai`, `router.huggingface.co`, `huggingface.co` (jlama's model-download token), or the default and regional hosts of a named OpenAI-compatible provider |
+| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`) |
+| `"allowedHosts": ["api.example.com", "proxy.example:8443"]` | exactly that list, for every secret the request vaults — validated as on the secrets API |
+| `"allowedHosts": ["*"]` | no list: the secret may go anywhere |
+
+Under `eddi.vault.grant-enforcement=enforce` (the default) a secret is never stored open by accident: when the request names no endpoint and the provider has none setup knows (`azure-openai` without an endpoint, for one), the setup is refused with a **400** before anything is written, and the message says to pass the endpoint, a host list, or `["*"]`. Under `warn` and `off` the secret is stored open and a `[SECURITY]` warning is logged. A configuration that names no endpoint still uses the provider's own and is not checked, so the default list is what an editor may legitimately *spell out*, not something the agent needs in order to work.
+
+Plaintext reuse (below) follows the same rule: an existing entry holding the same key is reused only when it is restricted to the same hosts — an `["*"]` request reuses only an open entry — so a key vaulted open by an earlier release is not handed to new agents; a restricted copy is stored instead. An entry named in `vaultKeyName` that already exists, or a `${vault:…}` reference passed as `apiKey`, is used as it is: that entry is the administrator's own, restricted however they left it. Narrow an older open entry with `PUT /secretstore/secrets/{tenant}/{key}/grant {"allowedAgents": ["*"], "allowedHosts": [...]}`.
+
+`allowedHosts` is an administrator's field like `grantReferencedSecrets`, and is not exposed on the MCP `setup_agent` / `create_api_agent` tools; those always derive the list.
 
 ### Reusing one key across agents
 
