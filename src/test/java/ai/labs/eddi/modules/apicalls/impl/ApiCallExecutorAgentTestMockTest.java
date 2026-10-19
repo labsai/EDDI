@@ -42,6 +42,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -60,6 +61,7 @@ class ApiCallExecutorAgentTestMockTest {
     private PrePostUtils prePostUtils;
     private IRuntime runtime;
     private ApiCallExecutor executor;
+    private SecretResolver secretResolver;
     private IConversationMemory memory;
 
     @BeforeEach
@@ -67,7 +69,7 @@ class ApiCallExecutorAgentTestMockTest {
         httpClient = mock(IHttpClient.class);
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
-        SecretResolver secretResolver = mock(SecretResolver.class);
+        secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -161,5 +163,28 @@ class ApiCallExecutorAgentTestMockTest {
         verify(httpClient, never()).newRequest(any(URI.class), any());
         verify(request, never()).send(any());
         verify(runtime, never()).submitCallable(any(), any());
+    }
+
+    /**
+     * Building the request is what resolves {@code ${vault:}} (and connection and
+     * caller) references. A mocked call must not build one: it must neither pull a
+     * live credential into a test run nor fail because the credential is not
+     * provisioned where the suite runs.
+     */
+    @Test
+    @DisplayName("a mocked call with an unresolvable ${vault:} reference succeeds without touching the vault")
+    void mockedCallNeverResolvesSecrets() throws Exception {
+        arm(List.of(new ToolMock("getAvailability", null, new MockResponse(200, "3 rooms"))));
+        when(secretResolver.resolveValue(anyString())).thenThrow(new IllegalStateException("vault key 'partner' not provisioned"));
+        ApiCall call = call(false);
+        call.getRequest().setHeaders(Map.of("Authorization", "Bearer ${vault:partner}"));
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), SERVER);
+
+        assertEquals(200, result.get("httpCode"));
+        assertEquals("3 rooms", result.get("body"));
+        verifyNoInteractions(secretResolver);
+        verify(httpClient, never()).newRequest(any(URI.class), any());
+        verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(200), eq(false));
     }
 }

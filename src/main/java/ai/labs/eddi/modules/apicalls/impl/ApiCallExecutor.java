@@ -309,57 +309,65 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    // Re-read per attempt rather than hoisted: a post-response property
-                    // instruction can write a property between attempts, and the guard has to
-                    // judge the request it is actually about to send.
-                    BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
-                    substitutedSecrets.addAll(built.resolvedSecrets());
-                    request = built.request();
-                    // Inside a turn deadline the call may not outlive what is left of the
-                    // turn. The first call is never skipped while any time remains.
-                    TurnDeadline turnDeadline = memory.getTurnDeadline();
-                    if (turnDeadline != null) {
-                        if (turnDeadline.isExpired()) {
-                            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall").increment();
-                            throw new LifecycleException("ApiCall (" + call.getName() + ") not sent: the turn deadline has already passed");
-                        }
-                        request.setTimeout(deadlineBoundedTimeout(resolveTimeout(call), turnDeadline), TimeUnit.MILLISECONDS);
-                    }
-                    var objectName = call.getName() + "Request";
-                    var requestMap = request.toMap();
-                    // Scrub resolved secrets — headers, query parameters and body — from
-                    // the request map before it is persisted to conversation memory. The
-                    // actual request was already built and still carries them; each entry
-                    // here is REPLACED with a redacted copy, so this only affects the debug
-                    // record. Shares RequestRedactor with the approval preview so the two
-                    // cannot disagree about what counts as a credential — including which
-                    // headers a connection filled, which no name or value heuristic can
-                    // recognise on its own.
-                    requestRedactor.redactRequestMap(requestMap, built.connectionOwnedHeaders());
-                    // By value as well: a vault secret need not look like one, and the
-                    // executor knows exactly which plaintexts it substituted.
-                    RequestRedactor.redactResolvedSecrets(requestMap, built.resolvedSecrets());
-                    prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
                     // Agent test harness: a test conversation gets its suite's mock (or a 501
                     // NOT_EXECUTED) instead of a request, and everything below — saveResponse,
-                    // postResponse property instructions, retries — runs on it unchanged.
+                    // postResponse property instructions, retries — runs on it unchanged. It is
+                    // selected BEFORE the request is built: building resolves ${vault:},
+                    // ${connection:} and ${caller:} references, and a mocked call must neither
+                    // fetch a live credential nor fail for want of one.
                     var mocked = ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall");
-                    response = mocked != null
-                            ? new MockedResponse(mocked)
-                            : executeAndMeasureRequest(call, request, built.resolvedSecrets(), retryCall, amountOfExecutions);
+                    Set<String> resolvedSecrets;
+                    if (mocked != null) {
+                        resolvedSecrets = Set.of();
+                        response = new MockedResponse(mocked);
+                    } else {
+                        // Re-read per attempt rather than hoisted: a post-response property
+                        // instruction can write a property between attempts, and the guard has to
+                        // judge the request it is actually about to send.
+                        BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
+                        resolvedSecrets = built.resolvedSecrets();
+                        substitutedSecrets.addAll(resolvedSecrets);
+                        request = built.request();
+                        // Inside a turn deadline the call may not outlive what is left of the
+                        // turn. The first call is never skipped while any time remains.
+                        TurnDeadline turnDeadline = memory.getTurnDeadline();
+                        if (turnDeadline != null) {
+                            if (turnDeadline.isExpired()) {
+                                Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall").increment();
+                                throw new LifecycleException("ApiCall (" + call.getName() + ") not sent: the turn deadline has already passed");
+                            }
+                            request.setTimeout(deadlineBoundedTimeout(resolveTimeout(call), turnDeadline), TimeUnit.MILLISECONDS);
+                        }
+                        var objectName = call.getName() + "Request";
+                        var requestMap = request.toMap();
+                        // Scrub resolved secrets — headers, query parameters and body — from
+                        // the request map before it is persisted to conversation memory. The
+                        // actual request was already built and still carries them; each entry
+                        // here is REPLACED with a redacted copy, so this only affects the debug
+                        // record. Shares RequestRedactor with the approval preview so the two
+                        // cannot disagree about what counts as a credential — including which
+                        // headers a connection filled, which no name or value heuristic can
+                        // recognise on its own.
+                        requestRedactor.redactRequestMap(requestMap, built.connectionOwnedHeaders());
+                        // By value as well: a vault secret need not look like one, and the
+                        // executor knows exactly which plaintexts it substituted.
+                        RequestRedactor.redactResolvedSecrets(requestMap, resolvedSecrets);
+                        prePostUtils.createMemoryEntry(currentStep, requestMap, objectName, KEY_HTTP_CALLS);
+                        response = executeAndMeasureRequest(call, request, resolvedSecrets, retryCall, amountOfExecutions);
+                    }
 
                     var isResponseSuccessful = response.getHttpCode() >= 200 && response.getHttpCode() < 300;
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), built.resolvedSecrets());
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
                         LOGGER.warn("Error Msg:" + httpCodeMessage);
 
                         // A server that rejects a credential routinely echoes it ("invalid
                         // api key sk-…"). The executor knows exactly which plaintexts it
                         // sent, so those are removed by value before the body goes
                         // anywhere — memory, template data, the tool result or a log.
-                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), built.resolvedSecrets());
+                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), resolvedSecrets);
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -406,7 +414,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     var responseHeaderObjectName = call.getResponseHeaderObjectName();
                     Object responseObjectHeader = null;
                     if (!isNullOrEmpty(responseHeaderObjectName)) {
-                        responseObjectHeader = redactHeaderValues(withoutCredentialHeaders(response.getHttpHeader()), built.resolvedSecrets());
+                        responseObjectHeader = redactHeaderValues(withoutCredentialHeaders(response.getHttpHeader()), resolvedSecrets);
                         templateDataObjects.put(responseHeaderObjectName, responseObjectHeader);
                         prePostUtils.createMemoryEntry(currentStep, responseObjectHeader, responseHeaderObjectName, KEY_HTTP_CALLS);
                         // NOT put into `result` here — see the ordered insert below.
@@ -429,7 +437,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                         Object responseObject;
                         if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
-                            responseObject = redactedJsonResponse(rawBody, built.resolvedSecrets(), resolveMaxResponseSize(call), call.getName());
+                            responseObject = redactedJsonResponse(rawBody, resolvedSecrets, resolveMaxResponseSize(call), call.getName());
                         } else {
                             if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
                                 var message = "ApiCall (%s) didn't return application/json, text/plain nor text/html "
@@ -438,7 +446,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                             }
                             // Redacted BEFORE truncation, so a cut cannot leave half a secret
                             // that no longer matches.
-                            responseObject = truncateResponseBody(redactSuccessText(rawBody, built.resolvedSecrets()), resolveMaxResponseSize(call),
+                            responseObject = truncateResponseBody(redactSuccessText(rawBody, resolvedSecrets), resolveMaxResponseSize(call),
                                     call.getName());
                         }
 
