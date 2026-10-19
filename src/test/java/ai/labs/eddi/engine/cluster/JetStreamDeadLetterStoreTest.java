@@ -230,6 +230,15 @@ class JetStreamDeadLetterStoreTest {
         assertTrue(elapsedMillis < 4_000, "the dead letter retried for " + elapsedMillis + " ms on the turn's thread");
         ArgumentCaptor<PublishOptions> options = ArgumentCaptor.forClass(PublishOptions.class);
         verify(js, atMost(5)).publish(anyString(), any(byte[].class), options.capture());
+        List<PublishOptions> attempts = options.getAllValues();
+        assertTrue(attempts.size() >= 2, "expected the first publish and at least one retry: " + attempts.size());
+        for (int i = 1; i < attempts.size(); i++) {
+            assertTrue(attempts.get(i).getStreamTimeout().compareTo(attempts.get(i - 1).getStreamTimeout()) < 0,
+                    "every attempt waits at most what is left of the budget: " + attempts.get(i).getStreamTimeout());
+        }
+        assertTrue(attempts.getLast().getStreamTimeout().toMillis() < 1_500,
+                "the last attempt must not get a full default timeout: " + attempts.getLast().getStreamTimeout());
+        assertEquals(1, attempts.stream().map(PublishOptions::getMessageId).distinct().count(), "one message id for every attempt");
     }
 
     @Test

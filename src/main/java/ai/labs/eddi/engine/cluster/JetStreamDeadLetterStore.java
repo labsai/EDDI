@@ -141,12 +141,12 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
      * twenty seconds. A dead letter that does not get through within the budget
      * goes to the node-local ring, which forwards it once NATS answers again.
      */
-    private PublishAck publishOnceReady(String subject, byte[] payload, PublishOptions options, long deadline)
+    private PublishAck publishOnceReady(String subject, byte[] payload, String messageId, long deadline)
             throws IOException, JetStreamApiException {
         IOException last = null;
         for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
             try {
-                return connections.jetStream().publish(subject, payload, options);
+                return publishWithin(subject, payload, messageId, deadline);
             } catch (IOException notReadyYet) {
                 last = notReadyYet;
                 if (!connections.isConnected() || System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_BACKOFF_MILLIS) >= deadline) {
@@ -161,6 +161,25 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             }
         }
         throw last;
+    }
+
+    /**
+     * One publish that waits at most what is left of the append's budget. Without
+     * the per-call timeout a single publish waits the client's full default (2 s)
+     * whatever is left, so one late retry could still run far past the budget.
+     *
+     * @throws IOException
+     *             when no budget is left, without publishing
+     */
+    private PublishAck publishWithin(String subject, byte[] payload, String messageId, long deadline)
+            throws IOException, JetStreamApiException {
+        long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remainingMillis <= 0) {
+            throw new IOException("dead-letter publish budget spent");
+        }
+        PublishOptions options = PublishOptions.builder().messageId(messageId).streamTimeout(Duration.ofMillis(remainingMillis))
+                .build();
+        return connections.jetStream().publish(subject, payload, options);
     }
 
     /**
@@ -201,15 +220,14 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
         try {
             byte[] payload = JSON.writeValueAsBytes(body);
             String subject = subjects.deadLetterTurn(KvKeys.safe(conversationId));
-            PublishOptions options = PublishOptions.builder()
-                    .messageId(messageId(connections.node().nodeId(), conversationId, timestamp, error)).build();
+            String messageId = messageId(connections.node().nodeId(), conversationId, timestamp, error);
             PublishAck ack;
             // One budget for the whole append — the first publish, provisioning and the
             // retries — so a NATS that stops answering costs the failing turn about two
             // seconds in all, not two seconds per step.
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_ATTEMPTS * READY_BACKOFF_MILLIS);
             try {
-                ack = connections.jetStream().publish(subject, payload, options);
+                ack = publishWithin(subject, payload, messageId, deadline);
             } catch (IOException | JetStreamApiException noStreamYet) {
                 if (!connections.isConnected() || System.nanoTime() - deadline >= 0
                         || (noStreamYet instanceof JetStreamApiException api && !streamMissing(api))) {
@@ -225,7 +243,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 if (System.nanoTime() - deadline >= 0) {
                     throw noStreamYet; // provisioning used up the budget
                 }
-                ack = publishOnceReady(subject, payload, options, deadline);
+                ack = publishOnceReady(subject, payload, messageId, deadline);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {
