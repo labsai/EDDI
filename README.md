@@ -7,6 +7,12 @@ with no source tree.
 - `data/metrics.csv` — one row per UTC day: Docker pulls, stars,
   forks, and GitHub's rolling 14-day views/clones. Aggregate counts
   only; nothing here identifies a person.
+- `data/runs.csv` — one line per workflow run (~every 15-60 min):
+  how much pull_count rose since the previous line, split into bot
+  sweeps of every tag, this repo's own CI pulls of `-b<N>` build
+  tags, and the rest ("real"), plus which other tags those real
+  pulls were. Estimates, from tag pull timestamps; the workflow's
+  "Persist metrics history" step documents the method.
 - `data/digests.json` — the last daily and weekly Slack digest
   sent, by window end date. Deleting it re-sends both.
 
