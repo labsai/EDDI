@@ -1,25 +1,15 @@
-import { Plus, Trash2 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
+import { Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   CONVERSATION_STATES,
   type Expectation,
   type ExpectedConversationState,
   type PropertyExpectation,
   type ToolCallExpectation,
-} from '@/lib/api/agent-tests';
-import {
-  cleanExpectation as clean,
-  propertyKind,
-  type PropertyKind,
-} from '@/lib/agent-test-utils';
-import { RenamableKeyInput } from '@/components/editors/renamable-key-input';
-import {
-  INPUT_CLASS,
-  JsonField,
-  LabelledField,
-  OptionalNumberField,
-  StringListField,
-} from './fields';
+} from "@/lib/api/agent-tests";
+import { cleanExpectation as clean, propertyKind, type PropertyKind } from "@/lib/agent-test-utils";
+import { RenamableKeyInput } from "@/components/editors/renamable-key-input";
+import { INPUT_CLASS, JsonField, LabelledField, OptionalNumberField, StringListField } from "./fields";
 
 /** A `property_N` name no other row uses, so a new row never overwrites one. */
 function freshPropertyName(taken: string[]): string {
@@ -28,17 +18,14 @@ function freshPropertyName(taken: string[]): string {
   return `property_${n}`;
 }
 
-function buildProperty(
-  kind: PropertyKind,
-  value: unknown,
-): PropertyExpectation {
+function buildProperty(kind: PropertyKind, value: unknown): PropertyExpectation {
   switch (kind) {
-    case 'absent':
+    case "absent":
       return { absent: true };
-    case 'exists':
+    case "exists":
       return { exists: true };
-    case 'matches':
-      return { matches: typeof value === 'string' ? value : '' };
+    case "matches":
+      return { matches: typeof value === "string" ? value : "" };
     default:
       // No value yet stays unset (serialised away) rather than becoming an
       // empty-string equality check the suite would then assert.
@@ -57,24 +44,19 @@ export function ExpectationEditor({
 }) {
   const { t } = useTranslation();
   const e = value ?? {};
-  const set = (patch: Partial<Expectation>) =>
-    onChange(clean({ ...e, ...patch }));
+  const set = (patch: Partial<Expectation>) => onChange(clean({ ...e, ...patch }));
 
   const properties = Object.entries(e.properties ?? {});
   const setProperties = (next: Array<[string, PropertyExpectation]>) =>
     set({ properties: next.length > 0 ? Object.fromEntries(next) : undefined });
 
   const toolCalled = e.toolCalled ?? [];
-  const setToolCalled = (next: ToolCallExpectation[]) =>
-    set({ toolCalled: next.length > 0 ? next : undefined });
+  const setToolCalled = (next: ToolCallExpectation[]) => set({ toolCalled: next.length > 0 ? next : undefined });
 
   return (
     <div className="space-y-4" data-testid="expectation-editor">
       <div className="grid gap-3 sm:grid-cols-2">
-        <LabelledField
-          label={t('testSuiteEditor.actionsContain', 'Actions fired (all of)')}
-          hint={t('testSuiteEditor.listHint', 'Comma-separated')}
-        >
+        <LabelledField label={t("testSuiteEditor.actionsContain", "Actions fired (all of)")} hint={t("testSuiteEditor.listHint", "Comma-separated")}>
           {(id) => (
             <StringListField
               id={id}
@@ -86,12 +68,7 @@ export function ExpectationEditor({
             />
           )}
         </LabelledField>
-        <LabelledField
-          label={t(
-            'testSuiteEditor.actionsExact',
-            'Actions fired (exactly, in order)',
-          )}
-        >
+        <LabelledField label={t("testSuiteEditor.actionsExact", "Actions fired (exactly, in order)")}>
           {(id) => (
             <StringListField
               id={id}
@@ -102,33 +79,28 @@ export function ExpectationEditor({
             />
           )}
         </LabelledField>
-        <LabelledField
-          label={t('testSuiteEditor.outputContains', 'Output contains')}
-        >
+        <LabelledField label={t("testSuiteEditor.outputContains", "Output contains")}>
           {(id) => (
             <input
               id={id}
               type="text"
               className={INPUT_CLASS}
-              value={e.outputContains ?? ''}
+              value={e.outputContains ?? ""}
               readOnly={readOnly}
               onChange={(ev) => set({ outputContains: ev.target.value })}
             />
           )}
         </LabelledField>
         <LabelledField
-          label={t('testSuiteEditor.outputMatches', 'Output matches (regex)')}
-          hint={t(
-            'testSuiteEditor.regexHint',
-            'Searched, not a full match. At most 500 characters.',
-          )}
+          label={t("testSuiteEditor.outputMatches", "Output matches (regex)")}
+          hint={t("testSuiteEditor.regexHint", "Searched, not a full match. At most 500 characters.")}
         >
           {(id) => (
             <input
               id={id}
               type="text"
               className={`${INPUT_CLASS} font-mono`}
-              value={e.outputMatches ?? ''}
+              value={e.outputMatches ?? ""}
               readOnly={readOnly}
               maxLength={500}
               placeholder="(?i)3 rooms"
@@ -142,25 +114,17 @@ export function ExpectationEditor({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-semibold text-foreground">
-            {t('testSuiteEditor.properties', 'Conversation properties')}
+            {t("testSuiteEditor.properties", "Conversation properties")}
           </h4>
           {!readOnly && (
             <button
               type="button"
-              onClick={() =>
-                setProperties([
-                  ...properties,
-                  [
-                    freshPropertyName(properties.map(([n]) => n)),
-                    { exists: true },
-                  ],
-                ])
-              }
+              onClick={() => setProperties([...properties, [freshPropertyName(properties.map(([n]) => n)), { exists: true }]])}
               className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               data-testid="expect-add-property"
             >
               <Plus className="h-3 w-3" aria-hidden="true" />
-              {t('testSuiteEditor.addProperty', 'Add property')}
+              {t("testSuiteEditor.addProperty", "Add property")}
             </button>
           )}
         </div>
@@ -169,50 +133,28 @@ export function ExpectationEditor({
           const replace = (entry: [string, PropertyExpectation]) =>
             setProperties(properties.map((x, j) => (j === i ? entry : x)));
           return (
-            <div
-              key={i}
-              className="flex flex-wrap items-start gap-2"
-              data-testid="expect-property-row"
-            >
+            <div key={i} className="flex flex-wrap items-start gap-2" data-testid="expect-property-row">
               <RenamableKeyInput
-                aria-label={t('testSuiteEditor.propertyName', 'Property name')}
+                aria-label={t("testSuiteEditor.propertyName", "Property name")}
                 className={`${INPUT_CLASS} w-36 sm:w-44`}
                 value={name}
                 readOnly={readOnly}
-                isAvailable={(next) =>
-                  !properties.some(([other], j) => j !== i && other === next)
-                }
+                isAvailable={(next) => !properties.some(([other], j) => j !== i && other === next)}
                 onRename={(next) => replace([next, p])}
               />
               <select
-                aria-label={t('testSuiteEditor.propertyCheck', 'Check')}
+                aria-label={t("testSuiteEditor.propertyCheck", "Check")}
                 className={`${INPUT_CLASS} w-36`}
                 value={kind}
                 disabled={readOnly}
-                onChange={(ev) =>
-                  replace([
-                    name,
-                    buildProperty(
-                      ev.target.value as PropertyKind,
-                      p.equals ?? p.matches,
-                    ),
-                  ])
-                }
+                onChange={(ev) => replace([name, buildProperty(ev.target.value as PropertyKind, p.equals ?? p.matches)])}
               >
-                <option value="equals">
-                  {t('testSuiteEditor.kindEquals', 'equals')}
-                </option>
-                <option value="matches">
-                  {t('testSuiteEditor.kindMatches', 'matches (regex)')}
-                </option>
-                <option value="exists">
-                  {t('testSuiteEditor.kindExists', 'exists')}
-                </option>
-                <option value="absent">
-                  {t('testSuiteEditor.kindAbsent', 'is absent')}
-                </option>
+                <option value="equals">{t("testSuiteEditor.kindEquals", "equals")}</option>
+                <option value="matches">{t("testSuiteEditor.kindMatches", "matches (regex)")}</option>
+                <option value="exists">{t("testSuiteEditor.kindExists", "exists")}</option>
+                <option value="absent">{t("testSuiteEditor.kindAbsent", "is absent")}</option>
               </select>
-              {kind === 'equals' && (
+              {kind === "equals" && (
                 <div className="min-w-40 flex-1">
                   <JsonField
                     value={p.equals}
@@ -223,29 +165,22 @@ export function ExpectationEditor({
                   />
                 </div>
               )}
-              {kind === 'matches' && (
+              {kind === "matches" && (
                 <input
                   type="text"
-                  aria-label={t('testSuiteEditor.regex', 'Regex')}
+                  aria-label={t("testSuiteEditor.regex", "Regex")}
                   className={`${INPUT_CLASS} min-w-40 flex-1 font-mono`}
-                  value={p.matches ?? ''}
+                  value={p.matches ?? ""}
                   readOnly={readOnly}
                   maxLength={500}
-                  onChange={(ev) =>
-                    replace([name, { matches: ev.target.value }])
-                  }
+                  onChange={(ev) => replace([name, { matches: ev.target.value }])}
                 />
               )}
               {!readOnly && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setProperties(properties.filter((_, j) => j !== i))
-                  }
-                  aria-label={t(
-                    'testSuiteEditor.removeProperty',
-                    'Remove property',
-                  )}
+                  onClick={() => setProperties(properties.filter((_, j) => j !== i))}
+                  aria-label={t("testSuiteEditor.removeProperty", "Remove property")}
                   className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -259,35 +194,28 @@ export function ExpectationEditor({
       {/* Tools */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h4 className="text-xs font-semibold text-foreground">
-            {t('testSuiteEditor.toolCalled', 'Tools called')}
-          </h4>
+          <h4 className="text-xs font-semibold text-foreground">{t("testSuiteEditor.toolCalled", "Tools called")}</h4>
           {!readOnly && (
             <button
               type="button"
-              onClick={() => setToolCalled([...toolCalled, { tool: '' }])}
+              onClick={() => setToolCalled([...toolCalled, { tool: "" }])}
               className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               data-testid="expect-add-tool"
             >
               <Plus className="h-3 w-3" aria-hidden="true" />
-              {t('testSuiteEditor.addToolCall', 'Add tool call')}
+              {t("testSuiteEditor.addToolCall", "Add tool call")}
             </button>
           )}
         </div>
         {toolCalled.map((c, i) => {
-          const replace = (next: ToolCallExpectation) =>
-            setToolCalled(toolCalled.map((x, j) => (j === i ? next : x)));
+          const replace = (next: ToolCallExpectation) => setToolCalled(toolCalled.map((x, j) => (j === i ? next : x)));
           return (
-            <div
-              key={i}
-              className="flex flex-wrap items-start gap-2"
-              data-testid="expect-tool-row"
-            >
+            <div key={i} className="flex flex-wrap items-start gap-2" data-testid="expect-tool-row">
               <input
                 type="text"
-                aria-label={t('testSuiteEditor.toolName', 'Tool name')}
+                aria-label={t("testSuiteEditor.toolName", "Tool name")}
                 className={`${INPUT_CLASS} w-44`}
-                value={c.tool ?? ''}
+                value={c.tool ?? ""}
                 readOnly={readOnly}
                 onChange={(ev) => replace({ ...c, tool: ev.target.value })}
               />
@@ -298,24 +226,14 @@ export function ExpectationEditor({
                   objectOnly
                   rows={1}
                   placeholder='{"city":"Vienna"}'
-                  onChange={(v) =>
-                    replace({
-                      ...c,
-                      argsSubset: v as Record<string, unknown> | undefined,
-                    })
-                  }
+                  onChange={(v) => replace({ ...c, argsSubset: v as Record<string, unknown> | undefined })}
                 />
               </div>
               {!readOnly && (
                 <button
                   type="button"
-                  onClick={() =>
-                    setToolCalled(toolCalled.filter((_, j) => j !== i))
-                  }
-                  aria-label={t(
-                    'testSuiteEditor.removeToolCall',
-                    'Remove tool call',
-                  )}
+                  onClick={() => setToolCalled(toolCalled.filter((_, j) => j !== i))}
+                  aria-label={t("testSuiteEditor.removeToolCall", "Remove tool call")}
                   className="rounded p-1.5 text-muted-foreground hover:bg-secondary hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -327,9 +245,7 @@ export function ExpectationEditor({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <LabelledField
-          label={t('testSuiteEditor.toolNotCalled', 'Tools not called')}
-        >
+        <LabelledField label={t("testSuiteEditor.toolNotCalled", "Tools not called")}>
           {(id) => (
             <StringListField
               id={id}
@@ -340,53 +256,28 @@ export function ExpectationEditor({
             />
           )}
         </LabelledField>
-        <LabelledField
-          label={t('testSuiteEditor.maxToolCalls', 'Max tool calls')}
-        >
+        <LabelledField label={t("testSuiteEditor.maxToolCalls", "Max tool calls")}>
           {(id) => (
-            <OptionalNumberField
-              id={id}
-              integer
-              min={0}
-              value={e.maxToolCalls}
-              onChange={(v) => set({ maxToolCalls: v })}
-              readOnly={readOnly}
-            />
+            <OptionalNumberField id={id} integer min={0} value={e.maxToolCalls} onChange={(v) => set({ maxToolCalls: v })} readOnly={readOnly} />
           )}
         </LabelledField>
-        <LabelledField
-          label={t('testSuiteEditor.maxCostUsd', 'Max cost (USD)')}
-        >
+        <LabelledField label={t("testSuiteEditor.maxCostUsd", "Max cost (USD)")}>
           {(id) => (
-            <OptionalNumberField
-              id={id}
-              min={0}
-              value={e.maxCostUsd}
-              onChange={(v) => set({ maxCostUsd: v })}
-              readOnly={readOnly}
-            />
+            <OptionalNumberField id={id} min={0} value={e.maxCostUsd} onChange={(v) => set({ maxCostUsd: v })} readOnly={readOnly} />
           )}
         </LabelledField>
-        <LabelledField
-          label={t(
-            'testSuiteEditor.conversationState',
-            'Conversation state after',
-          )}
-        >
+        <LabelledField label={t("testSuiteEditor.conversationState", "Conversation state after")}>
           {(id) => (
             <select
               id={id}
               className={INPUT_CLASS}
-              value={e.conversationState ?? ''}
+              value={e.conversationState ?? ""}
               disabled={readOnly}
               onChange={(ev) =>
-                set({
-                  conversationState: (ev.target.value || undefined) as
-                    ExpectedConversationState | undefined,
-                })
+                set({ conversationState: (ev.target.value || undefined) as ExpectedConversationState | undefined })
               }
             >
-              <option value="">{t('testSuiteEditor.anyState', 'Any')}</option>
+              <option value="">{t("testSuiteEditor.anyState", "Any")}</option>
               {CONVERSATION_STATES.map((s) => (
                 <option key={s} value={s}>
                   {s}
