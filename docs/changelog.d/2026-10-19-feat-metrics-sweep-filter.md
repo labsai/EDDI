@@ -23,7 +23,10 @@ The digests keep the absolute count and now add two lines:
 How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-notify.yml):
 
 - A new step, **Fetch Docker Hub tags**, reads every tag's `tag_last_pulled`
-  after it reads pull_count, and records when it finished.
+  after it reads pull_count, and records when it finished. Both Docker Hub
+  reads now have a 30-second deadline, so a stalled connection can't hold the
+  job, and through the concurrency group every later run, until GitHub's
+  6-hour limit.
 - **Persist metrics history** appends one line per run to `data/runs.csv` on
   the `metrics` branch. Each line splits the increase since the previous line
   three ways. An interval in which ≥ 20 tags were pulled is a sweep, costing one

@@ -95,7 +95,7 @@ jobs:
           # history" then leaves the day's row to a later run: on a cache miss
           # the carried value is 0, and a 0 row would become a digest baseline.
           OK=true
-          PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
+          PULLS=$(curl -sf --connect-timeout 10 --max-time 30 https://hub.docker.com/v2/repositories/labsai/eddi/ | jq -r '.pull_count // empty')
           case "${PULLS:-}" in
             ''|*[!0-9]*)
               echo "::warning::Docker Hub returned no usable pull_count - carrying the previous value forward"
@@ -134,7 +134,10 @@ jobs:
             PAGES=$(( PAGES + 1 ))
             # 100 per page; 20 pages is far beyond the ~200 tags there are.
             if [ "$PAGES" -gt 20 ]; then OK=false; break; fi
-            PAGE=$(curl -sf "$URL") || { OK=false; break; }
+            # A deadline per page: an accepted-but-stalled connection would
+            # otherwise hold the job (and, through the concurrency group,
+            # every later run) until GitHub's 6-hour job limit.
+            PAGE=$(curl -sf --connect-timeout 10 --max-time 30 "$URL") || { OK=false; break; }
             printf '%s' "$PAGE" | jq -c '.results[] | {name, pulled: .tag_last_pulled}' >> tags.ndjson \
               || { OK=false; break; }
             URL=$(printf '%s' "$PAGE" | jq -r '.next // ""')
