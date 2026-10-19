@@ -11980,7 +11980,7 @@
           }
         },
         {
-          "id": 207,
+          "id": 261,
           "type": "timeseries",
           "title": "Tenant cost metering by outcome",
           "datasource": {
@@ -12056,7 +12056,7 @@
           }
         },
         {
-          "id": 208,
+          "id": 262,
           "type": "timeseries",
           "title": "LLM spend gate refusals",
           "datasource": {
