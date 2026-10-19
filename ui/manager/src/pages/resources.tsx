@@ -2,9 +2,11 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
+  AlertCircle,
   FileCode,
   ChevronRight,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { RESOURCE_TYPES } from "@/lib/api/resources";
 import { useResourceDescriptors } from "@/hooks/use-resources";
 import { cn } from "@/lib/utils";
@@ -19,7 +21,7 @@ function ResourceTypeCard({
   labelKey: string;
 }) {
   const { t } = useTranslation();
-  const { data: items } = useResourceDescriptors(slug, 1000, 0, "");
+  const { data: items, isLoading, isError } = useResourceDescriptors(slug, 1000, 0, "");
   const Icon = getResourceTypeIcon(slug);
   const count = items?.length ?? 0;
 
@@ -49,12 +51,22 @@ function ResourceTypeCard({
       </div>
 
       <div className="mt-auto pt-4 border-t border-border">
-        <span className="text-sm font-medium text-primary">
-          {t("resources.itemCount", {
-            count,
-            defaultValue: `${count} item(s)`,
-          })}
-        </span>
+        {/* "0 item(s)" while loading or after a failure read as an empty store. */}
+        {isLoading ? (
+          <Skeleton className="h-5 w-16" data-testid={`resource-type-${slug}-count-loading`} />
+        ) : isError && !items ? (
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-destructive">
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+            {t("common.loadError", "Failed to load data")}
+          </span>
+        ) : (
+          <span className="text-sm font-medium text-primary">
+            {t("resources.itemCount", {
+              count,
+              defaultValue: `${count} item(s)`,
+            })}
+          </span>
+        )}
       </div>
     </Link>
   );

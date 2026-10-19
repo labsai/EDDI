@@ -41,6 +41,10 @@ import {
   type CreationProgressItem,
 } from "@/components/workforce/wizard/review-launch";
 import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm";
+import { mapWithConcurrency } from "@/lib/concurrency";
+
+/** New advisors provisioned at once: faster than one by one, gentle on the backend. */
+const MEMBER_SETUP_CONCURRENCY = 3;
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -350,10 +354,10 @@ function WorkforceWizard() {
     // Mutable copy of members to record returned agentIds
     const resolvedMembers = members.map((m) => ({ ...m }));
 
-    // Create new agents sequentially
-    for (let i = 0; i < resolvedMembers.length; i++) {
-      const member = resolvedMembers[i]!;
-
+    // Create new agents a few at a time — each row has its own progress, so
+    // the user watches them finish side by side instead of waiting on a queue.
+    // Every agent that is created is recorded before any failure is reported.
+    const failed = await mapWithConcurrency(resolvedMembers, MEMBER_SETUP_CONCURRENCY, async (member, i) => {
       // An existing agent the user picked, or a new advisor a previous attempt
       // already provisioned (its id was written into `createdAgentId` below) —
       // nothing to create. The old "resume" logic remembered only which *rows*
@@ -364,7 +368,7 @@ function WorkforceWizard() {
       if (alreadyProvisioned) {
         resolvedMembers[i] = { ...member, agentId: alreadyProvisioned };
         updateProgress(member.id, { status: "done" });
-        continue;
+        return null;
       }
 
       updateProgress(member.id, { status: "creating" });
@@ -393,25 +397,23 @@ function WorkforceWizard() {
           ),
         );
         updateProgress(member.id, { status: "done" });
+        return null;
       } catch (err) {
         // getErrorMessage keeps the backend's sentence ("System prompt is
         // required") and appends the status, which is what the rest of the
-        // app shows for API failures. This used to be `err instanceof Error ?
-        // err.message : String(err)` against a plain-object ApiError, which
-        // rendered every rejection as "[object Object]" — ApiClient now throws
-        // a real Error (ApiClientError), so that shape is safe again elsewhere.
+        // app shows for API failures.
+        // Each failed row shows its own error; one toast below speaks for them.
         const message = getErrorMessage(err);
         updateProgress(member.id, { status: "error", error: message });
-        toast.error(
-          t("Workforce.wizard.agentError", "Failed to create {{name}}: {{error}}", {
-            name: member.displayName,
-            error: message,
-          }),
-        );
-        setIsCreating(false);
-        creatingRef.current = false;
-        return; // Stop on error
+        return { name: member.displayName, error: message };
       }
+    });
+    const firstFailure = failed.find((f) => f !== null);
+    if (firstFailure) {
+      toast.error(t("Workforce.wizard.agentError", "Failed to create {{name}}: {{error}}", firstFailure));
+      setIsCreating(false);
+      creatingRef.current = false;
+      return; // Stop on error; the agents that were created are kept
     }
 
     // Deploy every advisor that is not live yet - the new ones, and any a

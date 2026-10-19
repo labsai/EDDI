@@ -9,9 +9,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import ai.labs.eddi.configs.shared.MutableTestClock;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -25,7 +23,6 @@ import java.util.logging.Logger;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
@@ -49,6 +46,109 @@ class AgentSigningServiceTest {
         String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
         assertNotNull(publicKey);
         assertFalse(publicKey.isBlank());
+    }
+
+    // ─── negative cache: a keyless agent does not ask the vault per audit entry
+    // ───
+
+    @Test
+    void keylessAgent_vaultAskedOncePerTtl() {
+        long[] now = {0L};
+        signingService.nanoClock = () -> now[0];
+
+        for (int i = 0; i < 3; i++) {
+            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+            assertTrue(e.getMessage().contains("No signing key found"), e.getMessage());
+        }
+        assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
+
+        now[0] += AgentSigningService.MISSING_KEY_TTL_NANOS;
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "keyless", "entry"));
+        assertEquals(2, secretProvider.resolveCalls, "after the TTL the vault is asked again");
+    }
+
+    @Test
+    void signIfKeyPresent_keylessAgentIsNullWithoutAskingTheVaultAgain() throws Exception {
+        signingService.nanoClock = () -> 0L;
+
+        for (int i = 0; i < 3; i++) {
+            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", "entry"));
+        }
+        assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
+    }
+
+    @Test
+    void signIfKeyPresent_signsWhenTheKeyExists() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", "entry");
+
+        assertNotNull(signature);
+        assertTrue(signingService.verify(publicKey, "entry", signature));
+    }
+
+    @Test
+    void signIfKeyPresent_aVaultFailureStillThrows() {
+        var failing = new InMemorySecretProvider() {
+            @Override
+            public String resolve(SecretReference reference) {
+                throw new IllegalStateException("Vault unavailable");
+            }
+        };
+        var service = new AgentSigningService(failing, new SimpleMeterRegistry());
+        service.initMetrics();
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "entry"));
+    }
+
+    @Test
+    void keylessAgent_keyGeneratedHereIsUsedAtOnce() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
+
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-x");
+
+        assertTrue(signingService.verify(publicKey, "entry", signingService.sign("tenant-1", "agent-x", "entry")));
+    }
+
+    @Test
+    void keylessAgent_rotatedKeyIsUsedAtOnce() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        var envelope = SignedEnvelope.forSigning("agent-x", "agent-y", Map.of("text", "hello"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.signEnvelope("tenant-1", "agent-x", envelope, 2));
+
+        signingService.rotateKey("tenant-1", "agent-x", 2);
+
+        assertNotNull(signingService.signEnvelope("tenant-1", "agent-x", envelope, 2).signature());
+    }
+
+    @Test
+    void keylessAgent_aMissSeenBeforeTheKeyWasGeneratedIsNotRemembered() throws Exception {
+        signingService.nanoClock = () -> 0L;
+        // The vault answers "not found", but by the time that answer comes back the key
+        // has been generated (and the cache evicted) on this node.
+        secretProvider.beforeNotFound = () -> {
+            try {
+                signingService.generateKeyPair("tenant-1", "agent-x");
+            } catch (AgentSigningService.AgentSigningException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));
+        secretProvider.beforeNotFound = null;
+
+        assertNotNull(signingService.sign("tenant-1", "agent-x", "entry"), "the new key signs at once, not after the TTL");
+    }
+
+    @Test
+    void vaultFailure_isNotRemembered() {
+        signingService.nanoClock = () -> 0L;
+        secretProvider.resolveUnreachable = true;
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-1", "entry"));
+
+        assertEquals(2, secretProvider.resolveCalls);
     }
 
     @Test
@@ -118,119 +218,6 @@ class AgentSigningServiceTest {
 
         assertThrows(AgentSigningService.AgentSigningException.class,
                 () -> failService.generateKeyPair("t1", "a1"));
-    }
-
-    /**
-     * The audit ledger signs every entry on the turn's thread, and almost no agent
-     * has a key. Each entry used to cost a vault read that was certain to miss.
-     */
-    @Nested
-    class MissingKey {
-        private final MutableTestClock clock = new MutableTestClock();
-        private AgentSigningService service;
-
-        @BeforeEach
-        void setUp() {
-            service = new AgentSigningService(secretProvider, new SimpleMeterRegistry(),
-                    () -> TimeUnit.MILLISECONDS.toNanos(clock.millis()));
-            service.initMetrics();
-        }
-
-        @Test
-        void asksTheVaultOncePerRecheckWindow() throws Exception {
-            for (int i = 0; i < 5; i++) {
-                assertNull(service.signIfKeyPresent("t1", "a1", "payload-" + i));
-            }
-
-            assertEquals(1, secretProvider.resolveCalls, "a known-missing key was looked up again");
-        }
-
-        @Test
-        void asksAgainOnceTheWindowHasPassed() throws Exception {
-            service.signIfKeyPresent("t1", "a1", "p");
-            clock.advance(AgentSigningService.MISSING_KEY_RECHECK.toMillis());
-
-            service.signIfKeyPresent("t1", "a1", "p");
-
-            assertEquals(2, secretProvider.resolveCalls);
-        }
-
-        @Test
-        void picksUpAKeyWrittenToTheVaultDirectlyAfterTheWindow() throws Exception {
-            assertNull(service.signIfKeyPresent("t1", "a1", "p"));
-            // Another node, or an operator, writes the key: this node's marker is not
-            // cleared.
-            String publicKey = new AgentSigningService(secretProvider, new SimpleMeterRegistry()).generateKeyPair("t1", "a1");
-
-            assertNull(service.signIfKeyPresent("t1", "a1", "p"), "the marker should hold until the window ends");
-            clock.advance(AgentSigningService.MISSING_KEY_RECHECK.toMillis());
-
-            String signature = service.signIfKeyPresent("t1", "a1", "p");
-            assertNotNull(signature);
-            assertTrue(service.verify(publicKey, "p", signature));
-        }
-
-        @Test
-        void generatingAKeyOnThisNodeClearsTheMarkerAtOnce() throws Exception {
-            assertNull(service.signIfKeyPresent("t1", "a1", "p"));
-
-            String publicKey = service.generateKeyPair("t1", "a1");
-
-            String signature = service.signIfKeyPresent("t1", "a1", "p");
-            assertNotNull(signature);
-            assertTrue(service.verify(publicKey, "p", signature));
-        }
-
-        @Test
-        void aVaultThatCouldNotAnswerIsNotRememberedAsMissing() {
-            secretProvider.resolveUnreachable = true;
-
-            assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "p"));
-            assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "p"));
-
-            assertEquals(2, secretProvider.resolveCalls, "an outage was cached as a missing key");
-        }
-
-        @Test
-        void signStillThrowsForAKnownMissingKey() throws Exception {
-            assertNull(service.signIfKeyPresent("t1", "a1", "p"));
-
-            var e = assertThrows(AgentSigningService.AgentSigningException.class, () -> service.sign("t1", "a1", "p"));
-            assertInstanceOf(ISecretProvider.SecretNotFoundException.class, e.getCause());
-            assertEquals(1, secretProvider.resolveCalls);
-        }
-
-        @Test
-        void generatingAVersionedKeyClearsThatVersionsMarkerAtOnce() throws Exception {
-            var envelope = SignedEnvelope.forSigning("a1", "a2", Map.of("message", "hello"));
-            assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signEnvelope("t1", "a1", envelope, 2));
-
-            String publicKey = service.generateKeyPairVersioned("t1", "a1", 2);
-
-            var signed = service.signEnvelope("t1", "a1", envelope, 2);
-            assertTrue(service.verifyEnvelope(signed, publicKey));
-        }
-
-        @Test
-        void remembersAtMostMaxMissingKeys() throws Exception {
-            for (int i = 0; i < AgentSigningService.MAX_MISSING_KEYS + 50; i++) {
-                assertNull(service.signIfKeyPresent("t1", "agent-" + i, "p"));
-            }
-
-            assertTrue(service.missingKeyCount() <= AgentSigningService.MAX_MISSING_KEYS,
-                    "missing-key markers exceeded the bound: " + service.missingKeyCount());
-        }
-
-        @Test
-        void deletingTheKeysClearsTheMarker() throws Exception {
-            assertNull(service.signIfKeyPresent("t1", "a1", "p"));
-            service.deleteKeyPair("t1", "a1");
-            int before = secretProvider.resolveCalls;
-
-            service.signIfKeyPresent("t1", "a1", "p");
-
-            assertEquals(before + 1, secretProvider.resolveCalls);
-        }
     }
 
     @Test
@@ -852,6 +839,20 @@ class AgentSigningServiceTest {
          */
         private final Set<String> unreachable = new HashSet<>();
 
+        /**
+         * How often the vault was asked for a secret — for pinning the negative cache.
+         */
+        int resolveCalls;
+
+        /** Makes {@code resolve} fail as an unreachable vault would. */
+        boolean resolveUnreachable;
+
+        /**
+         * Runs just before {@code resolve} answers "not found" — for racing a key
+         * generation.
+         */
+        Runnable beforeNotFound;
+
         /** Whether a key is still in the vault — for asserting what a delete left. */
         boolean contains(String tenantId, String keyName) {
             return store.containsKey(tenantId + ":" + keyName);
@@ -893,21 +894,18 @@ class AgentSigningServiceTest {
             return sealed.ciphertext().substring(prefix.length());
         }
 
-        /** Vault reads, for pinning how often a missing key is looked up. */
-        private int resolveCalls;
-
-        /** While set, {@code resolve} reports the vault as unreachable. */
-        private boolean resolveUnreachable;
-
         @Override
-        public String resolve(SecretReference reference) throws SecretNotFoundException, SecretProviderException {
+        public String resolve(SecretReference reference) throws SecretNotFoundException {
             resolveCalls++;
             if (resolveUnreachable) {
-                throw new SecretProviderException("Vault unavailable");
+                throw new IllegalStateException("Vault unreachable");
             }
             String key = reference.tenantId() + ":" + reference.keyName();
             String value = store.get(key);
             if (value == null) {
+                if (beforeNotFound != null) {
+                    beforeNotFound.run();
+                }
                 throw new SecretNotFoundException("Secret not found: " + key);
             }
             return value;

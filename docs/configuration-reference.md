@@ -68,6 +68,7 @@ PostgreSQL.
 | Property | Environment variable | Default | Meaning |
 |---|---|---|---|
 | `mongodb.connectionString` | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000` (`mongodb://localhost:27017/…` in dev mode) | MongoDB connection string, credentials included (`docker-compose.yml` passes one with `authSource=admin`). Read by `PersistenceModule` |
+| `eddi.mongodb.max-wait-time-ms` | `EDDI_MONGODB_MAX_WAIT_TIME_MS` | `10000` | How long an operation waits for a pooled MongoDB connection before it fails. The driver's own default is 120 s, twice the turn timeout, so a saturated pool held turns long after their callers had given up. A `waitQueueTimeoutMS` in the connection string wins over this; `0` keeps the driver default |
 | `mongodb.database` | `MONGODB_DATABASE` | `eddi` | The database EDDI uses. This, not the path in the connection string, selects the database |
 | `quarkus.profile` | `QUARKUS_PROFILE` | *(none — MongoDB)* | `postgres` switches the deployment to PostgreSQL: the profile sets `eddi.datastore.type=postgres` and activates the JDBC datasource, which is inactive (`quarkus.datasource.active=false`) otherwise |
 | `quarkus.datasource.jdbc.url` | `QUARKUS_DATASOURCE_JDBC_URL` | *(unset)* | PostgreSQL only, e.g. `jdbc:postgresql://postgres:5432/eddi`. Required whenever the `postgres` profile is active — there is no default, and datasource Dev Services are disabled (`quarkus.datasource.devservices.enabled=false`) |
@@ -189,6 +190,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations: how many conversations may hold a turn queue at once. Only a turn for a conversation that has none is refused; follow-up turns are always queued |
 | `eddi.conversation.max-in-flight-turns` | `auto` | Turns this node runs at once, queued or executing. One more is refused with **503** `capacity_exceeded` and `Retry-After`, and counted as `eddi_turn_rejected_total{reason="in_flight_limit"}`. Turns run on virtual threads, so this limit, not the worker pool, is the node's turn ceiling, and heap is what bounds it. **`auto`** derives it from the maximum heap: (max heap − 256 MB) ÷ `eddi.conversation.in-flight-turn-memory-mb`, e.g. 128 at a 512 MB heap, ~1400 at 3 GB, ~2900 at 6 GB. The node logs the value it resolved at startup and exports it as `eddi_conversation_max_in_flight_turns`. A number sets it; `0` or negative disables it. **Leave headroom above the number of conversations you expect to be active at once (roughly 10–20 %).** A turn holds its place until it has been persisted, and that happens after its caller already has the answer, so a client that sends its next turn straight away can arrive before the previous turn released its place. In a load test with exactly as many clients as the limit (1000 against 1000), 5–12 % of turns were refused this way. Keep the database pool in step (MongoDB driver default 100 connections, `maxPoolSize` in the connection string; PostgreSQL `quarkus.datasource.jdbc.max-size`, Quarkus default 50) |
 | `eddi.conversation.in-flight-turn-memory-mb` | `2` | Heap budget per in-flight turn for `max-in-flight-turns=auto`. Load tests measured about 1 MB for short conversations; 2 leaves room for long histories and tool payloads. Raise it for agents with large RAG contexts or tool results |
+| `eddi.conversation.max-queued-turns-per-conversation` | `20` | Turns one conversation may have waiting behind the one it is running; one more answers **503** `capacity_exceeded`, counted as `eddi_turn_rejected_total{reason="conversation_queue"}`. Turns of a conversation run one at a time, so a client that keeps sending without waiting for answers (a retry storm, a bot loop) only builds a queue that holds permits and loaded conversations. `0` or negative disables it |
 | `eddi.coordinator.max-dead-letters` | `1000` | Retained dead-letter entries. `-1` unbounded, `0` retain none |
 
 ### Graceful shutdown
@@ -208,6 +210,7 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
+| `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream). Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
 
 ---
@@ -428,7 +431,7 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.max-forward-bytes` | `10485760` (10 MB) | Per-file ceiling on what is forwarded to the LLM, across every source |
 | `eddi.attachments.max-forward-aggregate-bytes` | `20971520` (20 MB) | Aggregate ceiling for one message |
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
-| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document |
+| `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document — for a page range (`readAttachment`, `PdfReaderTool`) too, counted from its first page. Every PDF read for an attachment or a tool also runs under the ingestion path's decode budgets: one compressed stream may expand to at most 64 MB and the whole document to 128 MB |
 
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without

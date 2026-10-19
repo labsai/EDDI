@@ -339,7 +339,7 @@ export function GroupsPage() {
           ) : (
             /* List table */
             <div
-              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
               data-testid="group-list"
             >
               <table className="w-full">

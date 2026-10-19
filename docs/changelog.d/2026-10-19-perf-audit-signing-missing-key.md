@@ -1,4 +1,4 @@
-## perf(audit): remember a missing agent signing key instead of reading the vault per audit entry (2026-10-19)
+## perf(audit): the audit ledger signs through signIfKeyPresent; burst-collapse investigation (2026-10-19)
 
 **Repo:** EDDI · **Branch:** `perf/audit-signing-missing-key`
 
@@ -7,36 +7,28 @@
 An investigation of throughput collapses under a 5,000-user burst
 ([`scripts/loadtest/results/collapse-2026-10-19.md`](../../scripts/loadtest/results/collapse-2026-10-19.md))
 found that every audit entry did a vault read that was certain to miss. `AuditLedgerService.submit`
-signs each entry with the agent's Ed25519 key, on the turn's own thread. Almost no agent has a key:
-`AgentSigningService.generateKeyPair` has no production caller, so a key exists only where an operator
-wrote one into the vault by hand. Each entry therefore queried `secretvault_secrets`, got
-`SecretNotFoundException` and threw two more exceptions on the way out, about three times per turn.
+signs each entry with the agent's Ed25519 key, on the turn's own thread, and almost no agent has a key.
+This branch fixed that with a 60 s missing-key cache. Meanwhile #1055 landed an equivalent cache on
+`main` (`AgentSigningService.missingKeyUntil`, with a guard against a lookup racing a key generation),
+so the merge keeps `main`'s implementation. What this branch still adds:
 
-- `AgentSigningService` remembers a vault miss for 60 s (`MISSING_KEY_RECHECK`) in a Caffeine cache
-  capped at 10,000 keys (`MAX_MISSING_KEYS`). The cap is there because an audit entry can name any
-  well-formed agent id. `generateKeyPair`, `generateKeyPairVersioned` (for that version) and
-  `deleteKeyPair` clear the marker at once on the node that ran them. A key written into the vault by
-  hand, possibly through another node, is used within a minute. Only `SecretNotFoundException` is
-  remembered: a vault that could not answer is asked again on the next call.
-- New `signIfKeyPresent`, used by the audit ledger, returns `null` for a known-missing key without
-  throwing. `sign` keeps its contract and still throws.
-- Measured with `loadtest.py gate` (PR #1086): `secretvault_secrets` queries per turn went from 3.0 to
-  0, and all queries per turn from 17.5 to 13.96, with all 100 turns succeeding.
+- `AgentSigningService.signIfKeyPresent`, used by the audit ledger. While a "no key" answer is
+  remembered it returns `null` without throwing. Through `sign`, a remembered miss still builds three
+  exceptions per entry (`SecretNotFoundException`, `PrivateKeyLoadException`, `AgentSigningException`),
+  about 8,000 of each in one profiled burst. `sign` keeps its contract.
+- The investigation's results file. Host contention triggers the collapses; on 2026-10-18 that is
+  stated as a hypothesis, since no host telemetry covers the worst runs. On scarce CPU, EDDI spent most
+  of it outside turns. Its follow-ups are the unfired 60 s turn timeout, `/q/metrics` going unresponsive
+  and turns that run after their caller has gone.
 - [`docs/configuration-reference.md`](../configuration-reference.md) described
   `eddi.audit.agent-signing-enabled` as signing agent configurations. It signs audit entries, and the
   row now says so, including the 60 s re-check.
 
 ### Design decisions
 
-- **A time-bounded marker, not a check of the agent's `identity.publicKey`.** The public key in the
-  configuration and the private key in the vault are set independently, and reading the agent
-  configuration per entry would cost what this removes. 60 s bounds how long a newly written key goes
-  unused.
-- Tests: `AgentSigningServiceTest$MissingKey` (nine cases, including the size bound and versioned generation). Mutation-checked: dropping the marker fails
-  three of them, and caching vault outages as misses fails the outage case.
-
-### What's next
-
-- The investigation's follow-ups are listed in the results file: the 60 s turn timeout not firing under
-  event-loop saturation, `/q/metrics` going unresponsive during a burst, and turns that run after their
-  caller has gone. The start-path capacity check went to PR #1085.
+- On the merge conflict with #1055, `main`'s cache won outright: it also guards the race in which a
+  lookup that started before `generateKeyPair` publishes its miss afterwards. This branch's own cache, a
+  Caffeine cache with a 10,000-key cap that came out of review, was dropped rather than merged in.
+- Tests: three `signIfKeyPresent` cases in `AgentSigningServiceTest` (null without a second vault read,
+  a present key, a vault failure still thrown), and `AuditLedgerServiceBranchTest` covering the
+  unsigned-entry path.

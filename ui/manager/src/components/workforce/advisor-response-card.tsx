@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
+import { useAuth } from "@/hooks/use-auth";
+import { pinsStorageKey } from "@/lib/workforce-pins";
 import { Check, Clipboard, Star, MessageCircle, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +26,10 @@ interface PinnedResponse {
 }
 
 function usePinnedResponses(boardId: string) {
-  const key = `workforce-pins-${boardId}`;
+  // Namespaced by the signed-in principal so another user on this browser reads
+  // their own list; sign-out clears the lot (lib/workforce-pins.ts).
+  const { user } = useAuth();
+  const key = pinsStorageKey(boardId, user?.username || user?.email);
 
   const [pins, setPins] = useState<PinnedResponse[]>(() => {
     try {

@@ -369,4 +369,33 @@ class ConversationServiceTurnAdmissionTest {
         assertEquals(0.0, inFlight());
         assertDoesNotThrow(this::say, "the failed start must not keep the only permit");
     }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("the pre-check refuses at the limit before anything is read, and counts it")
+    void preCheckRefusesBeforeReading() throws Exception {
+        conversationService.maxInFlightTurns = 2;
+        assertDoesNotThrow(() -> conversationService.refuseIfAtCapacity(CONVERSATION_ID));
+        say();
+        say();
+        clearInvocations(conversationMemoryStore);
+
+        TurnCapacityExceededException refused = assertThrows(TurnCapacityExceededException.class,
+                () -> conversationService.refuseIfAtCapacity(CONVERSATION_ID));
+
+        assertInstanceOf(RejectedExecutionException.class, refused, "must reach the existing 503 capacity_exceeded mapping");
+        verifyNoInteractions(conversationMemoryStore);
+        assertEquals(1.0, rejected());
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("with the limit disabled the pre-check never refuses")
+    void preCheckWithoutALimit() throws Exception {
+        conversationService.maxInFlightTurns = 0;
+        for (int i = 0; i < 5; i++) {
+            say();
+        }
+        assertDoesNotThrow(() -> conversationService.refuseIfAtCapacity(CONVERSATION_ID));
+    }
 }

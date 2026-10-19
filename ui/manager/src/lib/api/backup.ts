@@ -1,4 +1,5 @@
 import { api, SPACE_HEADER } from "../api-client";
+import { seg } from "./path-segment";
 
 // ==================== Export Types ====================
 
@@ -442,7 +443,7 @@ export async function previewExport(
   version = 1
 ): Promise<ExportPreview> {
   return api.post<ExportPreview>(
-    `/backup/export/${agentId}/preview?agentVersion=${version}`
+    `/backup/export/${seg(agentId)}/preview?agentVersion=${version}`
   );
 }
 
@@ -489,7 +490,7 @@ export async function exportAgentSelective(
     params.set("selectedSchedules", selection.schedules.join(","));
   }
   const res = await fetch(
-    `${api.getBaseUrl()}/backup/export/${agentId}?${params}`,
+    `${api.getBaseUrl()}/backup/export/${seg(agentId)}?${params}`,
     { method: "POST", headers: api.getAuthHeader() }
   );
   if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);

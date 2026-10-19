@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
+import ai.labs.eddi.utils.JsonStringField;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatModel;
@@ -61,7 +62,10 @@ class ConfidenceEvaluator {
     // JSON extraction patterns (regex fallback only — a real JSON parse is tried
     // first)
     private static final Pattern CONFIDENCE_JSON_PATTERN = Pattern.compile("\"confidence\"\\s*:\\s*(-?\\d+\\.?\\d*)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern RESPONSE_JSON_PATTERN = Pattern.compile("\"response\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", Pattern.DOTALL);
+    // The "response" member is found by JsonStringField's linear scan: the regex
+    // "response"\s*:\s*"((?:[^"\\]|\\.)*)" recursed once per character and
+    // overflowed the stack on a reply of ~2,000 characters (security review L14).
+    private static final String RESPONSE_KEY = "response";
 
     // Default hedging/uncertainty phrases (case-insensitive match) — English.
     // Overridable per deployment via HeuristicConfig for non-English agents.
@@ -145,10 +149,10 @@ class ConfidenceEvaluator {
                 Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(candidate);
                 if (confidenceMatcher.find()) {
                     double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
-                    Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(candidate);
+                    String rawResponse = JsonStringField.firstRawValue(candidate, RESPONSE_KEY);
                     // Use the fence-stripped candidate (not the raw response) so a fenced wrapper
                     // does not leak markdown fences into the extracted answer.
-                    String actualResponse = responseMatcher.find() ? unescapeJsonString(responseMatcher.group(1)) : stripJsonWrapper(candidate);
+                    String actualResponse = rawResponse != null ? unescapeJsonString(rawResponse) : stripJsonWrapper(candidate);
                     return new EvaluationResult(actualResponse, confidence);
                 }
             } catch (NumberFormatException e) {
@@ -325,9 +329,9 @@ class ConfidenceEvaluator {
     private static String stripJsonWrapper(String response) {
         String trimmed = response.trim();
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            Matcher matcher = RESPONSE_JSON_PATTERN.matcher(trimmed);
-            if (matcher.find()) {
-                return unescapeJsonString(matcher.group(1));
+            String rawResponse = JsonStringField.firstRawValue(trimmed, RESPONSE_KEY);
+            if (rawResponse != null) {
+                return unescapeJsonString(rawResponse);
             }
         }
         return response;

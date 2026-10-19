@@ -34,7 +34,7 @@ export function useCreateUserConversation() {
       userId: string;
       data: UserConversation;
     }) => createUserConversation(intent, userId, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: KEY }),
   });
 }
 
@@ -44,6 +44,6 @@ export function useDeleteUserConversation() {
   return useMutation({
     mutationFn: ({ intent, userId }: { intent: string; userId: string }) =>
       deleteUserConversation(intent, userId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: KEY }),
   });
 }

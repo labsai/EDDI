@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { BearerEventSource } from "../bearer-event-source";
+import { seg } from "./path-segment";
 
 // ==================== Types ====================
 
@@ -34,11 +35,11 @@ export async function getDeadLetters(): Promise<DeadLetterEntry[]> {
 }
 
 export async function replayDeadLetter(entryId: string): Promise<void> {
-  return api.post(`${BASE}/dead-letters/${entryId}/replay`);
+  return api.post(`${BASE}/dead-letters/${seg(entryId)}/replay`);
 }
 
 export async function discardDeadLetter(entryId: string): Promise<void> {
-  return api.delete(`${BASE}/dead-letters/${entryId}`);
+  return api.delete(`${BASE}/dead-letters/${seg(entryId)}`);
 }
 
 export async function purgeDeadLetters(): Promise<number> {

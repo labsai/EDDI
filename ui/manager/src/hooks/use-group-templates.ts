@@ -38,6 +38,6 @@ export function useInstantiateGroupTemplate() {
     // is now stale. Without this a user who creates a group from a template and
     // navigates back to the list does not see it until the query goes stale on
     // its own — the same invalidation `useCreateGroup` does.
-    onSuccess: () => qc.invalidateQueries({ queryKey: GROUPS_KEY }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: GROUPS_KEY }),
   });
 }

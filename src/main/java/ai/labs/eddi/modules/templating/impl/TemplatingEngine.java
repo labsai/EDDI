@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.RenderDeadline;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.Settings;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.TemplateLimitExceededException;
 import ai.labs.eddi.modules.templating.impl.extensions.TemplateOutputLimit;
@@ -129,19 +130,25 @@ public class TemplatingEngine implements ITemplatingEngine {
                     escapedAttributes.forEach(instance::data);
                 }
                 instance.setAttribute(BoundedLoopSectionHelperFactory.ITERATION_BUDGET_ATTRIBUTE, new AtomicLong());
+                RenderDeadline deadline = RenderDeadline.startingNow(settings.timeoutMillis());
+                if (deadline != null) {
+                    instance.setAttribute(RuntimeTemplateEngineFactory.RENDER_DEADLINE_ATTRIBUTE, deadline);
+                }
                 var output = new BoundedOutput(settings.maxOutputChars());
                 instance.consume(output).toCompletableFuture().get(settings.timeoutMillis(), TimeUnit.MILLISECONDS);
                 return output.toString();
             } else {
                 return template;
             }
-        } catch (Exception | OutOfMemoryError e) {
+        } catch (Exception | OutOfMemoryError | StackOverflowError e) {
             // An OutOfMemoryError is caught on purpose: it is raised by the render's own
             // allocation (a value the bound did not catch in time), which the unwinding
             // has just released. Letting it escape would fail the turn with no record
             // of which template did it, where a TemplateLimitExceededException — the
             // same class of failure, caught in time — is reported like any other
-            // malformed template. Both now are.
+            // malformed template. Both now are. A StackOverflowError likewise: Qute
+            // renders nested sections recursively, so a template nesting a few thousand
+            // {#if}s overflows the stack, which has unwound by the time it lands here.
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
@@ -154,6 +161,8 @@ public class TemplatingEngine implements ITemplatingEngine {
                 if (t instanceof OutOfMemoryError) {
                     cause = "the render exhausted the available memory before reaching the limit of " + settings.maxOutputChars()
                             + " characters (eddi.templating.max-output-chars)";
+                } else if (t instanceof StackOverflowError) {
+                    cause = "the template nests its sections too deeply to render";
                 } else if (t instanceof TemplateLimitExceededException) {
                     cause = t.getMessage();
                 }
@@ -217,6 +226,8 @@ public class TemplatingEngine implements ITemplatingEngine {
         try {
             engine.parse(template);
             return null;
+        } catch (StackOverflowError e) {
+            return "the template nests its sections too deeply to parse";
         } catch (Exception e) {
             String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             int lineEnd = message.indexOf('\n');

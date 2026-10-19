@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg, nameSeg } from "./path-segment";
 
 // ─── Types ───
 
@@ -25,13 +26,13 @@ const BASE = "/usermemorystore/memories";
 export async function getAllMemories(
   userId: string,
 ): Promise<UserMemoryEntry[]> {
-  return api.get<UserMemoryEntry[]>(`${BASE}/${encodeURIComponent(userId)}`);
+  return api.get<UserMemoryEntry[]>(`${BASE}/${nameSeg(userId)}`);
 }
 
 export async function deleteMemory(entryId: string): Promise<void> {
-  return api.delete(`${BASE}/entry/${encodeURIComponent(entryId)}`);
+  return api.delete(`${BASE}/entry/${seg(entryId)}`);
 }
 
 export async function deleteAllForUser(userId: string): Promise<void> {
-  return api.delete(`${BASE}/${encodeURIComponent(userId)}`);
+  return api.delete(`${BASE}/${nameSeg(userId)}`);
 }

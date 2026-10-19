@@ -305,7 +305,7 @@ export function ConnectionsPage() {
               ))}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-border/50">
+            <div className="overflow-x-auto rounded-xl border border-border/50">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -318,7 +318,7 @@ export function ConnectionsPage() {
                     <th className="px-4 py-3 text-start font-medium">
                       {t("connections.bindingCol", "Resolves as")}
                     </th>
-                    <th className="px-4 py-3 text-start font-medium">
+                    <th className="hidden md:table-cell px-4 py-3 text-start font-medium">
                       {t("connections.originsCol", "Allowed origins")}
                     </th>
                     <th className="px-4 py-3 text-end font-medium">
@@ -360,7 +360,7 @@ export function ConnectionsPage() {
                         <BindingBadge binding={connection.binding} />
                       </td>
                       <td
-                        className="px-4 py-3 font-mono text-xs text-muted-foreground"
+                        className="hidden md:table-cell px-4 py-3 font-mono text-xs text-muted-foreground"
                         dir="ltr"
                       >
                         {connection.origins.join(", ") || "—"}
