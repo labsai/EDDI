@@ -104,6 +104,9 @@ class ClassifierGuardrailTest {
         map.put("provider", "ollama");
         map.put("model", "shieldgemma:2b");
         map.put("baseUrl", "http://classifier.guardrails.svc:11434");
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + kv.length + " values");
+        }
         for (int i = 0; i < kv.length; i += 2) {
             map.put(kv[i], kv[i + 1]);
         }
