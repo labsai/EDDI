@@ -815,6 +815,11 @@ jobs:
             # at all gives no line. Neither does a log with no line on the
             # `from` day: the first line it has is past the window, so the
             # window is empty rather than borrowing an interval after it.
+            #
+            # `base` is the line the window starts after. The figure is partial,
+            # and labelled with it, when that line is the log's first (the log
+            # began inside the window) or falls after the `from` day (a
+            # multi-day weekly window whose first days have no line).
             local real="" sweeps="" real_since="" versions="" summary window
             # Lines that are not timestamped (a damaged line the run log then
             # restarted after) are skipped: "g…" sorts after any date and
@@ -824,12 +829,15 @@ jobs:
               $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { next }
               first == "" { first = $1 }
               state == 2 { next }
-              state == 0 { if ($1 >= from) state = ($1 >= to ? 2 : 1); next }
+              state == 0 { if ($1 >= from) { base = $1; state = ($1 >= to ? 2 : 1) } next }
               $1 >= to { state = 2 }'
             if [ -f "$RUNS_CSV" ]; then
               summary=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'
                 { real += $8; sweeps += $5; n++ }
-                END { if (n) printf "%d,%d,%s", real, sweeps, (first >= from ? first : "") }' "$RUNS_CSV")
+                END {
+                  if (n) printf "%d,%d,%s", real, sweeps,
+                    (base == first || substr(base, 1, 10) > substr(from, 1, 10) ? base : "")
+                }' "$RUNS_CSV")
               if [ -n "$summary" ]; then
                 IFS=, read -r real sweeps real_since <<< "$summary"
                 real=$(signed "$real")

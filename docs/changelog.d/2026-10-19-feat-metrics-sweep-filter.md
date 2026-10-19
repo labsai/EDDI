@@ -49,7 +49,8 @@ How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-
   snapshots). Consecutive windows share no line and miss none, so an interval
   crossing midnight is counted exactly once. If the log has no line on the
   `from` day, the window is empty rather than borrowing an interval from after
-  it. A log younger than the
+  it. A window that has to start after its first day (no line until later in
+  a weekly window) is labelled partial from that line. A log younger than the
   window gives a figure labelled "counted since …". With no log, the line is
   left out and the digest is otherwise unchanged.
 
