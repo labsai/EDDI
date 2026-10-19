@@ -30,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -168,6 +169,7 @@ class JetStreamDeadLetterStoreTest {
         when(connections.jetStreamManagement()).thenReturn(jsm);
         when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
         when(connections.isConnected()).thenReturn(true);
+        when(connections.jetStreamManagement(any(Duration.class))).thenReturn(jsm);
         JetStream js = mock(JetStream.class);
         when(connections.jetStream()).thenReturn(js);
         PublishAck ack = mock(PublishAck.class);
@@ -207,6 +209,7 @@ class JetStreamDeadLetterStoreTest {
         when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
         when(connections.jetStream()).thenReturn(js);
         when(connections.isConnected()).thenReturn(connected);
+        when(connections.jetStreamManagement(any(Duration.class))).thenReturn(jsm);
         return connections;
     }
 
@@ -260,6 +263,23 @@ class JetStreamDeadLetterStoreTest {
         assertTrue(elapsedMillis < 3_000, "the append went on after its budget: " + elapsedMillis + " ms");
         verify(js, times(1)).publish(anyString(), any(byte[].class), any(PublishOptions.class));
         verify(jsm, never()).getStreamInfo(anyString());
+    }
+
+    @Test
+    void lazyProvisioningWaitsAtMostWhatIsLeftOfTheBudget() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenThrow(new IOException("no stream yet"));
+        NatsConnectionManager connections = publishingConnections(jsm, js, true);
+        var store = new JetStreamDeadLetterStore(connections);
+
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+
+        ArgumentCaptor<Duration> timeout = ArgumentCaptor.forClass(Duration.class);
+        verify(connections).jetStreamManagement(timeout.capture());
+        assertTrue(timeout.getValue().toMillis() > 0 && timeout.getValue().toMillis() <= 2_000,
+                "provisioning from an append must be bounded by the append's budget: " + timeout.getValue());
+        verify(connections, never()).jetStreamManagement();
     }
 
     @Test

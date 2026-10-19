@@ -95,6 +95,27 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
     }
 
     void provision() {
+        provision(connections.jetStreamManagement(), false, 0L);
+    }
+
+    /**
+     * Provisions the stream from a dead-letter append: every management call waits
+     * at most what is left of the append's budget, and none starts once it is
+     * spent. The on-connect provisioning keeps the default request timeout.
+     */
+    private void provisionWithin(long deadline) {
+        long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remainingMillis <= 0) {
+            return;
+        }
+        try {
+            provision(connections.jetStreamManagement(Duration.ofMillis(remainingMillis)), true, deadline);
+        } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Dead-letter stream not provisioned: %s", e.getMessage());
+        }
+    }
+
+    private void provision(JetStreamManagement jsm, boolean bounded, long deadline) {
         ClusterConfig config = connections.config();
         // Capped by size as well as age: a burst of failing turns with large inputs
         // must
@@ -106,13 +127,18 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 .retentionPolicy(RetentionPolicy.Limits).maxAge(config.deadLetterMaxAge())
                 .maxBytes(config.deadLetterMaxBytes() > 0 ? config.deadLetterMaxBytes() : -1).discardPolicy(DiscardPolicy.New)
                 .storageType(StorageType.File).duplicateWindow(DUPLICATE_WINDOW).replicas(config.natsReplicas()).build();
-        JetStreamManagement jsm = connections.jetStreamManagement();
         try {
             try {
                 jsm.getStreamInfo(stream);
             } catch (JetStreamApiException notFound) {
+                if (bounded && System.nanoTime() - deadline >= 0) {
+                    return; // the lookup used up the budget
+                }
                 jsm.addStream(desired);
                 LOGGER.infof("Created dead-letter stream %s", stream);
+                return;
+            }
+            if (bounded && System.nanoTime() - deadline >= 0) {
                 return;
             }
             jsm.updateStream(desired);
@@ -239,7 +265,7 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 }
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
-                provision();
+                provisionWithin(deadline);
                 if (System.nanoTime() - deadline >= 0) {
                     throw noStreamYet; // provisioning used up the budget
                 }

@@ -443,6 +443,22 @@ public class NatsConnectionManager {
     }
 
     /**
+     * A JetStream management context whose calls wait at most
+     * {@code requestTimeout}, for a caller with a budget smaller than the default
+     * request timeout.
+     *
+     * @throws ClusterUnavailableException
+     *             while disconnected
+     */
+    public JetStreamManagement jetStreamManagement(Duration requestTimeout) {
+        try {
+            return requireConnected().jetStreamManagement(JetStreamOptions.builder().requestTimeout(requestTimeout).build());
+        } catch (IOException e) {
+            throw new ClusterUnavailableException("Cannot create a JetStream management context: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * The scheduler for lease heartbeats and lease-waiter timers, and nothing else.
      * Tasks on it must be short and must not block: anything slow belongs on
      * {@link #scheduler()}.
