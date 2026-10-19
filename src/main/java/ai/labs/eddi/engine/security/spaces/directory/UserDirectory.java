@@ -74,8 +74,18 @@ public class UserDirectory {
     /** Upper bound on any directory listing, whatever a client asks for. */
     public static final int MAX_RESULTS = 25;
 
-    /** Shortest query that searches people at all. */
-    public static final int MIN_USER_QUERY = 1;
+    /**
+     * Shortest query that searches people at all. Three characters, not one: a
+     * one-letter prefix, repeated for every letter, lists the whole directory.
+     */
+    public static final int MIN_USER_QUERY = 3;
+
+    /**
+     * Whether the directory is on. Unset, it follows workspace enforcement: a
+     * deployment that does not enforce workspaces has nothing to share, so it keeps
+     * no directory of its users either.
+     */
+    public static final String ENABLED_PROPERTY = "eddi.workspaces.directory.enabled";
 
     private final IUserDirectoryStore store;
     private final SecurityIdentity identity;
@@ -92,10 +102,21 @@ public class UserDirectory {
     private final Cache<String, Optional<DirectoryUser>> labels = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(2))
             .maximumSize(20_000).build();
 
+    /**
+     * @param enabled
+     *            {@value #ENABLED_PROPERTY}; unset follows
+     *            {@link WorkspaceSettings#isEnforcing()}
+     */
     @Inject
     public UserDirectory(IUserDirectoryStore store, SecurityIdentity identity, SpaceContext spaceContext, WorkspaceSettings settings,
-            ManagedExecutor executor, @ConfigProperty(name = "eddi.workspaces.directory.enabled", defaultValue = "true") boolean enabled,
+            ManagedExecutor executor, @ConfigProperty(name = ENABLED_PROPERTY) Optional<Boolean> enabled,
             @ConfigProperty(name = "eddi.workspaces.directory.expose-email", defaultValue = "true") boolean exposeEmail) {
+        this(store, identity, spaceContext, settings, executor, enabled.orElseGet(settings::isEnforcing), exposeEmail);
+    }
+
+    /** With the switch decided by the caller. Test seam. */
+    public UserDirectory(IUserDirectoryStore store, SecurityIdentity identity, SpaceContext spaceContext, WorkspaceSettings settings,
+            ManagedExecutor executor, boolean enabled, boolean exposeEmail) {
         this.store = store;
         this.identity = identity;
         this.spaceContext = spaceContext;
@@ -375,6 +396,44 @@ public class UserDirectory {
         return user == null ? principal : user.label();
     }
 
+    /**
+     * {@link #detailFor(DirectoryUser)} as {@code caller} may see it: the email
+     * only to an administrator or to somebody who shares a team with the person.
+     * Anyone else gets the username at most — a share dialog must not become a way
+     * to read the address of whoever one has heard the name of.
+     */
+    public String detailFor(DirectoryUser user, CallerSpaces caller, boolean callerIsAdmin) {
+        if (user == null) {
+            return null;
+        }
+        if (callerIsAdmin || sharesTeam(user, caller)) {
+            return detailFor(user);
+        }
+        return usernameDetail(user, false);
+    }
+
+    /** Whether {@code user} belongs to any team {@code caller} belongs to. */
+    static boolean sharesTeam(DirectoryUser user, CallerSpaces caller) {
+        if (user == null || caller == null || user.teams().isEmpty()) {
+            return false;
+        }
+        Set<String> teams = teamsOf(caller);
+        return user.teams().stream().anyMatch(teams::contains);
+    }
+
+    /** The caller's team subjects, their personal space left out. */
+    private static Set<String> teamsOf(CallerSpaces caller) {
+        Set<String> teams = new LinkedHashSet<>();
+        if (caller != null) {
+            for (String space : caller.spaces()) {
+                if (space != null && space.startsWith(Subjects.TEAM_PREFIX)) {
+                    teams.add(space);
+                }
+            }
+        }
+        return teams;
+    }
+
     /** The secondary line shown under a person's name: their email, if exposed. */
     public String detailFor(DirectoryUser user) {
         if (user == null) {
@@ -383,7 +442,21 @@ public class UserDirectory {
         if (exposeEmail && user.email() != null) {
             return user.email();
         }
-        return user.username() != null && !user.username().equals(user.label()) ? user.username() : null;
+        return usernameDetail(user, exposeEmail);
+    }
+
+    /**
+     * The username as a secondary line, when it adds to the label. A username that
+     * is itself an email address is one, and is shown only where an address may be
+     * ({@code emailAllowed}): an account whose username is its address would
+     * otherwise be exactly as exposed as before.
+     */
+    private static String usernameDetail(DirectoryUser user, boolean emailAllowed) {
+        String username = user.username();
+        if (username == null || username.isBlank() || username.equals(user.label())) {
+            return null;
+        }
+        return emailAllowed || !DirectoryUser.emailForm(username) ? username : null;
     }
 
     // --- Search -------------------------------------------------------------
@@ -411,8 +484,20 @@ public class UserDirectory {
      * <p>
      * The caller themselves is left out — sharing with yourself is never what
      * anybody means.
+     *
+     * <h3>What a non-administrator is shown</h3> The directory holds everybody who
+     * ever signed in, chat-only customers included, so an open prefix search lists
+     * every name and email address on the deployment. A non-administrator is
+     * therefore offered only their own teams, and only people who share one of
+     * those teams with them; people are searched from {@value #MIN_USER_QUERY}
+     * characters on. Sharing with anybody else still works by typing their exact
+     * username, verified email or {@code team:<name>} — {@link #resolveSubject} is
+     * unchanged — they are only not suggested.
+     *
+     * @param callerIsAdmin
+     *            an administrator is offered every known team and every person
      */
-    public List<Match> search(String query, int limit, CallerSpaces caller) {
+    public List<Match> search(String query, int limit, CallerSpaces caller, boolean callerIsAdmin) {
         int bounded = Math.max(1, Math.min(limit, MAX_RESULTS));
         String q = query == null ? "" : query.trim();
         String teamQuery = q.startsWith(Subjects.TEAM_PREFIX) ? q.substring(Subjects.TEAM_PREFIX.length()) : q;
@@ -428,7 +513,7 @@ public class UserDirectory {
                     }
                 }
             }
-            if (isActive()) {
+            if (isActive() && callerIsAdmin) {
                 try {
                     for (String team : store.searchTeams(teamQuery, bounded)) {
                         matches.putIfAbsent(team, teamMatch(team));
@@ -441,13 +526,23 @@ public class UserDirectory {
 
         if (isActive() && !q.startsWith(Subjects.TEAM_PREFIX) && userQuery.length() >= MIN_USER_QUERY) {
             Set<String> self = caller == null ? Set.of() : caller.selfPrincipals();
+            Set<String> callerTeams = teamsOf(caller);
             try {
-                for (DirectoryUser user : store.search(userQuery, bounded + 1)) {
-                    if (self.contains(user.principal()) || !searchableBy(user, userQuery)) {
+                List<DirectoryUser> found;
+                if (callerIsAdmin) {
+                    found = store.search(userQuery, bounded + 1);
+                } else if (callerTeams.isEmpty()) {
+                    found = List.of();
+                } else {
+                    found = store.searchWithinTeams(userQuery, callerTeams, bounded + 1);
+                }
+                for (DirectoryUser user : found) {
+                    if (self.contains(user.principal()) || !searchableBy(user, userQuery)
+                            || (!callerIsAdmin && !sharesTeam(user, caller))) {
                         continue;
                     }
                     String subject = Subjects.user(user.principal());
-                    matches.putIfAbsent(subject, new Match(subject, "user", user.label(), detailFor(user)));
+                    matches.putIfAbsent(subject, new Match(subject, "user", user.label(), detailFor(user, caller, callerIsAdmin)));
                 }
             } catch (RuntimeException e) {
                 LOGGER.debugf(e, "Could not search the user directory");

@@ -260,19 +260,14 @@ public class ConversationMemoryUtilities {
      * tell "nothing priced ran" apart from a genuine total. Non-finite and negative
      * values are skipped: one NaN would poison the total and silently disable every
      * ceiling compared against it.
-     * <p>
-     * The current-step response path
-     * ({@link #convertConversationMemoryForCurrentStep}) hands in a lazily
-     * converted step list; walking it here would convert every step of the
-     * conversation to return one, which is the cost that path exists to avoid. Its
-     * total is read from the live steps instead, one exact key per step — the same
-     * entries a full conversion would carry, since a step holds one value per key.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps) {
         if (steps == null) {
             return null;
         }
         if (steps instanceof LazyStepSnapshots lazy) {
+            // The current-step projection must not convert every step just to price
+            // the conversation: the cost comes straight from the live steps.
             return lazy.conversationCost();
         }
         double total = 0.0;
@@ -286,18 +281,15 @@ public class ConversationMemoryUtilities {
                     continue;
                 }
                 for (var result : workflow.getLifecycleTasks()) {
-                    if (result != null && AUDIT_COST.equals(result.getKey()) && isCountableCost(result.getResult())) {
-                        total += ((Number) result.getResult()).doubleValue();
+                    if (result != null && AUDIT_COST.equals(result.getKey()) && result.getResult() instanceof Number cost
+                            && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
+                        total += cost.doubleValue();
                         found = true;
                     }
                 }
             }
         }
         return found ? total : null;
-    }
-
-    private static boolean isCountableCost(Object value) {
-        return value instanceof Number cost && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0;
     }
 
     private static boolean isSensitiveDetailedKey(String key) {
@@ -1001,6 +993,25 @@ public class ConversationMemoryUtilities {
             this.converted = new ConversationStepSnapshot[steps.size()];
         }
 
+        /**
+         * What {@link ConversationMemoryUtilities#conversationCost(List)} returns for
+         * the fully converted steps, read from the live steps' {@code audit:cost}
+         * entries alone — one stack-level read, no step converted. A step holds at most
+         * one value per key, which is all the full conversion sums per step.
+         */
+        Double conversationCost() {
+            double total = 0.0;
+            boolean found = false;
+            for (IData<Object> data : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
+                if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
+                        && cost.doubleValue() >= 0.0) {
+                    total += cost.doubleValue();
+                    found = true;
+                }
+            }
+            return found ? total : null;
+        }
+
         @Override
         public ConversationStepSnapshot get(int index) {
             Objects.checkIndex(index, converted.length);
@@ -1016,22 +1027,6 @@ public class ConversationMemoryUtilities {
         @Override
         public int size() {
             return converted.length;
-        }
-
-        /**
-         * {@link #conversationCost(List)} over this view without converting a step: the
-         * one {@code audit:cost} entry of each live step, under the same filter.
-         */
-        private Double conversationCost() {
-            double total = 0.0;
-            boolean found = false;
-            for (IData<Object> cost : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
-                if (cost != null && isCountableCost(cost.getResult())) {
-                    total += ((Number) cost.getResult()).doubleValue();
-                    found = true;
-                }
-            }
-            return found ? total : null;
         }
     }
 

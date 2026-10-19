@@ -111,23 +111,22 @@ class ConversationMemoryCurrentStepConversionTest {
     }
 
     @Test
-    @DisplayName("current-step path sums the cost of every step without converting them")
-    void currentStepPathSumsCostOfEveryStepWithoutConverting() {
+    @DisplayName("current-step path prices the whole conversation without converting earlier steps")
+    void currentStepPathSumsCostWithoutConvertingOtherSteps() {
         var real = memory("plain");
-        var steps = real.getAllSteps();
-        // Newest-first stack: price three of the four steps, one of them invalid.
-        ((IWritableConversationStep) steps.get(0)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.25));
-        ((IWritableConversationStep) steps.get(2)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 1.5));
-        ((IWritableConversationStep) steps.get(3)).storeData(new Data<>(MemoryKeys.AUDIT_COST, Double.NaN));
-
-        Double full = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(real, false, false, null).getConversationCost();
-        IConversationStepStack stack = mock(IConversationStepStack.class, delegatesTo(steps));
+        for (int i = 0; i < real.getAllSteps().size(); i++) {
+            ((IWritableConversationStep) real.getAllSteps().get(i)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.25 * (i + 1)));
+        }
+        var expected = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(
+                ConversationMemoryUtilities.convertConversationMemory(real), true, true, null).getConversationCost();
+        IConversationStepStack stack = mock(IConversationStepStack.class, delegatesTo(real.getAllSteps()));
         var memory = spy(real);
         doReturn(stack).when(memory).getAllSteps();
-        Double currentOnly = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, false, true, null).getConversationCost();
 
-        assertEquals(1.75, full.doubleValue(), 1e-9);
-        assertEquals(full.doubleValue(), currentOnly.doubleValue(), 1e-9);
+        var actual = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, true, true, null).getConversationCost();
+
+        assertEquals(2.5, expected, 1e-9);
+        assertEquals(expected, actual);
         verify(stack, never()).get(intThat(index -> index != 0));
     }
 

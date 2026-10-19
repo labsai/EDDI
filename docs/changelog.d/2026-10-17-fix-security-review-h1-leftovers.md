@@ -77,16 +77,13 @@ still omit the list. The user agreed to the break before it was made.
 #1079 merged as a squash while this branch still carried its earlier commits,
 and `main` had moved on, so the sync merge resolves the overlap (operator
 revision 20, `main`'s dialog sizing, `nameSeg` encoding in `space-resources.ts`)
-and carries five fixes that would otherwise have needed PRs of their own:
+and carries the fixes below:
 
-- **`main` was red.** #1066 sums `audit:cost` over every step of the response
-  snapshot, and #1093 (merged after it without a re-sync) converts only the
-  newest step and pins that with `convertsOnlyCurrentStep`; the cost sum walked
-  the lazy step list and converted every step again. `conversationCost` now reads
-  a lazily converted list's total from the live steps
-  (`getExactDataPerStep("audit:cost")`, one entry per step), so the total is
-  unchanged and no step is converted. New test: the current-step total equals the
-  full conversion's, with a NaN entry skipped, and no older step is read.
+- **`main` was red** (#1066 against #1093: the response's cost sum converted
+  every step that #1093 had made lazy). This branch fixed it first, but #1081
+  merged the same fix (`conversationCost` reads a lazy step list's total from
+  the live steps), so the second sync takes `main`'s version and drops the
+  duplicate.
 - **`/setup-api` apiAuth was locked to the LLM host** by an explicit
   `allowedHosts` (#1079): the request's list names where the LLM key may go, so it
   no longer applies to `apiAuth`, which keeps the generated calls' target hosts;
