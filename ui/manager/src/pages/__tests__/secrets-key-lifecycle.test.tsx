@@ -80,7 +80,7 @@ describe("secrets key-lifecycle API functions", () => {
     const res = await resetTenant("my-org");
     expect(hit).not.toBeNull();
     expect(hit!.method).toBe("POST");
-    expect(hit!.url).toContain("/secretstore/secrets/my-org/reset");
+    expect(hit!.url).toContain("/secretstore/secrets/my-org/reset?confirm=true");
     expect(res.secretsDeleted).toBe(5);
   });
 
