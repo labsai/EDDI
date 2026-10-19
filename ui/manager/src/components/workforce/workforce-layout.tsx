@@ -30,10 +30,11 @@ export function WorkforceLayout() {
   const { t } = useTranslation();
 
   // Viewport detection
-  const [viewport, setViewport] = useState<Viewport>("desktop");
+  // Initialised from the real width, as AppLayout does: starting at
+  // "desktop" rendered the desktop sidebar for one frame on every phone load.
+  const [viewport, setViewport] = useState<Viewport>(() => getViewport(window.innerWidth));
 
   useEffect(() => {
-    setViewport(getViewport(window.innerWidth));
     const onResize = () => setViewport(getViewport(window.innerWidth));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -119,7 +120,7 @@ export function WorkforceLayout() {
   // ─── Mobile ──────────────────────────────────────────────────
   if (viewport === "mobile") {
     return (
-      <div data-testid="workforce-layout" className="Workforce relative flex h-screen flex-col overflow-hidden">
+      <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <a
@@ -144,7 +145,7 @@ export function WorkforceLayout() {
   // ─── Tablet ──────────────────────────────────────────────────
   if (viewport === "tablet") {
     return (
-      <div data-testid="workforce-layout" className="Workforce relative flex h-screen flex-col overflow-hidden">
+      <div data-testid="workforce-layout" className="Workforce relative flex h-dvh flex-col overflow-hidden">
         <WorkforceShortcuts />
         <ShortcutsDialog />
         <a
@@ -201,7 +202,7 @@ export function WorkforceLayout() {
 
   // ─── Desktop ─────────────────────────────────────────────────
   return (
-    <div data-testid="workforce-layout" className="Workforce relative flex h-screen overflow-hidden">
+    <div data-testid="workforce-layout" className="Workforce relative flex h-dvh overflow-hidden">
       <WorkforceShortcuts />
       <ShortcutsDialog />
       <a

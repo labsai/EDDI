@@ -3579,7 +3579,7 @@
     "intent": "Intention",
     "deployments": "Déploiements d’agents",
     "addDeployment": "Ajouter un agent",
-    "agents": "agents",
+    "intentPlaceholder": "p. ex. booking_request",
     "empty": "Aucun déclencheur configuré",
     "created": "Déclencheur créé",
     "updated": "Déclencheur mis à jour",
@@ -4034,7 +4034,11 @@
     "targetType": "Type",
     "triggerHint": "Les utilisateurs saisissent « mot-clé : message » pour router vers cette cible",
     "triggerKeywords": "Mots-clés déclencheurs",
-    "triggers": "déclencheurs",
+    "targetFallback": "Cible {{number}}",
+    "untitledChannel": "Canal sans titre",
+    "triggerCount_one": "{{count}} déclencheur",
+    "triggerCount_many": "{{count}} déclencheurs",
+    "triggerCount_other": "{{count}} déclencheurs",
     "type": "Type de canal",
     "webhookHint": "Collez cette URL dans le champ Request URL des Event Subscriptions de votre application Slack.",
     "webhookUrl": "URL du webhook",
@@ -6389,5 +6393,14 @@
     "cancelled": "Non déployés : la clé du coffre n'a pas été accordée. Les agents ont été créés – réessayez pour l'accorder et les déployer, ou déployez-les depuis leurs pages d'agent.",
     "failed": "Créés mais non déployés : {{names}}. {{reason}} Réessayez, ou déployez-les depuis leurs pages d'agent.",
     "memberCancelled": "Non déployé : la clé du coffre n'a pas été accordée"
+  },
+  "modelCombobox": {
+    "toggle": "Afficher les suggestions de modèles",
+    "listLabel": "Suggestions de modèles",
+    "matching": "Correspondant à « {{query}} »",
+    "otherModels": "Autres modèles",
+    "default": "par défaut",
+    "noMatch": "Aucune suggestion ne correspond à « {{query}} » — la valeur sera utilisée telle que saisie.",
+    "customHint": "Absent de la liste ? Saisissez n’importe quel identifiant de modèle pris en charge par votre fournisseur."
   }
 }

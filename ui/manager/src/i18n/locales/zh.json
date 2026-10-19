@@ -3534,7 +3534,7 @@
     "intent": "意图",
     "deployments": "代理部署",
     "addDeployment": "添加代理",
-    "agents": "个代理",
+    "intentPlaceholder": "例如 booking_request",
     "empty": "尚未配置触发器",
     "created": "触发器已创建",
     "updated": "触发器已更新",
@@ -3987,7 +3987,10 @@
     "targetType": "类型",
     "triggerHint": "用户输入“关键词：消息”以路由到此目标",
     "triggerKeywords": "触发关键词",
-    "triggers": "触发器",
+    "targetFallback": "目标 {{number}}",
+    "untitledChannel": "未命名频道",
+    "triggerCount_one": "{{count}} 个触发词",
+    "triggerCount_other": "{{count}} 个触发词",
     "type": "频道类型",
     "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
     "webhookUrl": "Webhook URL",
@@ -6319,5 +6322,14 @@
     "cancelled": "未部署：保管库密钥尚未授权。智能体已创建——请重试以授权并部署它们，或从各自的智能体页面部署。",
     "failed": "已创建但未部署：{{names}}。{{reason}} 请重试，或从各自的智能体页面部署。",
     "memberCancelled": "未部署：保管库密钥尚未授权"
+  },
+  "modelCombobox": {
+    "toggle": "显示模型建议",
+    "listLabel": "模型建议",
+    "matching": "匹配“{{query}}”",
+    "otherModels": "其他模型",
+    "default": "默认",
+    "noMatch": "没有与“{{query}}”匹配的建议——将按输入内容使用。",
+    "customHint": "列表中没有？可输入提供商支持的任意模型 ID。"
   }
 }

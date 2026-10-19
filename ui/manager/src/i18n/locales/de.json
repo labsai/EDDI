@@ -3755,7 +3755,7 @@
     "intent": "Absicht",
     "deployments": "Agentenbereitstellungen",
     "addDeployment": "Agent hinzufügen",
-    "agents": "Agenten",
+    "intentPlaceholder": "z. B. booking_request",
     "empty": "Noch keine Auslöser konfiguriert",
     "created": "Auslöser erstellt",
     "updated": "Auslöser aktualisiert",
@@ -3987,7 +3987,10 @@
     "targetType": "Typ",
     "triggerHint": "Benutzer geben „Schlüsselwort: Nachricht“ ein, um an dieses Ziel weiterzuleiten",
     "triggerKeywords": "Trigger-Schlüsselwörter",
-    "triggers": "Trigger",
+    "targetFallback": "Ziel {{number}}",
+    "untitledChannel": "Unbenannter Kanal",
+    "triggerCount_one": "{{count}} Auslöser",
+    "triggerCount_other": "{{count}} Auslöser",
     "type": "Kanaltyp",
     "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
     "webhookUrl": "Webhook-URL",
@@ -6319,5 +6322,14 @@
     "cancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben. Die Agenten wurden erstellt – versuchen Sie es erneut, um sie freizugeben und bereitzustellen, oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "failed": "Erstellt, aber nicht bereitgestellt: {{names}}. {{reason}} Versuchen Sie es erneut oder stellen Sie sie auf ihren Agentenseiten bereit.",
     "memberCancelled": "Nicht bereitgestellt: Der Vault-Schlüssel wurde nicht freigegeben"
+  },
+  "modelCombobox": {
+    "toggle": "Modellvorschläge anzeigen",
+    "listLabel": "Modellvorschläge",
+    "matching": "Passend zu „{{query}}“",
+    "otherModels": "Weitere Modelle",
+    "default": "Standard",
+    "noMatch": "Kein Vorschlag passt zu „{{query}}“ – der Wert wird wie eingegeben verwendet.",
+    "customHint": "Nicht dabei? Gib eine beliebige Modell-ID ein, die dein Anbieter unterstützt."
   }
 }

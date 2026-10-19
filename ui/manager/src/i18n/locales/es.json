@@ -3579,7 +3579,7 @@
     "intent": "Intención",
     "deployments": "Despliegues de agentes",
     "addDeployment": "Añadir agente",
-    "agents": "agentes",
+    "intentPlaceholder": "p. ej. booking_request",
     "empty": "Aún no hay disparadores configurados",
     "created": "Disparador creado",
     "updated": "Disparador actualizado",
@@ -4034,7 +4034,11 @@
     "targetType": "Tipo",
     "triggerHint": "Los usuarios escriben \"palabra clave: mensaje\" para enrutar a este destino",
     "triggerKeywords": "Palabras clave de activación",
-    "triggers": "activadores",
+    "targetFallback": "Destino {{number}}",
+    "untitledChannel": "Canal sin título",
+    "triggerCount_one": "{{count}} disparador",
+    "triggerCount_many": "{{count}} disparadores",
+    "triggerCount_other": "{{count}} disparadores",
     "type": "Tipo de canal",
     "webhookHint": "Pegue esta URL en el campo Request URL de Event Subscriptions de su aplicación Slack.",
     "webhookUrl": "URL del webhook",
@@ -6389,5 +6393,14 @@
     "cancelled": "No desplegados: no se concedió la clave del almacén. Los agentes se crearon; vuelva a intentarlo para concederla y desplegarlos, o despliéguelos desde sus páginas de agente.",
     "failed": "Creados pero no desplegados: {{names}}. {{reason}} Vuelva a intentarlo o despliéguelos desde sus páginas de agente.",
     "memberCancelled": "No desplegado: no se concedió la clave del almacén"
+  },
+  "modelCombobox": {
+    "toggle": "Mostrar sugerencias de modelos",
+    "listLabel": "Sugerencias de modelos",
+    "matching": "Coincidencias con «{{query}}»",
+    "otherModels": "Otros modelos",
+    "default": "predeterminado",
+    "noMatch": "Ninguna sugerencia coincide con «{{query}}»; se usará tal como está escrito.",
+    "customHint": "¿No aparece? Escribe cualquier ID de modelo que admita tu proveedor."
   }
 }

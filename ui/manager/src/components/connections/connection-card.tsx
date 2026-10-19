@@ -61,7 +61,7 @@ export function ConnectionCard({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="reveal-on-touch flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <Button
             variant="ghost"
             size="icon"

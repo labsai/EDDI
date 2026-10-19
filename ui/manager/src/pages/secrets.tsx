@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -1050,7 +1051,7 @@ export function SecretsPage() {
       {/* ─── Create dialog ─── */}
       {showCreate && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => {
             setShowCreate(false);
             setNewKeyName("");
@@ -1071,7 +1072,7 @@ export function SecretsPage() {
           }}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -1085,6 +1086,7 @@ export function SecretsPage() {
                 {t("secrets.createTitle", "Add Secret")}
               </h2>
               <button
+                aria-label={t("common.close", "Close")}
                 onClick={() => {
                   setShowCreate(false);
                   setNewKeyName("");
@@ -1263,6 +1265,7 @@ export function SecretsPage() {
                           <Bot className="h-2.5 w-2.5" />
                           {agentId.length > 20 ? agentId.slice(0, 20) + "…" : agentId}
                           <button
+                            aria-label={t("common.removeItem", { item: agentId, defaultValue: "Remove {{item}}" })}
                             type="button"
                             onClick={() => setNewAllowedAgents((prev) => prev.filter((a) => a !== agentId))}
                             className="ms-0.5 rounded-full p-0.5 text-primary/60 hover:text-primary transition-colors"
@@ -1283,6 +1286,7 @@ export function SecretsPage() {
                     data-testid="new-allowed-agents-input"
                     autoComplete="off"
                     onKeyDown={(e) => {
+                      if (isImeComposing(e)) return;
                       if (e.key === "Enter" || e.key === ",") {
                         e.preventDefault();
                         const val = newAgentInput.trim().replace(/,$/,"");
@@ -1369,7 +1373,7 @@ export function SecretsPage() {
       {/* ─── Rotate secret dialog ─── */}
       {rotateTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => {
             if (!rotateMut.isPending) setRotateTarget(null);
           }}
@@ -1378,7 +1382,7 @@ export function SecretsPage() {
           }}
         >
           <div
-            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

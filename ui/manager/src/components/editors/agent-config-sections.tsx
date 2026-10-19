@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -325,6 +326,7 @@ function SkillAutocomplete({
   }, []);
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (isImeComposing(e)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlighted((h) => Math.min(h + 1, suggestions.length - 1));
@@ -432,7 +434,7 @@ function CapabilityAttributesEditor({
           type="text"
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
           placeholder={t("agentDetail.attributeKey", "key")}
           disabled={disabled}
           className="h-6 w-20 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
@@ -442,7 +444,7 @@ function CapabilityAttributesEditor({
           type="text"
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
           placeholder={t("agentDetail.attributeValue", "value")}
           disabled={disabled}
           className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
@@ -476,6 +478,7 @@ function AttrRow({
   onRemove: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5">
       <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
@@ -486,10 +489,12 @@ function AttrRow({
         value={attrValue}
         onChange={(e) => onCommit(e.target.value)}
         disabled={disabled}
+        aria-label={attrKey}
         data-testid={`attribute-value-${attrKey}`}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
+        aria-label={t("common.removeItem", { item: attrKey, defaultValue: "Remove {{item}}" })}
         type="button"
         onClick={onRemove}
         disabled={disabled}
@@ -598,6 +603,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     </button>
                   )}
                   <button
+                    aria-label={t("common.remove", "Remove")}
                     type="button"
                     onClick={() => removeCapability(i)}
                     disabled={disabled}
@@ -634,6 +640,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
             placeholder={t("agentDetail.capabilityPlaceholder", "Search or type a skill name...")}
           />
           <button
+            aria-label={t("common.add", "Add")}
             type="button"
             onClick={() => addCapability(newSkill)}
             disabled={!newSkill.trim() || disabled}
@@ -708,7 +715,7 @@ export const UserMemorySection = memo(function UserMemorySection({
         {enabled && (
           <div className="space-y-4 rounded-lg border border-teal-500/20 bg-teal-500/5 p-4">
             {/* Core settings */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
               <div>
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.defaultVisibility", "Default Visibility")}
@@ -780,7 +787,7 @@ export const UserMemorySection = memo(function UserMemorySection({
               <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("agentDetail.guardrails", "Write Guardrails")}
               </h4>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
                   <DraftNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -815,7 +822,7 @@ export const UserMemorySection = memo(function UserMemorySection({
 
               {dream.enabled && (
                 <div className="space-y-3 ps-5">
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
                       <DraftInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -829,7 +836,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                       <DraftInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
                       <DraftNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />

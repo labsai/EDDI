@@ -3534,7 +3534,7 @@
     "intent": "インテント",
     "deployments": "エージェントデプロイメント",
     "addDeployment": "エージェントを追加",
-    "agents": "エージェント",
+    "intentPlaceholder": "例: booking_request",
     "empty": "トリガーはまだ設定されていません",
     "created": "トリガーを作成しました",
     "updated": "トリガーを更新しました",
@@ -3987,7 +3987,10 @@
     "targetType": "タイプ",
     "triggerHint": "ユーザーが「キーワード: メッセージ」と入力するとこのターゲットにルーティングされます",
     "triggerKeywords": "トリガーキーワード",
-    "triggers": "トリガー",
+    "targetFallback": "ターゲット {{number}}",
+    "untitledChannel": "無題のチャネル",
+    "triggerCount_one": "{{count}} 件のトリガー",
+    "triggerCount_other": "{{count}} 件のトリガー",
     "type": "チャネルタイプ",
     "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
     "webhookUrl": "Webhook URL",
@@ -6319,5 +6322,14 @@
     "cancelled": "デプロイされていません: 保管庫キーが付与されませんでした。エージェントは作成済みです。もう一度試して付与とデプロイを行うか、各エージェントのページからデプロイしてください。",
     "failed": "作成済みですが未デプロイ: {{names}}。{{reason}} もう一度試すか、各エージェントのページからデプロイしてください。",
     "memberCancelled": "デプロイされていません: 保管庫キーが付与されませんでした"
+  },
+  "modelCombobox": {
+    "toggle": "モデル候補を表示",
+    "listLabel": "モデル候補",
+    "matching": "「{{query}}」に一致",
+    "otherModels": "その他のモデル",
+    "default": "デフォルト",
+    "noMatch": "「{{query}}」に一致する候補はありません。入力したとおりに使用されます。",
+    "customHint": "一覧にない場合は、プロバイダーがサポートする任意のモデル ID を入力できます。"
   }
 }

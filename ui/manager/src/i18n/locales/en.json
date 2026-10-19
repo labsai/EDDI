@@ -3809,7 +3809,7 @@
     "intent": "Intent",
     "deployments": "Agent Deployments",
     "addDeployment": "Add Agent",
-    "agents": "agents",
+    "intentPlaceholder": "e.g. booking_request",
     "empty": "No triggers configured yet",
     "created": "Trigger created",
     "updated": "Trigger updated",
@@ -4028,7 +4028,10 @@
     "targetType": "Type",
     "triggerHint": "Users type \"keyword: message\" to route to this target",
     "triggerKeywords": "Trigger Keywords",
-    "triggers": "triggers",
+    "targetFallback": "Target {{number}}",
+    "untitledChannel": "Untitled Channel",
+    "triggerCount_one": "{{count}} trigger",
+    "triggerCount_other": "{{count}} triggers",
     "type": "Channel Type",
     "webhookHint": "Paste this URL into your Slack App’s Event Subscriptions → Request URL field.",
     "webhookUrl": "Webhook URL",
@@ -6319,5 +6322,14 @@
     "cancelled": "Not deployed: the vault key was not granted. The agents were created - try again to grant and deploy them, or deploy them from their agent pages.",
     "failed": "Created but not deployed: {{names}}. {{reason}} Try again, or deploy them from their agent pages.",
     "memberCancelled": "Not deployed: the vault key was not granted"
+  },
+  "modelCombobox": {
+    "toggle": "Show model suggestions",
+    "listLabel": "Model suggestions",
+    "matching": "Matching “{{query}}”",
+    "otherModels": "Other models",
+    "default": "default",
+    "noMatch": "No suggestion matches “{{query}}” — it will be used as typed.",
+    "customHint": "Not listed? Type any model id your provider supports."
   }
 }
