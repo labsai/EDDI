@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -106,6 +107,27 @@ class ConversationMemoryCurrentStepConversionTest {
         assertTrue(result.isUndoAvailable());
         // The stack is newest-first: index 0 is the current step.
         verify(stack, atLeastOnce()).get(0);
+        verify(stack, never()).get(intThat(index -> index != 0));
+    }
+
+    @Test
+    @DisplayName("current-step path sums the cost of every step without converting them")
+    void currentStepPathSumsCostOfEveryStepWithoutConverting() {
+        var real = memory("plain");
+        var steps = real.getAllSteps();
+        // Newest-first stack: price three of the four steps, one of them invalid.
+        ((IWritableConversationStep) steps.get(0)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.25));
+        ((IWritableConversationStep) steps.get(2)).storeData(new Data<>(MemoryKeys.AUDIT_COST, 1.5));
+        ((IWritableConversationStep) steps.get(3)).storeData(new Data<>(MemoryKeys.AUDIT_COST, Double.NaN));
+
+        Double full = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(real, false, false, null).getConversationCost();
+        IConversationStepStack stack = mock(IConversationStepStack.class, delegatesTo(steps));
+        var memory = spy(real);
+        doReturn(stack).when(memory).getAllSteps();
+        Double currentOnly = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, false, true, null).getConversationCost();
+
+        assertEquals(1.75, full.doubleValue(), 1e-9);
+        assertEquals(full.doubleValue(), currentOnly.doubleValue(), 1e-9);
         verify(stack, never()).get(intThat(index -> index != 0));
     }
 
