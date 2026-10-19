@@ -883,6 +883,12 @@ your tool schemas do not cover it, not as a routine first step:
   a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
   and the model answers with what it has — the usual answer to "why did only
   some of my tools run?".
+- Repeat guard (LLM task toolRepeatGuard, ON by default): a tool call that
+  already failed identically, with nothing succeeding since, is not run again —
+  it is answered NOT_EXECUTED and traced as tool_repeat_refused; after
+  maxRefusalsPerTurn (default 3) refusals the turn ends with a fixed message.
+  Knobs: enabled, maxIdenticalFailures (2), maxIdenticalCalls (-1),
+  maxRefusalsPerTurn (3), exemptTools (e.g. status-poll tools).
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
