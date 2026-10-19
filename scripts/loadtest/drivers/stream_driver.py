@@ -143,9 +143,13 @@ class Stats:
         self.samples = {"first_byte_ms": [], "ttft_ms": [], "total_ms": [], "spread_ms": [], "tokens": []}
         self.errors = {}
         self.ok = 0
-        # Earliest start and latest end of a successful measured turn: the window turns_per_s divides
-        # by, so that conversation starts and warm-up turns are not counted as measured time.
+        # Earliest start and latest end of a measured attempt, failed or timed out ones included: the
+        # window turns_per_s divides by. Conversation starts and warm-up turns are outside it.
         self.window = [None, None]
+
+    def attempt(self, start, end):
+        self.window[0] = start if self.window[0] is None else min(self.window[0], start)
+        self.window[1] = end if self.window[1] is None else max(self.window[1], end)
 
     def error(self, kind):
         self.errors[kind] = self.errors.get(kind, 0) + 1
@@ -223,8 +227,6 @@ async def stream_turn(args, stats, vu, turn, conversation):
         s["spread_ms"].append((last - first) * 1000)
         s["tokens"].append(tokens)
         stats.ok += 1
-        stats.window[0] = t0 if stats.window[0] is None else min(stats.window[0], t0)
-        stats.window[1] = end if stats.window[1] is None else max(stats.window[1], end)
     finally:
         writer.close()
 
@@ -252,12 +254,15 @@ async def vu_loop(args, stats, vu):
     warmup = Stats()  # warm-up turns run the same way and are thrown away
     for turn in range(args.warmup_turns + args.turns):
         target = warmup if turn < args.warmup_turns else stats
+        started = time.perf_counter()
         try:
             await asyncio.wait_for(stream_turn(args, target, vu, turn, conversation), TIMEOUT_S)
         except asyncio.TimeoutError:
             target.error("timeout")
         except (OSError, asyncio.IncompleteReadError, ValueError) as e:
             target.error("no_response" if isinstance(e, OSError) else "protocol")
+        finally:
+            target.attempt(started, time.perf_counter())
 
 
 async def main_async(args):
