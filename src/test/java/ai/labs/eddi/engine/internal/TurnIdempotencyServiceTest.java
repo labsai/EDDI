@@ -9,6 +9,10 @@ import ai.labs.eddi.engine.internal.TurnIdempotencyService.Admission;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.InvalidIdempotencyKeyException;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.Kind;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService.Outcome;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
@@ -22,6 +26,7 @@ import io.vertx.ext.web.RoutingContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Date;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -241,6 +246,23 @@ class TurnIdempotencyServiceTest {
 
         var quota = TurnError.of(new LlmFailure(FailureClass.QUOTA_EXHAUSTED, null, "r"), "msg");
         assertFalse(quota.retryable());
+    }
+
+    @Test
+    @DisplayName("isRecordedIn: a stored key within the TTL is recorded; no key, another key or a disabled service is not")
+    void isRecordedIn() {
+        var snapshot = new ConversationMemorySnapshot();
+        var step = new ConversationStepSnapshot();
+        var run = new WorkflowRunSnapshot();
+        run.getLifecycleTasks().add(new ResultSnapshot(
+                TurnIdempotencyService.STEP_KEY, "k-1", null, new Date(), null, true));
+        step.getWorkflows().add(run);
+        snapshot.getConversationSteps().add(step);
+
+        assertTrue(service.isRecordedIn(snapshot, "k-1"));
+        assertFalse(service.isRecordedIn(snapshot, "k-2"));
+        assertFalse(service.isRecordedIn(snapshot, null));
+        assertFalse(new TurnIdempotencyService(0, 30, null, System::currentTimeMillis).isRecordedIn(snapshot, "k-1"));
     }
 
     private static TurnIdempotencyService.SnapshotSink sink(AtomicReference<SimpleConversationMemorySnapshot> into) {

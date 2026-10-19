@@ -38,8 +38,11 @@ import java.security.KeyStore;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -103,6 +106,18 @@ public class NatsConnectionManager {
      */
     private volatile long unavailableSinceMillis;
     private volatile ScheduledExecutorService scheduler;
+    /**
+     * Lease heartbeats and lease-waiter timers only. Kept apart from
+     * {@link #scheduler} so that slow work there — reconnect hooks, sweeps that
+     * query the database — can never delay a renewal past the lease TTL.
+     */
+    private volatile ScheduledExecutorService leaseScheduler;
+    /**
+     * Runs the on-connect hooks. They do blocking NATS and database I/O (outbox
+     * flush, bucket provisioning, stale-lease sweep) right when NATS has just come
+     * back, so they get threads of their own instead of the scheduler's.
+     */
+    private final ExecutorService hookExecutor;
     private volatile JetStream jetStream;
     private volatile JetStreamManagement jetStreamManagement;
     private volatile KeyValueManagement keyValueManagement;
@@ -115,11 +130,17 @@ public class NatsConnectionManager {
         this.meterRegistry = meterRegistry;
         // Created here rather than in start(): components built before the startup
         // event (a lease manager injected into an early bean) can already schedule.
-        this.scheduler = Executors.newScheduledThreadPool(2, r -> {
-            Thread t = new Thread(r, "eddi-cluster-" + node.nodeId());
+        this.scheduler = Executors.newScheduledThreadPool(2, daemon("eddi-cluster-" + node.nodeId()));
+        this.leaseScheduler = Executors.newSingleThreadScheduledExecutor(daemon("eddi-cluster-lease-" + node.nodeId()));
+        this.hookExecutor = Executors.newFixedThreadPool(2, daemon("eddi-cluster-connect-" + node.nodeId()));
+    }
+
+    private static ThreadFactory daemon(String name) {
+        return r -> {
+            Thread t = new Thread(r, name);
             t.setDaemon(true);
             return t;
-        });
+        };
     }
 
     /**
@@ -259,10 +280,11 @@ public class NatsConnectionManager {
                     }
                     LOGGER.infof("NATS %s (node %s, server %s)", type == Events.CONNECTED ? "connected" : "reconnected", node,
                             ClusterConfig.redactUserInfo(conn.getConnectedUrl()));
-                    ScheduledExecutorService s = scheduler;
-                    if (s != null) {
-                        for (Runnable hook : connectedHooks) {
-                            s.execute(() -> runHook(hook));
+                    for (Runnable hook : connectedHooks) {
+                        try {
+                            hookExecutor.execute(() -> runHook(hook));
+                        } catch (RejectedExecutionException e) {
+                            LOGGER.debugf("On-connect hook not run (shutting down): %s", e.getMessage());
                         }
                     }
                 }
@@ -414,6 +436,19 @@ public class NatsConnectionManager {
         return s;
     }
 
+    /**
+     * The scheduler for lease heartbeats and lease-waiter timers, and nothing else.
+     * Tasks on it must be short and must not block: anything slow belongs on
+     * {@link #scheduler()}.
+     */
+    public ScheduledExecutorService leaseScheduler() {
+        ScheduledExecutorService s = leaseScheduler;
+        if (s == null) {
+            throw new IllegalStateException("NatsConnectionManager not started");
+        }
+        return s;
+    }
+
     /** The scheduler, or {@code null} before {@link #start()} (tests). */
     ScheduledExecutorService schedulerOrNull() {
         return scheduler;
@@ -456,5 +491,10 @@ public class NatsConnectionManager {
         if (s != null) {
             s.shutdownNow();
         }
+        ScheduledExecutorService ls = leaseScheduler;
+        if (ls != null) {
+            ls.shutdownNow();
+        }
+        hookExecutor.shutdownNow();
     }
 }

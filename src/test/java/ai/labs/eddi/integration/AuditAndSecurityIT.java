@@ -104,7 +104,8 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
                 {
                   "value": "super-secret-api-key-12345",
                   "description": "Test API key for integration tests",
-                  "allowedAgents": ["*"]
+                  "allowedAgents": ["*"],
+                  "allowedHosts": ["api.example.com"]
                 }
                 """;
 

@@ -598,7 +598,7 @@
       "id": 22,
       "title": "Resyncs",
       "type": "timeseries",
-      "description": "`eddi_cluster_events_resync_total` — full cache flushes after possibly missed events.",
+      "description": "`eddi_cluster_events_resync_total` — full cache flushes after possibly missed events. `eddi_cluster_events_resync_coalesced_total` — resync requests that joined one already queued (many nodes asking at once after an outage).",
       "gridPos": {
         "h": 7,
         "w": 8,
@@ -610,6 +610,11 @@
           "expr": "sum(increase(eddi_cluster_events_resync_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
           "legendFormat": "{{instance}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum(increase(eddi_cluster_events_resync_coalesced_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}} coalesced",
+          "refId": "B"
         }
       ],
       "fieldConfig": {

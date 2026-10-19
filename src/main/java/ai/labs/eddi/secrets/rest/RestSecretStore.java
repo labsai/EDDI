@@ -160,7 +160,7 @@ public class RestSecretStore implements IRestSecretStore {
             // A list that IS present is held to the grant endpoint's rules whatever the
             // mode: a malformed id or an empty list is wrong in every mode.
             allowedAgents = VaultGrantRequests.validatedGrant(body.allowedAgents());
-            allowedHosts = VaultHostAllowlist.validatedHosts(body.allowedHosts());
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -180,6 +180,7 @@ public class RestSecretStore implements IRestSecretStore {
             if (!exists) {
                 try {
                     VaultGrantRequests.requireGrantOnCreate(grantEnforcement, allowedAgents);
+                    VaultGrantRequests.requireHostsOnCreate(grantEnforcement, body.allowedHosts());
                 } catch (IllegalArgumentException e) {
                     return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
                 }
@@ -229,7 +230,9 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             requested = validatedGrant(body);
             validateExpectedGrant(body.expectedAllowedAgents());
-            allowedHosts = VaultHostAllowlist.validatedHosts(body.allowedHosts());
+            // ["*"] reads as [] here, the clear it already was on this endpoint, so the
+            // spelling a create requires is accepted on an edit too.
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }

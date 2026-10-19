@@ -203,7 +203,12 @@ const BODY_CLUSTER = `Cluster questions:
   write refused because another node took the conversation over; a
   "lease-lost" one is a turn stopped because its node lost the lease while it
   ran, so nothing of it was stored. Replaying runs the turn again with its side
-  effects, so advise replay only once the cause is fixed.
+  effects, so advise replay only once the cause is fixed. The dead-letter stream
+  is capped by size (eddi.coordinator.dead-letter.max-bytes, 1 GiB) as well as
+  age; when it is full, new dead letters stay on the node that produced them
+  until there is room, so discarding handled ones frees space.
+- Draining a node also hands any leader role it held (the HITL crash-recovery
+  sweep) to another node; nothing else needs to be moved first.
 - You cannot release leases, drain nodes, resync caches, reconcile deployments
   or replay/discard dead letters. Say which action in the Cluster screen fits
   and why; never claim you did it.`;
@@ -575,6 +580,10 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
 - You cannot read the vault, so never claim a key exists. Ask the admin for the
   name exactly as the Secrets page in the manager shows it; if it does not
   exist the call is refused, so say that before proposing.
+- If the admin still has to create the key on the Secrets page, say that a new
+  secret must name where it may be sent: the provider's host (for example
+  \`api.openai.com\`), or an explicit "any host". The page refuses a create
+  with neither.
 - A brand-new agent is not on a restricted key's grant (\`allowedAgents\`), so
   its first deploy is refused with \`VAULT_GRANT_MISSING\` — expected, not an
   error to work around, and the agent itself is created. Granting is the
@@ -878,6 +887,12 @@ your tool schemas do not cover it, not as a routine first step:
   a cap is not run: it is answered NOT_EXECUTED, never reaches the approval gate,
   and the model answers with what it has — the usual answer to "why did only
   some of my tools run?".
+- Repeat guard (LLM task toolRepeatGuard, ON by default): a tool call that
+  already failed identically, with nothing succeeding since, is not run again —
+  it is answered NOT_EXECUTED and traced as tool_repeat_refused; after
+  maxRefusalsPerTurn (default 3) refusals the turn ends with a fixed message.
+  Knobs: enabled, maxIdenticalFailures (2), maxIdenticalCalls (-1),
+  maxRefusalsPerTurn (3), exemptTools (e.g. status-poll tools).
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
