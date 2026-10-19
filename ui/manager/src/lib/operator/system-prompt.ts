@@ -227,12 +227,16 @@ const BODY_CLUSTER = `Cluster questions:
  * Every fact here is the backend's: `InFlightTurnLimit` (the auto formula and
  * its 256 MB reserve), `RejectedExecutionExceptionMapper` (503, `Retry-After:
  * 5`), the three `RejectedExecutionException` sources (in-flight limit,
- * `eddi.coordinator.max-active-conversations`, a draining node), and
+ * `eddi.coordinator.max-active-conversations`, a draining node),
+ * `ConnectionWaitTimeouts` (a pool-wait timeout is the same 503, not a 500),
+ * `RestAgentEngine` and `ConversationStepRunner` (the 408 counted from the
+ * request's arrival, `eddi_turn_rejected_total` / `eddi_turn_skipped_total`
+ * with `reason="caller_timed_out"`, both logged at DEBUG only), and
  * `docs/monitoring/eddi-alerts.yml`. The docs it names are the top-level pages
  * the image ships (`Dockerfile` copies `docs/*.md` only, so the monitoring
  * guide is not among them).
  */
-const BODY_CAPACITY = `Turn capacity — "why was my turn refused?" and "how big should a node be?":
+const BODY_CAPACITY = `Turn capacity — "why was my turn refused?", "why do my users get 408?" and "how big should a node be?":
 - A turn refused with HTTP 503 and \`"error": "capacity_exceeded"\` is
   backpressure, not a failure: nothing of that turn ran or was stored, the
   response carries \`Retry-After\`, and sending it again shortly is correct.
@@ -245,9 +249,43 @@ const BODY_CAPACITY = `Turn capacity — "why was my turn refused?" and "how big
      of existing conversations are never refused by this one.
   3. "This node is shutting down ...": the node is stopping (a rolling update
      or restart); retrying lands on another node.
+  4. "The database is busy: no connection was free in time ...": a turn or a
+     conversation start waited longer than the database connection pool
+     allows (MongoDB \`eddi.mongodb.max-wait-time-ms\`, default 10 s, or
+     \`waitQueueTimeoutMS\` in the connection string; PostgreSQL's pool
+     acquisition timeout). The node is overloaded at the database — see Sizing
+     below. Older EDDI versions answered this with HTTP 500.
   A node an administrator DRAINED from the Cluster screen answers differently:
   HTTP 409 with \`Retry-After\` ("Conversation is processing another turn"),
   not 503. That is not a capacity limit; retrying reaches an undrained node.
+- HTTP 408 Request Timeout (empty body, no \`Retry-After\`) is not a refusal:
+  the turn was accepted but its caller's time ran out. 503 means "refused at
+  the door, retry shortly"; 408 means "too slow". The time is
+  \`systemRuntime.agentTimeoutInSeconds\` (60 s; 600 s in dev mode) counted
+  from when the request ARRIVED, so time it spent waiting for a thread on a
+  busy node counts. Whether the turn ran depends on where it was:
+  1. It had used the whole budget before reaching the engine: answered 408 at
+     once and nothing was queued — \`eddi_turn_rejected_total{reason="caller_timed_out"}\`.
+  2. It was still waiting in its conversation's queue: it is dropped unrun when
+     its place comes up, and its input is not consumed, so sending the message
+     again runs it exactly once — \`eddi_turn_skipped_total{reason="caller_timed_out"}\`.
+     This is \`eddi.conversation.skip-turns-of-timed-out-callers\` (default
+     \`true\`); \`false\` runs such turns anyway, which only spends model calls
+     on answers nobody receives.
+  3. It had already started: it is abandoned (the conversation becomes
+     \`EXECUTION_INTERRUPTED\`, no further lifecycle tasks run, no long-term
+     properties are written), but a model call already in flight still runs
+     and is billed. Only this case can leave side effects, such as an HTTP call
+     made before the timeout, so check those before advising a retry.
+  So a 408 means the turn did NOT run, unless it had already started. The next
+  message on the conversation runs normally either way.
+- Either \`caller_timed_out\` counter rising means the node takes longer to
+  START a turn than its callers wait: it is overloaded. Raising
+  \`agentTimeoutInSeconds\` only makes users wait longer for the same outcome.
+  Add nodes, or lower \`eddi.conversation.max-in-flight-turns\` so excess turns
+  get a fast 503 with \`Retry-After\` instead of a 60-second wait ending in a
+  408. 408s while both counters stay flat are turns that started in time and
+  ran past the limit: a slow model provider or tool, not overload.
 - \`eddi.conversation.max-in-flight-turns\` (default \`auto\`) counts turns
   queued or executing on ONE node. Turns run on virtual threads, so memory, not
   threads, decides how many fit: \`auto\` is (max heap − 256 MB) ÷
@@ -263,7 +301,10 @@ const BODY_CAPACITY = `Turn capacity — "why was my turn refused?" and "how big
   say so and tell the admin what to look at: \`eddi_conversation_max_in_flight_turns\`
   (the resolved limit), \`eddi_turn_rejected_total{reason="in_flight_limit"}\`
   (refusals), and the alert \`EddiTurnCapacityReached\` (refusals for 5 minutes).
-  EDDI's full-metrics Grafana dashboard plots both.
+  EDDI's full-metrics Grafana dashboard plots both. \`/q/metrics\` is served on
+  two threads of its own (\`eddi.metrics.dedicated-scrape-threads\`, default
+  \`true\`), so it keeps answering while the node is saturated; on older
+  versions the graphs went blank exactly during an overload.
 - What to do about sustained refusals, in this order: check how long turns take
   (a slow LLM provider keeps turns in flight longer, and fills the limit at the
   same arrival rate); add replicas (cluster mode, docs page "clustering"); or
@@ -291,8 +332,12 @@ const BODY_CAPACITY_LOGS = `- The platform logs show refusals too. A refused mes
   and for which conversation. A refused NEW conversation under the coordinator
   cap is a WARN "Coordinator capacity exceeded". A conversation START refused
   by the in-flight limit is logged only at DEBUG, so no log line does not mean
-  no refusal. The startup line with the resolved limit and heap may still be
-  there too.`;
+  no refusal. A database pool-wait refusal is a WARN "Turn refused for
+  conversation <id>: no database connection ..." (or "Conversation start
+  refused for agent <id>: ..."). A 408, whether answered at once or for a
+  queued turn that was then dropped, is logged only at DEBUG, so the logs do
+  not show those. The startup line with the resolved limit and heap may still
+  be there too.`;
 
 function buildCapacitySection(endpoints: readonly string[]): string {
   const lines = [BODY_CAPACITY];
