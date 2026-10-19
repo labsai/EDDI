@@ -1,37 +1,121 @@
-# Cluster topology for the scaling scenario (`loadtest.py up --nodes N`), after
-# scripts/cluster-demo: EDDI nodes on eddi.messaging.type=nats behind an nginx round robin with
-# no affinity. One NATS JetStream server (R1) instead of the demo's three: the scenario measures
-# throughput, not NATS failover, and three servers would take memory from the EDDI nodes.
+# Cluster load-test stack: N EDDI replicas (eddi.messaging.type=nats) behind an nginx round-robin
+# load balancer, a three-node NATS JetStream cluster (R3) and one shared MongoDB — the topology of
+# the repository's docker-compose.cluster.yml and scripts/cluster-demo, plus the WireMock "LLM" and
+# k6 of docker-compose.loadtest.yml. Driven by `loadtest.py cluster-up/cluster-matrix --nodes N`;
+# see README.md. Everything binds to 127.0.0.1: EDDI runs unauthenticated, as in the quick start.
 #
-# This file makes `eddi` node 1. Nodes 2..N are copies of the fully merged `eddi` service
-# (same image, build mount, database and limits) that loadtest.py writes to
-# results/.cluster-nodes.json, together with the nginx config they need.
+# Every knob that decides whether two runs are comparable is set here from the environment the
+# driver passes, never left to a default that depends on the heap: per-node in-flight turns
+# (LOADTEST_MAX_IN_FLIGHT), the per-node MongoDB pool (LOADTEST_MONGO_POOL), heap, memory and CPUs.
+name: eddi-loadtest-cluster
+
+x-nats: &nats
+  image: nats:2.11-alpine
+  healthcheck:
+    test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz?js-enabled-only=true"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+  mem_limit: 1g
+  cpus: ${LOADTEST_NATS_CPUS:-1}
+
 services:
-  nats:
-    image: nats:2.11-alpine
-    command: ["--jetstream", "--store_dir=/data", "-m", "8222", "--user", "eddi", "--pass", "loadtest-nats-password-1234"]
+  mongodb:
+    image: mongo:7.0.43
+    # The image's first-start init runs a temporary mongod and then the real one; on a busy host the
+    # second can fail to bind while the first is still exiting (exit 48). A restart skips the init.
+    restart: on-failure:3
+    environment:
+      - "MONGO_INITDB_ROOT_USERNAME=eddi"
+      - "MONGO_INITDB_ROOT_PASSWORD=changeme"
+    ports:
+      - "127.0.0.1:${LOADTEST_CLUSTER_MONGO_PORT:-27570}:27017"
+    cpus: ${LOADTEST_MONGO_CPUS:-4}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
-      interval: 3s
-      timeout: 3s
+      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
       retries: 20
 
+  # Same mock as the single-node stack; loadtest.py sets the delay through /__admin/settings.
+  wiremock:
+    image: wiremock/wiremock:3.9.1
+    command: ["--port", "8080", "--async-response-enabled", "true", "--async-response-threads", "128",
+              "--container-threads", "800", "--no-request-journal", "--disable-banner"]
+    volumes:
+      - "./wiremock/mappings:/home/wiremock/mappings:ro"
+    ports:
+      - "127.0.0.1:${LOADTEST_CLUSTER_WIREMOCK_PORT:-18570}:8080"
+
+  nats-1:
+    <<: *nats
+    command: ["--name", "nats-1", "--jetstream", "--store_dir=/data", "-m", "8222", "--user", "eddi", "--pass", "loadtest-nats-password",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222", "--routes", "nats://nats-2:6222,nats://nats-3:6222"]
+  nats-2:
+    <<: *nats
+    command: ["--name", "nats-2", "--jetstream", "--store_dir=/data", "-m", "8222", "--user", "eddi", "--pass", "loadtest-nats-password",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222", "--routes", "nats://nats-1:6222,nats://nats-3:6222"]
+  nats-3:
+    <<: *nats
+    command: ["--name", "nats-3", "--jetstream", "--store_dir=/data", "-m", "8222", "--user", "eddi", "--pass", "loadtest-nats-password",
+              "--cluster_name", "eddi", "--cluster", "nats://0.0.0.0:6222", "--routes", "nats://nats-1:6222,nats://nats-2:6222"]
+
+  # Scaled with `--scale eddi=N`. Each replica publishes one port of the range so the driver can
+  # scrape every node's /q/metrics and check its deployment; clients only use the load balancer.
   eddi:
+    image: ${LOADTEST_EDDI_IMAGE:-labsai/eddi:6.5.0}
     depends_on:
-      nats:
+      mongodb:
+        condition: service_healthy
+      nats-1:
+        condition: service_healthy
+      nats-2:
+        condition: service_healthy
+      nats-3:
         condition: service_healthy
     environment:
-      - "EDDI_MESSAGING_TYPE=nats"
-      - "EDDI_NATS_URL=nats://nats:4222"
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
+      - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
+      - "QUARKUS_OIDC_TENANT_ENABLED=false"
+      - "QUARKUS_ANALYTICS_DISABLED=true"
+      - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
+      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin&maxPoolSize=${LOADTEST_MONGO_POOL:-100}"
+      - "JAVA_OPTS_APPEND=${LOADTEST_JAVA_OPTS:--Xmx1536m}"
+      - "EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS=${LOADTEST_MAX_IN_FLIGHT:-400}"
+      # in-memory for the single-node baseline point; nats for every cluster point. NATS runs
+      # either way so the two N=1 points share the same host load apart from the coordination.
+      - "EDDI_MESSAGING_TYPE=${LOADTEST_MESSAGING:-nats}"
+      - "EDDI_NATS_URL=nats://nats-1:4222,nats://nats-2:4222,nats://nats-3:4222"
       - "EDDI_NATS_USERNAME=eddi"
-      - "EDDI_NATS_PASSWORD=loadtest-nats-password-1234"
-      - "EDDI_NATS_REPLICAS=1"
-      - "EDDI_CLUSTER_NODE_ID=n1"
-      - "EDDI_SCHEDULE_INSTANCE_ID=eddi-1"
+      - "EDDI_NATS_PASSWORD=loadtest-nats-password"
+      - "EDDI_NATS_REPLICAS=3"
+    mem_limit: ${LOADTEST_EDDI_MEMORY:-2g}
+    cpus: ${LOADTEST_EDDI_CPUS:-2}
+    ports:
+      - "127.0.0.1:${LOADTEST_CLUSTER_NODE_PORTS:-7581-7599}:7070"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
 
   lb:
     image: nginx:1.27.3-alpine
     volumes:
-      - "${LOADTEST_NGINX_CONF:?written by loadtest.py up --nodes}:/etc/nginx/nginx.conf:ro"
+      - "./nginx-cluster.conf:/etc/nginx/nginx.conf:ro"
     ports:
-      - "127.0.0.1:${LOADTEST_LB_PORT:-7380}:8080"
+      - "127.0.0.1:${LOADTEST_CLUSTER_PORT:-7570}:7070"
+    depends_on:
+      eddi:
+        condition: service_healthy
+
+  k6:
+    image: grafana/k6:0.54.0
+    profiles: ["k6"]
+    environment:
+      - "BASE_URL=http://lb:7070"
+    volumes:
+      - "./k6:/scripts:ro"
+      - "./results:/results"

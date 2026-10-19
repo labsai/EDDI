@@ -1,17 +1,17 @@
 """Load-test and benchmark driver for EDDI (planning/throughput-optimization-plan.md, WS0).
 
-    python scripts/loadtest/loadtest.py up [--db mongo|postgres] [--nodes N] [--app DIR | --no-app] [--image IMG]
+    python scripts/loadtest/loadtest.py up [--db mongo|postgres] [--app DIR | --no-app] [--image IMG]
     python scripts/loadtest/loadtest.py run --scenario steady --vus 200 --turns 10 --delay-ms 3000 [--label baseline]
     python scripts/loadtest/loadtest.py matrix --vus 50,200,500 --delay-ms 3000 [--label baseline]
     python scripts/loadtest/loadtest.py stream --vus 50 --turns 5 --first-chunk-ms 500 [--endpoints native,openai]
     python scripts/loadtest/loadtest.py group --members 3 --rounds 1 --vus 10 --discussions 3 --delay-ms 1000
-    python scripts/loadtest/loadtest.py scaling --nodes 1,2,4 --vus 300 --turns 20 --delay-ms 0
+    python scripts/loadtest/loadtest.py cluster-matrix --nodes 1,2,4,8 --vus-per-node 300 --turns 20 --delay-ms 3000
     python scripts/loadtest/loadtest.py gate --thresholds scripts/loadtest/thresholds/db-ops-mongo.json
     python scripts/loadtest/loadtest.py report --label baseline [--laptop]
     python scripts/loadtest/loadtest.py down
 
-`up` starts the database, the WireMock LLM and EDDI (with --nodes: N EDDI nodes on NATS behind
-nginx) and creates one deployed LLM agent; what it started is kept in results/.state.json. Every
+`up` starts the database, the WireMock LLM and EDDI and creates one deployed LLM agent (`cluster-up`
+does the same for N replicas on NATS behind nginx, from docker-compose.cluster.yml); what it started is kept in results/.state.json. Every
 measuring command snapshots /q/metrics and the database's operation counters, drives the load
 (k6 for turns and group discussions, drivers/stream_driver.py for SSE), samples the saturation
 gauges every second, snapshots again and writes results/<label>-<kind>-….json. `report` renders
@@ -38,13 +38,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 RESULTS = os.path.join(HERE, "results")
 STATE = os.path.join(RESULTS, ".state.json")
-NGINX_CONF = os.path.join(RESULTS, ".nginx.conf")
-CLUSTER_OVERLAY = os.path.join(RESULTS, ".cluster-nodes.json")
 PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "eddi-loadtest")
 EDDI_PORT = int(os.environ.get("LOADTEST_EDDI_PORT", "7370"))
 EDDI = f"http://127.0.0.1:{EDDI_PORT}"
 WIREMOCK = "http://127.0.0.1:" + os.environ.get("LOADTEST_WIREMOCK_PORT", "18370")
-LB = "http://127.0.0.1:" + os.environ.get("LOADTEST_LB_PORT", "7380")
 DEFAULT_IMAGE = "labsai/eddi:6.5.0"
 # The /v1 key set in docker-compose.loadtest.yml.
 OPENAI_KEY = "sk-loadtest-openai-compat-0123456789"
@@ -52,6 +49,9 @@ OPENAI_KEY = "sk-loadtest-openai-compat-0123456789"
 STREAM_STUB_ID = "5f0c7c1e-57ea-4000-8000-000000000001"
 # Load generators of any stack on this machine; a measurement waits while one of them runs.
 LOAD_IMAGES = ("grafana/k6", "python:3.12.7-alpine3.20")
+# The single-node stack (docker-compose.loadtest.yml) is the default; the cluster-* commands switch
+# every helper below to docker-compose.cluster.yml through use_cluster_stack().
+STACK_FILE = "docker-compose.loadtest.yml"
 
 # Gauges sampled during a run; the report shows the peak of every series (per node, max over nodes).
 SAMPLED = re.compile(r"^(eddi_runtime_executor_(active|queued|max_threads)|eddi_processing_conversation_count|"
@@ -91,12 +91,13 @@ def sh(*cmd, check=False, capture=True, env=None, timeout=COMMAND_TIMEOUT_S, on_
 
 
 def compose_files(state):
-    files = ["-f", os.path.join(HERE, "docker-compose.loadtest.yml"),
-             "-f", os.path.join(HERE, f"docker-compose.{state.get('db') or 'mongo'}.yml")]
+    if STACK_FILE == "docker-compose.loadtest.yml":
+        files = ["-f", os.path.join(HERE, STACK_FILE),
+                 "-f", os.path.join(HERE, f"docker-compose.{state.get('db') or 'mongo'}.yml")]
+    else:  # the cluster stack brings its own MongoDB
+        files = ["-f", os.path.join(HERE, STACK_FILE)]
     if state.get("app"):
         files += ["-f", os.path.join(HERE, "docker-compose.app.yml")]
-    if state.get("nodes"):
-        files += ["-f", os.path.join(HERE, "docker-compose.cluster.yml")]
     # Your own overrides last, e.g. EDDI settings under test (README: "Changing EDDI settings").
     for extra in filter(None, os.environ.get("LOADTEST_COMPOSE_EXTRA", "").split(os.pathsep)):
         files += ["-f", os.path.abspath(extra)]
@@ -109,18 +110,15 @@ def compose_env(state):
         env["EDDI_APP"] = state["app"]
     if state.get("image"):
         env["LOADTEST_EDDI_IMAGE"] = state["image"]
-    if state.get("cpus"):
-        env["LOADTEST_EDDI_CPUS"] = str(state["cpus"])
-    if state.get("nodes"):
-        env["LOADTEST_NGINX_CONF"] = NGINX_CONF
     return env
 
 
-def compose(*cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S, on_timeout=None, overlay=True):
+def compose(*cmd, check=True, capture=True, timeout=COMMAND_TIMEOUT_S, on_timeout=None):
+    # The cluster commands pass their argparse namespace first; what they start is in the state file.
+    if cmd and not isinstance(cmd[0], str):
+        cmd = cmd[1:]
     state = load_state()
     files = compose_files(state)
-    if overlay and state.get("nodes") and os.path.exists(CLUSTER_OVERLAY):
-        files += ["-f", CLUSTER_OVERLAY]
     return sh("docker", "compose", *files, *cmd, check=check, capture=capture, env=compose_env(state), timeout=timeout,
               on_timeout=on_timeout)
 
@@ -184,19 +182,19 @@ def save_state(state):
 
 
 def node_urls(state=None):
-    """Host URLs of the EDDI nodes: node 1 on LOADTEST_EDDI_PORT, node i on the port i - 1 above it."""
-    n = (state or load_state()).get("nodes") or 1
-    return [f"http://127.0.0.1:{EDDI_PORT + i}" for i in range(n)]
+    """Host URLs of the EDDI nodes the measurements scrape. The single-node stack has one; the
+    cluster-* commands keep their own list (cluster_nodes)."""
+    return [EDDI]
 
 
 def client_base(state=None):
     """Where the load generators, inside the compose network, send their requests."""
-    return "http://lb:8080" if (state or load_state()).get("nodes") else "http://eddi:7070"
+    return "http://eddi:7070"
 
 
 def topology_suffix(state):
-    """Part of a result's file name, so that runs on another database or node count do not overwrite it."""
-    return ("-pg" if state.get("db") == "postgres" else "") + (f"-{state['nodes']}n" if state.get("nodes") else "")
+    """Part of a result's file name, so that runs on another database do not overwrite it."""
+    return "-pg" if state.get("db") == "postgres" else ""
 
 
 def command_line():
@@ -215,99 +213,32 @@ def cmd_up(args):
         if not os.path.isfile(os.path.join(args.app, "quarkus-run.jar")):
             raise SystemExit(f"{args.app} has no quarkus-run.jar — run ./mvnw package -DskipTests -DskipUi=true first, or pass --no-app")
         os.makedirs(os.path.join(args.app, "tmp"), exist_ok=True)  # mount point of the tmpfs
-    state = {"app": None if args.no_app else args.app, "image": args.image, "db": args.db, "nodes": args.nodes,
-             "cpus": args.cpus_per_node, "up_command": command_line(), "up_env": env_overrides()}
+    state = {"app": None if args.no_app else args.app, "image": args.image, "db": args.db,
+             "up_command": command_line(), "up_env": env_overrides()}
     save_state(state)
-    bring_up(args.nodes)
+    bring_up()
     state = load_state()
     state["agent"], state["agent_name"] = setup_agent("loadtest")
     save_state(state)
-    if state.get("nodes"):
-        wait_deployed_everywhere(state["agent"])
     install_stream_stub(500, 10, 20)
     # Pulled now so that the first measurement does not include a pull, and so that their digests are known.
     compose("--profile", "k6", "--profile", "stream", "pull", "-q", "k6", "stream", check=False)
     state["env"] = collect_env()
     save_state(state)
-    where = f"nginx {LB} over {state['nodes']} node(s)" if state.get("nodes") else f"EDDI {EDDI}"
-    print(f"stack up ({state['db']}): {where}, agent {state['agent']}")
+    print(f"stack up ({state['db']}): EDDI {EDDI}, agent {state['agent']}")
 
 
-def bring_up(nodes):
-    """Start (or resize to) the topology in the state file and wait until every node is ready."""
+def bring_up():
+    """Start the stack in the state file and wait until EDDI is ready."""
     state = load_state()
     services = [{"mongo": "mongodb", "postgres": "postgres"}[state.get("db") or "mongo"], "wiremock", "eddi"]
-    if nodes:
-        write_cluster_files(nodes)
-        services += ["nats"] + [f"eddi-{i}" for i in range(2, nodes + 1)]
     compose("up", "-d", "--remove-orphans", *services)
-    for i, url in enumerate(node_urls()):
-        if not wait_until(lambda: http("GET", url + "/q/health/ready", timeout=5)[0] == 200, 300, 2):
-            print(compose("logs", "--tail", "80", "eddi" if i == 0 else f"eddi-{i + 1}", check=False).stdout)
-            raise SystemExit(f"EDDI node {i + 1} did not become ready")
+    if not wait_until(lambda: http("GET", EDDI + "/q/health/ready", timeout=5)[0] == 200, 300, 2):
+        print(compose("logs", "--tail", "80", "eddi", check=False).stdout)
+        raise SystemExit("EDDI did not become ready")
     if state.get("db") == "postgres":
         # In the maintenance database, so that the counters' own queries are not counted against eddi.
         psql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
-    if nodes:
-        # Recreated every time: the upstream list in the mounted config changes with the node count.
-        compose("up", "-d", "--force-recreate", "lb")
-        if not wait_until(lambda: http("GET", LB + "/q/health/ready", timeout=5)[0] == 200, 60, 1):
-            print(compose("logs", "--tail", "40", "lb", check=False).stdout)
-            raise SystemExit("nginx did not become ready")
-
-
-def write_cluster_files(nodes):
-    """nginx config for N nodes, and nodes 2..N as copies of the fully merged `eddi` service."""
-    ensure_results()
-    servers = "\n".join(f"        server {'eddi' if i == 1 else f'eddi-{i}'}:7070 resolve max_fails=0;" for i in range(1, nodes + 1))
-    with open(NGINX_CONF, "w", encoding="utf-8", newline="\n") as f:
-        f.write(f"""# Written by loadtest.py up --nodes {nodes}: round robin over the nodes, no affinity (after
-# scripts/cluster-demo/nginx-demo.conf). max_fails=0: a 503 must not take a node out of rotation.
-worker_processes auto;
-worker_rlimit_nofile 65536;
-events {{
-    worker_connections 16384;
-}}
-http {{
-    access_log off;
-    resolver 127.0.0.11 valid=5s ipv6=off;
-    upstream eddi {{
-        zone eddi 64k;
-{servers}
-        keepalive 512;
-    }}
-    server {{
-        listen 8080;
-        client_max_body_size 32m;
-        location / {{
-            proxy_pass http://eddi;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header Connection "";
-            proxy_buffering off;
-            proxy_read_timeout 600s;
-            proxy_connect_timeout 2s;
-            proxy_next_upstream error;
-        }}
-    }}
-}}
-""")
-    if os.path.exists(CLUSTER_OVERLAY):
-        os.remove(CLUSTER_OVERLAY)
-    r = compose("config", "--format", "json", overlay=False)
-    eddi = json.loads(r.stdout)["services"]["eddi"]
-    services = {}
-    for i in range(2, nodes + 1):
-        svc = copy.deepcopy(eddi)
-        svc.pop("container_name", None)
-        env = svc.setdefault("environment", {})
-        env["EDDI_CLUSTER_NODE_ID"] = f"n{i}"
-        env["EDDI_SCHEDULE_INSTANCE_ID"] = f"eddi-{i}"
-        for p in svc.get("ports", []):
-            p["published"] = str(EDDI_PORT + i - 1)
-        services[f"eddi-{i}"] = svc
-    with open(CLUSTER_OVERLAY, "w", encoding="utf-8") as f:
-        json.dump({"services": services}, f, indent=2)
 
 
 def setup_agent(prefix, system_prompt="You are a load test agent."):
@@ -330,18 +261,6 @@ def setup_agent(prefix, system_prompt="You are a load test agent."):
     if not ok:
         raise SystemExit(f"agent {agent} did not deploy")
     return agent, name
-
-
-def wait_deployed_everywhere(agent):
-    def ready(url):
-        s, _, b = http("GET", f"{url}/administration/production/deploymentstatus/{agent}?version=1", timeout=10)
-        return s == 200 and json.loads(b).get("status") == "READY"
-    for url in node_urls():
-        if not wait_until(lambda: ready(url), 120, 1):
-            # A node that came up after the deployment did not take it over: deploy it there directly.
-            http("POST", f"{url}/administration/production/{agent}?version=1&autoDeploy=true", timeout=60)
-            if not wait_until(lambda: ready(url), 120, 1):
-                raise SystemExit(f"agent {agent} is not deployed on {url}")
 
 
 def cmd_down(args):
@@ -379,18 +298,18 @@ def collect_env():
         dirty = sh("git", "-C", checkout, "status", "--porcelain", "--", "src", "pom.xml", check=False).stdout.strip()
         env["build"] = {"commit": head or "unknown", "branch": branch, "dirty": bool(dirty)}
     env["eddi"] = {"image": state.get("image") or DEFAULT_IMAGE, "local_build": bool(app), "db": state.get("db") or "mongo",
-                   "nodes": state.get("nodes") or 1, "messaging": "nats" if state.get("nodes") else "in-memory",
+                   "nodes": 1, "messaging": "in-memory",
                    "java_opts": os.environ.get("LOADTEST_JAVA_OPTS", "-Xmx2g"),
                    "memory_limit": os.environ.get("LOADTEST_EDDI_MEMORY", "3g"),
-                   "cpus_per_node": state.get("cpus") or os.environ.get("LOADTEST_EDDI_CPUS") or "unlimited"}
+                   "cpus_per_node": os.environ.get("LOADTEST_EDDI_CPUS") or "unlimited"}
     env["collected"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     return env
 
 
 # ------------------------------------------------------------------ measurements
 
-def scrape(base):
-    s, _, body = http("GET", base + "/q/metrics", timeout=10, headers={"Accept": "text/plain"})
+def scrape(base=None):
+    s, _, body = http("GET", (base or EDDI) + "/q/metrics", timeout=10, headers={"Accept": "text/plain"})
     if s != 200:
         return {}
     out = {}
@@ -460,6 +379,18 @@ def db_diff(before, after):
         if d:
             detail[c] = d
     return {"kind": after.get("kind"), "ops": ops, "detail": detail}
+
+
+def mongo_snapshot():
+    """db_snapshot() in the shape the cluster-* commands read (opcounters, collections)."""
+    d = db_snapshot()
+    return {"opcounters": d["ops"], "collections": d["detail"]}
+
+
+def mongo_diff(before, after):
+    d = db_diff({"ops": before["opcounters"], "detail": before["collections"]},
+                {"kind": "mongo", "ops": after["opcounters"], "detail": after["collections"]})
+    return {"opcounters": d["ops"], "collections": d["detail"]}
 
 
 def per_turn(db, turns):
@@ -662,11 +593,12 @@ def cmd_run(args, label=None, name=None, kind="turns"):
 
 
 def one_line(r):
-    lat, ovh = r["latency_ms"], r["overhead_ms"]
+    # cluster-run results carry neither overhead nor per-turn database fields
+    lat, ovh = r["latency_ms"], r.get("overhead_ms") or {k: None for k in STATS}
     errs = ", ".join(f"{k[6:] if k.startswith('turns_') else k}={int(v)}" for k, v in r["errors"].items() if v)
     return (f"{r['name']}: {r['turns_ok']:.0f} ok, {r['turns_per_s'] or 0:.1f} turns/s, p50 {fmt(lat['med'])} p95 {fmt(lat['p(95)'])} "
             f"p99 {fmt(lat['p(99)'])} ms; EDDI overhead p50 {fmt(ovh['med'])} p95 {fmt(ovh['p(95)'])} p99 {fmt(ovh['p(99)'])} ms; "
-            f"db ops/turn {r['db_ops_per_turn'].get('total', '-')}; errors: {errs or 'none'}"
+            f"db ops/turn {(r.get('db_ops_per_turn') or {}).get('total', '-')}; errors: {errs or 'none'}"
             + (f"; with backoff p50 {fmt(r['total_latency_ms']['med'])} p95 {fmt(r['total_latency_ms']['p(95)'])} "
                f"p99 {fmt(r['total_latency_ms']['p(99)'])} ms, attempts avg {fmt(r['attempts']['avg'], 2)} "
                f"max {fmt(r['attempts']['max'])}, abandoned {r['errors'].get('turns_abandoned', 0):.0f}"
@@ -863,9 +795,6 @@ def cmd_group(args):
     while len(agents) < args.members + 1:
         agents.append(setup_agent("loadtest-member")[0])
         save_state(state)
-    if state.get("nodes"):
-        for a in agents:
-            wait_deployed_everywhere(a)
     group = create_group(agents[:args.members], agents[args.members], args.rounds, args.style)
     wait_for_quiet(args)
     set_mock_delay(args.delay_ms)
@@ -891,38 +820,6 @@ def cmd_group(args):
     d = result["discussion_ms"]
     print(f"{name}: {ok:.0f} discussions ok, {turns:.0f} member turns, {result['member_turns_per_s']:.1f} member turns/s, "
           f"discussion p50 {fmt(d['med'])} p95 {fmt(d['p(95)'])} ms, failed {result['discussions_failed']:.0f}")
-
-
-# ------------------------------------------------------------------ cluster scaling
-
-def cmd_scaling(args):
-    state = load_state()
-    if not state.get("nodes"):
-        raise SystemExit("the scaling scenario needs the cluster topology — run `up --nodes 1` (or any N) first")
-    counts = [int(n) for n in args.nodes.split(",")]
-    runs = []
-    for n in counts:
-        state = load_state()
-        state["nodes"] = n
-        save_state(state)
-        print(f"--- {n} node(s)", flush=True)
-        bring_up(n)
-        wait_deployed_everywhere(state["agent"])
-        a = argparse.Namespace(**vars(args))
-        a.scenario = "steady"
-        runs.append(cmd_run(a, name=f"{args.label}-scaling-{n}n-{args.vus}vu-{args.delay_ms}ms", kind="scaling-step"))
-    base = runs[0]["turns_per_s"] or 0
-    rows = []
-    for n, r in zip(counts, runs):
-        tps = r["turns_per_s"] or 0
-        rows.append({"nodes": n, "turns_per_s": tps, "speedup": tps / base if base else None,
-                     "efficiency": tps / (base * n / counts[0]) if base else None, "run": r["name"]})
-    result = write_result({"kind": "scaling", "name": f"{args.label}-scaling-{args.vus}vu-{args.delay_ms}ms", "label": args.label,
-                           "vus": args.vus, "turns_per_vu": args.turns, "warmup_turns": args.warmup_turns,
-                           "llm_delay_ms": args.delay_ms, "cpus_per_node": state.get("cpus"), "rows": rows})
-    for row in result["rows"]:
-        print(f"{row['nodes']} node(s): {row['turns_per_s']:.1f} turns/s, speedup {fmt(row['speedup'], 2)}, "
-              f"efficiency {fmt(row['efficiency'] * 100 if row['efficiency'] is not None else None)} %")
 
 
 # ------------------------------------------------------------------ regression gate
@@ -1147,22 +1044,6 @@ def cmd_report(args):
                      f"{res['errors'] or 'none'} |")
         L += ["", "A token spread close to the mock's means EDDI forwards tokens as they arrive; near 0 would mean it buffered "
               + "the answer.", ""]
-    for r in by.get("scaling", []):
-        L += [f"## Cluster scaling — {r['vus']} conversations, mock delay {r['llm_delay_ms']} ms", "",
-              f"Nodes on NATS behind nginx round robin (no affinity), CPUs per node: {r.get('cpus_per_node') or 'unlimited'}. "
-              + "Efficiency = turns/s ÷ (nodes × single-node turns/s).", "",
-              "| Nodes | Turns/s | Speedup | Efficiency | p50 ms | p95 ms | EDDI overhead p95 ms | Errors | DB ops per turn |",
-              "|---|---|---|---|---|---|---|---|---|"]
-        steps = {s["name"]: s for s in by.get("scaling-step", [])}
-        for row in r["rows"]:
-            s = steps.get(row["run"], {})
-            errs = ", ".join(f"{k}={int(v)}" for k, v in s.get("errors", {}).items() if v) or "none"
-            eff = row["efficiency"]
-            L.append(f"| {row['nodes']}{flag(s)} | {row['turns_per_s']:.1f} | {fmt(row['speedup'], 2)}× | "
-                     f"{fmt(eff * 100 if eff is not None else None)} % | {ms(s.get('latency_ms'), 'med')} | "
-                     f"{ms(s.get('latency_ms'), 'p(95)')} | {ms(s.get('overhead_ms'), 'p(95)')} | {errs} | "
-                     f"{ops_cell(s.get('db_ops_per_turn'))} |")
-        L.append("")
     rows = by.get("group", [])
     if rows:
         L += ["## Multi-agent group discussions", "",
@@ -1190,8 +1071,6 @@ def cmd_report(args):
     seen, stack = [], None
     # In the order they ran; each topology's `up` before the commands measured on it.
     for r in sorted(results, key=lambda r: r.get("finished") or r.get("date", "")):
-        if r["kind"] == "scaling-step":
-            continue  # `scaling` itself is listed
         # A command run with other settings than the first gets them in front of it.
         own = r.get("env_overrides") or {}
         prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in own.items() if overrides.get(k) != v)
@@ -1216,6 +1095,437 @@ def cmd_report(args):
 
 
 # ------------------------------------------------------------------ CLI
+# ------------------------------------------------------------------ cluster (N replicas behind nginx)
+#
+# docker-compose.cluster.yml: N EDDI replicas (eddi.messaging.type=nats), a three-node NATS JetStream
+# cluster, one MongoDB, the WireMock LLM and an nginx round-robin balancer. `cluster-matrix` brings a
+# fresh stack up for every point so each starts from an empty database, warms it up, measures one
+# steady run and writes results/cluster-scaling-<date>.md.
+
+CLUSTER_STATE = os.path.join(RESULTS, ".cluster-state.json")
+CLUSTER_PROJECT = "eddi-loadtest-cluster"
+# Counters compared before/after a run on every node, on top of COUNTED.
+CLUSTER_COUNTED = re.compile(r"^(eddi_cluster_lease_acquire_seconds_(count|sum)|eddi_cluster_fence_rejected_total|"
+                             r"eddi_cluster_lease_(takeover|release_conflicts)_total|eddi_cluster_degraded_decisions_total|"
+                             r"eddi_conversation_processing_count_total)")
+CLUSTER_SAMPLED = re.compile(SAMPLED.pattern + r"|^(eddi_cluster_lease_held|eddi_cluster_lease_acquire_seconds_max|"
+                             r"eddi_cluster_degraded|eddi_conversation_max_in_flight_turns)")
+
+
+def use_cluster_stack():
+    global STACK_FILE, STATE, EDDI, WIREMOCK
+    STACK_FILE = "docker-compose.cluster.yml"
+    STATE = CLUSTER_STATE
+    EDDI = "http://127.0.0.1:" + os.environ.get("LOADTEST_CLUSTER_PORT", "7570")
+    WIREMOCK = "http://127.0.0.1:" + os.environ.get("LOADTEST_CLUSTER_WIREMOCK_PORT", "18570")
+
+
+def cluster_env(args):
+    """What makes two points comparable, passed to compose explicitly rather than left to defaults."""
+    return {
+        "LOADTEST_MESSAGING": args.messaging,
+        "LOADTEST_MAX_IN_FLIGHT": str(args.max_in_flight),
+        "LOADTEST_MONGO_POOL": str(args.mongo_pool),
+        "LOADTEST_JAVA_OPTS": args.java_opts,
+        "LOADTEST_EDDI_MEMORY": args.eddi_memory,
+        "LOADTEST_EDDI_CPUS": str(args.eddi_cpus),
+        "LOADTEST_MONGO_CPUS": str(args.mongo_cpus),
+        "LOADTEST_NATS_CPUS": str(args.nats_cpus),
+    }
+
+
+def cluster_nodes():
+    """[{name, ip, base}] of the running EDDI replicas, in replica order."""
+    r = sh("docker", "ps", "--filter", f"label=com.docker.compose.project={CLUSTER_PROJECT}",
+           "--filter", "label=com.docker.compose.service=eddi", "--format", "{{.Names}}", check=True)
+    nodes = []
+    for name in sorted(r.stdout.split(), key=lambda n: int(n.rsplit("-", 1)[1])):
+        ip = sh("docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name, check=True).stdout.strip()
+        port = sh("docker", "port", name, "7070/tcp", check=True).stdout.split()[0].rsplit(":", 1)[1]
+        nodes.append({"name": name, "ip": ip, "base": f"http://127.0.0.1:{port}"})
+    return nodes
+
+
+def cmd_cluster_up(args):
+    use_cluster_stack()
+    if not args.no_app:
+        args.app = os.path.abspath(args.app or os.path.join(REPO, "target", "quarkus-app"))
+        if not os.path.isfile(os.path.join(args.app, "quarkus-run.jar")):
+            raise SystemExit(f"{args.app} has no quarkus-run.jar — run ./mvnw package -DskipTests -DskipUi=true first, or pass --no-app")
+        os.makedirs(os.path.join(args.app, "tmp"), exist_ok=True)
+    save_state({"app": None if args.no_app else args.app, "image": args.image, "nodes": args.nodes, "messaging": args.messaging,
+                "env": cluster_env(args)})
+    os.environ.update(cluster_env(args))
+    compose(args, "up", "-d", "--scale", f"eddi={args.nodes}", "mongodb", "wiremock", "nats-1", "nats-2", "nats-3", "eddi", "lb")
+    nodes = cluster_nodes()
+    if len(nodes) != args.nodes:
+        raise SystemExit(f"expected {args.nodes} EDDI replicas, found {len(nodes)}")
+    for n in nodes:
+        if not wait_until(lambda: http("GET", n["base"] + "/q/health/ready", timeout=5)[0] == 200, 300, 2):
+            print(sh("docker", "logs", "--tail", "80", n["name"]).stdout)
+            raise SystemExit(f"{n['name']} did not become ready")
+    if not wait_until(lambda: http("GET", EDDI + "/q/health/ready", timeout=5)[0] == 200, 60, 1):
+        raise SystemExit("the load balancer does not reach EDDI")
+    # Set up on the first node directly: right after start the balancer can still hold a replica
+    # address it resolved before that replica was up and answer 502 to the (non-retried) POST.
+    global EDDI
+    lb, EDDI = EDDI, nodes[0]["base"]
+    try:
+        agent = setup_agent("loadtest")[0]
+    finally:
+        EDDI = lb
+    # Deployed through the balancer on one node; every node must serve it before a turn arrives.
+    for n in nodes:
+        ok = wait_until(lambda: json.loads(http("GET", f"{n['base']}/administration/production/deploymentstatus/{agent}?version=1")[2])
+                        .get("status") == "READY", 120)
+        if not ok:
+            raise SystemExit(f"agent {agent} is not deployed on {n['name']}")
+    state = load_state()
+    state.update({"agent": agent, "node_names": [n["name"] for n in nodes]})
+    save_state(state)
+    print(f"cluster up: {args.nodes} x EDDI ({args.messaging}) behind {EDDI}, agent {agent}", flush=True)
+
+
+def cmd_cluster_down(args):
+    use_cluster_stack()
+    compose(args, "down", "-v", "--remove-orphans", check=False)
+    print("cluster down", flush=True)
+
+
+class DockerStats(threading.Thread):
+    """CPU of every container on the Docker host, sampled continuously while a run lasts.
+
+    All containers, not only this stack's: on one machine the host is shared, and another load test
+    running at the same time is part of the answer to "where did the host saturate"."""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.samples = []  # [{container: cpu%}]
+        self.stop = threading.Event()
+
+    def run(self):
+        while not self.stop.is_set():
+            r = sh("docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}", timeout=60)
+            sample = {}
+            for line in (r.stdout or "").splitlines():
+                name, _, value = line.partition("\t")
+                try:
+                    sample[name] = float(value.strip().rstrip("%"))
+                except ValueError:
+                    continue  # a row without a number (a container starting or stopping): skip that container
+            if sample:
+                self.samples.append(sample)
+
+    def summary(self):
+        if not self.samples:
+            return {"samples": 0, "containers": {}, "total_mean": 0.0, "total_peak": 0.0, "foreign_mean": 0.0}
+        n = len(self.samples)
+        names = {k for s in self.samples for k in s}
+        per = {k: {"mean": sum(s.get(k, 0.0) for s in self.samples) / n, "peak": max(s.get(k, 0.0) for s in self.samples)}
+               for k in names}
+        totals = [sum(s.values()) for s in self.samples]
+        foreign = [sum(v for k, v in s.items() if not k.startswith(CLUSTER_PROJECT)) for s in self.samples]
+        return {"samples": n, "containers": per, "total_mean": sum(totals) / n, "total_peak": max(totals),
+                "foreign_mean": sum(foreign) / n}
+
+
+class HostCpu(threading.Thread):
+    """CPU of the machine itself, which docker stats cannot see: on Docker Desktop the containers share a
+    VM with whatever else runs on the host (IDEs, builds, other sessions' test suites). Windows: the
+    `% Processor Time` counter through typeperf; elsewhere the 1-minute load average per CPU."""
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        self.samples = []
+        self.stop = threading.Event()
+
+    def run(self):
+        while not self.stop.is_set():
+            v = None
+            if sys.platform == "win32":
+                r = sh("typeperf", r"\Processor(_Total)\% Processor Time", "-si", "1", "-sc", "1", timeout=30)
+                m = re.search(r'^"[^"]+","([0-9.,]+)"', r.stdout or "", re.M)
+                v = float(m.group(1).replace(",", ".")) if m else None
+            elif hasattr(os, "getloadavg"):
+                v = 100.0 * os.getloadavg()[0] / (os.cpu_count() or 1)
+                self.stop.wait(1.0)
+            if v is not None:
+                self.samples.append(v)
+
+    def summary(self):
+        if not self.samples:
+            return {"samples": 0}
+        return {"samples": len(self.samples), "mean": sum(self.samples) / len(self.samples), "peak": max(self.samples),
+                "share_at_95_plus": sum(1 for v in self.samples if v >= 95) / len(self.samples)}
+
+
+def nats_varz():
+    out = {}
+    for i in (1, 2, 3):
+        r = sh("docker", "exec", f"{CLUSTER_PROJECT}-nats-{i}-1", "wget", "-qO-", "http://localhost:8222/varz", timeout=30)
+        try:
+            v = json.loads(r.stdout)
+            out[f"nats-{i}"] = {k: v.get(k, 0) for k in ("in_msgs", "out_msgs", "in_bytes", "out_bytes")}
+        except ValueError:
+            # A node that did not answer with JSON is left out; the run still reports the others.
+            print(f"nats-{i}: /varz returned no JSON; its message counts are left out", file=sys.stderr)
+    return out
+
+
+class ClusterSampler(threading.Thread):
+    def __init__(self, nodes):
+        super().__init__(daemon=True)
+        self.nodes = nodes
+        self.peaks = {n["name"]: {} for n in nodes}
+        self.stop = threading.Event()
+
+    def run(self):
+        while not self.stop.is_set():
+            for n in self.nodes:
+                p = self.peaks[n["name"]]
+                for k, v in scrape(n["base"]).items():
+                    if CLUSTER_SAMPLED.match(k):
+                        p[k] = max(v, p.get(k, float("-inf")))
+            self.stop.wait(1.0)
+
+
+def node_diff(before, after):
+    return {k: after[k] - before.get(k, 0.0) for k in after
+            if (COUNTED.match(k) or CLUSTER_COUNTED.match(k)) and after[k] - before.get(k, 0.0) != 0}
+
+
+def lease_by_outcome(counters):
+    """{outcome: {count, mean_ms}} from the eddi_cluster_lease_acquire_seconds_{count,sum} deltas."""
+    agg = {}
+    for k, v in counters.items():
+        m = re.match(r"eddi_cluster_lease_acquire_seconds_(count|sum)\{(.*)\}", k)
+        if not m:
+            continue
+        outcome = (re.search(r'outcome="([^"]*)"', m.group(2)) or [None, "?"])[1]
+        contended = (re.search(r'contended="([^"]*)"', m.group(2)) or [None, "?"])[1]
+        a = agg.setdefault(outcome + (" (contended)" if contended == "true" else ""), {"count": 0.0, "sum": 0.0})
+        a["count" if m.group(1) == "count" else "sum"] += v
+    return {k: {"count": a["count"], "mean_ms": 1000 * a["sum"] / a["count"] if a["count"] else None} for k, a in agg.items()}
+
+
+def k6_run(args, agent, vus, turns, name, nodes):
+    summary_path = os.path.join(RESULTS, f"{name}.k6.json")
+    if os.path.exists(summary_path):
+        os.remove(summary_path)
+    addrs = ",".join(f"{n['ip']}:7070" for n in nodes)
+    k6 = ["run", "--rm", "-e", f"AGENT_ID={agent}", "-e", "SCENARIO=steady", "-e", f"VUS={vus}", "-e", f"TURNS={turns}",
+          "-e", f"THINK_MS={args.think_ms}", "-e", f"OUT={name}.k6.json", "-e", f"NODE_ADDRS={addrs}",
+          "k6", "run", "--quiet", "/scripts/turns.js"]
+    t0 = time.time()
+    r = compose(args, "--profile", "k6", *k6, check=False, capture=False, timeout=args.k6_timeout,
+                on_timeout=lambda: compose(args, "--profile", "k6", "rm", "--stop", "--force", "k6", check=False, timeout=120))
+    elapsed = time.time() - t0
+    if r.returncode != 0:
+        raise SystemExit(f"k6 exited {r.returncode}; no result written for {name}")
+    with open(summary_path, encoding="utf-8") as f:
+        return json.load(f), elapsed
+
+
+def cmd_cluster_run(args):
+    use_cluster_stack()
+    state = load_state()
+    agent = state.get("agent")
+    if not agent:
+        raise SystemExit("no agent — run `cluster-up` first")
+    nodes = cluster_nodes()
+    vus = args.vus_per_node * len(nodes)
+    s, _, b = http("POST", WIREMOCK + "/__admin/settings", {"fixedDelay": args.delay_ms})
+    if s == 0 or s >= 300:
+        raise SystemExit(f"could not set the mock delay: {s} {b}")
+    label = f"{args.label}-{state.get('messaging')}-{len(nodes)}n"
+    os.makedirs(RESULTS, exist_ok=True)
+    if args.warmup_turns:
+        # JIT, connection pools and caches on every node; in the WS2 report a first run's p95 doubled.
+        print(f"{label}: warm-up {vus} conversations x {args.warmup_turns} turns", flush=True)
+        k6_run(args, agent, vus, args.warmup_turns, f"{label}-warmup", nodes)
+        time.sleep(3)
+    name = f"{label}-{vus}vu-{args.delay_ms}ms"
+    before = {n["name"]: scrape(n["base"]) for n in nodes}
+    db_before, nats_before = mongo_snapshot(), nats_varz()
+    sampler, stats, host = ClusterSampler(nodes), DockerStats(), HostCpu()
+    for t in (sampler, stats, host):
+        t.start()
+    summary, elapsed = k6_run(args, agent, vus, args.turns, name, nodes)
+    for t in (sampler, stats, host):
+        t.stop.set()
+    sampler.join(5)
+    stats.join(15)
+    host.join(15)
+    time.sleep(2)  # let the last turns' persistence settle before counting Mongo ops
+    after = {n["name"]: scrape(n["base"]) for n in nodes}
+    db_after, nats_after = mongo_snapshot(), nats_varz()
+    ok = metric(summary, "turns_ok", "count") or 0
+    duration_s = (summary.get("state", {}).get("testRunDurationMs") or elapsed * 1000) / 1000
+    mongo = mongo_diff(db_before, db_after)
+    per_node = []
+    for n in nodes:
+        tag = f"{{node:{n['ip']}:7070}}"
+        counters = node_diff(before[n["name"]], after[n["name"]])
+        turns_ok = metric(summary, "turns_ok" + tag, "count") or 0
+        per_node.append({
+            "name": n["name"], "ip": n["ip"], "turns_ok": turns_ok, "turns_per_s": turns_ok / duration_s if duration_s else None,
+            "latency_ms": {k: metric(summary, "turn_duration" + tag, k) for k in ["med", "p(95)", "p(99)", "max"]},
+            "errors": {k: metric(summary, k + tag, "count") or 0 for k in ["turns_503", "turns_409", "turns_5xx_other", "turns_app_error"]},
+            "lease_acquire": lease_by_outcome(counters),
+            "fence_rejected": sum(v for k, v in counters.items() if k.startswith("eddi_cluster_fence_rejected")),
+            "counters": counters, "peaks": sampler.peaks[n["name"]],
+        })
+    nats = {k: {f: nats_after[k][f] - nats_before.get(k, {}).get(f, 0) for f in ("in_msgs", "out_msgs", "in_bytes", "out_bytes")}
+            for k in nats_after}
+    total_ops = sum(mongo["opcounters"].values())
+    result = {
+        "name": name, "label": args.label, "nodes": len(nodes), "messaging": state.get("messaging"), "env": state.get("env"),
+        "image": state.get("image"), "app": state.get("app"),
+        "vus": vus, "vus_per_node": args.vus_per_node, "turns_per_vu": args.turns, "warmup_turns": args.warmup_turns,
+        "llm_delay_ms": args.delay_ms, "elapsed_s": round(elapsed, 1), "duration_s": round(duration_s, 1),
+        "turns_ok": ok, "turns_per_s": metric(summary, "turns_ok", "rate"),
+        "latency_ms": {k: metric(summary, "turn_duration", k) for k in ["med", "p(90)", "p(95)", "p(99)", "max"]},
+        "errors": {k: metric(summary, k, "count") or 0 for k in
+                   ["turns_503", "turns_429", "turns_408", "turns_409", "turns_5xx_other", "turns_other", "turns_no_response",
+                    "turns_app_error", "start_failed"]},
+        "mongo": mongo, "mongo_ops_total": total_ops, "mongo_ops_per_s": total_ops / duration_s if duration_s else None,
+        "mongo_ops_per_turn": {k: round(v / ok, 2) for k, v in mongo["opcounters"].items()} if ok else {},
+        "nats": nats, "nats_msgs_per_turn": (sum(v["in_msgs"] for v in nats.values()) / ok) if ok and nats else None,
+        "docker": stats.summary(), "host_cpu": host.summary(), "per_node": per_node,
+    }
+    with open(os.path.join(RESULTS, f"{name}.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2)
+    print(one_line(result) + f"; mongo {result['mongo_ops_per_s'] or 0:.0f} ops/s; containers {result['docker']['total_mean']:.0f}% CPU"
+          f" (other stacks {result['docker']['foreign_mean']:.0f}%); host CPU {result['host_cpu'].get('mean', 0):.0f}%", flush=True)
+    return result
+
+
+def cmd_cluster_matrix(args):
+    results = []
+    points = ([("in-memory", 1)] if args.baseline else []) + [("nats", int(n)) for n in args.nodes.split(",")]
+    for messaging, n in points:
+        a = argparse.Namespace(**vars(args))
+        a.nodes, a.messaging = n, messaging
+        for attempt in (1, 2):
+            cmd_cluster_down(a)
+            try:
+                cmd_cluster_up(a)
+                break
+            except SystemExit as e:  # a stack that did not come up is retried once, from scratch
+                if attempt == 2:
+                    raise
+                print(f"cluster-up failed ({e}); retrying once", flush=True)
+        results.append(cmd_cluster_run(a))
+        cluster_report(results, a)  # rewritten after every point, so an aborted sweep keeps what it measured
+    if not args.keep:
+        cmd_cluster_down(args)
+
+
+def cluster_report_from_files(args):
+    """Rebuild the report from the .json results of earlier cluster-run calls (`cluster-report a.json b.json`)."""
+    results = []
+    for p in args.files:
+        with open(p, encoding="utf-8") as f:
+            results.append(json.load(f))
+    cluster_report(results, args)
+
+
+def cpu(r, service):
+    """(sum of mean CPU %, sum of peak CPU %, containers) of one service of this stack."""
+    rows = [v for k, v in r["docker"]["containers"].items() if k.startswith(f"{CLUSTER_PROJECT}-{service}")]
+    return sum(v["mean"] for v in rows), sum(v["peak"] for v in rows), len(rows)
+
+
+def host_txt(r):
+    h = r.get("host_cpu") or {}
+    return f"{h['mean']:.0f} · {100 * h['share_at_95_plus']:.0f} %" if h.get("samples") else "-"
+
+
+def cluster_report(results, args):
+    today = datetime.date.today().isoformat()
+    path = getattr(args, "out", None) or os.path.join(RESULTS, f"cluster-scaling-{today}.md")
+    first = results[0]
+    env = first.get("env") or {}
+    ncpu = sh("docker", "info", "--format", "{{.NCPU}}").stdout.strip() or "?"
+    base1 = next((r for r in results if r["messaging"] == "nats" and r["nodes"] == 1), None)
+    t1 = (base1 or {}).get("turns_per_s") or None
+    lines = [f"# Cluster scaling — {today}", "",
+             (f"Scenario `steady`, {first['vus_per_node']} conversations per node, {first['turns_per_vu']} turns each (after a "
+             + f"{first.get('warmup_turns', 0)}-turn warm-up), mock LLM delay {first['llm_delay_ms']} ms. Per node: "
+             + f"`eddi.conversation.max-in-flight-turns={env.get('LOADTEST_MAX_IN_FLIGHT')}`, MongoDB `maxPoolSize={env.get('LOADTEST_MONGO_POOL')}`, "
+             + f"`{env.get('LOADTEST_JAVA_OPTS')}`, {env.get('LOADTEST_EDDI_CPUS')} CPUs, {env.get('LOADTEST_EDDI_MEMORY')}. "
+             + f"MongoDB {env.get('LOADTEST_MONGO_CPUS')} CPUs, NATS 3 x {env.get('LOADTEST_NATS_CPUS')} CPU (R3). "
+             + f"Docker host: {ncpu} CPUs. Image `{first.get('image') or 'labsai/eddi:6.5.0'}`"
+             + f"{' with the local build mounted' if first.get('app') else ''}; commit `{git_head()}`."), "",
+             ("| Run | Nodes | Messaging | Conv. | OK turns | Turns/s | Efficiency | p50 ms | p95 ms | p99 ms | 409 | 503 | other err. | "
+             + "Lease acquire: count · mean ms | Fence rejected | Mongo ops/turn | Mongo ops/s | Mongo CPU % mean/peak | "
+             + "NATS CPU % mean/peak (3 nodes) | NATS msgs/turn | EDDI CPU % mean per node | All containers CPU % mean (other stacks) | "
+             + "Host CPU % mean · time at >= 95 % |"),
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in results:
+        e, lat = r["errors"], r["latency_ms"]
+        other = sum(v for k, v in e.items() if k not in ("turns_409", "turns_503"))
+        eff = f"{r['turns_per_s'] / (r['nodes'] * t1):.2f}" if t1 and r["messaging"] == "nats" else "-"
+        leases = {}
+        for p in r["per_node"]:
+            for k, v in p["lease_acquire"].items():
+                a = leases.setdefault(k, [0.0, 0.0])
+                a[0] += v["count"]
+                a[1] += (v["mean_ms"] or 0) * v["count"]
+        lease_txt = "; ".join(f"{k} {c:.0f} · {s / c:.1f}" for k, (c, s) in sorted(leases.items()) if c) or "-"
+        mc, mp, _ = cpu(r, "mongodb")
+        nc, np_, _ = cpu(r, "nats")
+        ec, _, en = cpu(r, "eddi")
+        nm = r.get("nats_msgs_per_turn")
+        lines.append(f"| {r['label']} | {r['nodes']} | {r['messaging']} | {r['vus']} | {r['turns_ok']:.0f} | {r['turns_per_s'] or 0:.1f} | {eff} | "
+                     f"{fmt(lat['med'])} | {fmt(lat['p(95)'])} | {fmt(lat['p(99)'])} | {e['turns_409']:.0f} | {e['turns_503']:.0f} | "
+                     f"{other:.0f} | {lease_txt} | {sum(p['fence_rejected'] for p in r['per_node']):.0f} | "
+                     f"{sum(r['mongo_ops_per_turn'].values()):.1f} | {r['mongo_ops_per_s'] or 0:.0f} | {mc:.0f}/{mp:.0f} | "
+                     f"{nc:.0f}/{np_:.0f} | {'-' if nm is None or r['messaging'] != 'nats' else f'{nm:.1f}'} | "
+                     f"{ec / en if en else 0:.0f} | {r['docker']['total_mean']:.0f} ({r['docker']['foreign_mean']:.0f}) | {host_txt(r)} |")
+    lines += ["", "## Per node", ""]
+    for r in results:
+        lines += [f"**{r['nodes']} x {r['messaging']}** (`{r['label']}`)", "",
+                  "| Node | OK turns | Turns/s | p50 ms | p95 ms | p99 ms | 409 | 503 | Peak in-flight turns | Peak leases held | CPU % mean |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+        for p in r["per_node"]:
+            c = r["docker"]["containers"].get(p["name"], {}).get("mean", 0.0)
+            lines.append(f"| {p['name'].replace(CLUSTER_PROJECT + '-', '')} | {p['turns_ok']:.0f} | {p['turns_per_s'] or 0:.1f} | "
+                         f"{fmt(p['latency_ms']['med'])} | {fmt(p['latency_ms']['p(95)'])} | {fmt(p['latency_ms']['p(99)'])} | "
+                         f"{p['errors']['turns_409']:.0f} | {p['errors']['turns_503']:.0f} | "
+                         f"{peak(p, 'eddi_processing_conversation_count')} | {peak(p, 'eddi_cluster_lease_held')} | {c:.0f} |")
+        lines.append("")
+    lines += ["Raw numbers: the `.json` files next to this report (not committed).", ""]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"wrote {path}", flush=True)
+    return path
+
+
+def add_cluster_args(p):
+    p.add_argument("--app", help="local build to mount (default: target/quarkus-app of this checkout)")
+    p.add_argument("--no-app", action="store_true", help="run the image as published, without a local build")
+    p.add_argument("--image", default=None, help="runtime image (default labsai/eddi:6.5.0)")
+    p.add_argument("--messaging", default="nats", choices=["nats", "in-memory"],
+                   help="eddi.messaging.type; in-memory is the single-node baseline (cluster-up only)")
+    p.add_argument("--max-in-flight", type=int, default=400, help="eddi.conversation.max-in-flight-turns per node (default 400)")
+    p.add_argument("--mongo-pool", type=int, default=100, help="MongoDB maxPoolSize per node (default 100)")
+    p.add_argument("--java-opts", default="-Xmx1536m", help="heap per node (default -Xmx1536m)")
+    p.add_argument("--eddi-memory", default="2g", help="container memory per node (default 2g)")
+    p.add_argument("--eddi-cpus", type=float, default=2.0, help="CPUs per node (default 2)")
+    p.add_argument("--mongo-cpus", type=float, default=4.0, help="CPUs of the MongoDB container (default 4)")
+    p.add_argument("--nats-cpus", type=float, default=1.0, help="CPUs per NATS node (default 1, the docs' sizing)")
+
+
+def add_cluster_run_args(p):
+    p.add_argument("--vus-per-node", type=int, default=300, help="concurrent conversations per node (default 300)")
+    p.add_argument("--turns", type=int, default=20, help="turns per conversation (default 20)")
+    p.add_argument("--warmup-turns", type=int, default=3, help="turns per conversation of the discarded warm-up run (0: none)")
+    p.add_argument("--delay-ms", type=int, default=3000)
+    p.add_argument("--think-ms", type=int, default=0)
+    p.add_argument("--label", default="cluster")
+    p.add_argument("--k6-timeout", type=int, default=3600)
+
 
 def main():
     if hasattr(sys.stdout, "reconfigure"):
@@ -1227,8 +1537,6 @@ def main():
     up.add_argument("--no-app", action="store_true", help="run the image as published, without a local build")
     up.add_argument("--image", default=None, help=f"runtime image (default {DEFAULT_IMAGE})")
     up.add_argument("--db", default="mongo", choices=["mongo", "postgres"])
-    up.add_argument("--nodes", type=int, default=None, help="cluster topology: N EDDI nodes on NATS behind nginx")
-    up.add_argument("--cpus-per-node", type=float, default=None, help="CPU limit per EDDI node (default: none)")
     sub.add_parser("down")
 
     def common(p, delay=3000):
@@ -1237,12 +1545,11 @@ def main():
         p.add_argument("--k6-timeout", type=int, default=7200, help="seconds a load phase may take before the driver gives up")
         p.add_argument("--no-wait", action="store_true", help="do not wait for other load tests on this machine to finish")
 
-    for name in ["run", "matrix", "scaling"]:
+    for name in ["run", "matrix"]:
         p = sub.add_parser(name)
-        common(p, 0 if name == "scaling" else 3000)
-        if name != "scaling":
-            p.add_argument("--scenario", default="steady", choices=["steady", "burst", "same-conversation", "long-conversation"])
-        p.add_argument("--vus", default={"run": "50", "matrix": "50,200,500", "scaling": "300"}[name])
+        common(p, 3000)
+        p.add_argument("--scenario", default="steady", choices=["steady", "burst", "same-conversation", "long-conversation"])
+        p.add_argument("--vus", default={"run": "50", "matrix": "50,200,500"}[name])
         p.add_argument("--turns", type=int, default=None, help="turns per conversation (default 10; long-conversation 200)")
         p.add_argument("--think-ms", type=int, default=0)
         p.add_argument("--ramp", default="30s")
@@ -1251,10 +1558,7 @@ def main():
         p.add_argument("--retry-503", type=int, default=0, metavar="N",
                        help="honour 503 + Retry-After: back off and resend the turn, at most N attempts (default 0: off)")
         p.add_argument("--retry-cap-ms", type=int, default=10000, help="longest Retry-After the client waits")
-        p.add_argument("--warmup-turns", type=int, default=3 if name == "scaling" else 0,
-                       help="turns per conversation run first and not recorded")
-        if name == "scaling":
-            p.add_argument("--nodes", default="1,2,4")
+        p.add_argument("--warmup-turns", type=int, default=0, help="turns per conversation run first and not recorded")
     st = sub.add_parser("stream")
     common(st, 0)
     st.add_argument("--vus", type=int, default=50)
@@ -1280,13 +1584,29 @@ def main():
     rp.add_argument("--label", required=True)
     rp.add_argument("--out", help="output file (default results/<label>-report.md)")
     rp.add_argument("--laptop", action="store_true", help="mark the report as a non-publishable laptop run")
+    cu = sub.add_parser("cluster-up", help="start N replicas behind the balancer and deploy the agent")
+    cu.add_argument("--nodes", type=int, default=1)
+    add_cluster_args(cu)
+    sub.add_parser("cluster-down")
+    cr = sub.add_parser("cluster-run", help="one steady run against the running cluster")
+    add_cluster_run_args(cr)
+    cm = sub.add_parser("cluster-matrix", help="fresh cluster per node count, one run each, Markdown report")
+    cm.add_argument("--nodes", default="1,2,4,8", help="comma-separated node counts (default 1,2,4,8)")
+    cm.add_argument("--baseline", action="store_true", help="also measure one in-memory single node first")
+    cm.add_argument("--keep", action="store_true", help="leave the last cluster running")
+    add_cluster_args(cm)
+    add_cluster_run_args(cm)
+    cp = sub.add_parser("cluster-report", help="rebuild the Markdown report from cluster-run .json results")
+    cp.add_argument("files", nargs="+")
+    cp.add_argument("--out", help="report path (default results/cluster-scaling-<date>.md)")
     args = ap.parse_args()
-    if args.cmd in ("run", "matrix", "scaling") and args.turns is None:
-        args.turns = 200 if getattr(args, "scenario", "steady") == "long-conversation" else (20 if args.cmd == "scaling" else 10)
-    if args.cmd in ("run", "scaling"):
+    if args.cmd in ("run", "matrix") and args.turns is None:
+        args.turns = 200 if args.scenario == "long-conversation" else 10
+    if args.cmd == "run":
         args.vus = int(args.vus)
     {"up": cmd_up, "down": cmd_down, "run": cmd_run, "matrix": cmd_matrix, "stream": cmd_stream, "group": cmd_group,
-     "scaling": cmd_scaling, "gate": cmd_gate, "report": cmd_report}[args.cmd](args)
+     "gate": cmd_gate, "report": cmd_report, "cluster-up": cmd_cluster_up, "cluster-down": cmd_cluster_down,
+     "cluster-run": cmd_cluster_run, "cluster-matrix": cmd_cluster_matrix, "cluster-report": cluster_report_from_files}[args.cmd](args)
 
 
 if __name__ == "__main__":

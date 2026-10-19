@@ -23,11 +23,25 @@ services:
       # HighValueSurfaceGuard refuses to boot without these while OIDC is off.
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=${EDDI_MCP_ALLOW_UNAUTHENTICATED:-true}"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=${EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED:-true}"
+      # While authentication is off EDDI answers only requests addressed to
+      # localhost, an IP address, host.docker.internal (and its Podman/gateway
+      # siblings) or a host listed here (UnauthenticatedRequestGuard
+      # — a DNS-rebinding page arrives with its own name), and refuses cross-site
+      # POST/PUT/PATCH/DELETE. `eddi` is this service's name on the compose
+      # network, which Prometheus (docker-compose.monitoring.yml) and other
+      # containers use. Add the name you browse to when it is not localhost.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
       - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
       # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Every in-flight turn can hold an LLM socket on top of the database pool, NATS and
+    # client connections; the runtime default (often 1024) runs out under load.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     # EDDI ships unauthenticated by default (the escape hatch above), so it must
     # NOT be reachable from off-box out of the box. MongoDB is already bound to
     # 127.0.0.1 below; EDDI is bound the same way here. To expose it on the LAN
@@ -37,6 +51,9 @@ services:
     # explicit, deliberate choice rather than the default.
     ports:
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_PORT:-7070}:7070"
+      # 7443 is Quarkus' HTTPS port. Nothing listens on it until a TLS certificate
+      # is configured (docs/security.md, "TLS Directly in Quarkus") — the mapping is
+      # here for that case and refuses connections otherwise.
       - "${EDDI_BIND:-127.0.0.1}:${EDDI_HTTPS_PORT:-7443}:7443"
       # - "127.0.0.1:5005:5005"
     depends_on:
@@ -107,7 +124,10 @@ services:
     volumes:
       - mongodb-db:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "-u", "${MONGO_INITDB_ROOT_USERNAME:-eddi}", "-p", "${MONGO_INITDB_ROOT_PASSWORD:-changeme}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      # `ping` needs no authentication, so the probe carries no credentials: a
+      # password here is interpolated into the container's healthcheck command,
+      # where `docker inspect` and the host's process list show it.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 5

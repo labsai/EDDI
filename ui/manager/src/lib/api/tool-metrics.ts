@@ -1,4 +1,5 @@
 import { api, isApiError } from "../api-client";
+import { seg } from "./path-segment";
 
 // ==================== Types ====================
 
@@ -27,7 +28,7 @@ export async function getConversationCosts(
 ): Promise<ConversationCosts | null> {
   try {
     return await api.get<ConversationCosts>(
-      `${TOOLS_BASE}/costs/conversation/${conversationId}`,
+      `${TOOLS_BASE}/costs/conversation/${seg(conversationId)}`,
     );
   } catch (err) {
     // Backend returns 404 when no cost data exists for the conversation yet

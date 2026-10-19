@@ -10,7 +10,7 @@ k6 / SSE driver ──► EDDI :7370 ──► WireMock "LLM" :18370 (fixed dela
  (VUs = conversations)   │
                       MongoDB :27370 or PostgreSQL :54370
 
-with --nodes N:   k6 ──► nginx :7380 ──► eddi, eddi-2 … eddi-N (:7370 …) ──► NATS JetStream
+cluster-*:        k6 ──► nginx :7570 ──► N replicas (:7581–7599) ──► NATS JetStream (R3), MongoDB :27570
 ```
 
 EDDI runs the **published** `labsai/eddi` image with this checkout's `target/quarkus-app` mounted over
@@ -38,17 +38,17 @@ python scripts/loadtest/loadtest.py down
 
 | Command | What it does |
 |---|---|
-| `up [--db mongo\|postgres] [--nodes N] [--cpus-per-node C]` | Starts the stack and deploys one agent. `--no-app` measures the image as published; `--image labsai/eddi:<tag>` picks another runtime |
+| `up [--db mongo\|postgres]` | Starts the stack and deploys one agent. `--no-app` measures the image as published; `--image labsai/eddi:<tag>` picks another runtime |
 | `run`, `matrix` | Turns: one scenario, or `steady` at several VU counts plus a Markdown table |
 | `stream` | Time to first token over SSE, native and `/v1` |
 | `group` | Multi-agent group discussions |
-| `scaling --nodes 1,2,4` | The steady scenario on 1, 2 and 4 nodes; needs `up --nodes …` first |
+| `cluster-matrix --nodes 1,2,4,8` | Cluster scaling: a fresh N-replica stack per point, one steady run each — see [Cluster mode](#cluster-mode-n-replicas) |
 | `gate` | The CI regression gate: database operations per turn against committed ceilings |
 | `report --label L [--laptop]` | Every result of a label as one benchmark page |
 | `down` | Removes the stack and its volumes |
 
 Ports move with `LOADTEST_EDDI_PORT`, `LOADTEST_WIREMOCK_PORT`, `LOADTEST_MONGO_PORT`,
-`LOADTEST_POSTGRES_PORT`, `LOADTEST_LB_PORT`; the heap with `LOADTEST_JAVA_OPTS` (default `-Xmx2g`),
+`LOADTEST_POSTGRES_PORT`; the heap with `LOADTEST_JAVA_OPTS` (default `-Xmx2g`),
 the container limit with `LOADTEST_EDDI_MEMORY` (default `3g`). Keep them set for every command of a
 session: `loadtest.py` reads them on each call.
 
@@ -59,13 +59,13 @@ and never stop a stack that is not yours:
 
 ```bash
 export COMPOSE_PROJECT_NAME=eddi-loadtest-bench LOADTEST_EDDI_PORT=7470 LOADTEST_WIREMOCK_PORT=18470 \
-       LOADTEST_MONGO_PORT=27470 LOADTEST_POSTGRES_PORT=54470 LOADTEST_LB_PORT=7480
+       LOADTEST_MONGO_PORT=27470 LOADTEST_POSTGRES_PORT=54470
 ```
 
 Before each measurement the driver waits while another stack's k6 or SSE driver container runs
 (`--no-wait` skips that), and it watches during the run: a result measured while one appeared
-records it in `contended_by`, and the report marks the row with ⚠. With `--nodes N`, node *i* listens
-on `LOADTEST_EDDI_PORT + i - 1`, so keep that range free too.
+records it in `contended_by`, and the report marks the row with ⚠. The cluster stack has its own
+ports (see [Cluster mode](#cluster-mode-n-replicas)) and reports other stacks' CPU instead.
 
 ## Scenarios
 
@@ -144,23 +144,10 @@ one LLM call — plus discussion latency, turns per discussion and database oper
 
 ### Cluster scaling
 
-```bash
-python scripts/loadtest/loadtest.py up --nodes 1 --cpus-per-node 2
-python scripts/loadtest/loadtest.py scaling --label baseline --nodes 1,2,4 --vus 300 --turns 20 --delay-ms 0
-```
-
-The topology of the [cluster demo](../cluster-demo/README.md): EDDI nodes on
-`eddi.messaging.type=nats` behind an nginx round robin with no affinity, so consecutive turns of one
-conversation land on different nodes. One NATS JetStream server (R1) instead of three: this measures
-throughput, not NATS failover. Nodes 2..N are copies of the fully merged `eddi` service (same image,
-build, database and limits) written to `results/.cluster-nodes.json`, next to the generated nginx
-config. Each step resizes the cluster, waits until every node serves the agent, runs
-`--warmup-turns` (default 3) and then the measured steady run through nginx.
-
-Scaling efficiency = turns/s ÷ (nodes × single-node turns/s). It only means something when a node
-is the bottleneck: use `--delay-ms 0` (or small) and enough VUs to saturate one node, and give every
-node its own CPU budget with `--cpus-per-node`, or the nodes just share one machine's CPUs. Every node
-shares one database, which becomes the next bottleneck.
+Scaling efficiency is measured by the cluster stack: `cluster-matrix --nodes 1,2,4,8` brings up a
+fresh N-replica stack per point and reports turns/s, per-node latency and the efficiency
+`turns/s(N) / (N × turns/s(1))` — see [Cluster mode](#cluster-mode-n-replicas) below. It writes its
+own report (`results/cluster-scaling-<date>.md`), not part of `report --label`.
 
 ### PostgreSQL
 
@@ -207,12 +194,52 @@ Two things the workflow depends on:
 
 ## Benchmark report
 
-`report --label L` collects every result of label `L` (turns, streaming, scaling, group, gate) into
+`report --label L` collects every result of label `L` (turns, streaming, group, gate) into
 `results/L-report.md`: hardware (CPU model, CPUs and memory visible to Docker, host OS), versions
 (image digests, the build's commit and branch, the JVM), the method, every number, and the exact
 commands that produced them — including the `LOADTEST_*` variables in effect. `--laptop` marks the
 page as not publishable. [`results/laptop-2026-10-17-report.md`](results/laptop-2026-10-17-report.md)
-is a sample from a developer laptop.
+is a sample from a developer laptop; its scaling section was measured with an earlier `up --nodes` /
+`scaling` path of this harness, which the cluster stack has since replaced.
+
+## Cluster mode (N replicas)
+
+`docker-compose.cluster.yml` is the topology of the repository's `docker-compose.cluster.yml` and
+the [cluster demo](../cluster-demo/README.md) — N EDDI replicas with `eddi.messaging.type=nats`, a
+three-node NATS JetStream cluster (R3), one MongoDB, an nginx round-robin balancer with no affinity —
+plus the same WireMock LLM and k6. Its own ports (balancer `7570`, replicas `7581–7599` (one port each; spares in case another stack takes one), MongoDB
+`27570`, WireMock `18570`; moved with `LOADTEST_CLUSTER_PORT`, `LOADTEST_CLUSTER_NODE_PORTS`,
+`LOADTEST_CLUSTER_MONGO_PORT`, `LOADTEST_CLUSTER_WIREMOCK_PORT`), so it can run next to the single-node stack.
+
+```bash
+./mvnw package -DskipTests -DskipUi=true
+python scripts/loadtest/loadtest.py cluster-matrix --baseline --nodes 1,2,4,8 --vus-per-node 300 --turns 20 --delay-ms 3000
+```
+
+Each point gets a fresh stack (empty database), a discarded warm-up run, then one `steady` run with
+`--vus-per-node` × N conversations, so the offered load grows with the cluster. `--baseline` adds a
+single node with `eddi.messaging.type=in-memory` first, which is the cluster-mode overhead at N=1.
+`cluster-up --nodes N` / `cluster-run` / `cluster-down` run one point by hand, and
+`cluster-report results/*.json` rebuilds the report from earlier runs.
+
+What decides whether two points are comparable is set explicitly, per node, never derived from the
+heap: `--max-in-flight` (`eddi.conversation.max-in-flight-turns`, default 400), `--mongo-pool`
+(`maxPoolSize`, default 100), `--java-opts` (`-Xmx1536m`), `--eddi-memory` (2g) and `--eddi-cpus`
+(2); MongoDB gets `--mongo-cpus` (4), each NATS node `--nats-cpus` (1, the sizing
+[docs/clustering.md](../../docs/clustering.md#sizing) calls ample).
+
+The balancer adds `X-Loadtest-Upstream` to every response, k6 tags each turn with it, and the driver
+reads per-node turns/s, p50/p95/p99, 409 and 503 from the k6 summary. From every replica's
+`/q/metrics` it takes `eddi_cluster_lease_acquire_seconds` by outcome, `eddi_cluster_fence_rejected_total`,
+peak in-flight turns and leases held; from MongoDB the opcounters (per turn and per second on the
+primary); from NATS `/varz` the messages per turn; and from `docker stats` the CPU of every container
+on the host — other stacks' too, because on one machine a parallel load test is part of why the host
+saturates. The report is `results/cluster-scaling-<date>.md`, with a scaling-efficiency column
+`turns/s(N) / (N × turns/s(1))`.
+
+One Docker host is not N machines: every replica, MongoDB, NATS, nginx and k6 share its CPUs, so a
+falling efficiency can be the host as easily as the database. Read the CPU columns before the
+efficiency one.
 
 ## What a run records
 

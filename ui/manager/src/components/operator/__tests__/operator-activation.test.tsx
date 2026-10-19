@@ -494,6 +494,7 @@ describe("OperatorActivation", () => {
         initial: { ...defaultOperatorConfig("Body."), scope: "read_only", agentId: "op-1", version: 1 },
       });
       expect(screen.getByTestId("operator-scope-read_only")).toBeChecked();
+      await userEvent.click(screen.getByTestId("operator-stored-prompt-confirm-checkbox"));
       await userEvent.click(screen.getByTestId("operator-activate"));
       expect(onActivate.mock.calls[0]![0]).toMatchObject({ scope: "read_only" });
     });

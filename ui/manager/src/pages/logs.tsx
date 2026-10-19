@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -567,6 +568,27 @@ function HistoryTab() {
     [patchParams]
   );
 
+  // The instance box is typed into; the URL (and so the query) follows once
+  // typing pauses, not on every keystroke.
+  const [instanceDraft, setInstanceDraft] = useState(filters.instanceId ?? "");
+  const debouncedInstance = useDebounce(instanceDraft.trim(), 300);
+  useEffect(() => {
+    if (debouncedInstance !== (filters.instanceId ?? "")) {
+      updateFilter("instanceId", debouncedInstance);
+    }
+    // Only a settled draft writes to the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedInstance]);
+  // ...and the URL can change on its own (back/forward): show that value.
+  // Our own write always equals the settled draft, so this never fires for it,
+  // and it never overwrites text that has not settled into the URL yet.
+  useEffect(() => {
+    const fromUrl = filters.instanceId ?? "";
+    if (fromUrl !== debouncedInstance) setInstanceDraft(fromUrl);
+    // Only a URL change is an outside change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.instanceId]);
+
   // Reset conversation when agent changes
   const handleAgentChange = useCallback(
     (v: string) => {
@@ -632,8 +654,8 @@ function HistoryTab() {
         <input
           type="text"
           placeholder={t("logs.filterInstance", "Instance ID...")}
-          value={filters.instanceId ?? ""}
-          onChange={(e) => updateFilter("instanceId", e.target.value)}
+          value={instanceDraft}
+          onChange={(e) => setInstanceDraft(e.target.value)}
           className="w-36 rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           data-testid="history-filter-instance"
         />
@@ -891,7 +913,7 @@ function LogRow({
             (no hover there), so it is reachable without a mouse. */}
         <button
           onClick={handleCopy}
-          className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+          className="reveal-on-touch shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
           title={t("logs.copyEntry", "Copy log entry")}
           aria-label={t("logs.copyEntry", "Copy log entry")}
           data-testid="copy-log-btn"

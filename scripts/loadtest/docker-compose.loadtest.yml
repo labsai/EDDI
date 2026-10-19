@@ -4,8 +4,8 @@
 #
 # This file holds what every topology shares: the mock LLM, EDDI and the load generators. The
 # database comes from docker-compose.mongo.yml or docker-compose.postgres.yml, a local build from
-# docker-compose.app.yml, and the NATS cluster topology from docker-compose.cluster.yml;
-# loadtest.py picks the files (`up --db`, `--no-app`, `--nodes`).
+# docker-compose.app.yml; loadtest.py picks the files (`up --db`, `--no-app`). The N-replica cluster is
+# its own stack, docker-compose.cluster.yml (`cluster-*` commands).
 #
 # COMPOSE_PROJECT_NAME overrides `name`, so two stacks on one machine stay apart when each sets
 # its own project name and its own LOADTEST_*_PORT values.
@@ -48,7 +48,7 @@ services:
       - "EDDI_OPENAI_COMPAT_API_KEY=sk-loadtest-openai-compat-0123456789"
       - "EDDI_OPENAI_COMPAT_MAX_CONCURRENT_REQUESTS=${LOADTEST_OPENAI_MAX_CONCURRENT:-2000}"
     mem_limit: ${LOADTEST_EDDI_MEMORY:-3g}
-    # 0 = no CPU limit. The scaling scenario sets one per node so that N nodes get N times the CPU.
+    # 0 = no CPU limit.
     cpus: ${LOADTEST_EDDI_CPUS:-0}
     ports:
       - "127.0.0.1:${LOADTEST_EDDI_PORT:-7370}:7070"

@@ -82,6 +82,10 @@ import { useLeaveConfirm } from "@/components/workforce/wizard/use-leave-confirm
 import { DurationField } from "@/components/shared/duration-field";
 import { BackLink } from "@/components/shared/back-link";
 import { summarizeRoles } from "@/lib/role-labels";
+import { mapWithConcurrency } from "@/lib/concurrency";
+
+/** New agents provisioned at once by the wizard: faster than one by one, gentle on the backend. */
+const MEMBER_SETUP_CONCURRENCY = 3;
 
 /* ================================================================
    Types & Constants
@@ -506,51 +510,51 @@ export function GroupWizardPage() {
       persistProgress();
     };
 
-    // --- Phase 1: Auto-create all uncreated "new" agents ---
-    const uncreatedMembers = updatedMembers
-      .map((m, i) => ({ slot: m, index: i }))
+    // --- Phase 1: Auto-create all uncreated "new" agents (and the moderator) ---
+    // A few at a time rather than one after another. Every agent that WAS
+    // created is written back before a failure is reported: provisioning is
+    // not idempotent, so a retry must know which slots already have one.
+    type Creation = { kind: "member"; slot: MemberSlot; index: number } | { kind: "moderator"; slot: MemberSlot };
+    const creations: Creation[] = updatedMembers
+      .map((slot, index): Creation => ({ kind: "member", slot, index }))
       .filter(({ slot }) => needsAgentCreation(slot));
-
-    for (const { slot, index } of uncreatedMembers) {
-      setCreationProgress(t("groupWizard.creatingSlot", { name: slot.displayName }));
-      try {
-        const result = await setupAgent(
-          buildSetupRequest(
-            slot,
-            `${state.name} — ${slot.displayName}`.trim(),
-            slot.systemPrompt || defaultMemberPrompt(t, slot.displayName, slot.role ?? null),
-          ),
-        );
-        const version = await resolveSetupVersion(result);
-        updatedMembers[index] = {
-          ...updatedMembers[index]!,
-          agentId: result.agentId,
-          created: true,
-          pendingDeploy: { version },
-        };
-      } catch (err) {
-        abort(err);
-        return; // Stop on first failure
-      }
+    if (updatedModerator && needsAgentCreation(updatedModerator)) {
+      creations.push({ kind: "moderator", slot: updatedModerator });
     }
 
-    // Auto-create moderator if needed
-    if (updatedModerator && needsAgentCreation(updatedModerator)) {
-      setCreationProgress(t("groupWizard.creatingModerator"));
+    const failures = await mapWithConcurrency(creations, MEMBER_SETUP_CONCURRENCY, async (job) => {
+      setCreationProgress(
+        job.kind === "moderator"
+          ? t("groupWizard.creatingModerator")
+          : t("groupWizard.creatingSlot", { name: job.slot.displayName }),
+      );
       try {
         const result = await setupAgent(
-          buildSetupRequest(
-            updatedModerator,
-            `${state.name} — ${t("groupWizard.moderator")}`.trim(),
-            updatedModerator.systemPrompt || defaultModeratorPrompt(t),
-          ),
+          job.kind === "moderator"
+            ? buildSetupRequest(
+                job.slot,
+                `${state.name} — ${t("groupWizard.moderator")}`.trim(),
+                job.slot.systemPrompt || defaultModeratorPrompt(t),
+              )
+            : buildSetupRequest(
+                job.slot,
+                `${state.name} — ${job.slot.displayName}`.trim(),
+                job.slot.systemPrompt || defaultMemberPrompt(t, job.slot.displayName, job.slot.role ?? null),
+              ),
         );
         const version = await resolveSetupVersion(result);
-        updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true, pendingDeploy: { version } };
+        const created = { agentId: result.agentId, created: true, pendingDeploy: { version } };
+        if (job.kind === "moderator") updatedModerator = { ...updatedModerator!, ...created };
+        else updatedMembers[job.index] = { ...updatedMembers[job.index]!, ...created };
+        return null;
       } catch (err) {
-        abort(err);
-        return;
+        return err;
       }
+    });
+    const failed = failures.findIndex((f) => f !== null);
+    if (failed >= 0) {
+      abort(failures[failed]);
+      return; // Stop on the first failure; the created ones are kept
     }
 
     // --- Phase 1b: Deploy every created-but-not-live agent, grants asked ONCE ---
@@ -829,7 +833,7 @@ export function GroupWizardPage() {
       )}
 
       {/* Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
           disabled={currentStep === 0}
@@ -841,7 +845,7 @@ export function GroupWizardPage() {
           )}
           data-testid="group-wizard-back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("common.back", "Back")}
         </button>
 
@@ -854,7 +858,7 @@ export function GroupWizardPage() {
             data-testid="group-wizard-next"
           >
             {t("common.next", "Next")}
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 rtl:rotate-180" />
           </button>
         ) : (
           <button

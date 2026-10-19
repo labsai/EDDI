@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
 import { getDescriptorVersions } from "./descriptors";
+import { seg } from "./path-segment";
 
 export { parseResourceUri } from "./agents";
 export type { AgentDescriptor as ResourceDescriptor };
@@ -124,7 +125,7 @@ export function getResource<T = unknown>(
   id: string,
   version: number
 ): Promise<T> {
-  return api.get<T>(`${basePath(rt)}/${id}?version=${version}`);
+  return api.get<T>(`${basePath(rt)}/${seg(id)}?version=${version}`);
 }
 
 export function createResource(
@@ -140,7 +141,7 @@ export function updateResource(
   version: number,
   body: unknown
 ): Promise<{ location: string }> {
-  return api.put(`${basePath(rt)}/${id}?version=${version}`, body);
+  return api.put(`${basePath(rt)}/${seg(id)}?version=${version}`, body);
 }
 
 export function deleteResource(
@@ -151,7 +152,7 @@ export function deleteResource(
 ): Promise<void> {
   const params = new URLSearchParams({ version: String(version) });
   if (options?.permanent) params.set("permanent", "true");
-  return api.delete(`${basePath(rt)}/${id}?${params}`);
+  return api.delete(`${basePath(rt)}/${seg(id)}?${params}`);
 }
 
 export function duplicateResource(
@@ -160,7 +161,7 @@ export function duplicateResource(
   version: number
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `${basePath(rt)}/${id}?version=${version}`
+    `${basePath(rt)}/${seg(id)}?version=${version}`
   );
 }
 
@@ -181,7 +182,7 @@ export async function getResourceVersions(
   let latest: number | null = null;
   try {
     const currentVersion = await api.get<number>(
-      `${basePath(rt)}/${encodeURIComponent(id)}/currentversion`
+      `${basePath(rt)}/${seg(id)}/currentversion`
     );
     latest = currentVersion ?? null;
   } catch {

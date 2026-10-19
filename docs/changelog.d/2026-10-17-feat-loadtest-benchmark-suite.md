@@ -29,10 +29,12 @@ those numbers can be published reproducibly and regressions caught. Nothing unde
   were not retried, so starts now back off too.
 - **Overhead as a first-class metric**: every turn run reports `turn_overhead` (latency minus the
   mock's delay) at p50/p95/p99.
-- **`up --nodes N` and `scaling --nodes 1,2,4`**: the cluster-demo topology (NATS JetStream,
-  `eddi.messaging.type=nats`, nginx round robin without affinity); nodes 2..N are generated as copies
-  of the fully merged `eddi` service, `--cpus-per-node` gives each node its own CPU budget. Reports
-  speedup and scaling efficiency.
+- **Cluster scaling** is `main`'s cluster mode ([labsai/EDDI#1092](https://github.com/labsai/EDDI/pull/1092),
+  `cluster-matrix`), which landed while this branch was open. This branch first had its own
+  `up --nodes N` / `scaling` overlay for the same purpose; merging `main` removed it rather than keep two
+  cluster paths (`cluster-*` is a full stack with a three-node NATS cluster and per-node metrics). The
+  laptop sample's scaling section was measured with the removed path; `report` no longer renders
+  scaling, `cluster-matrix` writes its own `results/cluster-scaling-<date>.md`.
 - **`group`**: N-member group discussions (`POST /groups/{id}/conversations`, k6
   [`groups.js`](../../scripts/loadtest/k6/groups.js)); member turns per second across members.
 - **`gate`** and [`.github/workflows/loadtest-db-ops.yml`](../../.github/workflows/loadtest-db-ops.yml)
@@ -61,7 +63,6 @@ those numbers can be published reproducibly and regressions caught. Nothing unde
   by a loose total-query ceiling (5 ops of headroom). Measured: 3 runs on this laptop agreed to
   0.01 per turn on every per-collection counter, and the first GitHub-runner run matched them exactly.
 - **Ceilings in git, not the Actions cache**, which evicts entries at its size cap.
-- **One NATS server (R1)** in the scaling topology: it measures throughput, not NATS failover.
 
 ### Measured (laptop, not publishable)
 

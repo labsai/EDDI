@@ -17,6 +17,7 @@ import {
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import { markOperatorDescriptor } from "./operator-marker";
+import { seg } from "./path-segment";
 import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import {
   buildEndpointFilter,
@@ -690,7 +691,7 @@ export async function resolveAgentVersion(
     if (parsed != null) return parsed;
   }
   const current = await api.get<number>(
-    `/agentstore/agents/${result.agentId}/currentversion`,
+    `/agentstore/agents/${seg(result.agentId)}/currentversion`,
   );
   return current ?? 1;
 }
@@ -844,7 +845,7 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
 export async function verifyGateInstalled(agentId: string): Promise<GateVerificationResult> {
   let currentVersion: number;
   try {
-    currentVersion = (await api.get<number>(`/agentstore/agents/${agentId}/currentversion`)) ?? 0;
+    currentVersion = (await api.get<number>(`/agentstore/agents/${seg(agentId)}/currentversion`)) ?? 0;
   } catch (error) {
     return {
       verified: false,

@@ -163,3 +163,36 @@ describe("useHitlPolling", () => {
     expect(calls.count).toBe(0);
   });
 });
+
+describe("useHitlPolling in a hidden tab", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    setVisibility("visible");
+  });
+
+  function setVisibility(state: "visible" | "hidden") {
+    Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+  const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+  it("stops polling while hidden and reads at once when the tab comes back", async () => {
+    const calls = mockStatuses(["AWAITING_HUMAN"]);
+    const unmount = mount(vi.fn(async () => true)).unmount;
+    await advance(0);
+    expect(calls.count).toBe(1);
+
+    setVisibility("hidden");
+    // The poll that was already scheduled may still run once; after that, nothing.
+    await advance(10 * 60_000);
+    const whileHidden = calls.count;
+    await advance(10 * 60_000);
+    expect(calls.count).toBe(whileHidden);
+
+    await act(async () => setVisibility("visible"));
+    await advance(0);
+    expect(calls.count).toBe(whileHidden + 1);
+    unmount();
+  });
+});

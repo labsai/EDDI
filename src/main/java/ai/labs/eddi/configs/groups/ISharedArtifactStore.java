@@ -68,6 +68,14 @@ public interface ISharedArtifactStore {
     long deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException;
 
     /**
+     * GDPR export (Art. 15/20): the artifacts whose {@code ownerUserId} is exactly
+     * {@code userId}, newest first, at most {@code limit} of them. Same
+     * narrow-then-recheck rule as {@link #deleteAllForUser}. A caller that needs to
+     * know whether the cap bit asks for one more than it will keep.
+     */
+    List<SharedArtifact> listAllForUser(String userId, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Unchecked "deleted concurrently" — thrown by {@link #updateIfVersion} so CAS
      * call sites can distinguish a retryable conflict (409) from a gone document
      * (404) without a checked-exception cascade.

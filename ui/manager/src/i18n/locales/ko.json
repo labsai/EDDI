@@ -2890,6 +2890,7 @@
     "question": "질문",
     "readyToDiscuss": "토론 준비 완료",
     "responding": "응답 중…",
+    "usingTool": "{{tool}} 사용 중…",
     "reviewMemberRoster": "멤버 명단",
     "reviewMembers": "멤버",
     "reviewModerator": "모더레이터",
@@ -3527,7 +3528,7 @@
     "intent": "인텐트",
     "deployments": "에이전트 배포",
     "addDeployment": "에이전트 추가",
-    "agents": "에이전트",
+    "intentPlaceholder": "예: booking_request",
     "empty": "아직 트리거가 설정되지 않았습니다",
     "created": "트리거가 생성되었습니다",
     "updated": "트리거가 업데이트되었습니다",
@@ -3980,7 +3981,10 @@
     "targetType": "유형",
     "triggerHint": "사용자가 \"키워드: 메시지\"를 입력하면 이 대상으로 라우팅됩니다",
     "triggerKeywords": "트리거 키워드",
-    "triggers": "트리거",
+    "targetFallback": "대상 {{number}}",
+    "untitledChannel": "제목 없는 채널",
+    "triggerCount_one": "트리거 {{count}}개",
+    "triggerCount_other": "트리거 {{count}}개",
     "type": "채널 유형",
     "webhookHint": "이 URL을 Slack 앱의 Event Subscriptions → Request URL 필드에 붙여넣으세요.",
     "webhookUrl": "Webhook URL",
@@ -4952,6 +4956,7 @@
       "action": "활성화"
     },
     "activation": {
+      "storedPromptConfirm": "이 지침은 저장된 구성에서 가져온 것으로, 플랫폼 설정을 편집할 수 있는 사람이 변경했을 수 있습니다. 위 내용을 읽었으며 설치하겠습니다.",
       "title": "플랫폼 오퍼레이터 활성화",
       "subtitle": "오퍼레이터를 구동할 모델을 고르고, 지침을 확인한 뒤 배포하세요.",
       "modelStep": "모델",
@@ -5054,7 +5059,11 @@
       "gateUnverifiedHelp": "이 에이전트 문서에서 승인 게이트를 확인할 수 없습니다.",
       "agentId": "에이전트",
       "platformBaseUrl": "플랫폼 호출 주소",
-      "platformBaseUrlUnknown": "기록되지 않음"
+      "platformBaseUrlUnknown": "기록되지 않음",
+      "unregister": "오퍼레이터 등록 해제",
+      "unregisterConfirmTitle": "플랫폼 오퍼레이터의 등록을 해제할까요?",
+      "unregisterConfirmBody": "저장된 오퍼레이터 설정만 제거됩니다. 등록된 에이전트가 이 Manager가 설정한 오퍼레이터인지 확인할 수 없어 배포, 배포 해제, 삭제는 하지 않습니다. 에이전트 화면에서 확인하세요.",
+      "unverifiedActions": "이 에이전트가 Manager가 설정한 오퍼레이터인지 확인할 수 없어 이 화면에서는 연결 확인, 배포 해제, 삭제를 하지 않습니다. '다시 설정'은 새 오퍼레이터를 만들고 이 에이전트는 그대로 둡니다."
     },
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
@@ -5144,7 +5153,8 @@
       "activatedChecking": "플랫폼 오퍼레이터 활성화됨. 연결 확인이 백그라운드에서 실행 중입니다.",
       "writeProbeVerified": "쓰기 액세스 검증됨 — 실제 게이트 적용 쓰기가 승인을 위해 일시 중지되었습니다.",
       "writeProbeFailed": "승인 게이트가 작동하지 않았습니다 — 오퍼레이터가 제거되었습니다.",
-      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다."
+      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다.",
+      "unregistered": "플랫폼 오퍼레이터 등록을 해제했습니다"
     },
     "canary": {
       "genericFailure": "연결 확인에 실패했습니다.",
@@ -5183,7 +5193,22 @@
     "superseded": {
       "title": "이전 오퍼레이터 에이전트가 여전히 배포되어 있습니다."
     },
+    "trust": {
+      "checking": "채팅을 열기 전에 오퍼레이터를 확인하는 중…",
+      "title": "플랫폼 오퍼레이터를 확인할 수 없습니다",
+      "body": "오퍼레이터로 등록된 에이전트({{agentId}})가 이 매니저가 설정한 것이라고 증명되지 않아 채팅이 꺼져 있습니다. 플랫폼 설정을 편집할 수 있는 사람은 어떤 에이전트인지 바꿀 수 있습니다.",
+      "reasonMarker": "플랫폼 오퍼레이터 표식이 없어 매니저가 프로비저닝한 에이전트가 아닐 수 있습니다.",
+      "reasonGate": "승인 게이트를 확인할 수 없습니다: {{detail}}",
+      "reasonUnreadable": "확인을 완료할 수 없습니다: {{detail}}",
+      "recheck": "다시 확인",
+      "manage": "오퍼레이터 화면 열기"
+    },
     "upgrade": {
+      "reviewTitle": "저장된 지침 검토",
+      "reviewBody": "이 지침은 이전에 저장되었으며 새 오퍼레이터에 설치됩니다. 플랫폼 설정을 편집할 수 있는 사람이 변경했을 수 있으므로, 계속하기 전에 기본값과 다른 부분을 읽어 보세요.",
+      "reviewSummary": "{{added}}줄 추가됨, 기본값 {{removed}}줄 제거됨",
+      "reviewFull": "저장된 전체 텍스트 보기",
+      "reviewConfirm": "이 지침을 읽었으며 설치하겠습니다",
       "hint": "Platform Operator 업데이트를 사용할 수 있습니다.",
       "blockerBaseUrl": "모델 서버 주소가 기록되지 않았습니다. 업그레이드하려면 다시 입력하세요.",
       "addedTools_other": "새 도구 {{count}}개",
@@ -6305,5 +6330,14 @@
     "cancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다. 에이전트는 생성되었습니다. 다시 시도하여 키를 부여하고 배포하거나, 각 에이전트 페이지에서 배포하세요.",
     "failed": "생성되었지만 배포되지 않음: {{names}}. {{reason}} 다시 시도하거나 각 에이전트 페이지에서 배포하세요.",
     "memberCancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다"
+  },
+  "modelCombobox": {
+    "toggle": "모델 추천 보기",
+    "listLabel": "모델 추천",
+    "matching": "“{{query}}”와(과) 일치",
+    "otherModels": "기타 모델",
+    "default": "기본값",
+    "noMatch": "“{{query}}”와(과) 일치하는 추천이 없습니다. 입력한 그대로 사용됩니다.",
+    "customHint": "목록에 없나요? 공급자가 지원하는 모델 ID를 직접 입력하세요."
   }
 }

@@ -33,6 +33,10 @@ interface UseHitlPollingArgs {
   onResolved: (isStale: () => boolean) => Promise<boolean>;
 }
 
+function isHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
 export function useHitlPolling({
   conversationId,
   paused,
@@ -63,8 +67,39 @@ export function useHitlPolling({
     // EXECUTION_INTERRUPTED are never what a not-yet-stored read returns.
     let observedPause = false;
     const startedAt = Date.now();
+    // A hidden tab does not poll: the next read is parked until the tab is
+    // visible again, then taken at once — the reviewer may well have decided
+    // while the user was away, and that is the moment they look.
+    let inFlight = false;
+    let parked = false;
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (isHidden()) {
+        parked = true;
+        return;
+      }
+      timer = setTimeout(
+        poll,
+        observedPause || Date.now() - startedAt >= UNOBSERVED_PAUSE_WINDOW_MS
+          ? nextPollDelay(attempt)
+          : nextUnobservedPollDelay(attempt),
+      );
+      attempt += 1;
+    };
+
+    const onVisibilityChange = () => {
+      if (cancelled || isHidden() || inFlight) return;
+      if (!parked && timer === undefined) return;
+      parked = false;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      void poll();
+    };
 
     const poll = async () => {
+      timer = undefined;
+      inFlight = true;
       try {
         const status = await getApprovalStatus(conversationId);
         if (cancelled) return;
@@ -99,24 +134,21 @@ export function useHitlPolling({
       } catch {
         // Transient failures must not end the watch; the pause outlives them.
         // Backing off below keeps a persistent outage from spinning.
+      } finally {
+        inFlight = false;
       }
 
-      if (cancelled) return;
-      timer = setTimeout(
-        poll,
-        observedPause || Date.now() - startedAt >= UNOBSERVED_PAUSE_WINDOW_MS
-          ? nextPollDelay(attempt)
-          : nextUnobservedPollDelay(attempt),
-      );
-      attempt += 1;
+      schedule();
     };
 
+    document.addEventListener("visibilitychange", onVisibilityChange);
     // First read immediately: the pause is already in effect.
     void poll();
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [conversationId, paused]);
 }
