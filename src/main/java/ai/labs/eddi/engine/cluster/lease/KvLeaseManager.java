@@ -184,6 +184,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private final Counter takeovers;
     private final Counter releaseConflicts;
     private ScheduledFuture<?> heartbeat;
+    /** A heartbeat pass is running on the I/O executor. */
+    private final AtomicBoolean heartbeatRunning = new AtomicBoolean();
 
     public KvLeaseManager(ISharedKv kv, NodeIdentity node, ClusterConfig config, ScheduledExecutorService scheduler, Executor io,
             LeaseNotifier notifier, ClusterView view, MeterRegistry meterRegistry) {
@@ -206,7 +208,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
     /** Starts the node-wide heartbeat. */
     public void start() {
         long period = config.leaseHeartbeatInterval().toMillis();
-        heartbeat = scheduler.scheduleAtFixedRate(this::heartbeatAll, period, period, TimeUnit.MILLISECONDS);
+        heartbeat = scheduler.scheduleAtFixedRate(this::dispatchHeartbeat, period, period, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -483,6 +485,13 @@ public class KvLeaseManager implements IConversationLeaseManager {
             Held h = new Held(key, revision.getAsLong(), false);
             observed.remove(key);
             held.put(key, h);
+            if (draining || shuttingDown) {
+                // A drain (or shutdown) began while this create was in flight: its sweep
+                // snapshot could not see this lease, so hand it straight back rather than
+                // renew a lease this node will not use and no other node can take.
+                release(h);
+                return Optional.empty();
+            }
             return Optional.of(h);
         } catch (ClusterUnavailableException e) {
             return Optional.empty();
@@ -728,6 +737,30 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     // ---------------------------------------------------------------- heartbeat
+
+    /**
+     * The scheduler's tick: starts a heartbeat pass on the I/O executor and returns
+     * at once. The lease scheduler also runs every lease waiter's retry and
+     * deadline timer, so a pass that waits for a stalled renewal must not run on
+     * it. A tick that finds the previous pass still running skips; the renewals of
+     * that pass carry on, and the next tick picks the lease up again.
+     */
+    void dispatchHeartbeat() {
+        if (!heartbeatRunning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            io.execute(() -> {
+                try {
+                    heartbeatAll();
+                } finally {
+                    heartbeatRunning.set(false);
+                }
+            });
+        } catch (RuntimeException e) {
+            heartbeatRunning.set(false); // executor shut down
+        }
+    }
 
     /**
      * Renews every held lease. The renewals run side by side on the I/O executor

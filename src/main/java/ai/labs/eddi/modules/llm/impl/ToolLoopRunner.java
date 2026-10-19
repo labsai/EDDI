@@ -516,6 +516,9 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                if (memory.isCancelled()) {
+                                    throw new LifecycleException("Agent execution cancelled before tool: " + allowedReq.name());
+                                }
                                 // Same absolute rule as the main allowed() loop below.
                                 // This branch runs BEFORE the pause is thrown, and its
                                 // results are frozen into the batch the resume replays

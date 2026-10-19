@@ -141,8 +141,8 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
      * twenty seconds. A dead letter that does not get through within the budget
      * goes to the node-local ring, which forwards it once NATS answers again.
      */
-    private PublishAck publishOnceReady(String subject, byte[] payload, PublishOptions options) throws IOException, JetStreamApiException {
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_ATTEMPTS * READY_BACKOFF_MILLIS);
+    private PublishAck publishOnceReady(String subject, byte[] payload, PublishOptions options, long deadline)
+            throws IOException, JetStreamApiException {
         IOException last = null;
         for (int attempt = 0; attempt < READY_ATTEMPTS; attempt++) {
             try {
@@ -204,10 +204,15 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
             PublishOptions options = PublishOptions.builder()
                     .messageId(messageId(connections.node().nodeId(), conversationId, timestamp, error)).build();
             PublishAck ack;
+            // One budget for the whole append — the first publish, provisioning and the
+            // retries — so a NATS that stops answering costs the failing turn about two
+            // seconds in all, not two seconds per step.
+            long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(READY_ATTEMPTS * READY_BACKOFF_MILLIS);
             try {
                 ack = connections.jetStream().publish(subject, payload, options);
             } catch (IOException | JetStreamApiException noStreamYet) {
-                if (!connections.isConnected() || (noStreamYet instanceof JetStreamApiException api && !streamMissing(api))) {
+                if (!connections.isConnected() || System.nanoTime() - deadline >= 0
+                        || (noStreamYet instanceof JetStreamApiException api && !streamMissing(api))) {
                     // Not a missing stream: NATS is gone, or the stream answered and refused
                     // (full under DiscardPolicy.New, among others). Provisioning would not help,
                     // and re-running it on every refusal of a full stream costs two management
@@ -217,7 +222,10 @@ public class JetStreamDeadLetterStore implements IDeadLetterStore {
                 // The stream is provisioned asynchronously after connecting; a dead letter
                 // that arrives first creates it here rather than being lost.
                 provision();
-                ack = publishOnceReady(subject, payload, options);
+                if (System.nanoTime() - deadline >= 0) {
+                    throw noStreamYet; // provisioning used up the budget
+                }
+                ack = publishOnceReady(subject, payload, options, deadline);
             }
             return String.valueOf(ack.getSeqno());
         } catch (IOException | JetStreamApiException e) {

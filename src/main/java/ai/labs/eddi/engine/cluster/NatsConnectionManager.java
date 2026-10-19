@@ -243,8 +243,14 @@ public class NatsConnectionManager {
     /** Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread. */
     public void onConnected(Runnable hook) {
         connectedHooks.add(hook);
-        if (isConnected() && scheduler != null) {
-            scheduler.execute(() -> runHook(hook));
+        if (isConnected()) {
+            // Same executor as the connection listener: a hook registered after the
+            // connection is up must not take a scheduler thread either.
+            try {
+                hookExecutor.execute(() -> runHook(hook));
+            } catch (RejectedExecutionException e) {
+                LOGGER.debugf("On-connect hook not run (shutting down): %s", e.getMessage());
+            }
         }
     }
 

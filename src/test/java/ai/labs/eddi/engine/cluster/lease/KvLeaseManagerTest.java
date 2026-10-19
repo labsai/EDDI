@@ -552,10 +552,12 @@ class KvLeaseManagerTest {
         while (updates.get() == 0 && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }
-        a.heartbeatAll(); // the first renewal is still blocked
-        assertEquals(1, updates.get(), "a second pass must skip the lease whose renewal is in flight");
-
-        gate.complete(null);
+        try {
+            a.heartbeatAll(); // the first renewal is still blocked
+            assertEquals(1, updates.get(), "a second pass must skip the lease whose renewal is in flight");
+        } finally {
+            gate.complete(null); // never leave an I/O worker blocked, even when the assertion fails
+        }
         first.get(3, TimeUnit.SECONDS);
         assertFalse(lease.isLost(), "the in-flight renewal used the current revision and must not read as a takeover");
     }
@@ -578,6 +580,59 @@ class KvLeaseManagerTest {
             a.heartbeatAll(); // test config: heartbeat 100 ms, TTL 400 ms
             long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
             assertTrue(elapsedMillis < 350, "heartbeatAll waited " + elapsedMillis + " ms, past the 100 ms interval");
+        } finally {
+            gate.complete(null);
+        }
+    }
+
+    @Test
+    @DisplayName("a leader lease whose create was in flight when a drain began is handed back, not kept")
+    void leaderAcquiredDuringADrainIsReleased() throws Exception {
+        AtomicReference<KvLeaseManager> self = new AtomicReference<>();
+        ISharedKv drainingMidCreate = new FlakyKv(kv, new AtomicBoolean()) {
+            @Override
+            public OptionalLong create(String key, byte[] value) {
+                OptionalLong revision = super.create(key, value);
+                self.get().setDraining(true); // the drain's sweep runs while the create is in flight
+                return revision;
+            }
+        };
+        KvLeaseManager a = manager(drainingMidCreate, "a", "a1");
+        self.set(a);
+        KvLeaseManager b = manager("b", "b1");
+
+        assertTrue(a.tryAcquireKey("leader.hitl-recovery").isEmpty(), "a drained node must not come out leading");
+        assertEquals(0, a.heldCount());
+        assertTrue(kv.get("leader.hitl-recovery").isEmpty(), "the lease must not stay behind for the heartbeat to keep alive");
+        assertTrue(b.tryAcquireKey("leader.hitl-recovery").isPresent(), "another node can lead");
+    }
+
+    @Test
+    @DisplayName("the scheduler tick only dispatches a heartbeat pass: a stalled pass never blocks the lease scheduler")
+    void heartbeatTickNeverBlocksTheScheduler() throws Exception {
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        AtomicInteger updates = new AtomicInteger();
+        ISharedKv stalled = new FlakyKv(kv, new AtomicBoolean()) {
+            @Override
+            public OptionalLong update(String key, byte[] value, long expectedRevision) {
+                updates.incrementAndGet();
+                gate.join();
+                return super.update(key, value, expectedRevision);
+            }
+        };
+        KvLeaseManager a = manager(stalled, "a", "a1");
+        get(a.acquire("conv1", Duration.ofSeconds(1)));
+        try {
+            long start = System.nanoTime();
+            a.dispatchHeartbeat();
+            a.dispatchHeartbeat(); // the first pass is still running: skipped
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            assertTrue(elapsedMillis < 50, "the tick waited " + elapsedMillis + " ms on the lease scheduler");
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (updates.get() == 0 && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertEquals(1, updates.get(), "one pass ran, and the overlapping tick did not start a second");
         } finally {
             gate.complete(null);
         }

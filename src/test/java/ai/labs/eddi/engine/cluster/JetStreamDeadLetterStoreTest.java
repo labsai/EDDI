@@ -233,6 +233,27 @@ class JetStreamDeadLetterStoreTest {
     }
 
     @Test
+    void aFirstPublishThatUsedUpTheBudgetSkipsProvisioningAndRetries() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        // A connected NATS that answers nothing: the first publish runs into its
+        // timeout.
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenAnswer(invocation -> {
+            Thread.sleep(2_100);
+            throw new IOException("Timeout or no response waiting for NATS JetStream server");
+        });
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, js, true));
+
+        long start = System.nanoTime();
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        assertTrue(elapsedMillis < 3_000, "the append went on after its budget: " + elapsedMillis + " ms");
+        verify(js, times(1)).publish(anyString(), any(byte[].class), any(PublishOptions.class));
+        verify(jsm, never()).getStreamInfo(anyString());
+    }
+
+    @Test
     void aDisconnectedNodeKeepsTheDeadLetterLocalWithoutRetrying() throws Exception {
         JetStreamManagement jsm = mock(JetStreamManagement.class);
         JetStream js = mock(JetStream.class);
