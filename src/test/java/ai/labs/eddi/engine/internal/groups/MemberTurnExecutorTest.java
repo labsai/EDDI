@@ -435,9 +435,11 @@ class MemberTurnExecutorTest {
         subConversation.setId("sub-gc-1");
         subConversation.setSynthesizedAnswer("Nested answer");
         subConversation.setTotalCost(0.42);
-        // The 7-arg overload — I1 added the inherited-cost-ceiling parameter, and a
-        // nested GROUP member now dispatches through it.
-        when(groupConversationService.discuss(eq("sub-group-1"), any(), any(), anyInt(), any(), any(), any())).thenReturn(subConversation);
+        // The 8-arg overload — I1 added the inherited-cost-ceiling parameter, and the
+        // parent discussion's id rides along as the source its attachments' storageRefs
+        // must be readable from.
+        when(groupConversationService.discuss(eq("sub-group-1"), any(), any(), anyInt(), any(), any(), any(), eq("gc-1")))
+                .thenReturn(subConversation);
 
         var executor = new MemberTurnExecutor(Mockito.mock(IConversationService.class), Mockito.mock(IAgentFactory.class),
                 new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
