@@ -45,8 +45,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Moves the running conversations of an agent that sit on an older
  * compatibility generation (or on none) onto the generation of the agent's
  * current version — the operator's declaration that "these conversations are
- * compatible with the current version", for the saves that could not say so
- * themselves (a ZIP import and an agent sync always write a breaking version).
+ * compatible with the current version", for the saves that did not say so
+ * themselves (a breaking save, or a ZIP import or agent sync made without
+ * {@code compatible=true}).
  *
  * <h2>What it writes</h2> Exactly one conversation field,
  * {@code compatibilityGeneration} (plus the revision markers that keep a stale

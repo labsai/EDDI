@@ -4,7 +4,8 @@
 
 ### What changed and why
 
-A ZIP import and an agent sync always write a breaking version, and conversations that
+A ZIP import and an agent sync write a breaking version unless declared compatible, a breaking save
+leaves the same result, and conversations that
 started before compatibility generations existed carry none, so after a promotion every
 running conversation stays pinned to the version it began on. Operators ended them, which is
 a bad experience for the user in the middle of a conversation. This adds an operator-declared,

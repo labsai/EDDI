@@ -72,8 +72,8 @@ public interface IRestAgentAdministration {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Move running conversations on older compatibility generations onto the current one",
                description = "The operator's declaration that this agent's conversations on an older compatibility generation (or "
-                       + "on none) are compatible with its CURRENT version — for the saves that cannot say so themselves: a ZIP import "
-                       + "and an agent sync always write a breaking version, which pins every running conversation to the old one. "
+                       + "on none) are compatible with its CURRENT version — for the saves that did not say so themselves: a breaking save, "
+                       + "or a ZIP import or agent sync made without compatible=true, which pins every running conversation to the old one. "
                        + "Only the conversation's generation is written; each conversation then moves to the newest READY version of "
                        + "the target generation on its next turn, as for any compatible save. The target generation is the generation "
                        + "of the agent's latest version, and a version of it must be READY in the environment. Never lowers a "

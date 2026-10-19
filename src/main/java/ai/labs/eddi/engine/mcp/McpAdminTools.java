@@ -230,7 +230,7 @@ public class McpAdminTools {
 
     @Tool(name = "upgrade_conversations", description = "Move an agent's running conversations that sit on an older compatibility generation "
             + "(or none) onto the generation of its CURRENT version, so they continue on it from their next turn instead of being ended. "
-            + "Use after a ZIP import or agent sync, which always write a breaking version and so pin every running conversation to the "
+            + "Use after a breaking save, or a ZIP import or agent sync made without compatible=true, which pins every running conversation to the "
             + "old one. DRY RUN BY DEFAULT: it only reports per source version how many conversations match, would move, or are skipped "
             + "(ended, awaitingHuman, inProgress); call again with dryRun=false after checking the numbers. Requires a version of the "
             + "current generation to be READY in the environment. Never lowers a generation; idempotent. Each call looks at a bounded "
