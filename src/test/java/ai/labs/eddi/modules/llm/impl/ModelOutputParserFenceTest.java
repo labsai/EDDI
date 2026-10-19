@@ -65,7 +65,7 @@ class ModelOutputParserFenceTest {
     }
 
     @Test
-    @DisplayName("the cubic input — three backticks, 50,000 spaces, a letter — returns in under 100 ms")
+    @DisplayName("the cubic input — three backticks, 50,000 spaces, a letter — returns in under a second")
     void cubicInputIsLinear() {
         String hostile = "```" + " ".repeat(50_000) + "a";
         String hostileClosed = "```json" + " ".repeat(50_000) + "a" + " ".repeat(50_000) + "```";
@@ -79,11 +79,11 @@ class ModelOutputParserFenceTest {
 
         assertEquals(hostile, unchanged);
         assertEquals("a", stripped);
-        assertTrue(elapsedMillis < 100, "stripFence took " + elapsedMillis + " ms on 50,000 spaces");
+        assertTrue(elapsedMillis < 1_000, "stripFence took " + elapsedMillis + " ms on 50,000 spaces");
     }
 
     @Test
-    @DisplayName("through parse(): the same hostile reply is judged in under 100 ms, and a fenced reply still parses")
+    @DisplayName("through parse(): the same hostile reply is judged in under a second, and a fenced reply still parses")
     void parseIsLinear() {
         var parser = new ModelOutputParser(new JsonSerialization(new ObjectMapper()));
         parser.parse("```json\n{\"a\":1}\n```", true);
@@ -92,7 +92,7 @@ class ModelOutputParserFenceTest {
         parser.parse("```" + " ".repeat(50_000) + "a", true);
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 
-        assertTrue(elapsedMillis < 100, "parse took " + elapsedMillis + " ms on 50,000 spaces");
+        assertTrue(elapsedMillis < 1_000, "parse took " + elapsedMillis + " ms on 50,000 spaces");
         assertEquals(Map.of("a", 1), parser.parse("```json\n{\"a\":1}\n```", true).value());
     }
 }

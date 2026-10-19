@@ -7,6 +7,7 @@ import {
   CapabilitiesSection,
   UserMemorySection,
   MemoryPolicySection,
+  LimitsSection,
   SessionManagementSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -690,5 +691,75 @@ describe("ChannelsSection", () => {
       <ChannelsSection agent={agentWithChannels} onChange={mockOnChange} />
     );
     expect(screen.getByTestId("remove-channel-0")).toBeInTheDocument();
+  });
+});
+
+describe("LimitsSection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("is collapsed with an empty field when no ceiling is set", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Limits"));
+    expect(screen.getByTestId("max-cost-per-conversation")).toHaveValue(null);
+  });
+
+  it("opens by default and shows the stored ceiling, 0 included", () => {
+    renderWithProviders(
+      <LimitsSection agent={{ ...baseAgent, maxCostPerConversationUsd: 0 }} onChange={mockOnChange} />,
+    );
+    expect(screen.getByTestId("max-cost-per-conversation")).toHaveValue(0);
+  });
+
+  it("writes the amount into the draft once one is typed", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Limits"));
+    await user.type(screen.getByTestId("max-cost-per-conversation"), "2.5");
+    expect(mockOnChange).toHaveBeenLastCalledWith({ ...baseAgent, maxCostPerConversationUsd: 2.5 });
+  });
+
+  it("removes the field when cleared, rather than storing null or -1", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <LimitsSection agent={{ ...baseAgent, maxCostPerConversationUsd: 5 }} onChange={mockOnChange} />,
+    );
+    await user.clear(screen.getByTestId("max-cost-per-conversation"));
+    const sent = (mockOnChange.mock.lastCall as [Agent])[0];
+    expect("maxCostPerConversationUsd" in sent).toBe(false);
+  });
+
+  it("rejects a negative amount and leaves the draft alone", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Limits"));
+    await user.type(screen.getByTestId("max-cost-per-conversation"), "-3");
+    expect(screen.getByTestId("max-cost-per-conversation-invalid")).toBeInTheDocument();
+    expect(mockOnChange).not.toHaveBeenCalled();
+  });
+
+  it("says that unpriced models are not bounded", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Limits"));
+    expect(screen.getByText(/Only priced models count/)).toBeInTheDocument();
+  });
+
+  it("reports an unusable amount to the page, and clears the report once it is fixed", async () => {
+    const user = userEvent.setup();
+    const onValidityChange = vi.fn();
+    renderWithProviders(
+      <LimitsSection agent={{ ...baseAgent, maxCostPerConversationUsd: 5 }} onChange={mockOnChange} onValidityChange={onValidityChange} />,
+    );
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    const input = screen.getByTestId("max-cost-per-conversation");
+    await user.clear(input);
+    await user.type(input, "-3");
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    await user.clear(input);
+    await user.type(input, "3");
+    expect(onValidityChange).toHaveBeenLastCalledWith(false);
   });
 });

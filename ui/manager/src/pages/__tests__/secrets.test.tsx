@@ -186,7 +186,75 @@ describe("SecretsPage", () => {
 
     await user.type(screen.getByTestId("new-key-input"), "mySecret");
     await user.type(screen.getByTestId("new-value-input"), "myValue");
+    // A create must say where the secret may be sent: still disabled, and why.
+    expect(confirmBtn).toBeDisabled();
+    expect(screen.getByTestId("new-secret-hosts-missing")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("new-secret-hosts-input-input"), "api.openai.com");
     expect(confirmBtn).not.toBeDisabled();
+    expect(screen.queryByTestId("new-secret-hosts-missing")).not.toBeInTheDocument();
+  });
+
+  it("sends the hosts typed into the create dialog as allowedHosts, lower-cased", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ reference: "vault:default/k", tenantId: "default", keyName: "k" });
+      })
+    );
+    renderSecrets();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-secret-button"));
+    await user.type(screen.getByTestId("new-key-input"), "k");
+    await user.type(screen.getByTestId("new-value-input"), "v");
+    await user.type(screen.getByTestId("new-secret-hosts-input-input"), "API.OpenAI.com{Enter}");
+    // Typed but not committed: must not be dropped by the click on Store.
+    await user.type(screen.getByTestId("new-secret-hosts-input-input"), "eu.api.openai.com:443");
+    await user.click(screen.getByTestId("confirm-create-button"));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.allowedHosts).toEqual(["api.openai.com", "eu.api.openai.com:443"]);
+  });
+
+  it("sends [\"*\"] when Any host is chosen", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ reference: "vault:default/k", tenantId: "default", keyName: "k" });
+      })
+    );
+    renderSecrets();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-secret-button"));
+    await user.type(screen.getByTestId("new-key-input"), "k");
+    await user.type(screen.getByTestId("new-value-input"), "v");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
+    await user.click(screen.getByTestId("confirm-create-button"));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.allowedHosts).toEqual(["*"]);
+  });
+
+  it("refuses a URL in the hosts box instead of sending it", async () => {
+    let calls = 0;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", () => {
+        calls++;
+        return HttpResponse.json({ reference: "vault:default/k", tenantId: "default", keyName: "k" });
+      })
+    );
+    renderSecrets();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-secret-button"));
+    await user.type(screen.getByTestId("new-key-input"), "k");
+    await user.type(screen.getByTestId("new-value-input"), "v");
+    await user.type(screen.getByTestId("new-secret-hosts-input-input"), "https://api.openai.com/v1");
+    await user.click(screen.getByTestId("confirm-create-button"));
+
+    expect(await screen.findByTestId("new-secret-hosts-error")).toBeInTheDocument();
+    expect(calls).toBe(0);
   });
 
   it("create dialog shows tenant context badge", async () => {
@@ -264,6 +332,7 @@ describe("SecretsPage", () => {
     await user.type(screen.getByTestId("new-key-input"), "test-key");
     await user.type(screen.getByTestId("new-value-input"), "test-value");
     await user.type(screen.getByTestId("new-description-input"), "Test description");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
 
     await user.click(screen.getByTestId("confirm-create-button"));
 
@@ -543,6 +612,7 @@ describe("SecretsPage", () => {
     await user.type(screen.getByTestId("new-value-input"), "flush-value");
     // Type an agent but DO NOT press Enter — it must not be silently dropped.
     await user.type(screen.getByTestId("new-allowed-agents-input"), "pending-agent");
+    await user.click(screen.getByTestId("new-secret-hosts-mode-any"));
 
     await user.click(screen.getByTestId("confirm-create-button"));
 
@@ -766,6 +836,7 @@ describe("SecretsPage", () => {
     await user.type(screen.getByTestId("new-key-input"), "full-test-key");
     await user.type(screen.getByTestId("new-value-input"), "full-test-value");
     await user.type(screen.getByTestId("new-description-input"), "A test description");
+    await user.type(screen.getByTestId("new-secret-hosts-input-input"), "api.example.com{Enter}");
 
     // Add an allowed agent
     const agentInput = screen.getByTestId("new-allowed-agents-input");

@@ -22,8 +22,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * The contract a client draws its workspace UI from.
@@ -64,6 +67,22 @@ class RestWorkspacesTest {
         var guard = new ResourceAccessGuard(identity, new OwnershipValidator(settings.isStampingOwnership()), spaceContext,
                 settings, mock(IDocumentDescriptorStore.class));
         return new RestWorkspaces(spaceContext, settings, guard, mock(UserDirectory.class));
+    }
+
+    @Test
+    @DisplayName("the directory search is told whether the caller is an administrator (M2)")
+    void directorySearchCarriesAdminFlag() {
+        for (boolean admin : new boolean[]{false, true}) {
+            var settings = settings(true);
+            var identity = admin ? identity("root", Set.of(), "eddi-admin") : identity("alice", Set.of("/engineering"), "eddi-editor");
+            var spaceContext = new SpaceContext(identity, settings);
+            var guard = new ResourceAccessGuard(identity, new OwnershipValidator(true), spaceContext, settings,
+                    mock(IDocumentDescriptorStore.class));
+            var directory = mock(UserDirectory.class);
+            new RestWorkspaces(spaceContext, settings, guard, directory).searchDirectory("bob", 5);
+
+            verify(directory).search(eq("bob"), eq(5), any(), eq(admin));
+        }
     }
 
     @Test

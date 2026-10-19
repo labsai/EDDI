@@ -195,6 +195,7 @@ eddi_tool_execution_cached_total            # Cache-served executions
 eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
+eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
 ```
 
@@ -908,6 +909,7 @@ eddi_cluster_events_consumed_total          # Cluster events handled from other 
 eddi_cluster_events_publish_failed_total    # Events that went to the outbox instead
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
+eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
 eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
 eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}
