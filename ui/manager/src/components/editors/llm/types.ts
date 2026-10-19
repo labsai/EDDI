@@ -154,6 +154,18 @@ export interface LlmTask {
    * (EDDI 6.6+, default 100). Same refusal and same `-1`/`0` rule as above.
    */
   maxToolCallsPerTurn?: number;
+  /**
+   * Refuses a tool call that already failed identically with nothing succeeding
+   * since (EDDI 6.6+). Absent means enabled with defaults; `{ enabled: false }`
+   * turns it off. No editor control yet: edit it in the JSON view.
+   */
+  toolRepeatGuard?: {
+    enabled?: boolean;
+    maxIdenticalFailures?: number;
+    maxIdenticalCalls?: number;
+    maxRefusalsPerTurn?: number;
+    exemptTools?: string[];
+  };
   modelCascade?: ModelCascadeConfig;
 
   // Conversation Summary (Rolling Summary Strategy)

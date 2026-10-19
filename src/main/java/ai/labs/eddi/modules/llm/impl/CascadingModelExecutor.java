@@ -445,7 +445,7 @@ class CascadingModelExecutor {
                 eventSink.onCascadeStepStart(i, modelType, modelName, steps.size());
             }
 
-            LOGGER.infof("Cascade step %d/%d: trying %s/%s", i, steps.size() - 1, modelType, modelName);
+            LOGGER.debugf("Cascade step %d/%d: trying %s/%s", i, steps.size() - 1, modelType, modelName);
             long stepStart = System.currentTimeMillis();
 
             Map<String, Object> stepTrace = new LinkedHashMap<>();
@@ -695,7 +695,7 @@ class CascadingModelExecutor {
 
                 if (isLastStep || step.getConfidenceThreshold() == null || stepResult.confidence >= step.getConfidenceThreshold()) {
                     trace.add(stepTrace);
-                    LOGGER.infof("Cascade step %d accepted: confidence=%.2f, model=%s, durationMs=%d", i, stepResult.confidence, modelName,
+                    LOGGER.debugf("Cascade step %d accepted: confidence=%.2f, model=%s, durationMs=%d", i, stepResult.confidence, modelName,
                             durationMs);
 
                     // returnBestAcrossSteps: an earlier escalated step may have scored higher.

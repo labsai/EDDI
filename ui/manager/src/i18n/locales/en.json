@@ -363,6 +363,13 @@
     "maxForksHint": "per conversation",
     "maxRecallEntries": "Max Recall",
     "memoryPolicy": "Memory Policy",
+    "limits": "Limits",
+    "limitsDesc": "Caps what a single conversation with this agent may spend. Once the cap is reached the agent stops calling its model and serves its fallback answer.",
+    "maxCostPerConversation": "Max cost per conversation (USD)",
+    "unlimited": "Unlimited",
+    "maxCostHint": "Empty = unlimited. 0 = no priced spend at all.",
+    "maxCostInvalid": "Enter an amount of 0 or more, or leave empty for unlimited.",
+    "maxCostPricedOnly": "Only priced models count toward this cap. A model with no input/output price in its LLM configuration adds $0, but is still stopped once other spend has reached the cap.",
     "memoryPolicyDesc": "Strict Write Discipline governs what happens when property updates fail during a conversation step. Choose how the engine handles partially committed data.",
     "onCapReached": "On Cap Reached",
     "onFailure": "On Failure Strategy",
@@ -1522,6 +1529,13 @@
     "maxToolCallsPerTurnDefault": "(default {{n}})",
     "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
     "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations.",
+    "repeatGuardTitle": "Repeated failing tool calls",
+    "repeatGuardEnabled": "Block repeated failing calls",
+    "maxIdenticalFailures": "Identical failures allowed",
+    "maxRefusalsPerTurn": "Refusals before stopping",
+    "maxIdenticalCalls": "Max identical successful calls",
+    "exemptTools": "Exempt tools (comma-separated)",
+    "repeatGuardHint": "A tool call that already failed identically, with nothing succeeding since, is answered NOT_EXECUTED instead of being run again; after the refusal limit the turn ends with a fixed message. On by default; leave fields blank to keep the defaults. A terminal failure (for example HTTP 403/404) is refused on the very next identical call, a retryable one after the failures allowed. Max identical successful calls is off unless set (-1 or 0 = unlimited). Needs EDDI 6.6 or later - leave untouched on an older server.",
     "toggleTask": "Show or hide task details",
     "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
     "model": "Model",
@@ -1980,6 +1994,9 @@
     "allowedHostsHint": "A request, model, knowledge base or MCP/A2A server that would send this secret to any other host is refused. A host without a port matches every port.",
     "allowedHostsTightened": "This restricts where the secret may be sent. A deployed agent, knowledge base or MCP/A2A configuration that sends it to any other host stops working at its next call — this is not checked in advance.",
     "allowedHostsAcknowledge": "I have checked that everything using this secret sends it only to these hosts.",
+    "allowedHostsOnlyThese": "Only these hosts",
+    "allowedHostsAnyHost": "Any host",
+    "allowedHostsRequired": "Add at least one host, or choose “Any host”. A new secret needs one or the other.",
     "grantOnlyTheseAgents": "Only these agents",
     "grantAllHint": "Every agent in this tenant may reference this secret. Narrow it to limit what a single leaked configuration can reach.",
     "grantAddAgent": "Add an agent",
@@ -2950,6 +2967,7 @@
     "question": "Question",
     "readyToDiscuss": "Ready to discuss",
     "responding": "responding…",
+    "usingTool": "using {{tool}}…",
     "reviewMemberRoster": "Member Roster",
     "reviewMembers": "Members",
     "reviewModerator": "Moderator",
@@ -4324,6 +4342,13 @@
     "tenantId": "Tenant ID",
     "title": "Tenant Quotas",
     "limitHintEmpty": "Empty or -1 = unlimited, 0 = blocked",
+    "costPricedOnly": "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration adds $0 to the total, but is refused like any other once the budget is spent.",
+    "budgetTitle": "Monthly cost budget",
+    "budgetUnlimited": "No monthly cost budget is set, so spend is metered but never limited.",
+    "budgetNotEnforced": "A budget of {{limit}} is set, but enforcement is off, so it is not applied.",
+    "budgetReached": "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
+    "budgetRemaining": "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.",
+    "budgetNote": "Counts priced model calls and tracked tool cost, per UTC calendar month. Unpriced models, conversation summaries and embeddings are not metered. A turn that crosses the limit still finishes, so the total can end slightly above it. Refused calls are counted in the eddi.llm.spend.refused metric.",
     "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
     "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited."
   },
@@ -4961,6 +4986,7 @@
       "action": "Activate"
     },
     "activation": {
+      "storedPromptConfirm": "These instructions were carried over from the saved configuration, which anyone who can edit platform settings may have changed. I have read them above and want to install them.",
       "title": "Activate the Platform Operator",
       "subtitle": "Choose the model that will run the operator, review its instructions, and deploy.",
       "modelStep": "Model",
@@ -5064,7 +5090,11 @@
       "gateUnverifiedHelp": "The approval gate could not be verified on this agent's document.",
       "agentId": "Agent",
       "platformBaseUrl": "Calls platform at",
-      "platformBaseUrlUnknown": "not recorded"
+      "platformBaseUrlUnknown": "not recorded",
+      "unregister": "Unregister operator",
+      "unregisterConfirmTitle": "Unregister the Platform Operator?",
+      "unregisterConfirmBody": "Only the saved operator configuration is removed. The registered agent could not be verified as one this Manager set up, so it is not deployed, undeployed or deleted — review it on the Agents screen.",
+      "unverifiedActions": "This agent could not be verified as an operator the Manager set up, so this screen will not probe, undeploy or delete it. Reconfigure provisions a new operator and leaves this agent in place."
     },
     "chat": {
       "empty": "Ask about your deployment. The operator looks things up and shows you every call it makes.",
@@ -5154,7 +5184,8 @@
       "activatedChecking": "Platform Operator activated. Connection checks are running in the background.",
       "writeProbeVerified": "Write access verified — a real gated write paused for approval.",
       "writeProbeFailed": "The approval gate did not hold — the operator was removed.",
-      "writeProbeInconclusive": "The live write probe was inconclusive."
+      "writeProbeInconclusive": "The live write probe was inconclusive.",
+      "unregistered": "Platform Operator unregistered"
     },
     "canary": {
       "genericFailure": "The connection check did not succeed.",
@@ -5193,7 +5224,22 @@
     "superseded": {
       "title": "The previous operator agent is still deployed."
     },
+    "trust": {
+      "checking": "Verifying the operator before opening chat…",
+      "title": "The Platform Operator could not be verified",
+      "body": "Chat is switched off because the agent registered as the operator ({{agentId}}) is not provably the one this Manager set up. Anyone who can edit platform settings can change which agent that is.",
+      "reasonMarker": "It does not carry the Platform Operator marker, so it may not be the agent the Manager provisioned.",
+      "reasonGate": "Its approval gate could not be verified: {{detail}}",
+      "reasonUnreadable": "The checks could not be completed: {{detail}}",
+      "recheck": "Check again",
+      "manage": "Open the operator screen"
+    },
     "upgrade": {
+      "reviewTitle": "Review the stored instructions",
+      "reviewBody": "These instructions were saved earlier and will be installed on the new operator. Anyone who can edit platform settings could have changed them, so read what differs from the default before you continue.",
+      "reviewSummary": "{{added}} lines added, {{removed}} default lines removed",
+      "reviewFull": "Show the full stored text",
+      "reviewConfirm": "I have read these instructions and want to install them",
       "hint": "An update for the Platform Operator is available.",
       "blockerBaseUrl": "Its model server address was not recorded — enter it again to upgrade.",
       "addedTools_other": "{{count}} new tools",
@@ -5812,6 +5858,7 @@
     "referenceCopied": "Reference copied",
     "copyReference": "Copy the reference to use in an agent",
     "secretStored": "Secret stored",
+    "secretHosts": "Sent only to: {{hosts}}",
     "secrets": "Secrets",
     "noSecrets": "No secrets in this space yet",
     "deleteNamed": "Delete {{name}}",

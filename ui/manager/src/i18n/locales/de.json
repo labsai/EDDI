@@ -334,6 +334,13 @@
     "maxForksHint": "pro Gespräch",
     "maxRecallEntries": "Max. Abruf",
     "memoryPolicy": "Speicher-Richtlinie",
+    "limits": "Limits",
+    "limitsDesc": "Begrenzt, was eine einzelne Unterhaltung mit diesem Agenten kosten darf. Ist das Limit erreicht, ruft der Agent sein Modell nicht mehr auf und liefert seine Ersatzantwort.",
+    "maxCostPerConversation": "Max. Kosten pro Unterhaltung (USD)",
+    "unlimited": "Unbegrenzt",
+    "maxCostHint": "Leer = unbegrenzt. 0 = keinerlei berechnete Ausgaben.",
+    "maxCostInvalid": "Gib einen Betrag ab 0 ein oder lass das Feld für unbegrenzt leer.",
+    "maxCostPricedOnly": "Nur Modelle mit Preis zählen für dieses Limit. Ein Modell ohne Ein-/Ausgabepreis in seiner LLM-Konfiguration addiert 0 $, wird aber trotzdem gestoppt, sobald andere Ausgaben das Limit erreicht haben.",
     "memoryPolicyDesc": "Die strikte Schreibdisziplin regelt, was geschieht, wenn Eigenschafts-Updates während eines Gesprächsschritts fehlschlagen. Wählen Sie, wie die Engine mit teilweise übernommenen Daten umgeht.",
     "onCapReached": "Bei erreichter Obergrenze",
     "onFailure": "Fehlerstrategie",
@@ -1480,6 +1487,13 @@
     "maxToolCallsPerTurnDefault": "(Standard {{n}})",
     "maxToolCallsHint": "Aufrufe über einer Grenze werden nicht ausgeführt: Jeder erhält ein NOT_EXECUTED-Ergebnis, das dem Modell sagt, dass die Grenze erreicht ist, und das Modell antwortet mit dem, was es hat. Abgelehnte Aufrufe erreichen nie die Freigabeprüfung. Die Zählung pro Zug umfasst Aufrufe vor einer Freigabepause. -1 oder 0 hebt eine Grenze auf. Erfordert EDDI 6.6 oder neuer – auf einem älteren Server leer lassen.",
     "maxToolCallsUncapped": "Eine Grenze ist ausgeschaltet: Das Modell kann dort beliebig viele Tool-Aufrufe ausführen, begrenzt nur durch Max Tool Iterations.",
+    "repeatGuardTitle": "Wiederholte fehlgeschlagene Tool-Aufrufe",
+    "repeatGuardEnabled": "Wiederholte fehlgeschlagene Aufrufe blockieren",
+    "maxIdenticalFailures": "Erlaubte identische Fehlschläge",
+    "maxRefusalsPerTurn": "Ablehnungen bis zum Abbruch",
+    "maxIdenticalCalls": "Max. identische erfolgreiche Aufrufe",
+    "exemptTools": "Ausgenommene Tools (kommagetrennt)",
+    "repeatGuardHint": "Ein Tool-Aufruf, der identisch bereits fehlgeschlagen ist, ohne dass seither etwas gelungen wäre, wird mit NOT_EXECUTED beantwortet statt erneut ausgeführt; nach dem Ablehnungslimit endet der Turn mit einer festen Nachricht. Standardmäßig aktiv; leere Felder behalten die Standardwerte. Ein endgültiger Fehler (z. B. HTTP 403/404) wird beim nächsten identischen Aufruf abgelehnt, ein wiederholbarer nach den erlaubten Fehlschlägen. Max. identische erfolgreiche Aufrufe ist ohne Wert aus (-1 oder 0 = unbegrenzt). Benötigt EDDI 6.6 oder neuer - auf älteren Servern unverändert lassen.",
     "toggleTask": "Aufgabendetails ein- oder ausblenden",
     "noActionsWarning": "Diese Aufgabe hat keine Auslöseaktion und wird daher nie ausgeführt. Fügen Sie die Aktion hinzu, die Ihre Verhaltensregeln ausgeben, z. B. send_message.",
     "model": "Modell",
@@ -1938,6 +1952,9 @@
     "allowedHostsHint": "Eine Anfrage, ein Modell, eine Wissensdatenbank oder ein MCP/A2A-Server, der dieses Secret an einen anderen Host senden würde, wird abgelehnt. Ein Host ohne Port gilt für jeden Port.",
     "allowedHostsTightened": "Dies schränkt ein, wohin das Secret gesendet werden darf. Ein bereitgestellter Agent, eine Wissensdatenbank oder eine MCP/A2A-Konfiguration, die es an einen anderen Host sendet, funktioniert beim nächsten Aufruf nicht mehr – das wird nicht vorab geprüft.",
     "allowedHostsAcknowledge": "Ich habe geprüft, dass alles, was dieses Secret verwendet, es nur an diese Hosts sendet.",
+    "allowedHostsOnlyThese": "Nur diese Hosts",
+    "allowedHostsAnyHost": "Beliebiger Host",
+    "allowedHostsRequired": "Fügen Sie mindestens einen Host hinzu oder wählen Sie „Beliebiger Host“. Ein neues Secret braucht das eine oder das andere.",
     "grantOnlyTheseAgents": "Nur diese Agenten",
     "grantAllHint": "Jeder Agent in diesem Tenant darf dieses Secret referenzieren. Schränke die Liste ein, um zu begrenzen, was eine einzelne kompromittierte Konfiguration erreichen kann.",
     "grantAddAgent": "Agent hinzufügen",
@@ -2896,6 +2913,7 @@
     "question": "Frage",
     "readyToDiscuss": "Bereit zur Diskussion",
     "responding": "antwortet…",
+    "usingTool": "Verwendet {{tool}} …",
     "reviewMemberRoster": "Mitgliederliste",
     "reviewMembers": "Mitglieder",
     "reviewModerator": "Moderator",
@@ -4283,6 +4301,13 @@
     "tenantId": "Mandanten-ID",
     "title": "Mandanten-Kontingente",
     "limitHintEmpty": "Leer oder -1 = unbegrenzt, 0 = gesperrt",
+    "costPricedOnly": "Zählt nur berechnete Ausgaben: Ein Modell ohne inputPricePer1M / outputPricePer1M in seiner LLM-Konfiguration addiert 0 $ zur Summe, wird aber wie jedes andere abgelehnt, sobald das Budget aufgebraucht ist.",
+    "budgetTitle": "Monatliches Kostenbudget",
+    "budgetUnlimited": "Es ist kein monatliches Kostenbudget gesetzt – die Ausgaben werden erfasst, aber nie begrenzt.",
+    "budgetNotEnforced": "Ein Budget von {{limit}} ist gesetzt, die Durchsetzung ist aber aus – es wird nicht angewendet.",
+    "budgetReached": "Budget erreicht ({{spent}} von {{limit}}). LLM-Tasks liefern ihre Ersatzantwort, statt das Modell aufzurufen, und Tool-Aufrufe werden abgelehnt – bis der Monat wechselt oder das Limit erhöht wird.",
+    "budgetRemaining": "{{spent}} von {{limit}} in diesem Monat verbraucht. Noch {{remaining}}, bevor Modelle nicht mehr aufgerufen werden.",
+    "budgetNote": "Zählt berechnete Modellaufrufe und erfasste Tool-Kosten pro UTC-Kalendermonat. Modelle ohne Preis, Unterhaltungszusammenfassungen und Embeddings werden nicht erfasst. Ein Turn, der das Limit überschreitet, läuft noch zu Ende – die Summe kann also leicht darüber liegen. Abgelehnte Aufrufe zählt die Metrik eddi.llm.spend.refused.",
     "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
     "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer."
   },
@@ -4961,6 +4986,7 @@
       "action": "Aktivieren"
     },
     "activation": {
+      "storedPromptConfirm": "Diese Anweisungen stammen aus der gespeicherten Konfiguration, die jeder ändern konnte, der Plattformeinstellungen bearbeiten darf. Ich habe sie oben gelesen und möchte sie installieren.",
       "title": "Plattform-Operator aktivieren",
       "subtitle": "Wählen Sie das Modell für den Operator, prüfen Sie seine Anweisungen und starten Sie das Deployment.",
       "modelStep": "Modell",
@@ -5064,7 +5090,11 @@
       "gateUnverifiedHelp": "Die Freigabesperre konnte im Dokument dieses Agenten nicht verifiziert werden.",
       "agentId": "Agent",
       "platformBaseUrl": "Ruft Plattform auf unter",
-      "platformBaseUrlUnknown": "nicht erfasst"
+      "platformBaseUrlUnknown": "nicht erfasst",
+      "unregister": "Operator abmelden",
+      "unregisterConfirmTitle": "Plattform-Operator abmelden?",
+      "unregisterConfirmBody": "Nur die gespeicherte Operator-Konfiguration wird entfernt. Der registrierte Agent konnte nicht als ein von diesem Manager eingerichteter Operator verifiziert werden, daher wird er weder bereitgestellt noch zurückgezogen oder gelöscht – prüfen Sie ihn auf der Agenten-Seite.",
+      "unverifiedActions": "Dieser Agent konnte nicht als ein vom Manager eingerichteter Operator verifiziert werden. Diese Seite prüft, zieht zurück oder löscht ihn daher nicht. „Neu konfigurieren“ richtet einen neuen Operator ein und lässt diesen Agenten unverändert."
     },
     "chat": {
       "empty": "Fragen Sie nach Ihrer Installation. Der Operator schlägt nach und zeigt Ihnen jeden Aufruf, den er macht.",
@@ -5154,7 +5184,8 @@
       "activatedChecking": "Platform Operator aktiviert. Verbindungsprüfungen laufen im Hintergrund.",
       "writeProbeVerified": "Schreibzugriff verifiziert — ein echter, geschützter Schreibvorgang wurde zur Freigabe angehalten.",
       "writeProbeFailed": "Das Freigabe-Gate hat nicht gehalten — der Operator wurde entfernt.",
-      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos."
+      "writeProbeInconclusive": "Der Live-Schreibtest war ergebnislos.",
+      "unregistered": "Plattform-Operator abgemeldet"
     },
     "canary": {
       "genericFailure": "Die Verbindungsprüfung war nicht erfolgreich.",
@@ -5193,7 +5224,22 @@
     "superseded": {
       "title": "Der vorherige Operator-Agent ist weiterhin deployed."
     },
+    "trust": {
+      "checking": "Der Operator wird geprüft, bevor der Chat geöffnet wird …",
+      "title": "Der Plattform-Operator konnte nicht verifiziert werden",
+      "body": "Der Chat ist deaktiviert, weil der als Operator registrierte Agent ({{agentId}}) nicht nachweislich der ist, den dieser Manager eingerichtet hat. Wer Plattformeinstellungen bearbeiten darf, kann ändern, welcher Agent das ist.",
+      "reasonMarker": "Er trägt die Plattform-Operator-Markierung nicht und ist daher möglicherweise nicht der vom Manager bereitgestellte Agent.",
+      "reasonGate": "Sein Freigabe-Gate konnte nicht verifiziert werden: {{detail}}",
+      "reasonUnreadable": "Die Prüfungen konnten nicht abgeschlossen werden: {{detail}}",
+      "recheck": "Erneut prüfen",
+      "manage": "Operator-Bildschirm öffnen"
+    },
     "upgrade": {
+      "reviewTitle": "Gespeicherte Anweisungen prüfen",
+      "reviewBody": "Diese Anweisungen wurden zuvor gespeichert und werden auf dem neuen Operator installiert. Wer Plattformeinstellungen bearbeiten darf, könnte sie geändert haben – lesen Sie daher, was vom Standard abweicht, bevor Sie fortfahren.",
+      "reviewSummary": "{{added}} Zeilen hinzugefügt, {{removed}} Standardzeilen entfernt",
+      "reviewFull": "Gesamten gespeicherten Text anzeigen",
+      "reviewConfirm": "Ich habe diese Anweisungen gelesen und möchte sie installieren",
       "hint": "Für den Platform Operator ist ein Update verfügbar.",
       "blockerBaseUrl": "Die Adresse seines Modellservers wurde nicht gespeichert — gib sie für das Update erneut ein.",
       "addedTools_other": "{{count}} neue Werkzeuge",
@@ -5812,6 +5858,7 @@
     "referenceCopied": "Referenz kopiert",
     "copyReference": "Referenz zur Verwendung in einem Agenten kopieren",
     "secretStored": "Geheimnis gespeichert",
+    "secretHosts": "Wird nur gesendet an: {{hosts}}",
     "secrets": "Geheimnisse",
     "noSecrets": "Noch keine Geheimnisse in diesem Arbeitsbereich",
     "deleteNamed": "{{name}} löschen",

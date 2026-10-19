@@ -14,6 +14,7 @@ import io.nats.client.api.PublishAck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
@@ -22,11 +23,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("JetStreamEventBus")
@@ -152,5 +157,72 @@ class JetStreamEventBusTest {
     void resyncWhileDisconnectedIsQueued() throws Exception {
         assertFalse(bus.requestResyncAll("test"), "the request waits in the outbox");
         assertEquals(1, bus.outboxDepth());
+    }
+
+    @Test
+    @DisplayName("resync requests that arrive while one is queued join it: N nodes asking at once flush this node once more, not N times")
+    void resyncsCoalesce() throws Exception {
+        CountDownLatch firstStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch twoFlushes = new CountDownLatch(2);
+        AtomicInteger flushes = new AtomicInteger();
+        bus.onResync(() -> {
+            if (flushes.incrementAndGet() == 1) {
+                firstStarted.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            twoFlushes.countDown();
+        });
+
+        bus.resync("first");
+        assertTrue(firstStarted.await(3, TimeUnit.SECONDS));
+        // Arrive while the first flush runs: they must queue exactly one more, since
+        // caches refilled during the first flush may predate their requests.
+        for (int i = 0; i < 5; i++) {
+            bus.receive(event(ClusterEvent.RESYNC_ALL, "n" + (i + 2), "b"), 0);
+        }
+        release.countDown();
+
+        assertTrue(twoFlushes.await(3, TimeUnit.SECONDS));
+        Thread.sleep(300); // let any wrongly queued extra flush run
+        assertEquals(2, flushes.get(), "five requests during one flush must coalesce into a single further flush");
+    }
+
+    @Test
+    @DisplayName("an event left in the outbox while the connection stayed up is flushed without waiting for a reconnect")
+    void outboxIsFlushedWhileConnected() throws Exception {
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        NatsConnectionManager conn = mock(NatsConnectionManager.class);
+        when(conn.node()).thenReturn(new NodeIdentity("n1", "boot1"));
+        when(conn.config()).thenReturn(ClusterConfig.defaults().withMessagingType("nats"));
+        when(conn.scheduler()).thenReturn(scheduler);
+        when(conn.isConnected()).thenReturn(false);
+        JetStreamEventBus connectedBus = new JetStreamEventBus(conn, new SimpleMeterRegistry());
+        connectedBus.startCluster();
+        ArgumentCaptor<Runnable> sampler = ArgumentCaptor.forClass(Runnable.class);
+        verify(scheduler).scheduleAtFixedRate(sampler.capture(), anyLong(), anyLong(), any(TimeUnit.class));
+
+        connectedBus.publish("deployment.changed", Map.of("agentId", "a1"));
+        assertEquals(1, connectedBus.outboxDepth());
+
+        JetStream jetStream = mock(JetStream.class);
+        when(jetStream.publish(anyString(), any(byte[].class))).thenReturn(mock(PublishAck.class));
+        when(conn.jetStream()).thenReturn(jetStream);
+        when(conn.isConnected()).thenReturn(true); // up again, but no reconnect event fires
+
+        sampler.getValue().run();
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (connectedBus.outboxDepth() > 0 && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(0, connectedBus.outboxDepth());
+        // drainOutbox lowers the count before it publishes, so wait for the publish
+        // too.
+        verify(jetStream, timeout(3000)).publish(anyString(), any(byte[].class));
     }
 }

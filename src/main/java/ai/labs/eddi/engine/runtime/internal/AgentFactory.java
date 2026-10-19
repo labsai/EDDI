@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.compat.AgentCompatibilityLint;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
@@ -63,6 +64,14 @@ public class AgentFactory implements IAgentFactory {
      */
     @Inject
     AgentCompatibilityLint compatibilityLint;
+
+    /**
+     * Dropped for the agent on every deploy and undeploy, so cached configuration
+     * never outlives the agent's presence in the runtime. Field-injected and
+     * null-checked for the same reason as the gate above.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
 
     private static final Logger log = Logger.getLogger(AgentFactory.class);
 
@@ -248,6 +257,7 @@ public class AgentFactory implements IAgentFactory {
 
     @Override
     public void deployAgent(Deployment.Environment environment, final String agentId, final Integer version, DeploymentProcess deploymentProcess) {
+        invalidateConfigurationCache(agentId);
         var finalDeploymentProcess = defaultIfNull(deploymentProcess);
 
         AgentId id = new AgentId(agentId, version);
@@ -411,6 +421,7 @@ public class AgentFactory implements IAgentFactory {
      */
     @Override
     public void undeployAgent(Deployment.Environment environment, String agentId, Integer version) {
+        invalidateConfigurationCache(agentId);
         Map<AgentId, IAgent> agentEnvironment = getAgentEnvironment(environment);
 
         if (version == null) {
@@ -422,6 +433,12 @@ public class AgentFactory implements IAgentFactory {
         }
 
         agentEnvironment.remove(new AgentId(agentId, version));
+    }
+
+    private void invalidateConfigurationCache(String agentId) {
+        if (agentConfigurationCache != null) {
+            agentConfigurationCache.invalidate(agentId);
+        }
     }
 
     @Override

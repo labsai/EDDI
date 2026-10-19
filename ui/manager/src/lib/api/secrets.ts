@@ -1,4 +1,5 @@
 import { api, ApiClientError } from "../api-client";
+import { seg, nameSeg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -25,6 +26,14 @@ export interface SecretStoreRequest {
   value: string;
   description?: string;
   allowedAgents?: string[];
+  /**
+   * Where a `${vault:…}` reference to the secret may be sent. Required on a
+   * create while `eddi.vault.grant-enforcement=enforce` (the default): exact
+   * `host` / `host:port` entries, or `["*"]` ({@link ALL_HOSTS}) for no
+   * restriction. `[]` is refused there — it would read as "anywhere" without
+   * anybody having said so. Omitted on an update, it keeps the stored list.
+   */
+  allowedHosts?: string[];
 }
 
 export interface SecretStoreResponse {
@@ -53,6 +62,85 @@ export function validateAllowedHost(candidate: string): AllowedHostProblem | nul
     return "shape";
   }
   return null;
+}
+
+/**
+ * The explicit "no destination restriction" a create sends as `allowedHosts`.
+ * Only ever on its own: the backend accepts `["*"]` and nothing that mixes the
+ * wildcard with hosts.
+ */
+export const ALL_HOSTS = "*";
+
+/**
+ * The host (with a non-default port) of an `http(s)` URL, as an `allowedHosts`
+ * entry — or undefined when there is none to take. Used to prefill the
+ * destination of a secret created from a field whose target URL is already
+ * known. A templated (`{…}`), referenced (`${…}`) or unparsable URL yields
+ * nothing rather than a guess.
+ */
+export function hostFromUrl(url: string | null | undefined): string | undefined {
+  const raw = url?.trim();
+  if (!raw || raw.includes("{") || raw.includes("$")) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+  const host = parsed.host.toLowerCase();
+  return host && validateAllowedHost(host) === null ? host : undefined;
+}
+
+/**
+ * The destination half of an "Add Secret" form: either the explicit "any host",
+ * or a list of hosts — plus the text still in the box, and the problem last
+ * found with it. `anyHost` is kept apart from `hosts` so that switching to "any
+ * host" and back does not throw away the list.
+ */
+export interface AllowedHostsDraft {
+  anyHost: boolean;
+  hosts: string[];
+  pending: string;
+  problem: AllowedHostProblem | null;
+}
+
+/** A fresh draft: a specific list, prefilled with `initialHost` when one is known. */
+export function newAllowedHostsDraft(initialHost?: string): AllowedHostsDraft {
+  return { anyHost: false, hosts: initialHost ? [initialHost] : [], pending: "", problem: null };
+}
+
+/** Why a create's destinations cannot be sent yet. */
+export type AllowedHostsDraftProblem = AllowedHostProblem | "missing";
+
+/**
+ * What a create sends as `allowedHosts`, or why it cannot be sent.
+ *
+ * Text still in the box counts — a host typed and not yet committed must not be
+ * dropped by a click on Save — and is refused if it would not pass the backend.
+ * Neither "any host" nor a single host is `missing`: the backend refuses a
+ * create without the field, and an empty list would read as "anywhere".
+ */
+export function resolveAllowedHostsDraft(
+  draft: AllowedHostsDraft,
+): { allowedHosts: string[] } | { problem: AllowedHostsDraftProblem } {
+  if (draft.anyHost) return { allowedHosts: [ALL_HOSTS] };
+  const pending = draft.pending.trim();
+  if (pending) {
+    const problem = validateAllowedHost(pending);
+    if (problem) return { problem };
+  }
+  const hosts = [...new Set([...draft.hosts, ...(pending ? [pending] : [])].map((h) => h.toLowerCase()))];
+  return hosts.length > 0 ? { allowedHosts: hosts } : { problem: "missing" };
+}
+
+/**
+ * True while a create has neither "any host" nor a single host — the state its
+ * submit button stays disabled in. An invalid host in the box is not "missing":
+ * the save reports it instead.
+ */
+export function allowedHostsMissing(draft: AllowedHostsDraft): boolean {
+  return !draft.anyHost && draft.hosts.length === 0 && !draft.pending.trim();
 }
 
 /** The wildcard that grants a secret to every agent. */
@@ -180,8 +268,8 @@ const BASE = "/secretstore/secrets";
  * its segments; the raw `fetch` calls here did not.
  */
 function secretPath(tenantId: string, keyName?: string): string {
-  const tenant = `${BASE}/${encodeURIComponent(tenantId)}`;
-  return keyName === undefined ? tenant : `${tenant}/${encodeURIComponent(keyName)}`;
+  const tenant = `${BASE}/${nameSeg(tenantId)}`;
+  return keyName === undefined ? tenant : `${tenant}/${nameSeg(keyName)}`;
 }
 
 /**
@@ -256,10 +344,13 @@ export async function storeSecret(
   value: string,
   description?: string,
   allowedAgents?: string[],
+  /** Required on a create (see `SecretStoreRequest`); omitted on a rotation, which keeps the stored list. */
+  allowedHosts?: string[],
 ): Promise<SecretStoreResponse> {
   const body: SecretStoreRequest = { value };
   if (description) body.description = description;
   if (allowedAgents) body.allowedAgents = allowedAgents;
+  if (allowedHosts) body.allowedHosts = allowedHosts;
 
   const res = await fetch(
     `${api.getBaseUrl()}${secretPath(tenantId, keyName)}`,
@@ -340,7 +431,7 @@ export function grantAgentToSecret(
 ): Promise<SecretGrantAppendResponse> {
   const query = options?.dryRun ? "?dryRun=true" : "";
   return api.post<SecretGrantAppendResponse>(
-    `${secretPath(tenantId, keyName)}/grant/agents/${encodeURIComponent(agentId)}${query}`,
+    `${secretPath(tenantId, keyName)}/grant/agents/${seg(agentId)}${query}`,
   );
 }
 

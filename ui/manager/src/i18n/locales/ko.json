@@ -334,6 +334,13 @@
     "maxForksHint": "대화당",
     "maxRecallEntries": "최대 리콜",
     "memoryPolicy": "메모리 정책",
+    "limits": "한도",
+    "limitsDesc": "이 에이전트와의 대화 한 건에서 쓸 수 있는 금액을 제한합니다. 한도에 도달하면 에이전트는 모델을 호출하지 않고 대체 응답을 제공합니다.",
+    "maxCostPerConversation": "대화당 최대 비용(USD)",
+    "unlimited": "무제한",
+    "maxCostHint": "비어 있음 = 무제한. 0 = 요금이 발생하는 지출을 전혀 허용하지 않음.",
+    "maxCostInvalid": "0 이상의 금액을 입력하거나, 무제한이면 비워 두세요.",
+    "maxCostPricedOnly": "가격이 설정된 모델만 이 한도에 집계됩니다. LLM 설정에 입력/출력 가격이 없는 모델은 $0을 더하지만, 다른 지출이 한도에 도달하면 마찬가지로 중단됩니다.",
     "memoryPolicyDesc": "엄격한 쓰기 규율은 대화 단계 중 속성 업데이트가 실패할 때의 동작을 제어합니다. 부분적으로 커밋된 데이터를 엔진이 어떻게 처리할지 선택하세요.",
     "onCapReached": "상한 도달 시",
     "onFailure": "실패 시 전략",
@@ -1480,6 +1487,13 @@
     "maxToolCallsPerTurnDefault": "(기본값 {{n}})",
     "maxToolCallsHint": "한도를 넘은 호출은 실행되지 않습니다. 각 호출은 한도에 도달했음을 모델에 알리는 NOT_EXECUTED 결과를 받고, 모델은 가진 정보로 답합니다. 거부된 호출은 승인 단계에 도달하지 않습니다. 턴당 집계에는 승인 일시 정지 전의 호출도 포함됩니다. -1 또는 0은 한도를 없앱니다. EDDI 6.6 이상이 필요합니다. 이전 서버에서는 비워 두세요.",
     "maxToolCallsUncapped": "한도가 꺼져 있습니다. 모델이 그곳에서 도구 호출을 제한 없이 실행할 수 있으며, Max Tool Iterations만 상한이 됩니다.",
+    "repeatGuardTitle": "반복되는 실패한 도구 호출",
+    "repeatGuardEnabled": "반복 실패 호출 차단",
+    "maxIdenticalFailures": "허용되는 동일 실패 횟수",
+    "maxRefusalsPerTurn": "중단 전 거부 횟수",
+    "maxIdenticalCalls": "동일한 성공 호출 최대 횟수",
+    "exemptTools": "제외할 도구(쉼표로 구분)",
+    "repeatGuardHint": "이미 동일하게 실패했고 그 이후 성공한 호출이 없는 도구 호출은 다시 실행하지 않고 NOT_EXECUTED로 응답합니다. 거부 한도에 도달하면 턴이 고정 메시지로 끝납니다. 기본으로 켜져 있으며, 비워 두면 기본값을 유지합니다. 영구적 실패(예: HTTP 403/404)는 다음 동일 호출에서 거부되고, 재시도 가능한 실패는 허용 횟수 이후 거부됩니다. 동일한 성공 호출 최대 횟수는 설정하지 않으면 꺼져 있습니다(-1 또는 0 = 무제한). EDDI 6.6 이상이 필요합니다. 이전 서버에서는 건드리지 마세요.",
     "toggleTask": "작업 세부 정보 표시 또는 숨기기",
     "noActionsWarning": "이 작업에는 트리거 액션이 없어 실행되지 않습니다. 동작 규칙이 내보내는 액션(예: send_message)을 추가하세요.",
     "model": "모델",
@@ -1938,6 +1952,9 @@
     "allowedHostsHint": "이 시크릿을 다른 호스트로 보내려는 요청, 모델, 지식 베이스 또는 MCP/A2A 서버는 거부됩니다. 포트가 없는 호스트는 모든 포트와 일치합니다.",
     "allowedHostsTightened": "시크릿을 보낼 수 있는 대상을 제한합니다. 배포된 에이전트, 지식 베이스 또는 MCP/A2A 구성이 다른 호스트로 보내고 있다면 다음 호출부터 작동하지 않습니다. 이는 미리 확인되지 않습니다.",
     "allowedHostsAcknowledge": "이 시크릿을 사용하는 모든 항목이 이 호스트로만 보낸다는 것을 확인했습니다.",
+    "allowedHostsOnlyThese": "이 호스트만",
+    "allowedHostsAnyHost": "모든 호스트",
+    "allowedHostsRequired": "호스트를 하나 이상 추가하거나 “모든 호스트”를 선택하세요. 새 시크릿에는 둘 중 하나가 필요합니다.",
     "grantOnlyTheseAgents": "이 에이전트만",
     "grantAllHint": "이 테넌트의 모든 에이전트가 이 시크릿을 참조할 수 있습니다. 범위를 제한하면 유출된 하나의 설정이 닿을 수 있는 범위가 줄어듭니다.",
     "grantAddAgent": "에이전트 추가",
@@ -2896,6 +2913,7 @@
     "question": "질문",
     "readyToDiscuss": "토론 준비 완료",
     "responding": "응답 중…",
+    "usingTool": "{{tool}} 사용 중…",
     "reviewMemberRoster": "멤버 명단",
     "reviewMembers": "멤버",
     "reviewModerator": "모더레이터",
@@ -4283,6 +4301,13 @@
     "tenantId": "테넌트 ID",
     "title": "테넌트 할당량",
     "limitHintEmpty": "비어 있음 또는 -1 = 무제한, 0 = 차단",
+    "costPricedOnly": "가격이 설정된 지출만 집계합니다. LLM 설정에 inputPricePer1M / outputPricePer1M이 없는 모델은 합계에 $0을 더하지만, 예산이 소진되면 다른 모델과 똑같이 거부됩니다.",
+    "budgetTitle": "월간 비용 예산",
+    "budgetUnlimited": "월간 비용 예산이 설정되지 않아 지출은 측정만 하고 제한하지 않습니다.",
+    "budgetNotEnforced": "{{limit}} 예산이 설정되어 있지만 적용이 꺼져 있어 반영되지 않습니다.",
+    "budgetReached": "예산에 도달했습니다({{spent}} / {{limit}}). LLM 작업은 모델을 호출하는 대신 대체 응답을 제공하고 도구 호출은 거부됩니다. 다음 달이 되거나 한도를 올릴 때까지 유지됩니다.",
+    "budgetRemaining": "이번 달 {{limit}} 중 {{spent}} 사용. 모델 호출이 중단되기까지 {{remaining}} 남았습니다.",
+    "budgetNote": "UTC 달력 월 기준으로 가격이 설정된 모델 호출과 추적된 도구 비용을 집계합니다. 가격이 없는 모델, 대화 요약, 임베딩은 계량되지 않습니다. 한도를 넘는 턴도 끝까지 실행되므로 합계가 한도를 약간 넘을 수 있습니다. 거부된 호출은 eddi.llm.spend.refused 지표에 집계됩니다.",
     "invalidInteger": "0 이상의 정수를 입력하거나 비워 두면 무제한입니다.",
     "invalidAmount": "0 이상의 금액을 입력하거나 비워 두면 무제한입니다."
   },
@@ -4961,6 +4986,7 @@
       "action": "활성화"
     },
     "activation": {
+      "storedPromptConfirm": "이 지침은 저장된 구성에서 가져온 것으로, 플랫폼 설정을 편집할 수 있는 사람이 변경했을 수 있습니다. 위 내용을 읽었으며 설치하겠습니다.",
       "title": "플랫폼 오퍼레이터 활성화",
       "subtitle": "오퍼레이터를 구동할 모델을 고르고, 지침을 확인한 뒤 배포하세요.",
       "modelStep": "모델",
@@ -5064,7 +5090,11 @@
       "gateUnverifiedHelp": "이 에이전트 문서에서 승인 게이트를 확인할 수 없습니다.",
       "agentId": "에이전트",
       "platformBaseUrl": "플랫폼 호출 주소",
-      "platformBaseUrlUnknown": "기록되지 않음"
+      "platformBaseUrlUnknown": "기록되지 않음",
+      "unregister": "오퍼레이터 등록 해제",
+      "unregisterConfirmTitle": "플랫폼 오퍼레이터의 등록을 해제할까요?",
+      "unregisterConfirmBody": "저장된 오퍼레이터 설정만 제거됩니다. 등록된 에이전트가 이 Manager가 설정한 오퍼레이터인지 확인할 수 없어 배포, 배포 해제, 삭제는 하지 않습니다. 에이전트 화면에서 확인하세요.",
+      "unverifiedActions": "이 에이전트가 Manager가 설정한 오퍼레이터인지 확인할 수 없어 이 화면에서는 연결 확인, 배포 해제, 삭제를 하지 않습니다. '다시 설정'은 새 오퍼레이터를 만들고 이 에이전트는 그대로 둡니다."
     },
     "chat": {
       "empty": "배포에 대해 물어보세요. 오퍼레이터가 찾아보고, 수행한 모든 호출을 보여줍니다.",
@@ -5154,7 +5184,8 @@
       "activatedChecking": "플랫폼 오퍼레이터 활성화됨. 연결 확인이 백그라운드에서 실행 중입니다.",
       "writeProbeVerified": "쓰기 액세스 검증됨 — 실제 게이트 적용 쓰기가 승인을 위해 일시 중지되었습니다.",
       "writeProbeFailed": "승인 게이트가 작동하지 않았습니다 — 오퍼레이터가 제거되었습니다.",
-      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다."
+      "writeProbeInconclusive": "라이브 쓰기 프로브가 결론에 이르지 못했습니다.",
+      "unregistered": "플랫폼 오퍼레이터 등록을 해제했습니다"
     },
     "canary": {
       "genericFailure": "연결 확인에 실패했습니다.",
@@ -5193,7 +5224,22 @@
     "superseded": {
       "title": "이전 오퍼레이터 에이전트가 여전히 배포되어 있습니다."
     },
+    "trust": {
+      "checking": "채팅을 열기 전에 오퍼레이터를 확인하는 중…",
+      "title": "플랫폼 오퍼레이터를 확인할 수 없습니다",
+      "body": "오퍼레이터로 등록된 에이전트({{agentId}})가 이 매니저가 설정한 것이라고 증명되지 않아 채팅이 꺼져 있습니다. 플랫폼 설정을 편집할 수 있는 사람은 어떤 에이전트인지 바꿀 수 있습니다.",
+      "reasonMarker": "플랫폼 오퍼레이터 표식이 없어 매니저가 프로비저닝한 에이전트가 아닐 수 있습니다.",
+      "reasonGate": "승인 게이트를 확인할 수 없습니다: {{detail}}",
+      "reasonUnreadable": "확인을 완료할 수 없습니다: {{detail}}",
+      "recheck": "다시 확인",
+      "manage": "오퍼레이터 화면 열기"
+    },
     "upgrade": {
+      "reviewTitle": "저장된 지침 검토",
+      "reviewBody": "이 지침은 이전에 저장되었으며 새 오퍼레이터에 설치됩니다. 플랫폼 설정을 편집할 수 있는 사람이 변경했을 수 있으므로, 계속하기 전에 기본값과 다른 부분을 읽어 보세요.",
+      "reviewSummary": "{{added}}줄 추가됨, 기본값 {{removed}}줄 제거됨",
+      "reviewFull": "저장된 전체 텍스트 보기",
+      "reviewConfirm": "이 지침을 읽었으며 설치하겠습니다",
       "hint": "Platform Operator 업데이트를 사용할 수 있습니다.",
       "blockerBaseUrl": "모델 서버 주소가 기록되지 않았습니다. 업그레이드하려면 다시 입력하세요.",
       "addedTools_other": "새 도구 {{count}}개",
@@ -5812,6 +5858,7 @@
     "referenceCopied": "참조를 복사했습니다",
     "copyReference": "에이전트에서 사용할 참조 복사",
     "secretStored": "시크릿을 저장했습니다",
+    "secretHosts": "다음으로만 전송: {{hosts}}",
     "secrets": "시크릿",
     "noSecrets": "이 작업 공간에는 아직 시크릿이 없습니다",
     "deleteNamed": "{{name}} 삭제",

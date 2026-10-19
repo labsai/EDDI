@@ -225,6 +225,9 @@ function TaskEditor({
     : undefined;
   const compatibleEndpoint = compatibleDefault ? baseUrlParam || regionUrl || compatibleDefault : undefined;
   const endpointOverridden = Boolean(compatibleEndpoint && compatibleEndpoint !== compatibleDefault);
+  // Where a credential for this model is sent, when the editor can tell: it
+  // prefills the destination of a secret created from the key picker.
+  const credentialDestination = baseUrlParam || regionUrl || compatibleDefault || undefined;
 
   const isAgent =
     (task.tools && task.tools.length > 0) ||
@@ -495,6 +498,7 @@ function TaskEditor({
                         readOnly={readOnly}
                         placeholder={"${vault:...}"}
                         testId={`llm-param-${credentialKey}`}
+                        destinationUrl={credentialDestination}
                       />
                       <ConnectionReferenceWarning
                         value={task.parameters?.[credentialKey] ?? ""}
@@ -677,6 +681,7 @@ function TaskEditor({
                               readOnly={readOnly}
                               placeholder={"${vault:...}"}
                               testId={`llm-param-${k}`}
+                              destinationUrl={credentialDestination}
                               ariaLabel={t("llmEditor.paramValueOf", "Value of {{key}}", { key: k })}
                             />
                           </div>
@@ -1148,6 +1153,7 @@ function TaskEditor({
                             readOnly={readOnly}
                             placeholder={t("llmEditor.a2aApiKey", "${vault:my-a2a-key}")}
                             testId={`a2a-apikey-${ai}`}
+                            destinationUrl={agent.url}
                             connections
                           />
                           <ConnectionReferenceWarning

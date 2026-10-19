@@ -14,11 +14,19 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import org.junit.jupiter.api.Test;
+
+import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -38,14 +46,49 @@ class GroupCostLedgerTest {
         return new GroupConversation();
     }
 
-    private SimpleConversationMemorySnapshot buildSnapshot(ConversationStepData... entries) {
+    private SimpleConversationMemorySnapshot withCost(Double conversationCost) {
         var snapshot = new SimpleConversationMemorySnapshot();
-        var step = new SimpleConversationStep();
-        for (var entry : entries) {
-            step.getConversationStep().add(entry);
-        }
-        snapshot.getConversationSteps().add(step);
+        snapshot.setConversationCost(conversationCost);
         return snapshot;
+    }
+
+    private SimpleConversationMemorySnapshot withCost(Double conversationCost, String conversationId) {
+        var snapshot = withCost(conversationCost);
+        snapshot.setConversationId(conversationId);
+        return snapshot;
+    }
+
+    /**
+     * A persisted member conversation whose steps each carry their own
+     * {@code audit:cost}, as {@code LlmTask} writes it: one value per step, the
+     * cost of that turn only.
+     */
+    private static ConversationMemorySnapshot memberConversation(double... perStepCosts) {
+        var stored = new ConversationMemorySnapshot();
+        stored.setConversationId("member-conv");
+        stored.setAgentId("agent-a");
+        stored.setAgentVersion(1);
+        for (double cost : perStepCosts) {
+            var output = new ConversationOutput();
+            output.put("output", "a contribution");
+            stored.getConversationOutputs().add(output);
+            var workflow = new WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ResultSnapshot("output:text:a", "a contribution", null, new Date(), null, true));
+            workflow.getLifecycleTasks().add(new ResultSnapshot(MemoryKeys.AUDIT_COST, cost, null, new Date(), null, false));
+            var step = new ConversationStepSnapshot();
+            step.getWorkflows().add(workflow);
+            stored.getConversationSteps().add(step);
+        }
+        return stored;
+    }
+
+    /**
+     * What a member turn's callback receives after the given turns, built through
+     * the real projection with the flags {@code MemberTurnExecutor} passes
+     * ({@code returnDetailed=true, returnCurrentStepOnly=true}).
+     */
+    private static SimpleConversationMemorySnapshot memberTurnSnapshot(double... perStepCosts) {
+        return ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memberConversation(perStepCosts), true, true, null);
     }
 
     // =================================================================
@@ -61,36 +104,35 @@ class GroupCostLedgerTest {
     }
 
     @Test
-    void accumulateMemberCost_nullConversationSteps_noOp() {
+    void accumulateMemberCost_noConversationCost_noOp() {
         var gc = gc();
-        var snapshot = new SimpleConversationMemorySnapshot();
-        snapshot.setConversationSteps(null);
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
-        assertTrue(gc.getMemberCosts().isEmpty());
-    }
-
-    @Test
-    void accumulateMemberCost_emptyConversationSteps_noOp() {
-        var gc = gc();
-        var snapshot = new SimpleConversationMemorySnapshot();
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
-        assertTrue(gc.getMemberCosts().isEmpty());
-    }
-
-    @Test
-    void accumulateMemberCost_noCostKeyPresent_noOp() {
-        var gc = gc();
-        var snapshot = buildSnapshot(new ConversationStepData("output:text", "hello", null, null));
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(null));
         assertTrue(gc.getMemberCosts().isEmpty(),
-                "a turn with no audit:cost key (non-cascade, no priced tool — the common case per V1) must not fabricate a cost entry");
+                "a conversation where nothing priced ran (non-cascade, no priced tool — the common case per V1) must not fabricate a cost entry");
     }
 
     @Test
-    void accumulateMemberCost_nonNumberCostValue_noOp() {
+    void accumulateMemberCost_nonFiniteOrNegativeCost_noOp() {
         var gc = gc();
-        var snapshot = buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, "not-a-number", null, null));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(Double.NaN));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(Double.POSITIVE_INFINITY));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(-1.0));
+        assertTrue(gc.getMemberCosts().isEmpty(), "a poisoned value would disable every ceiling compared against totalCost");
+        assertEquals(0.0, gc.getTotalCost());
+    }
+
+    @Test
+    void accumulateMemberCost_ignoresStepData() {
+        var gc = gc();
+        // The step data is not the source: an audit:cost there is one step's value,
+        // never the conversation's spend.
+        var snapshot = withCost(null);
+        var step = new SimpleConversationStep();
+        step.getConversationStep().add(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.99, null, null));
+        snapshot.getConversationSteps().add(step);
+
         GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
+
         assertTrue(gc.getMemberCosts().isEmpty());
     }
 
@@ -101,52 +143,162 @@ class GroupCostLedgerTest {
     @Test
     void accumulateMemberCost_costPresent_recordsAndSumsTotal() {
         var gc = gc();
-        var snapshot = buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.05, null, null));
-
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05));
 
         assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
         assertEquals(0.05, gc.getTotalCost());
     }
 
     @Test
-    void accumulateMemberCost_secondTurn_replacesRatherThanAdds() {
+    void accumulateMemberCost_sameTurnHarvestedTwice_isIdempotent() {
         var gc = gc();
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.05, null, null)));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.12));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.12));
 
-        // AUDIT_COST is cumulative per LlmTask.accumulateCost — a later turn's
-        // value already includes the earlier turn's, so this must REPLACE, not add.
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.12, null, null)));
-
-        assertEquals(0.12, gc.getMemberCosts().get("agent-a"), "must replace with the new cumulative value, not add deltas");
+        assertEquals(0.12, gc.getMemberCosts().get("agent-a"), "the value is the conversation's running total — replaced, never added");
         assertEquals(0.12, gc.getTotalCost());
     }
 
     @Test
     void accumulateMemberCost_multipleMembers_totalIsSumOfAll() {
         var gc = gc();
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.05, null, null)));
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_B, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.03, null, null)));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_B, withCost(0.03));
 
         assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
         assertEquals(0.03, gc.getMemberCosts().get("agent-b"));
         assertEquals(0.08, gc.getTotalCost(), 1e-9);
     }
 
+    // =================================================================
+    // accumulateMemberCost — through the real member-turn projection
+    // =================================================================
+
     @Test
-    void accumulateMemberCost_readsOnlyLastStep() {
+    void twoTurnMember_isCountedInFull() {
         var gc = gc();
-        var snapshot = new SimpleConversationMemorySnapshot();
-        var step1 = new SimpleConversationStep();
-        step1.getConversationStep().add(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.99, null, null));
-        snapshot.getConversationSteps().add(step1);
-        var step2 = new SimpleConversationStep();
-        step2.getConversationStep().add(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.10, null, null));
-        snapshot.getConversationSteps().add(step2);
+        // Turn 1 costs $0.05, turn 2 $0.07. audit:cost is per STEP, so the member's
+        // spend is $0.12, not the $0.07 the latest step alone carries.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, memberTurnSnapshot(0.05));
+        assertEquals(0.05, gc.getTotalCost(), 1e-9);
 
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, snapshot);
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, memberTurnSnapshot(0.05, 0.07));
 
-        assertEquals(0.10, gc.getMemberCosts().get("agent-a"), "must read the LAST step's value, not an earlier one");
+        assertEquals(0.12, gc.getMemberCosts().get("agent-a"), 1e-9);
+        assertEquals(0.12, gc.getTotalCost(), 1e-9);
+    }
+
+    @Test
+    void twoTurnMember_tripsTheCeilingItsTurnsJointlyExceed() {
+        var gc = gc();
+        var protocol = protocolWithCeiling(0.10);
+        var phase = new DiscussionPhase("P", PhaseType.OPINION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, memberTurnSnapshot(0.06));
+        assertFalse(GroupCostLedger.enforceCeiling(gc, protocol, 0, phase), "$0.06 of $0.10 is within budget");
+
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, memberTurnSnapshot(0.06, 0.06));
+
+        // Each turn alone is under the ceiling; together they are $0.12, over it.
+        assertTrue(GroupCostLedger.wouldExceedCeiling(gc, protocol));
+        assertTrue(GroupCostLedger.enforceCeiling(gc, protocol, 0, phase));
+        assertEquals(CostPolicy.ABORT, gc.getCostCeilingOutcome());
+    }
+
+    @Test
+    void memberTurnProjection_withholdsAuditCostFromStepData_yetCarriesTheTotal() {
+        var snapshot = memberTurnSnapshot(0.05, 0.07);
+
+        assertTrue(snapshot.getConversationSteps().stream()
+                .flatMap(step -> step.getConversationStep().stream())
+                .noneMatch(data -> MemoryKeys.AUDIT_COST.equals(data.getKey())),
+                "returnDetailed withholds audit:* — the ledger cannot read the cost off the steps");
+        assertEquals(0.12, snapshot.getConversationCost(), 1e-9);
+    }
+
+    // =================================================================
+    // retireConversation — a member's ended conversation replaced
+    // =================================================================
+
+    @Test
+    void retireConversation_keepsTheEndedConversationsSpend() {
+        var gc = gc();
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30));
+
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+        // The fresh conversation starts its own running total from zero.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05));
+
+        assertEquals(0.30, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
+        assertEquals(0.35, gc.getTotalCost(), 1e-9, "the fresh conversation must not overwrite the ended one's spend");
+    }
+
+    @Test
+    void lateCallbackFromARetiredConversation_landsOnItsRetiredKey() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05, "conv-new"));
+
+        // A turn that timed out on the ended conversation completes now, with that
+        // conversation's (larger) final total, under the same attribution key.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.40, "conv-ended"));
+
+        assertEquals(0.05, gc.getMemberCosts().get("agent-a"), "the replacement conversation's total must not be overwritten");
+        assertEquals(0.40, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.45, gc.getTotalCost(), 1e-9);
+    }
+
+    @Test
+    void lateCallbackBeforeRetirement_stillCountedOnce() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+        // An older total arriving after retirement must not lower the retired entry.
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.20, "conv-ended"));
+
+        assertEquals(0.30, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertNull(gc.getMemberCosts().get("agent-a"));
+        assertEquals(0.30, gc.getTotalCost(), 1e-9);
+    }
+
+    @Test
+    void lateCallbackBetweenRetirementAndReplacement_isNotLost() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.30, "conv-ended"));
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+
+        // The replacement's id is not published yet: the map still names the ended
+        // conversation when its late callback lands.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.40, "conv-ended"));
+        gc.getMemberConversationIds().put("agent-a", "conv-new");
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.05, "conv-new"));
+
+        assertEquals(0.40, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.05, gc.getMemberCosts().get("agent-a"));
+        assertEquals(0.45, gc.getTotalCost(), 1e-9, "the ended conversation's last spend must survive the replacement's first harvest");
+    }
+
+    @Test
+    void retireConversation_nothingRecordedYet_stillMarksTheConversationRetired() {
+        var gc = gc();
+        gc.getMemberConversationIds().put("agent-a", "conv-ended");
+        GroupCostLedger.retireConversation(gc, "agent-a", "conv-ended");
+
+        assertEquals(0.0, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertEquals(0.0, gc.getTotalCost());
+
+        // Its first (and late) callback is routed to the retired entry, not the
+        // plain key the replacement will use.
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.10, "conv-ended"));
+        assertEquals(0.10, gc.getMemberCosts().get("agent-a:conv-ended"));
+        assertNull(gc.getMemberCosts().get("agent-a"));
     }
 
     // =================================================================
@@ -195,7 +347,7 @@ class GroupCostLedgerTest {
     @Test
     void accumulateNestedGroupCost_mixesWithIndividualMembers() {
         var gc = gc();
-        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, buildSnapshot(new ConversationStepData(MemoryKeys.AUDIT_COST, 0.10, null, null)));
+        GroupCostLedger.accumulateMemberCost(gc, AGENT_A, withCost(0.10));
         var subConversation = gc();
         subConversation.setTotalCost(0.50);
 

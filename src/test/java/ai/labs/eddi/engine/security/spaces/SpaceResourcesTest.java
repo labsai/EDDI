@@ -15,6 +15,7 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantChecker;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -119,6 +120,49 @@ class SpaceResourcesTest {
             verify(vault).store(reference, "sk-test", "key", List.of("*"), null);
             var stored = (IRestSpaceResources.SpaceSecret) response.getEntity();
             assertEquals("${vault:" + tenant + "/openai}", stored.reference());
+        }
+
+        /**
+         * Security review 2026-10-17, H1: a space secret had no way to carry
+         * allowedHosts at all, so every one of them could be sent wherever a member's
+         * next configuration edit pointed it.
+         */
+        @Test
+        @DisplayName("a create under enforce needs allowedHosts, and stores the list it is given")
+        void createNeedsAllowedHosts() throws Exception {
+            String tenant = SpaceTenants.tenantFor(ENGINEERING);
+            var reference = new SecretReference(tenant, "openai");
+            when(vault.getMetadata(reference)).thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(
+                            new SecretMetadata(tenant, "openai", Instant.EPOCH, null, null, null, "key", List.of("*"), List.of("api.openai.com")));
+
+            var refused = assertThrows(BadRequestException.class,
+                    () -> sut.storeSecret(ENGINEERING, "openai", new IRestSpaceResources.SecretWrite("sk-test", "key", List.of("*"))));
+            assertTrue(refused.getMessage().contains("allowedHosts"), refused.getMessage());
+            verify(vault, never()).store(any(), anyString(), any(), any(), any());
+
+            when(vault.getMetadata(reference)).thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(
+                            new SecretMetadata(tenant, "openai", Instant.EPOCH, null, null, null, "key", List.of("*"), List.of("api.openai.com")));
+            var response = sut.storeSecret(ENGINEERING, "openai",
+                    new IRestSpaceResources.SecretWrite("sk-test", "key", List.of("*"), List.of("API.openai.com")));
+
+            verify(vault).store(reference, "sk-test", "key", List.of("*"), List.of("api.openai.com"));
+            assertEquals(List.of("api.openai.com"), ((IRestSpaceResources.SpaceSecret) response.getEntity()).allowedHosts());
+        }
+
+        @Test
+        @DisplayName("allowedHosts [\"*\"] creates a space secret with no destination restriction, said out loud")
+        void createWithAnyHost() throws Exception {
+            String tenant = SpaceTenants.tenantFor(ENGINEERING);
+            var reference = new SecretReference(tenant, "openai");
+            when(vault.getMetadata(reference)).thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
+                    .thenReturn(new SecretMetadata(tenant, "openai", Instant.EPOCH, null, null, null, "key", List.of("*")));
+
+            var response = sut.storeSecret(ENGINEERING, "openai", new IRestSpaceResources.SecretWrite("sk-test", "key", List.of("*"), List.of("*")));
+
+            verify(vault).store(reference, "sk-test", "key", List.of("*"), List.of());
+            assertEquals(List.of(), ((IRestSpaceResources.SpaceSecret) response.getEntity()).allowedHosts());
         }
 
         @Test

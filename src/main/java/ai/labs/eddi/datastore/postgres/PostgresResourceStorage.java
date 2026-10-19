@@ -374,6 +374,28 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     @Override
+    public boolean setNumberField(String id, String fieldName, long value) {
+        checkNotNull(id, "id");
+        IResourceStorage.requireTopLevelFieldName(fieldName);
+        if (!PostgresIds.isStorableId(id)) {
+            return false;
+        }
+        // One UPDATE on the live row: jsonb_set rewrites only this key, the version
+        // and every other field stay as they are.
+        String sql = "UPDATE resources SET data = jsonb_set(data, ?::text[], to_jsonb(?::bigint)) "
+                + "WHERE id = ?::uuid AND collection_name = ?";
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, "{" + fieldName + "}");
+            ps.setLong(2, value);
+            ps.setString(3, id);
+            ps.setString(4, collectionName);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to set field " + fieldName, e);
+        }
+    }
+
+    @Override
     public void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
             throws IResourceStore.ResourceModifiedException {
         Resource pgResource = checkInternalResource(newResource);

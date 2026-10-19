@@ -17,15 +17,29 @@ describe("secret mock handlers share state", () => {
   it("finds and lists a key right after it is created", async () => {
     expect(await findSecret("default", "fresh-key")).toBeNull();
 
-    await storeSecret("default", "fresh-key", "v1", "created in a test", ["agent1"]);
+    await storeSecret("default", "fresh-key", "v1", "created in a test", ["agent1"], ["api.example.com"]);
 
     const found = await findSecret("default", "fresh-key");
     expect(found).toMatchObject({
       keyName: "fresh-key",
       description: "created in a test",
       allowedAgents: ["agent1"],
+      allowedHosts: ["api.example.com"],
     });
     expect((await listSecrets("default")).map((s) => s.keyName)).toContain("fresh-key");
+  });
+
+  it("refuses a create without allowedHosts, or with an empty list, as enforce mode does", async () => {
+    await expect(storeSecret("default", "no-hosts", "v", undefined, ["*"])).rejects.toMatchObject({ status: 400 });
+    await expect(storeSecret("default", "no-hosts", "v", undefined, ["*"], [])).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(await findSecret("default", "no-hosts")).toBeNull();
+
+    // ["*"] is the explicit opt-out, stored as no restriction; an update may omit the list.
+    await storeSecret("default", "no-hosts", "v", undefined, ["*"], ["*"]);
+    expect((await findSecret("default", "no-hosts"))?.allowedHosts).toBeUndefined();
+    await storeSecret("default", "no-hosts", "v2", undefined, ["*"]);
   });
 
   it("resets between tests: the key created above is gone again", async () => {

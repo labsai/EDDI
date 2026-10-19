@@ -274,6 +274,54 @@ class InstallerReleaseRefTest {
     }
 
     /**
+     * Security review 2026-10-17, L8: every file the installers download at install
+     * time is checked against the release's SHA256SUMS before it is used, and the
+     * release job publishes that asset. Text-level, so a new download added without
+     * the check fails here rather than shipping unverified.
+     */
+    @Test
+    @DisplayName("every install-time download is checked against the release's SHA256SUMS")
+    void everyDownloadIsChecksumVerified() throws IOException {
+        String shell = Files.readString(INSTALL_SH, StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String resolve = shell.substring(shell.indexOf("resolve_compose_files() {"),
+                shell.indexOf("\n}\n", shell.indexOf("resolve_compose_files() {")));
+        assertTrue(resolve.contains("load_release_checksums"), "install.sh must load the checksums before downloading");
+        var shellDownloads = Pattern
+                .compile("if curl -fsSL \"\\$\\{(\\w+)\\}\" -o \"\\$(\\w+)\"; then\\n\\s+verify_download \"\\$(\\w+)\" \"\\$(\\w+)\"")
+                .matcher(resolve);
+        int verified = 0;
+        while (shellDownloads.find()) {
+            assertEquals(shellDownloads.group(2), shellDownloads.group(4), "verify_download must check the file just written");
+            verified++;
+        }
+        assertEquals(resolve.split("curl -fsSL", -1).length - 1, verified,
+                "install.sh: every curl download in resolve_compose_files must be followed by verify_download");
+        assertTrue(verified >= 3, "expected the compose, monitoring and Keycloak downloads, found " + verified);
+
+        String ps = Files.readString(INSTALL_PS1, StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String getCompose = ps.substring(ps.indexOf("function Get-ComposeFiles {"),
+                ps.indexOf("\n}\n", ps.indexOf("function Get-ComposeFiles {")));
+        assertTrue(getCompose.contains("Initialize-ReleaseChecksums"), "install.ps1 must load the checksums before downloading");
+        // Every download in Get-ComposeFiles goes through Save-VerifiedDownload, which
+        // writes to a temporary path, verifies it and only then moves it into place —
+        // a mismatch never replaces a file that is already installed.
+        assertFalse(getCompose.contains("Invoke-WebRequest"),
+                "install.ps1: Get-ComposeFiles must download through Save-VerifiedDownload, never Invoke-WebRequest directly");
+        int psVerified = getCompose.split("Save-VerifiedDownload -Uri ", -1).length - 1;
+        assertTrue(psVerified >= 3, "expected the compose, monitoring and Keycloak downloads, found " + psVerified);
+        String saveVerified = ps.substring(ps.indexOf("function Save-VerifiedDownload {"),
+                ps.indexOf("\n}\n", ps.indexOf("function Save-VerifiedDownload {")));
+        assertTrue(Pattern.compile("Invoke-WebRequest -Uri \\$Uri -OutFile \\$temporary [^\\n]*\\n\\s+"
+                + "Confirm-DownloadChecksum -RelativePath \\$RelativePath -Path \\$temporary\\n\\s+"
+                + "Move-Item -Path \\$temporary -Destination \\$Target").matcher(saveVerified).find(),
+                "Save-VerifiedDownload must download to the temporary path, verify that path, then move it to the target");
+
+        String ci = Files.readString(Path.of(".github", "workflows", "ci.yml"), StandardCharsets.UTF_8);
+        assertTrue(ci.contains("> SHA256SUMS") && ci.contains("files: SHA256SUMS"),
+                "the release job must generate SHA256SUMS and attach it to the GitHub release");
+    }
+
+    /**
      * A curl that answers the releases API with {@link #STUB_TAG} (or fails like an
      * unreachable host when STUB_API_FAIL=1), writes "stub" for any {@code -o}
      * download, and logs every URL it was asked for to stub/curl.log.

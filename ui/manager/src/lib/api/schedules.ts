@@ -1,4 +1,5 @@
 import { api, isApiError } from "../api-client";
+import { seg } from "./path-segment";
 
 // ==================== Types ====================
 
@@ -739,7 +740,7 @@ export function mayHaveMoreSchedules(
 export async function getSchedule(
   scheduleId: string
 ): Promise<ScheduleConfiguration> {
-  return api.get<ScheduleConfiguration>(`${BASE}/${scheduleId}`);
+  return api.get<ScheduleConfiguration>(`${BASE}/${seg(scheduleId)}`);
 }
 
 export async function createSchedule(
@@ -752,19 +753,19 @@ export async function updateSchedule(
   scheduleId: string,
   config: Partial<ScheduleConfiguration>
 ): Promise<void> {
-  return api.put(`${BASE}/${scheduleId}`, config);
+  return api.put(`${BASE}/${seg(scheduleId)}`, config);
 }
 
 export async function deleteSchedule(scheduleId: string): Promise<void> {
-  return api.delete(`${BASE}/${scheduleId}`);
+  return api.delete(`${BASE}/${seg(scheduleId)}`);
 }
 
 export async function enableSchedule(scheduleId: string): Promise<void> {
-  return api.post(`${BASE}/${scheduleId}/enable`);
+  return api.post(`${BASE}/${seg(scheduleId)}/enable`);
 }
 
 export async function disableSchedule(scheduleId: string): Promise<void> {
-  return api.post(`${BASE}/${scheduleId}/disable`);
+  return api.post(`${BASE}/${seg(scheduleId)}/disable`);
 }
 
 /**
@@ -775,15 +776,15 @@ export async function disableSchedule(scheduleId: string): Promise<void> {
 export async function fireNow(
   scheduleId: string
 ): Promise<ScheduleFireLog | undefined> {
-  return api.post<ScheduleFireLog | undefined>(`${BASE}/${scheduleId}/fire`);
+  return api.post<ScheduleFireLog | undefined>(`${BASE}/${seg(scheduleId)}/fire`);
 }
 
 export async function retryDeadLetter(scheduleId: string): Promise<void> {
-  return api.post(`${BASE}/${scheduleId}/retry`);
+  return api.post(`${BASE}/${seg(scheduleId)}/retry`);
 }
 
 export async function dismissDeadLetter(scheduleId: string): Promise<void> {
-  return api.post(`${BASE}/${scheduleId}/dismiss`);
+  return api.post(`${BASE}/${seg(scheduleId)}/dismiss`);
 }
 
 export async function getFireLogs(
@@ -791,7 +792,7 @@ export async function getFireLogs(
   limit = 20
 ): Promise<ScheduleFireLog[]> {
   return api.get<ScheduleFireLog[]>(
-    `${BASE}/${scheduleId}/fires?limit=${limit}`
+    `${BASE}/${seg(scheduleId)}/fires?limit=${limit}`
   );
 }
 
