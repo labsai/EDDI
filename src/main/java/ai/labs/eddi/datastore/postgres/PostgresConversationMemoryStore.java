@@ -877,6 +877,29 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public Map<Integer, Long> getActiveConversationCountsByGeneration(String agentId) {
+        ensureSchema();
+        // The generation lives in the snapshot JSON; a conversation without one has a
+        // NULL there and groups under a null key.
+        String sql = "SELECT (data ->> 'compatibilityGeneration')::int, COUNT(*) FROM conversation_memories "
+                + "WHERE AGENT_ID = ? AND conversation_state NOT IN (?, ?) GROUP BY 1";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, agentId);
+            ps.setString(2, ENDED.toString());
+            ps.setString(3, ConversationState.AWAITING_HUMAN.toString());
+            Map<Integer, Long> counts = new LinkedHashMap<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    counts.put(rs.getObject(1, Integer.class), rs.getLong(2));
+                }
+            }
+            return counts;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count active conversations by generation", e);
+        }
+    }
+
+    @Override
     public ConversationUsage getConversationUsage(String agentId) {
         ensureSchema();
         String sql = "SELECT COUNT(*), COUNT(*) FILTER (WHERE conversation_state <> ?), COUNT(DISTINCT data ->> 'userId') "

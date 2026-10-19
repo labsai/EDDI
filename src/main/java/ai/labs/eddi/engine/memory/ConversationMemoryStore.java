@@ -17,6 +17,8 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
@@ -68,6 +70,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_VALUE = "value";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
+    private static final String KEY_COMPATIBILITY_GENERATION = "compatibilityGeneration";
     private static final String KEY_END_REASON = "endReason";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
     private static final String KEY_USER_ID = "userId";
@@ -814,6 +817,21 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 Filters.nin(KEY_CONVERSATION_STATE,
                         ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
         return conversationCollectionDocument.countDocuments(query);
+    }
+
+    @Override
+    public Map<Integer, Long> getActiveConversationCountsByGeneration(String agentId) {
+        // One grouped count; a conversation without the field groups under a null _id.
+        Bson open = Filters.and(Filters.eq(KEY_AGENT_ID, agentId),
+                Filters.nin(KEY_CONVERSATION_STATE, ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
+        Map<Integer, Long> counts = new LinkedHashMap<>();
+        for (Document group : conversationCollectionDocument.aggregate(List.of(Aggregates.match(open),
+                Aggregates.group("$" + KEY_COMPATIBILITY_GENERATION, Accumulators.sum("n", 1L))))) {
+            Object generation = group.get("_id");
+            counts.merge(generation instanceof Number number ? Integer.valueOf(number.intValue()) : null,
+                    ((Number) group.get("n")).longValue(), Long::sum);
+        }
+        return counts;
     }
 
     @Override

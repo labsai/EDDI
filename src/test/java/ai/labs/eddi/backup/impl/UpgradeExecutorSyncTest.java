@@ -279,9 +279,16 @@ class UpgradeExecutorSyncTest {
                 row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0),
                 row(WF2, "workflow", DiffAction.REMOVE, WF2, 1, 1));
 
+        var written = new AgentConfiguration();
+        written.setCompatibilityGeneration(7);
+        when(agentStore.readAgent(AGENT, 6)).thenReturn(written);
+
         UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null, true));
 
         assertTrue(result.agentUpdated());
+        // the result says what the declaration did, so a script can verify it
+        assertEquals(Boolean.TRUE, result.compatible());
+        assertEquals(7, result.compatibilityGeneration());
         verify(agentStore).updateAgent(eq(AGENT), eq(5), any(), eq(true));
         verify(agentStore, never()).updateAgent(eq(AGENT), eq(5), any(), eq(false));
     }

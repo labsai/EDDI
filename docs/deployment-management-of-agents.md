@@ -254,11 +254,19 @@ removed, or the new version needs conversation state older conversations lack.
 The import and sync previews carry a `conversationImpact`, so the choice is made with the
 numbers in front of you. It answers for both declarations at once: the target's current version
 and generation, the generation each declaration would produce (`generationIfCompatible`,
-`generationIfBreaking`), the open conversations on every deployed version
-(`activeConversations`, counted, never loaded) and how many of them would follow if the version
-is declared compatible (`followingIfCompatible`). Declared breaking, none follow. It is absent
-when the preview writes nothing, the target does not exist yet, or the caller may not edit the
-target.
+`generationIfBreaking`), the agent's open conversations (`activeConversations`) grouped by their
+own compatibility generation (`generations`), and how many of them would follow if the version is
+declared compatible (`followingIfCompatible`: those of the generation a compatible save would
+carry). Declared breaking, none follow. Conversations are counted by generation, not by the
+version they last ran on, because a conversation follows the newest ready version of its own
+generation: after a few compatible saves many idle ones are stored on versions that are no longer
+deployed and still follow. It is one grouped count, never the conversations themselves. It is
+absent when the preview writes nothing, the target does not exist yet, or the caller may not edit
+the target.
+
+After the write, the answer says what the declaration did: an upgrade or sync result carries
+`compatible` and the `compatibilityGeneration` of the version it wrote, and a merge import answers
+with the headers `X-Agent-Compatible` and `X-Agent-Compatibility-Generation`.
 
 If the target's current version predates generations (`startsNewChain: true`), a compatible
 import still starts generation `1`, and the conversations already running on the old version stay

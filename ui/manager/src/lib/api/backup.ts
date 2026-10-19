@@ -45,12 +45,14 @@ export interface ResourceDiff {
 }
 
 /**
- * One version of the agent that is deployed somewhere, with the open
- * conversations on it (counted, never loaded).
+ * The agent's open conversations of one compatibility generation (counted, never
+ * loaded). Grouped by generation rather than by deployed version: a conversation
+ * follows the newest ready version of its OWN generation, whatever version it last
+ * ran on, so many idle ones are stored on versions that are no longer deployed.
  */
-export interface PromotionDeployedVersion {
-  version: number;
-  compatibilityGeneration: number | null;
+export interface PromotionGenerationCount {
+  /** `null` for conversations that predate compatibility generations. */
+  generation: number | null;
   activeConversations: number;
   /** Whether those conversations would follow the new version if it is declared compatible. */
   followsIfCompatible: boolean;
@@ -73,7 +75,8 @@ export interface PromotionImpact {
   startsNewChain: boolean;
   activeConversations: number;
   followingIfCompatible: number;
-  deployedVersions: PromotionDeployedVersion[];
+  /** Newest generation first, conversations without one last. */
+  generations: PromotionGenerationCount[];
 }
 
 export interface ImportPreview {
@@ -167,6 +170,13 @@ export interface UpgradeResult {
   created: number;
   skipped: number;
   failures: ResourceFailure[];
+  /**
+   * Whether the agent version this run wrote was declared compatible. Absent or
+   * null when no agent version was written (older backends omit it).
+   */
+  compatible?: boolean | null;
+  /** The compatibility generation the written agent version carries, when known. */
+  compatibilityGeneration?: number | null;
 }
 
 /**

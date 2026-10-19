@@ -243,6 +243,40 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
+        @DisplayName("getActiveConversationCountsByGeneration — groups open conversations by their own generation, across versions")
+        void activeCountsByGeneration() throws Exception {
+            // Generation 2 spread over three agent versions, as after compatible saves:
+            // the count is by what the conversation is, not by where it last ran
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, 2, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 2, 2, ConversationState.READY));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, 1, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, null, ConversationState.IN_PROGRESS));
+            // ended and paused conversations do not count, as in getActiveConversationCount
+            String endedId = store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.IN_PROGRESS));
+            store.setConversationState(endedId, ConversationState.ENDED);
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.AWAITING_HUMAN));
+            // another agent is never mixed in
+            store.storeConversationMemorySnapshot(withGeneration("other-agent", 1, 2, ConversationState.IN_PROGRESS));
+
+            Map<Integer, Long> counts = store.getActiveConversationCountsByGeneration("gen-agent");
+
+            assertEquals(3, counts.size(), counts.toString());
+            assertEquals(3L, counts.get(2));
+            assertEquals(1L, counts.get(1));
+            assertEquals(1L, counts.get(null), "a conversation without a generation is counted under null");
+            assertTrue(counts.containsKey(null));
+            assertTrue(store.getActiveConversationCountsByGeneration("nobody").isEmpty());
+        }
+
+        private ConversationMemorySnapshot withGeneration(String agentId, int agentVersion, Integer generation,
+                                                          ConversationState state) {
+            var snapshot = createSnapshot(null, agentId, agentVersion, "u", state);
+            snapshot.setCompatibilityGeneration(generation);
+            return snapshot;
+        }
+
+        @Test
         @DisplayName("getActiveConversationCount — counts non-ENDED only")
         void activeCount() throws IResourceStore.ResourceStoreException {
             store.storeConversationMemorySnapshot(

@@ -404,6 +404,9 @@ public class UpgradeExecutor {
         private int updated;
         private int created;
         private int skipped;
+        /** What the agent write was declared and the generation it landed on. */
+        private Boolean compatible;
+        private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
 
         void failed(String sourceId, String resourceType, String name, Throwable cause) {
@@ -418,7 +421,8 @@ public class UpgradeExecutor {
         }
 
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
-            return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures));
+            return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null);
         }
     }
 
@@ -1546,6 +1550,8 @@ public class UpgradeExecutor {
             if (resp != null && resp.getStatus() == 200) {
                 bumpDescriptorOrFail(agentId, currentVersion, "agent", agentId, null, outcome);
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
+                outcome.compatible = compatible;
+                outcome.compatibilityGeneration = generationOfWritten(agentId, currentVersion + 1);
                 LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", LogSanitizer.sanitize(agentId), currentVersion,
                         currentVersion + 1);
                 return updatedUri;
@@ -1561,6 +1567,21 @@ public class UpgradeExecutor {
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The generation the store gave the agent version just written, or null when it
+     * cannot be read back — reporting it is best effort and never fails the run.
+     */
+    private Integer generationOfWritten(String agentId, int version) {
+        try {
+            AgentConfiguration written = agentStore.readAgent(agentId, version);
+            return written != null ? written.getCompatibilityGeneration() : null;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read back the generation of agent %s v%d: %s", LogSanitizer.sanitize(agentId), version,
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
         }
     }
 

@@ -184,6 +184,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
     private static final String QUERY_SELECTED_RESOURCES = "selectedResources";
+    /** Whether the agent version a merge wrote was declared compatible. */
+    static final String HEADER_AGENT_COMPATIBLE = "X-Agent-Compatible";
+    /** The compatibility generation of the agent version a merge wrote. */
+    static final String HEADER_AGENT_COMPATIBILITY_GENERATION = "X-Agent-Compatibility-Generation";
 
     /** The container's configured scrubber, replacing the fail-safe default. */
     @Inject
@@ -841,6 +845,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         int connectionsNotImported = importConnections(Paths.get(targetDirPath), transaction);
 
         URI lastAgentUri = null;
+        // The generation of the agent version a merge wrote, so a script can verify
+        // what
+        // the declaration did without a second call.
+        Integer writtenGeneration = null;
         int schedulesNotImported = 0;
         for (var agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
             try {
@@ -866,6 +874,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 URI newAgentUri;
                 if (isMerge && isSelected(selectedSet, agentOriginId)) {
                     newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, compatible, transaction);
+                    writtenGeneration = generationOf(newAgentUri);
                 } else {
                     newAgentUri = createNewAgent(agentConfig, transaction);
                 }
@@ -901,6 +910,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // log, so the count travels with the answer it gets.
                 created.header(HEADER_SCHEDULES_SKIPPED, schedulesNotImported);
             }
+            if (writtenGeneration != null) {
+                created.header(HEADER_AGENT_COMPATIBLE, compatible);
+                created.header(HEADER_AGENT_COMPATIBILITY_GENERATION, writtenGeneration);
+            }
             if (connectionsNotImported > 0) {
                 // Same reasoning: a connection that already existed, or that this
                 // deployment refused, is a decision the caller should learn from the
@@ -912,6 +925,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Nothing was imported. Answering 200 with an empty resourceUri is how a
         // whole class of broken archives went unnoticed.
         throw noAgentFileFound();
+    }
+
+    /**
+     * The compatibility generation of the agent version at {@code agentUri}, or
+     * null when it cannot be read — reporting it is best effort and never fails the
+     * import.
+     */
+    private Integer generationOf(URI agentUri) {
+        try {
+            IResourceId id = RestUtilities.extractResourceId(agentUri);
+            if (id == null) {
+                return null;
+            }
+            IResourceStore<AgentConfiguration> store = resolveStore(IAgentStore.class);
+            AgentConfiguration written = store.read(id.getId(), id.getVersion());
+            return written != null ? written.getCompatibilityGeneration() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read back the generation of %s: %s", LogSanitizer.sanitize(String.valueOf(agentUri)),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     private URI buildOldAgentUri(Path agentPath) {

@@ -5225,9 +5225,9 @@ const MOCK_CONVERSATION_IMPACT = {
   startsNewChain: false,
   activeConversations: 12,
   followingIfCompatible: 9,
-  deployedVersions: [
-    { version: 4, compatibilityGeneration: 2, activeConversations: 9, followsIfCompatible: true },
-    { version: 2, compatibilityGeneration: 1, activeConversations: 3, followsIfCompatible: false },
+  generations: [
+    { generation: 2, activeConversations: 9, followsIfCompatible: true },
+    { generation: 1, activeConversations: 3, followsIfCompatible: false },
   ],
 };
 

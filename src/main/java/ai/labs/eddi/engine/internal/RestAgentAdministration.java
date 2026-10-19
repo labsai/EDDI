@@ -693,31 +693,33 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // a generation the save will not produce.
         int generationIfCompatible = AgentStore.nextCompatibilityGeneration(current, true);
         int generationIfBreaking = AgentStore.nextCompatibilityGeneration(current, false);
-        int newVersion = currentVersion + 1;
 
-        List<PromotionImpact.DeployedVersion> versions = new ArrayList<>();
+        // Counted by what a conversation is, not by the version it last ran on: it
+        // follows the newest ready version of its OWN generation, so after a few
+        // compatible saves many idle conversations are stored on versions that are no
+        // longer deployed, and a count per deployed version would leave them out. One
+        // grouped count, never the conversations.
+        Map<Integer, Long> byGeneration = conversationMemoryStore.getActiveConversationCountsByGeneration(agentId);
+        boolean startsNewChain = currentGeneration == null;
+        List<PromotionImpact.GenerationCount> generations = new ArrayList<>();
         long total = 0;
         long following = 0;
-        // A conversation is counted per agent version, not per environment, so a
-        // version deployed in both environments must be counted once.
-        SortedSet<Integer> deployedEverywhere = new TreeSet<>(Comparator.reverseOrder());
-        for (Deployment.Environment environment : Deployment.Environment.values()) {
-            deployedEverywhere.addAll(deployedVersions(environment, agentId));
-        }
-        for (Integer deployed : deployedEverywhere) {
-            Integer deployedGeneration = generationOf(agentId, deployed);
-            Long counted = conversationMemoryStore.getActiveConversationCount(agentId, deployed);
-            long active = counted != null ? counted : 0L;
-            boolean follows = outcomeFor(generationIfCompatible, newVersion, deployedGeneration,
-                    deployed) == DeploymentImpact.Outcome.FOLLOW;
+        for (Map.Entry<Integer, Long> entry : byGeneration.entrySet()) {
+            long active = entry.getValue() != null ? entry.getValue() : 0L;
+            // A version without a generation has no chain to continue, so nothing follows
+            // it; and a conversation without one never follows anything.
+            boolean follows = !startsNewChain && entry.getKey() != null && entry.getKey() == generationIfCompatible;
             total += active;
             if (follows) {
                 following += active;
             }
-            versions.add(new PromotionImpact.DeployedVersion(deployed, deployedGeneration, active, follows));
+            generations.add(new PromotionImpact.GenerationCount(entry.getKey(), active, follows));
         }
-        return new PromotionImpact(currentVersion, currentGeneration, generationIfCompatible, generationIfBreaking,
-                currentGeneration == null, total, following, versions);
+        // Newest generation first, conversations without one last.
+        generations.sort(Comparator.comparing(PromotionImpact.GenerationCount::generation, Comparator.nullsFirst(Comparator.<Integer>naturalOrder()))
+                .reversed());
+        return new PromotionImpact(currentVersion, currentGeneration, generationIfCompatible, generationIfBreaking, startsNewChain,
+                total, following, generations);
     }
 
     private static String getConflictExplanations(String agentId, Integer version, Long activeConversationCount) {

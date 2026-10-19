@@ -152,8 +152,16 @@ class RestImportServiceCompatibleTest {
             stubArchive(false);
             stubExistingAgent();
 
-            assertEquals(201, merge(true).getStatus());
+            var written = new AgentConfiguration();
+            written.setCompatibilityGeneration(2);
+            when(agentStore.read(TARGET_AGENT_ID, 5)).thenReturn(written);
 
+            Response response = merge(true);
+
+            assertEquals(201, response.getStatus());
+            // what the declaration did, so a script need not make a second call
+            assertEquals("true", response.getHeaderString(RestImportService.HEADER_AGENT_COMPATIBLE));
+            assertEquals("2", response.getHeaderString(RestImportService.HEADER_AGENT_COMPATIBILITY_GENERATION));
             verify(restAgentStore).updateAgent(eq(TARGET_AGENT_ID), eq(4), any(), eq(true));
             verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any(), eq(false));
         }
@@ -331,7 +339,7 @@ class RestImportServiceCompatibleTest {
 
         private PromotionImpact impact() {
             return new PromotionImpact(4, 2, 2, 3, false, 5, 5,
-                    List.of(new PromotionImpact.DeployedVersion(4, 2, 5, true)));
+                    List.of(new PromotionImpact.GenerationCount(2, 5, true)));
         }
     }
 
