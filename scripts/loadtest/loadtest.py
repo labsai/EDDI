@@ -18,7 +18,6 @@ gauges every second, snapshots again and writes results/<label>-<kind>-….json.
 every result of a label as one Markdown benchmark page. See README.md. Standard library only.
 """
 import argparse
-import copy
 import datetime
 import json
 import math

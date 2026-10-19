@@ -80,6 +80,9 @@ services:
       - "QUARKUS_OIDC_TENANT_ENABLED=false"
       - "QUARKUS_ANALYTICS_DISABLED=true"
       - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
+      # With authentication off EDDI answers only localhost, IPs and these Host names (421 otherwise);
+      # k6 addresses the replicas as eddi:7070, and nginx passes that Host through.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin&maxPoolSize=${LOADTEST_MONGO_POOL:-100}"
       - "JAVA_OPTS_APPEND=${LOADTEST_JAVA_OPTS:--Xmx1536m}"
       - "EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS=${LOADTEST_MAX_IN_FLIGHT:-400}"

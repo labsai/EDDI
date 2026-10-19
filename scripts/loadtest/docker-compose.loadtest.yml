@@ -40,6 +40,9 @@ services:
       - "QUARKUS_OIDC_TENANT_ENABLED=false"
       - "QUARKUS_ANALYTICS_DISABLED=true"
       - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
+      # With authentication off EDDI answers only localhost, IPs and these Host names (421 otherwise);
+      # k6 and the SSE driver address it as eddi:7070 inside the compose network.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "JAVA_OPTS_APPEND=${LOADTEST_JAVA_OPTS:--Xmx2g}"
       # The OpenAI-compatible /v1 API, off by default in EDDI. The stream scenario drives it with
       # this key; the adapter's own concurrency cap (default 64) is lifted so that the benchmark
