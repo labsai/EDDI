@@ -84,6 +84,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -277,6 +278,20 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public ImportPreview previewImport(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        return redactForCaller(buildImportPreview(zippedAgentConfigFiles, targetAgentId));
+    }
+
+    /**
+     * A preview as the caller may see it. {@link StructuralMatcher} reads targets
+     * unredacted so that an upgrade restores the target's own credentials; an
+     * administrator sees that content, anyone else the redacted copy — see
+     * {@link PreviewRedaction}.
+     */
+    private ImportPreview redactForCaller(ImportPreview preview) {
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin() ? preview : PreviewRedaction.forNonAdmin(preview);
+    }
+
+    private ImportPreview buildImportPreview(InputStream zippedAgentConfigFiles, String targetAgentId) {
         // When targetAgentId is provided, use the new structural matching pipeline
         if (targetAgentId != null && !targetAgentId.isBlank()) {
             return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
@@ -1461,6 +1476,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * failure can delete it again.
      */
     private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
+        // The direct create bypasses the REST stores, so it repeats their refusal of a
+        // document carrying the read-redaction marker — for the five types whose
+        // reads produce it; in a workflow or an output set the same text is content.
+        // Outside the try, like the caller-token check: a refusal must fail (and roll
+        // back) the import.
+        RedactionMarkerGuard.requireNoneIfRedactedType(document);
         if (callerTokenAuthorPolicy != null) {
             // Outside the try: a 403 must fail the import (and roll it back), not be
             // reported as a store failure.
@@ -3444,7 +3465,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         validateSourceUrl(sourceUrl);
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization,
                 remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
-            return previewOnto(source, sourceAgentId, targetAgentId, createNew);
+            return redactForCaller(previewOnto(source, sourceAgentId, targetAgentId, createNew));
         } catch (WebApplicationException e) {
             // An unreadable target agent is a 404 the operator can act on.
             throw withErrorBody(e);
@@ -3467,7 +3488,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
                     sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
-                previews.add(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew()));
+                previews.add(redactForCaller(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew())));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch preview failed for agent %s", LogSanitizer.sanitize(mapping.sourceAgentId()));
                 // Report the failure in its own field. Prefixing the agent NAME with

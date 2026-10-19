@@ -93,6 +93,50 @@ class RestLlmStoreReadRedactionTest {
     }
 
     @Test
+    @DisplayName("M1 (2026-10-17): A2A agent keys and cascade step and judge parameters are redacted too")
+    void a2aAndCascadeFieldsAreRedacted() throws Exception {
+        var a2a = new LlmConfiguration.A2AAgentConfig();
+        a2a.setUrl("https://peer.example.com/a2a/agents/x");
+        a2a.setName("peer");
+        a2a.setApiKey("a2a-literal-key");
+        var referencedA2a = new LlmConfiguration.A2AAgentConfig();
+        referencedA2a.setUrl("https://other.example.com/a2a");
+        referencedA2a.setApiKey("${vault:a2a-key}");
+
+        var step = new LlmConfiguration.CascadeStep();
+        step.setType("openai");
+        step.setParameters(new LinkedHashMap<>(Map.of("apiKey", "sk-step-literal", "modelName", "gpt-5")));
+        var judge = new LlmConfiguration.JudgeModelConfig();
+        judge.setType("anthropic");
+        judge.setParameters(new LinkedHashMap<>(Map.of("apiKey", "sk-ant-judge-literal")));
+        var cascade = new LlmConfiguration.ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setSteps(List.of(step));
+        cascade.setJudgeModel(judge);
+
+        var task = new LlmConfiguration.Task();
+        task.setType("openai");
+        task.setParameters(new LinkedHashMap<>(Map.of("maxTokens", "4096", "thinkingBudgetTokens", "2048")));
+        task.setA2aAgents(List.of(a2a, referencedA2a));
+        task.setModelCascade(cascade);
+        task.setToolCacheScopes(new LinkedHashMap<>(Map.of("get_token", "conversation")));
+
+        LlmConfiguration seen = read(new LlmConfiguration(List.of(task)), false);
+        LlmConfiguration.Task seenTask = seen.tasks().get(0);
+
+        assertEquals(RestLlmStore.REDACTED, seenTask.getA2aAgents().get(0).getApiKey());
+        assertEquals("https://peer.example.com/a2a/agents/x", seenTask.getA2aAgents().get(0).getUrl());
+        assertEquals("${vault:a2a-key}", seenTask.getA2aAgents().get(1).getApiKey());
+        assertEquals(RestLlmStore.REDACTED, seenTask.getModelCascade().getSteps().get(0).getParameters().get("apiKey"));
+        assertEquals("gpt-5", seenTask.getModelCascade().getSteps().get(0).getParameters().get("modelName"));
+        assertEquals(RestLlmStore.REDACTED, seenTask.getModelCascade().getJudgeModel().getParameters().get("apiKey"));
+        assertEquals("4096", seenTask.getParameters().get("maxTokens"), "a count of tokens is not a token");
+        assertEquals("2048", seenTask.getParameters().get("thinkingBudgetTokens"));
+        assertEquals("conversation", seenTask.getToolCacheScopes().get("get_token"), "tool names are not credential fields");
+        assertEquals("a2a-literal-key", task.getA2aAgents().get(0).getApiKey(), "the stored object is never touched");
+    }
+
+    @Test
     @DisplayName("a document without a plaintext credential is returned as it is")
     void cleanDocumentUnchanged() throws Exception {
         var task = new LlmConfiguration.Task();
