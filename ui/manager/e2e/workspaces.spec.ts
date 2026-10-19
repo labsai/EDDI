@@ -482,8 +482,12 @@ test.describe("the Workspaces page", () => {
     await expect(page.getByTestId("space-secrets")).toBeVisible();
     await page.getByTestId("space-secret-name").fill("openai-key");
     await page.getByTestId("space-secret-value").fill("sk-test-not-a-real-key");
+    // A create must name where the secret may be sent.
+    await expect(page.getByTestId("space-secret-save")).toBeDisabled();
+    await page.getByTestId("space-secret-hosts-input-input").fill("api.openai.com");
     await page.getByTestId("space-secret-save").click();
 
     await expect(page.getByText(/\$\{vault:u\.alice\.5e6f7a8b\/openai-key\}/).first()).toBeVisible();
+    await expect(page.getByTestId("space-secret-hosts-openai-key")).toContainText("api.openai.com");
   });
 });

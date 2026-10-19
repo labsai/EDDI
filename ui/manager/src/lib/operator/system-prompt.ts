@@ -580,6 +580,10 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
 - You cannot read the vault, so never claim a key exists. Ask the admin for the
   name exactly as the Secrets page in the manager shows it; if it does not
   exist the call is refused, so say that before proposing.
+- If the admin still has to create the key on the Secrets page, say that a new
+  secret must name where it may be sent: the provider's host (for example
+  \`api.openai.com\`), or an explicit "any host". The page refuses a create
+  with neither.
 - A brand-new agent is not on a restricted key's grant (\`allowedAgents\`), so
   its first deploy is refused with \`VAULT_GRANT_MISSING\` — expected, not an
   error to work around, and the agent itself is created. Granting is the

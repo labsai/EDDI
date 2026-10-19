@@ -24,7 +24,7 @@ Only tool *results* were governed (`ToolResultGuardrail`). Nothing screened the 
 ### Known limits / follow-ups
 
 - An `httpCallRag` template that reads `memory.current.input` directly (instead of `userInput`) still sees the stored, unredacted text (documented).
-- Manager: only the `LlmTask` type mirror (`inputGuardrails`/`outputGuardrails`, `GuardrailConfig`); a guardrail list editor on the LLM task form is a follow-up. Platform Operator cheatsheet explains configuring guardrails; revision bumped.
+- Manager: only the `LlmTask` type mirror (`inputGuardrails`/`outputGuardrails`, `GuardrailConfig`); the guardrail list editor on the LLM task form came with #1077, merged into this branch. Platform Operator cheatsheet explains configuring guardrails; revision bumped.
 - Phase 4b (`classifier` type) builds on this branch.
 - SSE acceptance criterion 11 (`guardrail_triggered` before `done` over a real socket) is covered at unit level (handler → `sendJson`) only.
 

@@ -433,7 +433,7 @@ administrator — in the Manager's **Workspaces** page, or:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/spacestore/tenant?space=` | The tenant id to use in references. |
-| `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. |
+| `GET` / `PUT` / `DELETE` | `/spacestore/secrets[/{key}]?space=` | A space's secrets. Values are write-only. A create under `enforce` carries `allowedAgents` and `allowedHosts` (`["*"]` for "any"), as on [the tenant vault](secrets-vault.md#required-on-a-create). |
 | `GET` / `PUT` / `DELETE` | `/spacestore/variables[/{key}]?space=` | A space's variables. |
 
 Agents reference them explicitly: `${vault:<tenant>/openai-key}` and

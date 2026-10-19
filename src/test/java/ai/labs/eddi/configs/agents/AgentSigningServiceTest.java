@@ -68,6 +68,40 @@ class AgentSigningServiceTest {
     }
 
     @Test
+    void signIfKeyPresent_keylessAgentIsNullWithoutAskingTheVaultAgain() throws Exception {
+        signingService.nanoClock = () -> 0L;
+
+        for (int i = 0; i < 3; i++) {
+            assertNull(signingService.signIfKeyPresent("tenant-1", "keyless", "entry"));
+        }
+        assertEquals(1, secretProvider.resolveCalls, "three audit entries, one vault lookup");
+    }
+
+    @Test
+    void signIfKeyPresent_signsWhenTheKeyExists() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+
+        String signature = signingService.signIfKeyPresent("tenant-1", "agent-1", "entry");
+
+        assertNotNull(signature);
+        assertTrue(signingService.verify(publicKey, "entry", signature));
+    }
+
+    @Test
+    void signIfKeyPresent_aVaultFailureStillThrows() {
+        var failing = new InMemorySecretProvider() {
+            @Override
+            public String resolve(SecretReference reference) {
+                throw new IllegalStateException("Vault unavailable");
+            }
+        };
+        var service = new AgentSigningService(failing, new SimpleMeterRegistry());
+        service.initMetrics();
+
+        assertThrows(AgentSigningService.AgentSigningException.class, () -> service.signIfKeyPresent("t1", "a1", "entry"));
+    }
+
+    @Test
     void keylessAgent_keyGeneratedHereIsUsedAtOnce() throws Exception {
         signingService.nanoClock = () -> 0L;
         assertThrows(AgentSigningService.AgentSigningException.class, () -> signingService.sign("tenant-1", "agent-x", "entry"));

@@ -15,7 +15,9 @@ import java.util.regex.Pattern;
  * The rules an {@code allowedAgents} list is held to when it arrives in a REST
  * body — shared by the tenant-level secret store and the space-scoped one so
  * the two cannot drift on what a grant may look like, or on when one is
- * required.
+ * required. When an {@code allowedHosts} list is required is decided here too,
+ * for the same reason; what an entry may look like is
+ * {@link VaultHostAllowlist}'s.
  */
 public final class VaultGrantRequests {
 
@@ -61,6 +63,45 @@ public final class VaultGrantRequests {
         if (allowedAgents.isEmpty()) {
             throw new IllegalArgumentException("allowedAgents must not be empty: an empty list means every agent. Send [\"*\"] if that is what "
                     + "you intend, or list the agents that may use this secret.");
+        }
+    }
+
+    /**
+     * The destination list a create must carry under
+     * {@code eddi.vault.grant-enforcement}, the host-side twin of
+     * {@link #requireGrantOnCreate}.
+     * <p>
+     * {@code allowedAgents} limits which agents may reference a secret, but every
+     * editor can write a configuration that sends a referenced secret to a URL of
+     * their choosing, so a secret with no {@code allowedHosts} goes wherever the
+     * next config edit points it (security review 2026-10-17, H1). Under
+     * {@code enforce} a create therefore says where the secret may go, or says
+     * {@code ["*"]} to allow any host on purpose. {@code []} is refused too: every
+     * layer reads it as unrestricted, so a list filtered down to nothing must not
+     * create an open secret with a 201. {@code warn} and {@code off} keep the old
+     * behaviour.
+     * <p>
+     * Only a <em>create</em>: a rotation that omits the list keeps the stored one.
+     *
+     * @param allowedHosts
+     *            the list exactly as the request body carried it, before
+     *            {@link VaultHostAllowlist#requestedHosts} turned {@code ["*"]}
+     *            into the stored empty list
+     * @throws IllegalArgumentException
+     *             with the message the 400 carries
+     */
+    public static void requireHostsOnCreate(VaultGrantGate.Mode mode, List<String> allowedHosts) {
+        if (mode != VaultGrantGate.Mode.ENFORCE) {
+            return;
+        }
+        if (allowedHosts == null) {
+            throw new IllegalArgumentException("allowedHosts is required when creating a secret under eddi.vault.grant-enforcement=enforce: "
+                    + "list the host or host:port values it may be sent to, or send [\"*\"] to allow any host explicitly. Without it, "
+                    + "any configuration that references the secret could send it anywhere.");
+        }
+        if (allowedHosts.isEmpty()) {
+            throw new IllegalArgumentException("allowedHosts must not be empty: an empty list means any host. Send [\"*\"] if that is what "
+                    + "you intend, or list the hosts this secret may be sent to.");
         }
     }
 

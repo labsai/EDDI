@@ -198,6 +198,38 @@ public class AgentSigningService {
     }
 
     /**
+     * As {@link #sign}, for callers that sign when they can and carry on unsigned
+     * when the agent has no key: the audit ledger, which signs every entry on the
+     * turn's thread. While a "no key" answer is remembered (see
+     * {@link #MISSING_KEY_TTL_NANOS}) this returns {@code null} without throwing,
+     * where {@link #sign} would still build three exceptions per entry.
+     *
+     * @return Base64-encoded signature, or {@code null} if the agent has no key
+     * @throws AgentSigningException
+     *             if a key exists but signing failed, or the vault could not answer
+     */
+    public String signIfKeyPresent(String tenantId, String agentId, String payload) throws AgentSigningException {
+        String cacheKeyStr = cacheKey(tenantId, agentId);
+        if (!privateKeyCache.containsKey(cacheKeyStr) && isKnownMissing(cacheKeyStr)) {
+            return null;
+        }
+        try {
+            return sign(tenantId, agentId, payload);
+        } catch (AgentSigningException e) {
+            if (e.getCause() instanceof ISecretProvider.SecretNotFoundException) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+    /** Whether a "not found" for this key is still being remembered. */
+    private boolean isKnownMissing(String cacheKeyStr) {
+        Long absentUntil = missingKeyUntil.get(cacheKeyStr);
+        return absentUntil != null && nanoClock.getAsLong() - absentUntil < 0;
+    }
+
+    /**
      * Verify a signature against a public key and payload.
      *
      * @param publicKeyB64
