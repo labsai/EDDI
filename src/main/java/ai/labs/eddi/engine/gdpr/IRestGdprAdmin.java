@@ -51,25 +51,26 @@ public interface IRestGdprAdmin {
                             @Parameter(description = "User ID to erase", required = true) String userId);
 
     /**
-     * <strong>Known gap.</strong> The bundle covers five categories: memories,
-     * conversation snapshots, managed conversation mappings, audit processing
-     * records and attachment metadata. It does <em>not</em> yet include the group
-     * discussion transcripts, shared artifacts, schedules and HITL tool journal
-     * entries that {@link #deleteUserData} erases as this user's personal data —
-     * the two halves of the feature disagree about what the user's data is, and
-     * only the deleting half is right. Closing it needs read-by-user methods those
-     * four stores do not have (their erasure counterparts page with an escaped
-     * regex and an exact re-check), plus a decision on how a bundle that could run
-     * to hundreds of megabytes is delivered.
+     * <strong>Known gap.</strong> The bundle covers memories, conversation
+     * snapshots, managed conversation mappings, audit processing records,
+     * attachment metadata, and — since the 2026-10-17 review — the group
+     * discussions the user started and their shared artifacts. It does <em>not</em>
+     * yet include the schedules and HITL tool journal entries that
+     * {@link #deleteUserData} erases as this user's personal data — the two halves
+     * of the feature disagree about what the user's data is, and only the deleting
+     * half is right. Closing it needs read-by-user methods those two stores do not
+     * have (their erasure counterparts page with an escaped regex and an exact
+     * re-check), plus a decision on how a bundle that could run to hundreds of
+     * megabytes is delivered.
      * <p>
      * <strong>Which is why this endpoint does not answer 200 today.</strong> The
      * gap is part of the response rather than a footnote here: every bundle carries
      * {@code complete: false} and an {@code omittedCategories} list naming those
-     * four stores, and the status is 207 Multi-Status. Without it, a user whose
-     * data lives only in the four omitted categories received an empty bundle with
-     * a 200 documented as "complete export bundle" — an Art. 20 answer that
-     * overstates itself to the one reader who cannot check it. It becomes 200 once
-     * the four exporters land and the list goes empty.
+     * stores, and the status is 207 Multi-Status. Without it, a user whose data
+     * lives only in the omitted categories received an empty bundle with a 200
+     * documented as "complete export bundle" — an Art. 20 answer that overstates
+     * itself to the one reader who cannot check it. It becomes 200 once the
+     * remaining exporters land and the list goes empty.
      * <p>
      * Conversation snapshots are capped per bundle; audit entries were already
      * capped. When the conversation cap bites, the response says so in the payload
@@ -90,17 +91,18 @@ public interface IRestGdprAdmin {
                operationId = "exportUserDataGdpr",
                summary = "Export all user data (GDPR Art. 15/20)",
                description = "Returns all data associated with a user: memories, conversations, "
-                       + "managed conversation mappings, audit processing records and attachment "
-                       + "metadata. Group discussion transcripts, shared artifacts, schedules and "
-                       + "HITL journal entries are NOT yet included, although the erasure endpoint "
-                       + "does delete them — see the interface javadoc. "
+                       + "managed conversation mappings, audit processing records, attachment "
+                       + "metadata, the group discussions the user started and their shared artifacts. "
+                       + "Schedules and HITL journal entries are NOT yet included, although the erasure "
+                       + "endpoint does delete them — see the interface javadoc. "
                        + "Responds 200 only when the bundle covers everything, and 207 Multi-Status "
                        + "otherwise: 'complete' says which, 'omittedCategories' names the categories "
                        + "this exporter does not reach, 'conversationsTruncated' with "
                        + "'totalConversations' report the per-request conversation cap, and "
                        + "'failedConversationIds' names conversations that could not be loaded at all "
-                       + "and are therefore absent from the bundle. Because those "
-                       + "four categories are always omitted today, the answer is currently always 207 "
+                       + "and are therefore absent from the bundle; 'groupConversationsTruncated', "
+                       + "'sharedArtifactsTruncated' and 'failedCategories' do the same for the group "
+                       + "sections. Because two categories are always omitted today, the answer is currently always 207 "
                        + "— the export must NOT be handed to the data subject as a complete Art. 15/20 "
                        + "bundle while 'complete' is false.")
     @APIResponse(responseCode = "200", description = "Complete export bundle — every category covered, nothing truncated",

@@ -76,7 +76,7 @@ export function ChannelCard({ channel, onDelete, onDuplicate }: ChannelCardProps
         {/* `focus-within` alongside `group-hover`: revealing these on hover
             alone left a keyboard user tabbing into a button they could not
             see. */}
-        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="reveal-on-touch flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <Button variant="ghost" size="icon" className="h-7 w-7"
             onClick={(e) => { e.stopPropagation(); onDuplicate(channel.id, channel.version); }}
             title={t("common.duplicate")}>

@@ -67,11 +67,23 @@ spec:
     spec:
       # MongoDB never talks to the Kubernetes API.
       automountServiceAccountToken: false
+      # Runs as the image's mongodb user from the start (uid/gid 999), so the
+      # entrypoint has no chown or gosu step and the container can drop every
+      # capability. Existing data directories are already owned by 999.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongodb
           image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           # Providing MONGO_INITDB_ROOT_USERNAME/PASSWORD makes the official mongo
           # image create the root user on first init AND enable authentication —
           # the same mechanism docker-compose.yml relies on. Every client (EDDI

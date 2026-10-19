@@ -225,7 +225,7 @@ export function ResourceListPage() {
             </div>
           ) : (
             <div
-              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
               data-testid="resource-list"
             >
               <table className="w-full">
@@ -234,7 +234,7 @@ export function ResourceListPage() {
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.name", "Name")}
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    <th className="hidden md:table-cell px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.id", "ID")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -270,7 +270,7 @@ export function ResourceListPage() {
                           visibility={item.visibility}
                         />
                       </td>
-                      <td className="px-5 py-3">
+                      <td className="hidden md:table-cell px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
                           {item.id.slice(0, 12)}…
                         </span>

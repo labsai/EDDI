@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -41,8 +42,13 @@ import {
   SecretsError,
   SECRET_EXISTS,
   SECRET_NOT_FOUND,
+  allowedHostsMissing,
+  newAllowedHostsDraft,
+  resolveAllowedHostsDraft,
+  type AllowedHostsDraft,
   type SecretMetadata,
 } from "@/lib/api/secrets";
+import { AllowedHostsField } from "@/components/secrets/allowed-hosts-field";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@/lib/api-client";
@@ -80,6 +86,8 @@ export function SecretsPage() {
   const [rotateVisible, setRotateVisible] = useState(false);
   const [newAllowedAgents, setNewAllowedAgents] = useState<string[]>([]);
   const [newAgentInput, setNewAgentInput] = useState("");
+  /* Where the new secret may be sent — required on a create, see AllowedHostsField. */
+  const [newHosts, setNewHosts] = useState<AllowedHostsDraft>(() => newAllowedHostsDraft());
   /* The existing key an "Add Secret" was refused for, so the dialog can say so
    * in place and offer the rotation that was probably meant. */
   const [existingKeyConflict, setExistingKeyConflict] = useState<string | null>(null);
@@ -127,6 +135,7 @@ export function SecretsPage() {
     if (!showCreate) {
       setNewAgentInput("");
       setExistingKeyConflict(null);
+      setNewHosts(newAllowedHostsDraft());
     }
   }, [showCreate]);
 
@@ -182,6 +191,15 @@ export function SecretsPage() {
     // different credential from the one pasted.
     if (!newKeyName.trim() || !newValue.trim()) return;
     const keyName = newKeyName.trim();
+    // The destinations are required on a create (the backend refuses one
+    // without them); a host still in the box is folded in, and refused if it
+    // would not pass the backend.
+    const hosts = resolveAllowedHostsDraft(newHosts);
+    if ("problem" in hosts) {
+      const problem = hosts.problem;
+      if (problem !== "missing") setNewHosts((d) => ({ ...d, problem }));
+      return;
+    }
     setExistingKeyConflict(null);
     // Flush any typed-but-not-Entered agent so it isn't silently dropped
     // (which would leave the secret unrestricted / available to ALL agents).
@@ -202,6 +220,8 @@ export function SecretsPage() {
         // wildcard here — the decision is the operator's, made in this dialog.
         allowedAgents:
           finalAllowedAgents.length > 0 ? finalAllowedAgents : [ALL_AGENTS],
+        // Always sent, for the same reason: hosts, or the explicit ["*"].
+        allowedHosts: hosts.allowedHosts,
         // "Add" never overwrites. Replacing a value is Rotate, which keeps the
         // grant; an upsert from here reset it.
         createOnly: true,
@@ -231,7 +251,7 @@ export function SecretsPage() {
         },
       },
     );
-  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, storeMut, t, secretsErrorMessage]);
+  }, [tenantId, newKeyName, newValue, newDescription, newAllowedAgents, newAgentInput, newHosts, storeMut, t, secretsErrorMessage]);
 
   /** Open the rotate dialog for one row, with no leftover state from the last. */
   const openRotate = useCallback(
@@ -1050,7 +1070,7 @@ export function SecretsPage() {
       {/* ─── Create dialog ─── */}
       {showCreate && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => {
             setShowCreate(false);
             setNewKeyName("");
@@ -1071,7 +1091,7 @@ export function SecretsPage() {
           }}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
@@ -1085,6 +1105,7 @@ export function SecretsPage() {
                 {t("secrets.createTitle", "Add Secret")}
               </h2>
               <button
+                aria-label={t("common.close", "Close")}
                 onClick={() => {
                   setShowCreate(false);
                   setNewKeyName("");
@@ -1263,6 +1284,7 @@ export function SecretsPage() {
                           <Bot className="h-2.5 w-2.5" />
                           {agentId.length > 20 ? agentId.slice(0, 20) + "…" : agentId}
                           <button
+                            aria-label={t("common.removeItem", { item: agentId, defaultValue: "Remove {{item}}" })}
                             type="button"
                             onClick={() => setNewAllowedAgents((prev) => prev.filter((a) => a !== agentId))}
                             className="ms-0.5 rounded-full p-0.5 text-primary/60 hover:text-primary transition-colors"
@@ -1283,6 +1305,7 @@ export function SecretsPage() {
                     data-testid="new-allowed-agents-input"
                     autoComplete="off"
                     onKeyDown={(e) => {
+                      if (isImeComposing(e)) return;
                       if (e.key === "Enter" || e.key === ",") {
                         e.preventDefault();
                         const val = newAgentInput.trim().replace(/,$/,"");
@@ -1298,6 +1321,11 @@ export function SecretsPage() {
                   </p>
                 </div>
               </div>
+              <AllowedHostsField
+                draft={newHosts}
+                onChange={setNewHosts}
+                testId="new-secret-hosts"
+              />
               <p className="text-xs text-muted-foreground">
                 {t(
                   "secrets.storeWarning",
@@ -1325,6 +1353,7 @@ export function SecretsPage() {
                 disabled={
                   !newKeyName.trim() ||
                   !newValue.trim() ||
+                  allowedHostsMissing(newHosts) ||
                   storeMut.isPending
                 }
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
@@ -1369,7 +1398,7 @@ export function SecretsPage() {
       {/* ─── Rotate secret dialog ─── */}
       {rotateTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => {
             if (!rotateMut.isPending) setRotateTarget(null);
           }}
@@ -1378,7 +1407,7 @@ export function SecretsPage() {
           }}
         >
           <div
-            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl"
+            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"

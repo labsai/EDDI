@@ -22,7 +22,9 @@
 # (log in there as the KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD pair below).
 
 services:
-  # The base file's bind-guard refuses a non-loopback EDDI_BIND while
+  # Every base stack's bind-guard (docker-compose.yml,
+  # docker-compose.postgres-only.yml — ComposeStackTest renders both with this
+  # overlay) refuses a non-loopback EDDI_BIND while
   # EDDI_SECURITY_ALLOW_UNAUTHENTICATED is "true". It reads the flag from its
   # OWN environment (compose interpolation of the .env / shell value), so the
   # override on the eddi service below does not reach it — tell it here that

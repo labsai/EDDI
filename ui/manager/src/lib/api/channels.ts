@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
+import { seg } from "./path-segment";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ export function getChannel(
 ): Promise<ChannelIntegrationConfiguration> {
   const suffix = version !== undefined ? `?version=${version}` : "";
   return api.get<ChannelIntegrationConfiguration>(
-    `/channelstore/channels/${id}${suffix}`,
+    `/channelstore/channels/${seg(id)}${suffix}`,
   );
 }
 
@@ -94,7 +95,7 @@ export function updateChannel(
   config: ChannelIntegrationConfiguration,
 ): Promise<{ location: string }> {
   return api.put(
-    `/channelstore/channels/${id}?version=${version}`,
+    `/channelstore/channels/${seg(id)}?version=${version}`,
     config,
   );
 }
@@ -108,7 +109,7 @@ export function deleteChannel(
     version: String(version),
     permanent: String(permanent),
   });
-  return api.delete(`/channelstore/channels/${id}?${params}`);
+  return api.delete(`/channelstore/channels/${seg(id)}?${params}`);
 }
 
 export function duplicateChannel(
@@ -116,7 +117,7 @@ export function duplicateChannel(
   version: number,
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `/channelstore/channels/${id}?version=${version}`,
+    `/channelstore/channels/${seg(id)}?version=${version}`,
   );
 }
 

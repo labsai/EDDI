@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 /*
  * Conversation attachments — multimodal file support.
@@ -168,7 +169,7 @@ export async function uploadAttachment(
   let response: Response;
   try {
     response = await fetch(
-      `${api.getBaseUrl()}/conversations/${encodeURIComponent(conversationId)}/attachments`,
+      `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
       {
         method: "POST",
         headers: api.getAuthHeader(),
@@ -200,7 +201,7 @@ export async function listAttachments(
   conversationId: string,
 ): Promise<AttachmentMeta[]> {
   const response = await fetch(
-    `${api.getBaseUrl()}/conversations/${encodeURIComponent(conversationId)}/attachments`,
+    `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { headers: api.getAuthHeader() },
   );
   if (!response.ok) throw await toAttachmentError(response);
@@ -220,7 +221,7 @@ export function getAttachmentDownloadUrl(
   conversationId: string,
   storageRef: string,
 ): string {
-  return `${api.getBaseUrl()}/conversations/${encodeURIComponent(
+  return `${api.getBaseUrl()}/conversations/${seg(
     conversationId,
   )}/attachments/${encodeURIComponent(storageRef)}`;
 }
@@ -262,7 +263,7 @@ export async function deleteAllAttachments(
   conversationId: string,
 ): Promise<number> {
   const response = await fetch(
-    `${api.getBaseUrl()}/conversations/${encodeURIComponent(conversationId)}/attachments`,
+    `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { method: "DELETE", headers: api.getAuthHeader() },
   );
   if (!response.ok) throw await toAttachmentError(response);

@@ -618,6 +618,11 @@ export function DiscussionTranscript({
                 key={`${entry.speakerAgentId}-${entry.phaseIndex}-${entryIdx}`}
                 entry={entry}
                 isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
+                toolName={
+                  isStreaming && entry.content === null
+                    ? streamState?.memberToolCalls?.get(entry.speakerAgentId)
+                    : undefined
+                }
                 allowHtml={allowHtml}
                 discussionStyle={style}
                 preConfiguredTasks={preConfiguredTasks}

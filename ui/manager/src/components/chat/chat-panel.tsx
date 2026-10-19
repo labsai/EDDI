@@ -37,6 +37,7 @@ import { useDebugStore, isInternalTask, type PipelineEvent } from "@/hooks/use-d
 import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/ime";
+import { isSafePathSegment } from "@/lib/api/path-segment";
 import { InputHint } from "@/components/chat/input-hint";
 import { PauseNotice } from "@/components/hitl/pause-notice";
 import { SecretInputField } from "./secret-input-field";
@@ -147,12 +148,24 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { pending: reviewPending } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
 
   useEffect(() => {
-    const agentIdParam = searchParams.get("agentId");
-    if (!agentIdParam) return;
+    const rawAgentIdParam = searchParams.get("agentId");
+    if (!rawAgentIdParam) return;
+    // Both ids end up in request paths (`GET /agents/<conversationId>`), so a
+    // crafted link carrying `../`, `%2F` or whitespace is dropped here instead of
+    // being passed on to retarget the call. See lib/api/path-segment.ts.
+    const agentIdParam = isSafePathSegment(rawAgentIdParam) ? rawAgentIdParam : null;
+    if (!agentIdParam) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
     // "Continue in Chat" names the exact conversation to continue. It used to
     // be ignored, so the chat reopened the agent's most recent conversation
     // instead — a different one whenever the user had continued from history.
-    const conversationIdParam = searchParams.get("conversationId");
+    const rawConversationIdParam = searchParams.get("conversationId");
+    const conversationIdParam =
+      rawConversationIdParam && isSafePathSegment(rawConversationIdParam)
+        ? rawConversationIdParam
+        : null;
 
     // Wait for the deployed-agents list before acting, so the display name can be
     // resolved from it (below) rather than falling back to the id and then losing

@@ -324,7 +324,7 @@ class RestAgentEngineStreamingTest {
 
             // user B posting into user A's conversation
             doThrow(new ForbiddenException("Access denied: you do not own this conversation"))
-                    .when(conversationAccessGuard).requireConversationOwner("conv-of-user-a");
+                    .when(conversationAccessGuard).requireConversationTurnAccess("conv-of-user-a");
 
             assertThrows(ForbiddenException.class,
                     () -> streaming.sayStreaming("conv-of-user-a", false, false, List.of(), inputData, eventSink, sse));
@@ -367,7 +367,7 @@ class RestAgentEngineStreamingTest {
 
             streaming.sayStreaming("conv-1", false, false, List.of(), inputData, eventSink, sse);
 
-            verify(conversationAccessGuard).requireConversationOwner("conv-1");
+            verify(conversationAccessGuard).requireConversationTurnAccess("conv-1");
         }
 
         @Test

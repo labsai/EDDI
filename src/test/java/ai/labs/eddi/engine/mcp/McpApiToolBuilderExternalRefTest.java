@@ -34,7 +34,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("McpApiToolBuilder — external $ref in inline specs")
 class McpApiToolBuilderExternalRefTest {
 
+    /**
+     * The ref is JSON-escaped. A Windows temp path is full of backslashes, and
+     * spliced in raw they are invalid JSON escapes: the raw-text pass still refused
+     * such a spec, but the decoded-tree pass could not build a tree at all, so a
+     * case resting on that pass alone failed on Windows with "could not be parsed"
+     * instead of ever reaching the reference.
+     */
     private static String specReferencing(String ref) {
+        ref = ref.replace("\\", "\\\\");
         return """
                 {"openapi":"3.0.0","info":{"title":"T","version":"1"},
                  "paths":{"/items":{"post":{"operationId":"create",

@@ -68,7 +68,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
         </p>
       )}
       {/* 4 Stat Cards */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <StatCard
           icon={<Coins className="h-3 w-3" aria-hidden="true" />}
           label={t("costDashboard.totalCost", "Total Cost")}
@@ -120,7 +120,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
 
       {/* Per-Turn Table */}
       {turnsCount > 0 && (
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="rounded-lg border border-border bg-card overflow-x-auto">
           <table className="w-full text-start border-collapse">
             <thead>
               <tr className="border-b border-border bg-muted/20">

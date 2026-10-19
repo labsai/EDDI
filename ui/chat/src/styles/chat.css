@@ -19,6 +19,13 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* Dynamic viewport height: follows the mobile URL bar and the on-screen
+   keyboard (with interactive-widget=resizes-content in index.html), so the
+   composer is never hidden behind either. 100% above is the fallback. */
+@supports (height: 100dvh) {
+  html, body, #root { height: 100dvh; }
+}
+
 body {
   background-color: var(--chat-bg);
   color: var(--chat-text);
@@ -244,6 +251,9 @@ a:hover { opacity: 0.85; }
   font-size: 0.925rem;
   line-height: 1.6;
   word-break: break-word;
+  /* A flex item defaults to min-width:auto, so one long code line or a wide
+     table would widen the bubble past .message and scroll the transcript. */
+  min-width: 0;
 }
 
 .message--user .message__bubble {
@@ -295,7 +305,7 @@ a:hover { opacity: 0.85; }
 
 .message__bubble .markdown-body ul,
 .message__bubble .markdown-body ol {
-  padding-left: 1.4em;
+  padding-inline-start: 1.4em;
   margin: 0.4em 0;
 }
 
@@ -333,9 +343,13 @@ a:hover { opacity: 0.85; }
   border-radius: var(--chat-radius-sm);
 }
 
+.message__bubble .markdown-body .table-scroll {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
 .message__bubble .markdown-body table {
   border-collapse: collapse;
-  margin: 8px 0;
   width: 100%;
 }
 
@@ -343,7 +357,7 @@ a:hover { opacity: 0.85; }
 .message__bubble .markdown-body td {
   border: 1px solid var(--chat-border);
   padding: 6px 10px;
-  text-align: left;
+  text-align: start;
   font-size: 0.85rem;
 }
 
@@ -353,8 +367,8 @@ a:hover { opacity: 0.85; }
 }
 
 .message__bubble .markdown-body blockquote {
-  border-left: 3px solid var(--chat-accent);
-  padding-left: 12px;
+  border-inline-start: 3px solid var(--chat-accent);
+  padding-inline-start: 12px;
   margin: 8px 0;
   color: var(--chat-text-muted);
 }
@@ -492,7 +506,7 @@ a:hover { opacity: 0.85; }
   min-height: 44px;
   max-height: 150px;
   padding: 10px 14px;
-  font-size: 0.925rem;
+  font-size: max(16px, 0.925rem); /* < 16px makes iOS Safari zoom on focus */
   font-family: var(--chat-font);
   line-height: 1.5;
   color: var(--chat-input-text);
@@ -630,7 +644,7 @@ a:hover { opacity: 0.85; }
 .chat-input__secret-field {
   flex: 1;
   padding: 10px 40px 10px 14px;
-  font-size: 0.925rem;
+  font-size: max(16px, 0.925rem); /* < 16px makes iOS Safari zoom on focus */
   font-family: var(--chat-font);
   line-height: 1.5;
   color: var(--chat-input-text);
@@ -710,7 +724,7 @@ a:hover { opacity: 0.85; }
 .secret-input__field {
   flex: 1;
   padding: 10px 40px 10px 14px;
-  font-size: 0.925rem;
+  font-size: max(16px, 0.925rem); /* < 16px makes iOS Safari zoom on focus */
   font-family: var(--chat-font);
   line-height: 1.5;
   color: var(--chat-input-text);
@@ -866,6 +880,11 @@ a:hover { opacity: 0.85; }
 @media (min-width: 1440px) {
   .chat-root {
     max-width: 960px;
+  }
+
+  /* Keep line length readable as the column widens. */
+  .message {
+    max-width: min(85%, 75ch);
   }
 }
 
@@ -1066,7 +1085,7 @@ a:hover { opacity: 0.85; }
   .chat-input__textarea {
     min-height: 38px;
     padding: 8px 10px;
-    font-size: 0.875rem;
+    font-size: 16px; /* iOS Safari zooms any focused input under 16px */
     border-radius: 10px;
   }
 

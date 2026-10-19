@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -81,6 +82,7 @@ function TagsInput({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 addTag();
@@ -93,6 +95,7 @@ function TagsInput({
             className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
+            aria-label={t("common.add", "Add")}
             type="button"
             onClick={addTag}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary"

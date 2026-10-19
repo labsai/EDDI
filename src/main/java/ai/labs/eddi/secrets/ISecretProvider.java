@@ -109,6 +109,26 @@ public interface ISecretProvider {
             throws SecretProviderException;
 
     /**
+     * {@link #storeIfAbsent(SecretReference, String, String, List)} with a
+     * destination allow-list, written in the same atomic insert — so the secret is
+     * never visible unrestricted, not even between two calls.
+     *
+     * @param allowedHosts
+     *            exact {@code host[:port]} entries, or {@code null} for none (any
+     *            destination). The default implementation supports only
+     *            {@code null}: a provider that cannot write the list atomically
+     *            refuses rather than storing the secret open
+     */
+    default boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents,
+                                  List<String> allowedHosts)
+            throws SecretProviderException {
+        if (allowedHosts != null && !allowedHosts.isEmpty()) {
+            throw new UnsupportedOperationException(getClass().getSimpleName() + " cannot store allowedHosts on a create-if-absent insert");
+        }
+        return storeIfAbsent(reference, plaintext, description, allowedAgents);
+    }
+
+    /**
      * Replace which destinations an existing secret may be sent to, without
      * touching its value — the host counterpart of {@link #updateGrant}, separate
      * from {@link #store} for the same reason: once a key is vaulted the operator

@@ -91,7 +91,7 @@ public class RestWorkspaces implements IRestWorkspaces {
 
     @Override
     public List<UserDirectory.Match> searchDirectory(String query, Integer limit) {
-        return directory.search(query, limit == null ? 10 : limit, spaceContext.current());
+        return directory.search(query, limit == null ? 10 : limit, spaceContext.current(), accessGuard.isAdmin());
     }
 
     @Override

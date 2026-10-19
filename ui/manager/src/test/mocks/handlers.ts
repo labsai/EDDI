@@ -969,14 +969,31 @@ export const handlers = [
   // the list the page re-reads. Values are never returned, as on the server.
   http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
   http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { description?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+      allowedHosts?: string[];
+    };
     const key = String(params.key);
+    const existing = (readSpaceStore(request, "secrets") as { keyName: string; allowedAgents?: string[]; allowedHosts?: string[]; createdAt?: string }[])
+      .find((s) => s.keyName === key);
+    // Both lists are required on a create under grant-enforcement=enforce (the
+    // shipped default); `["*"]` is the explicit "every agent" / "any host". A
+    // rotation may omit either and keeps the stored one.
+    if (!existing && (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0)) {
+      return HttpResponse.json({ error: "allowedAgents is required on create" }, { status: 400 });
+    }
+    if (!existing && (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0)) {
+      return HttpResponse.json({ error: "allowedHosts is required on create" }, { status: 400 });
+    }
+    const anyHost = body.allowedHosts?.length === 1 && body.allowedHosts[0] === "*";
     const secret = {
       keyName: key,
       reference: `\${vault:${tenantOf(request)}/${key}}`,
       description: body.description ?? null,
-      allowedAgents: ["*"],
-      createdAt: new Date().toISOString(),
+      allowedAgents: body.allowedAgents ? [...body.allowedAgents] : (existing?.allowedAgents ?? ["*"]),
+      allowedHosts: body.allowedHosts ? (anyHost ? [] : [...body.allowedHosts]) : (existing?.allowedHosts ?? []),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
     writeSpaceStore(request, "secrets", key, secret);
     return HttpResponse.json(secret);
@@ -4173,9 +4190,11 @@ export const secretsHandlers = [
       if (!dryRun) {
         existing.allowedAgents = [...body.allowedAgents];
         if (body.description !== undefined) existing.description = body.description;
-        // Present means "replace"; `[]` lifts the restriction, as on the backend.
+        // Present means "replace"; `[]` or `["*"]` lifts the restriction, as on the backend.
         if (body.allowedHosts !== undefined) {
-          existing.allowedHosts = body.allowedHosts.length > 0 ? [...body.allowedHosts] : undefined;
+          const lifts =
+            body.allowedHosts.length === 0 || (body.allowedHosts.length === 1 && body.allowedHosts[0] === "*");
+          existing.allowedHosts = lifts ? undefined : [...body.allowedHosts];
         }
       }
       const allowedHosts = body.allowedHosts ?? existing.allowedHosts;
@@ -4249,14 +4268,28 @@ export const secretsHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       description?: string;
       allowedAgents?: string[];
+      allowedHosts?: string[];
     };
     const now = new Date().toISOString();
     const existing = findMockSecret(tenantId, keyName);
+    // `["*"]` is the explicit "no restriction", stored as no list at all.
+    const storedHosts = (hosts: string[]) => (hosts.length === 1 && hosts[0] === "*" ? undefined : [...hosts]);
     if (existing) {
       existing.lastRotatedAt = now;
       if (body.description !== undefined) existing.description = body.description;
       if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+      // Omitted on an update keeps the stored list, as on the backend.
+      if (body.allowedHosts) existing.allowedHosts = storedHosts(body.allowedHosts);
     } else {
+      // Under grant-enforcement=enforce (the shipped default) a create must say
+      // where the secret may go: hosts, or the explicit ["*"]. An empty list is
+      // refused too — it would read as "anywhere" without anybody saying so.
+      if (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedHosts is required on create: list the hosts, or [\"*\"] for any host" },
+          { status: 400 },
+        );
+      }
       secretsState.push({
         tenantId,
         keyName,
@@ -4266,6 +4299,7 @@ export const secretsHandlers = [
         checksum: "0".repeat(64),
         description: body.description ?? "",
         allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+        allowedHosts: storedHosts(body.allowedHosts),
       });
     }
     const ref = tenantId === "default"
@@ -4703,6 +4737,7 @@ export const scheduleHandlers = [
       }),
       sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
       sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("member_tool_call", { agentId: "agent1", displayName: "Support Agent", tool: "search_knowledge_base" }),
       sseEvent("speaker_complete", {
         agentId: "agent1",
         displayName: "Support Agent",
@@ -4743,6 +4778,8 @@ export const scheduleHandlers = [
         for (const event of events) {
           await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
           controller.enqueue(encoder.encode(event));
+          // Hold after a tool call so the member card's "using <tool>…" is visible.
+          if (event.startsWith("event: member_tool_call")) await new Promise((r) => setTimeout(r, 4000));
         }
         controller.close();
       },

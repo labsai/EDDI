@@ -18,9 +18,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -28,7 +30,9 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Keeps the compose set internally consistent, because nothing else parses it.
@@ -544,5 +548,330 @@ class ComposeStackTest {
                 "MongoDB is pinned to more than one version across the compose files and the workflows: " + byVersion
                         + ". The release smoke test and the stack users actually run have to be the same database,"
                         + " or the gate cannot catch a version-specific regression.");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Documented combinations (security review 2026-10-17, M6)
+    // ─────────────────────────────────────────────────────────────
+
+    /** The two base stacks the installers choose between ({@code --db}). */
+    private static final List<String> INSTALLER_BASES = List.of("docker-compose.yml", "docker-compose.postgres-only.yml");
+
+    /**
+     * The overlays the installers layer on a base, in the order they add them
+     * ({@code --with-auth}, then {@code --with-monitoring}).
+     */
+    private static final List<String> INSTALLER_OVERLAYS = List.of("docker-compose.auth.yml", "docker-compose.monitoring.yml");
+
+    /**
+     * {@code --local}, which both installers put FIRST, before the base — so the
+     * repository becomes the project directory.
+     */
+    private static final String LOCAL_OVERLAY = "docker-compose.local.yml";
+
+    /**
+     * Combinations the documentation teaches that the installers never assemble.
+     * Each is a whole command a user copies;
+     * {@link #documentedCommandsAreKnownCombinations()} keeps this list honest
+     * against README.md and {@code docs/}.
+     */
+    private static final List<List<String>> DOCUMENTED_EXTRA_COMBINATIONS = List.of(
+            List.of("docker-compose.yml", "docker-compose.local.yml"),
+            List.of("docker-compose.yml", "docker-compose.nats.yml"),
+            List.of("docker-compose.yml", "docker-compose.ollama.yml"),
+            List.of("docker-compose.yml", "docker-compose.ollama.yml", "docker-compose.ollama-nvidia.yml"),
+            List.of("docker-compose.yml", "docker-compose.chroma.yml"),
+            List.of("docker-compose.yml", "docker-compose.mcp-sidecar.yml"),
+            List.of("docker-compose.cluster.yml"),
+            List.of("docker-compose.openwebui.yml"));
+
+    /**
+     * A {@code docker compose [-p name] -f a.yml [-f b.yml …]} command in prose.
+     * Only bare file names count — a path such as {@code ui/manager/…} belongs to
+     * another directory's compose set.
+     */
+    private static final Pattern DOCUMENTED_COMMAND = Pattern
+            .compile("docker compose(?: -p [\\w-]+)?((?: -f [\\w.\\-]+\\.yml)+)(?![\\w./-])");
+
+    /**
+     * Placeholder values for the variables some stacks require with {@code :?}, so
+     * {@code docker compose config} renders instead of stopping at the first one.
+     */
+    private static final Map<String, String> REQUIRED_VARIABLES = Map.of(
+            "POSTGRES_PASSWORD", "placeholder",
+            "MONGO_PASSWORD", "placeholder",
+            "NATS_PASSWORD", "placeholder",
+            "EDDI_VAULT_MASTER_KEY", "placeholder-placeholder");
+
+    /**
+     * Every combination a user can end up running: everything either installer can
+     * assemble (base × {@code --local} × {@code --with-auth} ×
+     * {@code --with-monitoring}) plus {@link #DOCUMENTED_EXTRA_COMBINATIONS}.
+     */
+    static List<List<String>> documentedCombinations() {
+        List<List<String>> combinations = new ArrayList<>();
+        for (String base : INSTALLER_BASES) {
+            for (int local = 0; local < 2; local++) {
+                for (int mask = 0; mask < (1 << INSTALLER_OVERLAYS.size()); mask++) {
+                    List<String> files = new ArrayList<>();
+                    if (local == 1) {
+                        files.add(LOCAL_OVERLAY);
+                    }
+                    files.add(base);
+                    for (int i = 0; i < INSTALLER_OVERLAYS.size(); i++) {
+                        if ((mask & (1 << i)) != 0) {
+                            files.add(INSTALLER_OVERLAYS.get(i));
+                        }
+                    }
+                    combinations.add(List.copyOf(files));
+                }
+            }
+        }
+        combinations.addAll(DOCUMENTED_EXTRA_COMBINATIONS);
+        return combinations;
+    }
+
+    /**
+     * The defect that made the authenticated PostgreSQL install unstartable:
+     * {@code docker-compose.auth.yml} overrides {@code bind-guard}, which only
+     * {@code docker-compose.yml} declared, so
+     * {@code -f docker-compose.postgres-only.yml -f docker-compose.auth.yml} — what
+     * {@code install.sh --db=postgres --with-auth} composes — failed with "service
+     * bind-guard has neither an image nor a build context".
+     * {@link #everyServiceResolvesToAnImageOrTheBase()} could not see it: it checks
+     * each overlay against {@code docker-compose.yml} alone. This checks every
+     * overlay against every base it is actually layered on.
+     */
+    @Test
+    @DisplayName("every documented combination resolves every service and dependency")
+    void documentedCombinationsResolveStructurally() {
+        List<String> offenders = new ArrayList<>();
+        for (List<String> combination : documentedCombinations()) {
+            TreeMap<String, JsonNode> withImage = new TreeMap<>();
+            List<Map.Entry<String, JsonNode>> all = new ArrayList<>();
+            for (String file : combination) {
+                Path path = Path.of(file);
+                assertTrue(Files.isRegularFile(path), combination + " names " + file + ", which does not exist");
+                for (var entry : services(path).entrySet()) {
+                    all.add(entry);
+                    if (entry.getValue().has("image") || entry.getValue().has("build")) {
+                        withImage.put(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            for (var entry : all) {
+                if (!withImage.containsKey(entry.getKey())) {
+                    offenders.add(combination + ": `" + entry.getKey() + "` has neither an image nor a build context");
+                }
+                JsonNode dependsOn = entry.getValue().path("depends_on");
+                List<String> targets = new ArrayList<>();
+                if (dependsOn.isArray()) {
+                    dependsOn.forEach(target -> targets.add(target.asText()));
+                } else {
+                    dependsOn.fieldNames().forEachRemaining(targets::add);
+                }
+                for (String target : targets) {
+                    if (!withImage.containsKey(target)) {
+                        offenders.add(combination + ": `" + entry.getKey() + "` depends on `" + target
+                                + "`, which no file of the combination declares");
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), offenders,
+                "a documented compose combination does not resolve — `docker compose up` refuses it outright. An"
+                        + " overlay may only override a service every base it is layered on declares.");
+    }
+
+    /**
+     * The installers' file choices, read out of the scripts, are exactly what
+     * {@link #documentedCombinations()} enumerates — so a new overlay added to an
+     * installer enters the matrix (and the render below) rather than shipping
+     * untested.
+     */
+    @Test
+    @DisplayName("the combination matrix covers every file the installers select")
+    void installerSelectionsAreInTheMatrix() {
+        Pattern shell = Pattern.compile("needed_files\\+=\\(\"(docker-compose[\\w.\\-]*\\.yml)\"\\)");
+        Pattern powerShell = Pattern.compile("\\$neededFiles \\+= \"(docker-compose[\\w.\\-]*\\.yml)\"");
+        TreeSet<String> expected = new TreeSet<>(INSTALLER_BASES);
+        expected.addAll(INSTALLER_OVERLAYS);
+        for (var script : List.of(Map.entry(Path.of("install.sh"), shell),
+                Map.entry(Path.of("install.ps1"), powerShell))) {
+            TreeSet<String> selected = new TreeSet<>();
+            Matcher matcher = script.getValue().matcher(read(script.getKey()));
+            while (matcher.find()) {
+                selected.add(matcher.group(1));
+            }
+            assertEquals(expected, selected, script.getKey() + " selects compose files the combination matrix does not"
+                    + " enumerate (or no longer selects one it does) — update INSTALLER_BASES / INSTALLER_OVERLAYS");
+            assertTrue(read(script.getKey()).contains(LOCAL_OVERLAY), script.getKey() + " no longer mentions "
+                    + LOCAL_OVERLAY + " — update the matrix");
+        }
+    }
+
+    /**
+     * Every multi-file command README.md and {@code docs/} print is one of the
+     * known combinations, so the render below covers what users actually copy.
+     */
+    @Test
+    @DisplayName("every compose command the documentation prints is a known combination")
+    void documentedCommandsAreKnownCombinations() {
+        Set<Set<String>> known = documentedCombinations().stream().map(Set::copyOf).collect(Collectors.toSet());
+        List<Path> pages = new ArrayList<>(List.of(README));
+        try (Stream<Path> docs = Files.walk(Path.of("docs"))) {
+            docs.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".md"))
+                    .filter(ComposeStackTest::countsAsDocumentation)
+                    .sorted()
+                    .forEach(pages::add);
+        } catch (IOException e) {
+            throw new UncheckedIOException("could not walk docs/", e);
+        }
+        TreeSet<String> unknown = new TreeSet<>();
+        int seen = 0;
+        for (Path page : pages) {
+            Matcher matcher = DOCUMENTED_COMMAND.matcher(read(page));
+            while (matcher.find()) {
+                List<String> files = new ArrayList<>();
+                for (String token : matcher.group(1).trim().split("\\s+")) {
+                    if (!token.equals("-f")) {
+                        files.add(token);
+                    }
+                }
+                if (!files.stream().allMatch(file -> Files.isRegularFile(Path.of(file)))) {
+                    continue; // another directory's compose set (ui/manager), or a deleted file other tests
+                              // report
+                }
+                seen++;
+                if (!known.contains(Set.copyOf(files))) {
+                    unknown.add(page + ": " + matcher.group());
+                }
+            }
+        }
+        assertTrue(seen > 5, "found almost no compose commands in the documentation — the sweep would be vacuous");
+        assertEquals(Set.of(), unknown, "the documentation prints compose combinations the matrix does not know, so"
+                + " nothing renders them. Add them to DOCUMENTED_EXTRA_COMBINATIONS (and make them work).");
+    }
+
+    /**
+     * The real check, where a Docker CLI is available (CI, most developer
+     * machines): {@code docker compose config} parses and merges exactly as
+     * {@code up} does, without starting anything or contacting a registry. Skipped
+     * — not passed — where there is no Docker; the structural check above still
+     * runs there.
+     */
+    @Test
+    @DisplayName("every documented combination renders with `docker compose config`")
+    void documentedCombinationsRenderWithDockerCompose() throws Exception {
+        assumeTrue(dockerComposeAvailable(), "no `docker compose` on this machine");
+        List<String> failures = new ArrayList<>();
+        for (List<String> combination : documentedCombinations()) {
+            List<String> command = new ArrayList<>(List.of("docker", "compose"));
+            for (String file : combination) {
+                command.add("-f");
+                command.add(file);
+            }
+            command.addAll(List.of("config", "-q"));
+            ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+            builder.environment().putAll(REQUIRED_VARIABLES);
+            // The output goes to a file, not a pipe read before waitFor: readAllBytes()
+            // blocks until the CLI exits, so a hung `docker compose` would hang the test
+            // and the timeout below could never fire.
+            Path output = Files.createTempFile("compose-config", ".log");
+            try {
+                builder.redirectOutput(output.toFile());
+                Process process = builder.start();
+                if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    failures.add(combination + ": timed out");
+                } else if (process.exitValue() != 0) {
+                    failures.add(combination + ": " + Files.readString(output, StandardCharsets.UTF_8).strip());
+                }
+            } finally {
+                Files.deleteIfExists(output);
+            }
+        }
+        assertEquals(List.of(), failures, "a documented compose combination does not render");
+    }
+
+    private static boolean dockerComposeAvailable() {
+        try {
+            Process process = new ProcessBuilder("docker", "compose", "version").redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * {@code docker-compose.postgres-only.yml} and
+     * {@code docker-compose.cluster.yml} publish on {@code ${EDDI_BIND:-127.0.0.1}}
+     * with authentication off by default, and had no {@code bind-guard}:
+     * {@code EDDI_BIND=0.0.0.0} there published an open EDDI, MCP server and
+     * secrets vault, which {@code docker-compose.yml} refuses. Every whole stack
+     * that publishes on {@code EDDI_BIND} carries the same guard — the same script
+     * and the same inputs, byte for byte, so a fix to one copy cannot miss another
+     * — and the publishing service waits for it.
+     */
+    @Test
+    @DisplayName("every stack that publishes on EDDI_BIND carries the same bind-guard")
+    void everyStackThatPublishesOnEddiBindCarriesTheBindGuard() {
+        JsonNode reference = services(BASE).get("bind-guard");
+        assertNotNull(reference, BASE + " must declare the reference bind-guard");
+        List<String> offenders = new ArrayList<>();
+        int guarded = 0;
+        for (Path file : composeFiles()) {
+            if (!STANDALONE_STACKS.contains(name(file))) {
+                continue;
+            }
+            TreeMap<String, JsonNode> services = services(file);
+            for (var entry : services.entrySet()) {
+                boolean publishesOnEddiBind = false;
+                for (JsonNode port : entry.getValue().path("ports")) {
+                    publishesOnEddiBind |= port.toString().contains("${EDDI_BIND");
+                }
+                if (!publishesOnEddiBind) {
+                    continue;
+                }
+                guarded++;
+                JsonNode guard = services.get("bind-guard");
+                if (guard == null) {
+                    offenders.add(name(file) + " publishes `" + entry.getKey() + "` on EDDI_BIND without a bind-guard");
+                    continue;
+                }
+                for (String key : List.of("entrypoint", "command", "environment")) {
+                    if (!reference.path(key).equals(guard.path(key))) {
+                        offenders.add(name(file) + "'s bind-guard `" + key + "` differs from " + BASE + "'s");
+                    }
+                }
+                String image = guard.path("image").asText();
+                boolean reusesAnImage = services.entrySet().stream()
+                        .anyMatch(other -> !other.getKey().equals("bind-guard")
+                                && image.equals(other.getValue().path("image").asText()));
+                if (!reusesAnImage) {
+                    offenders.add(name(file) + "'s bind-guard runs on `" + image
+                            + "`, which no other service of the stack uses — an extra pull for a one-line check");
+                }
+                String condition = entry.getValue().path("depends_on").path("bind-guard").path("condition").asText();
+                if (!"service_completed_successfully".equals(condition)) {
+                    offenders.add(name(file) + ": `" + entry.getKey()
+                            + "` must depend on bind-guard with condition service_completed_successfully");
+                }
+            }
+        }
+        assertTrue(guarded >= 3, "expected docker-compose.yml, docker-compose.postgres-only.yml and"
+                + " docker-compose.cluster.yml to publish on EDDI_BIND — the sweep found " + guarded);
+        assertEquals(List.of(), offenders,
+                "a stack publishes EDDI on EDDI_BIND without the guard that refuses a non-loopback bind while"
+                        + " authentication is off");
     }
 }

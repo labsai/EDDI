@@ -548,7 +548,9 @@ is exactly why each is worth setting explicitly.
   files, so the weights land in RSS and page cache, not the Java heap. They still count
   against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
   note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
-  for the model — it takes room away.
+  for the model — it takes room away. The image sets it to 75 % for EDDI's own work; with
+  an in-process Jlama model, lower it (for example `JAVA_MAX_MEM_RATIO=50`) and raise the
+  memory limit by the size of the weights.
 
 For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
 access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is
@@ -844,6 +846,7 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
 | `maxToolCallsPerIteration` | int      | Most tool calls executed from a **single model response**. Calls past the cap are not run: each gets a `NOT_EXECUTED` result naming the limit, so the model can answer with what it has. `-1`/`0` disables. See [Tool-call caps](#tool-call-caps) | 20 |
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
+| `toolRepeatGuard` | object | Refuses a tool call that already failed identically with nothing succeeding since, instead of re-running it. **On by default**; `{"enabled": false}` turns it off. See [Repeated failing tool calls](#repeated-failing-tool-calls) | enabled |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
@@ -1638,6 +1641,50 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Repeated failing tool calls
+
+Inside the iteration cap a model can still send the *same* failing call (a 403, a 404, a
+schema-rejected body) in every round. The tool repeat guard stops that: a call is refused,
+**without being executed**, when an identical call (same tool, same arguments, JSON key order
+ignored) already failed and no *other* call has succeeded since. Another success in between lifts
+the refusal, because the model may have fixed the precondition (404 on `getUser`, then a successful
+`createUser`, then `getUser` again is allowed).
+
+It is **enabled by default**, with the defaults below. Configure it per LLM task; `{"enabled": false}`
+restores the previous behaviour exactly:
+
+```json
+"toolRepeatGuard": {
+  "enabled": true,
+  "maxIdenticalFailures": 2,
+  "maxIdenticalCalls": -1,
+  "maxRefusalsPerTurn": 3,
+  "exemptTools": ["get_job_status"]
+}
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `enabled` | `true` | `false` disables the guard |
+| `maxIdenticalFailures` | `2` | Identical *retryable* failures tolerated; the next identical call is refused. A *terminal* failure is refused on the very next identical call |
+| `maxIdenticalCalls` | `-1` | Opt-in ceiling on identical *successful* calls (polling is legitimate, so unlimited by default) |
+| `maxRefusalsPerTurn` | `3` | Refusals after which the loop stops asking the model and ends the turn with a fixed message. `-1`/`0` = never stop, only refuse |
+| `exemptTools` | none | Tools never tracked, by dispatch name or built-in slug |
+
+Outcomes are classified from the tool's raw result (before the provenance envelope): an HTTP result
+with `httpCode` 2xx is a success, 408/425/429/5xx are retryable, every other status is terminal;
+`Error: ...` strings and `{"error": ...}` objects are retryable, except rejected arguments and an unknown
+tool, which are terminal. A call the loop refused itself (`NOT_EXECUTED`, budget, quota, expired deadline)
+is never counted as a failure. A refused call receives
+
+```json
+{"status":"NOT_EXECUTED","reason":"identical call already failed (HTTP 403) and nothing has changed since; do not repeat it. Report the failure to the user or try a different approach"}
+```
+
+and is traced as `tool_repeat_refused` (metric `eddi.tool.repeat.refused`). A refused repeat still counts toward `maxToolCallsPerTurn`, because the model did issue it. The state lives for one run of the
+tool loop: a HITL resume starts with a fresh guard, and each model-cascade step has its own. Rule-triggered
+`httpcalls` (no LLM) are out of scope, as they cannot loop.
 
 #### Execution timeouts
 

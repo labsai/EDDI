@@ -159,6 +159,14 @@ public class ClusterConfig {
     @ConfigProperty(name = "eddi.coordinator.dead-letter.capture-input", defaultValue = "true")
     boolean deadLetterCaptureInput = true;
 
+    /**
+     * Size cap of the dead-letter stream in bytes; {@code <= 0} for none. When it
+     * is full, new dead letters are refused (the oldest are kept for the operator)
+     * and fall back to the node-local ring, and audit entries to the JSONL file.
+     */
+    @ConfigProperty(name = "eddi.coordinator.dead-letter.max-bytes", defaultValue = "1073741824")
+    long deadLetterMaxBytes = 1L << 30;
+
     /** Every value as documented, for tests and for code paths without CDI. */
     public static ClusterConfig defaults() {
         return new ClusterConfig();
@@ -386,6 +394,10 @@ public class ClusterConfig {
 
     public boolean deadLetterCaptureInput() {
         return deadLetterCaptureInput;
+    }
+
+    public long deadLetterMaxBytes() {
+        return deadLetterMaxBytes;
     }
 
     // ---- mutators for tests and the in-JVM cluster ITs ----

@@ -194,6 +194,12 @@ final class BoundedLoopSectionHelperFactory implements SectionHelperFactory<Sect
             if (budget.incrementAndGet() > maxIterations) {
                 return CompletableFuture.failedFuture(exceeded(maxIterations));
             }
+            try {
+                RuntimeTemplateEngineFactory.RenderDeadline
+                        .check(delegate.resolutionContext().getAttribute(RuntimeTemplateEngineFactory.RENDER_DEADLINE_ATTRIBUTE));
+            } catch (TemplateLimitExceededException e) {
+                return CompletableFuture.failedFuture(e);
+            }
             return delegate.execute(context);
         }
 
