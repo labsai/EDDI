@@ -26,7 +26,7 @@ Two switches, and they mean different things.
 | `eddi.workspaces.groups-claim` | `groups` | JWT claim carrying Keycloak group membership, which becomes team spaces. |
 | `eddi.workspaces.legacy-visibility` | `shared` | What happens to resources created before ownership was recorded: `shared` or `admin-only`. **Changeable at runtime** — see [Runtime settings](#runtime-settings). |
 | `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment: that team's members create there by default, everyone else keeps their personal space. **Changeable at runtime.** |
-| `eddi.workspaces.directory.enabled` | `true` | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
+| `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
 
 **Recording and enforcing are deliberately separate.** Deploy the release,
@@ -172,6 +172,34 @@ recorded user (typically ones made before the directory existed) so an owner can
 remove them. The directory is covered by GDPR erasure and export. Set
 `eddi.workspaces.directory.enabled=false` to take shares exactly as typed.
 
+The directory holds everybody who ever signed in, chat-only users included, so
+its search is deliberately narrow:
+
+- **It is off unless workspaces are enforced.** Left unset,
+  `eddi.workspaces.directory.enabled` follows `eddi.workspaces.enabled`; set it
+  to `true` explicitly to keep a directory without enforcement.
+- **People are searched from three characters on.** Shorter queries offer only
+  the caller's own teams.
+- **A non-administrator is offered only their own teams and the people who share
+  one of them.** Other people and teams are still reachable by typing their
+  exact username, verified email or `team:<name>`; they are just not suggested.
+  `eddi-admin` is offered every recorded person and team.
+- **An email address is shown only to an administrator or to somebody who shares
+  a team with that person** — in suggestions and in a resource's grant list.
+  Anyone else sees the username. A username that is itself an address counts
+  as one: it is never used as a person's label, and as the secondary line it
+  follows the same rule as the email. (The principal is the id a grant is
+  stored under, so where the identity provider uses the address as the
+  principal, the grant's `subject` carries it regardless — see
+  [the token must name the user](security.md#the-token-must-name-the-user) for
+  the `principal-claim` setting that avoids this.)
+- **Teams are what the token carried at the person's last recorded sign-in.**
+  The directory is refreshed from the token about every ten minutes while
+  someone is signed in; a person removed from a team keeps that membership in
+  the directory — and stays suggested to their former teammates — until they
+  next sign in. Nothing expires a directory entry by age; GDPR erasure removes
+  one.
+
 ### Where new resources land
 
 A new resource is filed in the first of:
@@ -309,10 +337,25 @@ Three properties are worth knowing:
   any colleague's live agent.
 - **Starting a conversation** requires `USE`. An anonymous caller on the public
   production endpoints therefore reaches **published agents only**.
+- **Every turn of an existing conversation** re-checks `USE` on its agent — `say`,
+  its streaming twin, a rerun, MCP `talk_to_agent` and `chat_with_agent` on an
+  existing conversation. Revoking a share or making an agent private stops the
+  owner's *next message*, not only their next conversation. (Up to 6.5 only the
+  start was checked.)
 - **Schedules and group membership** are checked when they are *authored*:
-  creating or re-pointing one at an agent requires `USE` on that agent. The fire
-  (or the group's member turn) runs system-initiated and is deliberately not
-  re-checked — the vet happens where the human is.
+  creating or re-pointing one at an agent requires `USE` on that agent — for a
+  group, on every member, the moderator and the facilitator, and again when a
+  group is duplicated. A facilitator's `RECRUIT` move is checked against the
+  discussion owner the way the `recruit_agent` tool is. The fire (or the group's
+  member turn) runs system-initiated and is deliberately not re-checked — the vet
+  happens where the human is.
+- **Workflow references** are checked when a workflow is created, updated or
+  duplicated: every configuration a step names (`config.uri`, and each
+  extension's — a parser's dictionaries, for instance) requires `VIEW`, and an
+  agent or group a step names requires `USE`. An update need not re-justify a
+  reference the stored version already had. Without this, a workflow could point
+  at another space's private LLM or RAG configuration by id and read it back
+  through an export of the caller's own agent.
 - **Agent triggers** (managed-agent intents) require `EDIT` on every agent the
   trigger routes to — the agents it routes to now *and*, for an update, the ones
   it routed to before — to create, re-point or delete one. A trigger has no owner

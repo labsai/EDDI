@@ -75,6 +75,31 @@ describe("ChatPanel — Continue in Chat opens the named conversation", () => {
     expect(useChatStore.getState().selectedAgentId).toBe("agent1");
   });
 
+  it.each([
+    ["a dot-dot segment", "..%2Fadministration"],
+    ["an encoded slash", "a%2Fb"],
+    ["whitespace", "conv%20x"],
+  ])("never requests a conversationId carrying %s", async (_what, bad) => {
+    const reads: string[] = [];
+    server.use(
+      http.get("*/agents/:conversationId", ({ params }) => {
+        const id = String(params.conversationId);
+        if (id === DESCRIPTORS) return;
+        reads.push(id);
+        return HttpResponse.json(snapshot(id, "should not be read"));
+      }),
+    );
+
+    renderWithProviders(<ChatPanel />, {
+      initialRoute: `/manage/chat?agentId=agent1&conversationId=${bad}`,
+    });
+
+    // The agent is still preselected; only the unsafe conversation id is dropped.
+    await waitFor(() => expect(useChatStore.getState().selectedAgentId).toBe("agent1"));
+    expect(reads).toEqual([]);
+    expect(useChatStore.getState().conversationId).toBeNull();
+  });
+
   it("switches to the named conversation even when its agent is already selected", async () => {
     useChatStore.getState().setSelectedAgent("agent1", "Support Agent");
     useChatStore.getState().setConversationId("conv-current");

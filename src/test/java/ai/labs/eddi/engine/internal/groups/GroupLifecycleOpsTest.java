@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -58,15 +59,17 @@ class GroupLifecycleOpsTest {
     private IGroupConversationStore conversationStore;
 
     private ISharedArtifactStore sharedArtifactStore;
+    private IAttachmentStore attachmentStore;
 
     private GroupLifecycleOps ops() {
         agentFactory = mock(IAgentFactory.class);
         agentStore = mock(IAgentStore.class);
         conversationStore = mock(IGroupConversationStore.class);
         sharedArtifactStore = mock(ISharedArtifactStore.class);
+        attachmentStore = mock(IAttachmentStore.class);
         return new GroupLifecycleOps(conversationStore, mock(IAgentGroupStore.class),
                 mock(IConversationService.class), agentFactory, agentStore, mock(IDeploymentStore.class),
-                sharedArtifactStore,
+                sharedArtifactStore, attachmentStore,
                 ConcurrentHashMap.newKeySet(), new ConcurrentHashMap<String, DiscussionControlToken>(),
                 Mockito.mock(GroupConversationService.class),
                 new SimpleMeterRegistry().counter("test.followup"),
@@ -226,6 +229,35 @@ class GroupLifecycleOpsTest {
         var order = inOrder(sharedArtifactStore, conversationStore);
         order.verify(sharedArtifactStore).deleteByGroupConversationId("gc-1");
         order.verify(conversationStore).delete("gc-1");
+    }
+
+    @Test
+    void deleteGroupConversation_deletesTheDiscussionsAttachmentBlobs_beforeTheDocumentGoes() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.COMPLETED);
+        doReturn(gc).when(conversationStore).read("gc-1");
+        when(attachmentStore.deleteByConversation("gc-1")).thenReturn(2L);
+
+        ops.deleteGroupConversation("gc-1");
+
+        // The blobs are owned by the group conversation id; once the document is gone
+        // nothing points at them, so they must go first.
+        var order = inOrder(attachmentStore, conversationStore);
+        order.verify(attachmentStore).deleteByConversation("gc-1");
+        order.verify(conversationStore).delete("gc-1");
+    }
+
+    @Test
+    void deleteGroupConversation_blobDeleteFails_keepsTheDocumentSoTheDeleteCanBeRetried() throws Exception {
+        var ops = ops();
+        var gc = gc();
+        gc.setState(GroupConversationState.COMPLETED);
+        doReturn(gc).when(conversationStore).read("gc-1");
+        when(attachmentStore.deleteByConversation("gc-1")).thenThrow(new RuntimeException("gridfs down"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> ops.deleteGroupConversation("gc-1"));
+        verify(conversationStore, never()).delete("gc-1");
     }
 
     @Test

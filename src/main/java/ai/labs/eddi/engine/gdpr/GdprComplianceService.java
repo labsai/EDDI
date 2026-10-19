@@ -8,7 +8,10 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.SharedArtifact;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
+import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
@@ -133,6 +136,18 @@ public class GdprComplianceService {
 
     @Inject
     IConversationCoordinator conversationCoordinator;
+
+    /**
+     * The keyed pseudonym for database logs, log lines and compliance records (L9).
+     * Field-injected; null in tests built with {@code new}, which then get the
+     * unsalted {@link AuditHmac#pseudonymFor} they were written against.
+     */
+    @Inject
+    GdprPseudonymizer pseudonymizer;
+
+    private String pseudonymFor(String userId) {
+        return pseudonymizer != null ? pseudonymizer.pseudonymFor(userId) : AuditHmac.pseudonymFor(userId);
+    }
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -404,7 +419,7 @@ public class GdprComplianceService {
      */
     public GdprDeletionResult deleteUserData(String userId) {
         rejectReservedPrincipal(userId);
-        String pseudonym = AuditHmac.pseudonymFor(userId);
+        String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting erasure cascade for pseudonym '%s'", pseudonym);
 
         // Every step below is allowed to fail without aborting the cascade — but a
@@ -506,6 +521,33 @@ public class GdprComplianceService {
             recordFailure(failedSteps, "conversationIdLookup", e, pseudonym);
         }
 
+        // 1c. The user's group discussions and the member conversations they created
+        // own attachment blobs too: a discussion's shared files are stored under the
+        // group conversation's id, not under any conversation
+        // getConversationIdsByUserId
+        // returns. Resolved now, while the documents that name them still exist (step
+        // 5c deletes them), and erased with the conversations' own blobs in step 2.
+        Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
+        // The ids only the group documents record. If listing them fails, or a blob
+        // delete under one of them fails, step 5c keeps the documents (as 4c keeps
+        // the snapshots on an incomplete vault sweep): deleting the one record of an
+        // owner id would leave the retry this result asks for unable to reach the
+        // blobs.
+        Set<String> groupBlobOwnerIds = new LinkedHashSet<>();
+        boolean groupBlobCleanupIncomplete = false;
+        try {
+            for (GroupConversation gc : groupConversationsOf(userId, Integer.MAX_VALUE).owned()) {
+                groupBlobOwnerIds.add(gc.getId());
+                if (gc.getMemberConversationIds() != null) {
+                    groupBlobOwnerIds.addAll(gc.getMemberConversationIds().values());
+                }
+            }
+            blobOwnerIds.addAll(groupBlobOwnerIds);
+        } catch (Exception e) {
+            groupBlobCleanupIncomplete = true;
+            recordFailure(failedSteps, "groupConversationAttachments", e, pseudonym);
+        }
+
         // The per-conversation loops below wrap EACH conversation in its own try.
         // With the try outside the loop, the first conversation whose attachment
         // (or journal, or descriptor, or checkpoint) delete threw ended the sweep:
@@ -515,19 +557,25 @@ public class GdprComplianceService {
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
-                for (String convId : conversationIds) {
+                for (String convId : blobOwnerIds) {
                     try {
                         attachmentsDeleted += attachmentStorage.deleteByConversation(convId);
                     } catch (Exception e) {
+                        if (groupBlobOwnerIds.contains(convId)) {
+                            groupBlobCleanupIncomplete = true;
+                        }
                         recordFailure(failedSteps, "attachments", e, pseudonym);
                     }
                 }
                 if (attachmentsDeleted > 0) {
                     LOGGER.infof("[GDPR] Deleted %d attachments across %d conversations [%s]",
-                            attachmentsDeleted, conversationIds.size(), pseudonym);
+                            attachmentsDeleted, blobOwnerIds.size(), pseudonym);
                 }
             }
         } catch (Exception e) {
+            if (!groupBlobOwnerIds.isEmpty()) {
+                groupBlobCleanupIncomplete = true;
+            }
             recordFailure(failedSteps, "attachments", e, pseudonym);
         }
 
@@ -688,18 +736,25 @@ public class GdprComplianceService {
         }
 
         // 5c. Delete group conversation transcripts. A GroupConversation stores the
-        // user's id next to the verbatim discussion transcript.
+        // user's id next to the verbatim discussion transcript — unless step 1c/2
+        // left group blobs behind: the documents are the only record of the ids those
+        // blobs are stored under, so they stay until a retry has erased the blobs.
         long groupConversationsDeleted = 0;
-        try {
-            if (groupConversationStoreInstance.isResolvable()) {
-                groupConversationsDeleted = groupConversationStoreInstance.get().deleteAllForUser(userId);
-                if (groupConversationsDeleted > 0) {
-                    LOGGER.infof("[GDPR] Deleted %d group conversations [%s]",
-                            groupConversationsDeleted, pseudonym);
+        if (groupBlobCleanupIncomplete) {
+            recordFailure(failedSteps, "groupConversations",
+                    new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else {
+            try {
+                if (groupConversationStoreInstance.isResolvable()) {
+                    groupConversationsDeleted = groupConversationStoreInstance.get().deleteAllForUser(userId);
+                    if (groupConversationsDeleted > 0) {
+                        LOGGER.infof("[GDPR] Deleted %d group conversations [%s]",
+                                groupConversationsDeleted, pseudonym);
+                    }
                 }
+            } catch (Exception e) {
+                recordFailure(failedSteps, "groupConversations", e, pseudonym);
             }
-        } catch (Exception e) {
-            recordFailure(failedSteps, "groupConversations", e, pseudonym);
         }
 
         // 5c2. Delete shared artifacts (I17). Artifacts carry ownerUserId (the
@@ -809,7 +864,13 @@ public class GdprComplianceService {
         // 7b. Pseudonymize what is left in the audit ledger under the raw id — every
         // row in pseudonymize mode, the rows the redaction could not reach otherwise.
         try {
-            long remaining = auditStore.pseudonymizeByUserId(userId, pseudonym);
+            // Deliberately the unsalted form, not `pseudonym`: the rows this blanket
+            // update reaches are the v1-v4 and unsigned ones (the store gives v5 rows the
+            // keyed pseudonym of the key that signed them first), and a v3/v4 row signs
+            // exactly this token — any other value would stop it verifying. In the
+            // default redact mode step 7a has already moved every row it could reach to
+            // the keyed pseudonym.
+            long remaining = auditStore.pseudonymizeByUserId(userId, AuditHmac.pseudonymFor(userId));
             auditPseudonymized += remaining;
             LOGGER.infof("[GDPR] Pseudonymized %d audit entries [%s]",
                     auditPseudonymized, pseudonym);
@@ -960,7 +1021,7 @@ public class GdprComplianceService {
      */
     public UserDataExport exportUserData(String userId) {
         rejectReservedPrincipal(userId);
-        String pseudonym = AuditHmac.pseudonymFor(userId);
+        String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Starting data export [%s]", pseudonym);
 
         // 1. User memories
@@ -1061,13 +1122,64 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
+        // 4b. Group discussions the user started (Art. 15/20 — erased as theirs by
+        // step 5c of the cascade, so exported as theirs too), capped like the
+        // conversations and reported as truncated when the cap bites.
+        var failedCategories = new ArrayList<String>();
+        var groupConversationEntries = new ArrayList<UserDataExport.GroupConversationExportEntry>();
+        boolean groupConversationsTruncated = false;
+        Set<String> blobOwnerIds = new LinkedHashSet<>(conversationIds);
+        try {
+            GroupConversationsPage page = groupConversationsOf(userId, GROUP_CONVERSATION_EXPORT_LIMIT);
+            groupConversationsTruncated = page.truncated();
+            for (GroupConversation gc : page.owned()) {
+                groupConversationEntries.add(new UserDataExport.GroupConversationExportEntry(gc.getId(), gc.getGroupId(),
+                        gc.getState() != null ? gc.getState().name() : null, gc.getOriginalQuestion(), gc.getTranscript(),
+                        gc.getCreated(), gc.getLastModified()));
+                blobOwnerIds.add(gc.getId());
+                if (gc.getMemberConversationIds() != null) {
+                    blobOwnerIds.addAll(gc.getMemberConversationIds().values());
+                }
+            }
+            if (groupConversationsTruncated) {
+                LOGGER.warnf("[GDPR] User has more than %d group conversations; the bundle is marked truncated [%s]",
+                        GROUP_CONVERSATION_EXPORT_LIMIT, pseudonym);
+            }
+        } catch (Exception e) {
+            failedCategories.add("groupConversations");
+            LOGGER.errorf(e, "[GDPR] Failed to export group conversations [%s]", pseudonym);
+        }
+
+        // 4c. Shared artifacts of the user's discussions (I17), with their history.
+        var sharedArtifactEntries = new ArrayList<UserDataExport.SharedArtifactExportEntry>();
+        boolean sharedArtifactsTruncated = false;
+        try {
+            if (sharedArtifactStoreInstance != null && sharedArtifactStoreInstance.isResolvable()) {
+                // One more than the cap, so a full page tells "exactly the cap" from "more".
+                List<SharedArtifact> artifacts = sharedArtifactStoreInstance.get().listAllForUser(userId, SHARED_ARTIFACT_EXPORT_LIMIT + 1);
+                if (artifacts != null) {
+                    sharedArtifactsTruncated = artifacts.size() > SHARED_ARTIFACT_EXPORT_LIMIT;
+                    for (SharedArtifact a : artifacts.subList(0, Math.min(artifacts.size(), SHARED_ARTIFACT_EXPORT_LIMIT))) {
+                        sharedArtifactEntries.add(new UserDataExport.SharedArtifactExportEntry(a.getId(), a.getGroupConversationId(),
+                                a.getName(), a.getType() != null ? a.getType().name() : null, a.getStatus() != null ? a.getStatus().name() : null,
+                                a.getVersion(), a.getContent(), a.getHistory(), a.getCreatedAt(), a.getUpdatedAt()));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            failedCategories.add("sharedArtifacts");
+            LOGGER.errorf(e, "[GDPR] Failed to export shared artifacts [%s]", pseudonym);
+        }
+
         // 5. Attachment metadata (no bytes — the payload is fetched via the
-        // download API; portability requires the metadata, not the blobs).
+        // download API; portability requires the metadata, not the blobs). The
+        // inventory covers the blobs of the user's group discussions and of the
+        // member conversations those created, which erasure deletes as well.
         var attachmentEntries = new ArrayList<UserDataExport.AttachmentExportEntry>();
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var store = attachmentStorageInstance.get();
-                for (var convId : conversationIds) {
+                for (var convId : blobOwnerIds) {
                     try {
                         for (var a : store.listByConversation(convId)) {
                             attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
@@ -1113,16 +1225,22 @@ public class GdprComplianceService {
         // evidence that this export happened: an entry saying 998 of 1,000 were
         // exported with nothing to explain the two is a discrepancy nobody can
         // account for after the fact.
-        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
-                "memoriesExported", memories.size(),
-                "conversationsExported", conversations.size(),
-                "totalConversations", totalConversations,
-                "conversationsTruncated", conversationsTruncated,
-                "conversationsFailed", failedConversationIds.size(),
-                "managedConversationsExported", managedConversations.size(),
-                "auditEntriesExported", auditExportEntries.size(),
-                "attachmentsExported", attachmentEntries.size(),
-                "connectionGrantsExported", connectionGrants.size()));
+        var exportDetails = new LinkedHashMap<String, Object>();
+        exportDetails.put("memoriesExported", memories.size());
+        exportDetails.put("conversationsExported", conversations.size());
+        exportDetails.put("totalConversations", totalConversations);
+        exportDetails.put("conversationsTruncated", conversationsTruncated);
+        exportDetails.put("conversationsFailed", failedConversationIds.size());
+        exportDetails.put("managedConversationsExported", managedConversations.size());
+        exportDetails.put("auditEntriesExported", auditExportEntries.size());
+        exportDetails.put("attachmentsExported", attachmentEntries.size());
+        exportDetails.put("connectionGrantsExported", connectionGrants.size());
+        exportDetails.put("groupConversationsExported", groupConversationEntries.size());
+        exportDetails.put("groupConversationsTruncated", groupConversationsTruncated);
+        exportDetails.put("sharedArtifactsExported", sharedArtifactEntries.size());
+        exportDetails.put("sharedArtifactsTruncated", sharedArtifactsTruncated);
+        exportDetails.put("failedCategories", List.copyOf(failedCategories));
+        submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, exportDetails);
 
         Map<String, Object> additionalData = new LinkedHashMap<>();
         for (IGdprParticipant participant : participants()) {
@@ -1142,7 +1260,9 @@ public class GdprComplianceService {
 
         return new UserDataExport(userId, Instant.now(), memories,
                 conversations, managedConversations, auditExportEntries, attachmentEntries,
-                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData);
+                totalConversations, conversationsTruncated, failedConversationIds, connectionGrants, additionalData,
+                groupConversationEntries, groupConversationsTruncated, sharedArtifactEntries, sharedArtifactsTruncated,
+                failedCategories);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===
@@ -1167,6 +1287,66 @@ public class GdprComplianceService {
      */
     static final int CONVERSATION_EXPORT_LIMIT = 1_000;
 
+    /** Cap on group discussions in one export bundle — same reasoning as above. */
+    static final int GROUP_CONVERSATION_EXPORT_LIMIT = 1_000;
+
+    /** Cap on shared artifacts in one export bundle. */
+    static final int SHARED_ARTIFACT_EXPORT_LIMIT = 1_000;
+
+    /**
+     * Upper bound on listing pages, so a pathological store cannot spin forever.
+     */
+    private static final int MAX_GROUP_LISTING_PASSES = 1_000;
+
+    /**
+     * The user's group discussions, at most {@code cap} of them.
+     *
+     * @param owned
+     *            the discussions, newest first
+     * @param truncated
+     *            whether more exist than {@code cap}
+     */
+    record GroupConversationsPage(List<GroupConversation> owned, boolean truncated) {
+    }
+
+    /**
+     * Pages through the group-conversation store for the user's discussions,
+     * stopping at {@code cap}. Empty when the store is not available.
+     *
+     * @throws Exception
+     *             when the store cannot be read — the caller reports the step
+     */
+    GroupConversationsPage groupConversationsOf(String userId, int cap) throws Exception {
+        if (groupConversationStoreInstance == null || !groupConversationStoreInstance.isResolvable()) {
+            return new GroupConversationsPage(List.of(), false);
+        }
+        var store = groupConversationStoreInstance.get();
+        List<GroupConversation> owned = new ArrayList<>();
+        // The store reads every row of a page in full before it returns, so an export
+        // (cap 1,000) asks for one row past its cap — enough to tell "exactly the cap"
+        // from "more" — rather than the storage maximum. Erasure (no cap) keeps the
+        // full page.
+        int pageSize = cap >= IResourceStorage.MAX_RESULT_LIMIT ? IResourceStorage.MAX_RESULT_LIMIT : cap + 1;
+        int skip = 0;
+        for (int pass = 0; pass < MAX_GROUP_LISTING_PASSES; pass++) {
+            var page = store.listAllForUser(userId, skip, pageSize);
+            if (page == null || page.scanned() == 0) {
+                return new GroupConversationsPage(owned, false);
+            }
+            for (GroupConversation gc : page.owned()) {
+                if (owned.size() == cap) {
+                    return new GroupConversationsPage(owned, true);
+                }
+                owned.add(gc);
+            }
+            if (page.scanned() < pageSize) {
+                return new GroupConversationsPage(owned, false);
+            }
+            skip += page.scanned();
+        }
+        throw new IllegalStateException("Group conversation listing did not finish after " + MAX_GROUP_LISTING_PASSES + " pages");
+    }
+
     /**
      * Restrict processing for a user (GDPR Art. 18). Data is preserved but new
      * conversations and message processing are blocked.
@@ -1175,7 +1355,7 @@ public class GdprComplianceService {
      *            the user whose processing to restrict
      */
     public void restrictProcessing(String userId) {
-        String pseudonym = AuditHmac.pseudonymFor(userId);
+        String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Processing restriction applied [%s]", pseudonym);
 
         try {
@@ -1208,7 +1388,7 @@ public class GdprComplianceService {
      *            the user whose restriction to lift
      */
     public void unrestrictProcessing(String userId) {
-        String pseudonym = AuditHmac.pseudonymFor(userId);
+        String pseudonym = pseudonymFor(userId);
         LOGGER.infof("[GDPR] Processing restriction removed [%s]", pseudonym);
 
         try {

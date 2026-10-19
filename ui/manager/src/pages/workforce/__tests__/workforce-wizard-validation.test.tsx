@@ -485,7 +485,9 @@ describe("Workforce wizard — creation failures", () => {
     await user.click(await completeCustomTeam(user));
 
     await screen.findByText(/creation failed/i);
-    expect(await screen.findByText(/system prompt is too long/i)).toBeInTheDocument();
+    // Advisors are created in parallel, so every row that failed shows the
+    // message (plus the one toast) — at least one, and never [object Object].
+    expect((await screen.findAllByText(/system prompt is too long/i)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/\[object Object\]/)).toBeNull();
   });
 

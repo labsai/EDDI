@@ -166,6 +166,13 @@ a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:84
 775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:85
 
+# docs/security-review.md, PR #1088 (fix/security-review-runtime): the generic-api-key rule
+# matched prose in a table row of the published review summary ("caller-token confused
+# deputy, A2A/ownership gaps" -- the word token followed by a comma-separated phrase of
+# high enough entropy). It is a sentence, not a credential; the row is reworded in the
+# next commit, and this names the commit that carried the original wording.
+298c30e59f7a13776add72f273071f1530692e1b:docs/security-review.md:generic-api-key:82
+
 # PR #1094 (fix/security-review-secrets-redaction): three stand-in credentials in
 # two read-redaction tests -- a Slack bot token and a signing secret in
 # RestChannelIntegrationStoreReadRedactionTest, a form-encoded client secret in

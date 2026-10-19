@@ -222,6 +222,8 @@ class AdminActionAuditFilterTest {
         assertTrue(AdminActionAuditFilter.isAdministrative("/backup/import"));
         assertTrue(AdminActionAuditFilter.isAdministrative("admin/gdpr/x"));
         assertTrue(AdminActionAuditFilter.isAdministrative("/conversationstore/conversations/abc"));
+        // M5: platform.* global-variable writes rely on this record.
+        assertTrue(AdminActionAuditFilter.isAdministrative("/variablestore/variables/default/platform.operator"));
         assertFalse(AdminActionAuditFilter.isAdministrative("/Agents/x"));
         assertFalse(AdminActionAuditFilter.isAdministrative("/"));
         assertFalse(AdminActionAuditFilter.isAdministrative(null));

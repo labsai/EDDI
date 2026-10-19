@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory.model;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.TurnError;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -68,6 +69,20 @@ public class SimpleConversationMemorySnapshot {
      * {@code ConversationMemorySnapshot.hitlPendingToolCalls}.
      */
     private PendingToolCallBatch hitlPendingToolCalls;
+    /**
+     * The conversation's own tracked dollar cost so far: the sum of
+     * {@code audit:cost} over <em>every</em> step, not just the steps this
+     * projection returns. {@code null} when no step carried a cost.
+     * <p>
+     * In-process only, hence {@link JsonIgnore}. {@code audit:cost} is a per-step
+     * value and the {@code returnDetailed} projection withholds every
+     * {@code audit:*} key from callers, so an in-process consumer that needs a
+     * conversation's spend (a group member turn, for the group cost ceiling) had no
+     * way to read it. Carrying the total here gives that consumer a running total
+     * without widening what any REST, MCP or SSE caller receives.
+     */
+    @JsonIgnore
+    private Double conversationCost;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
@@ -255,6 +270,16 @@ public class SimpleConversationMemorySnapshot {
 
     public void setUndoAvailable(boolean undoAvailable) {
         this.undoAvailable = undoAvailable;
+    }
+
+    @JsonIgnore
+    public Double getConversationCost() {
+        return conversationCost;
+    }
+
+    @JsonIgnore
+    public void setConversationCost(Double conversationCost) {
+        this.conversationCost = conversationCost;
     }
 
     public boolean isRedoAvailable() {

@@ -98,11 +98,13 @@ public final class SecretRedactionFilter {
             // key inside a gated tool call's arguments sailed through "redacted" and
             // rendered clear-text on the approval card. Ordered before the generic
             // sk- rule so the replacement keeps the sk-ant- prefix.
-            new RedactionRule(Pattern.compile("sk-ant-[a-zA-Z0-9_\\-]{20,}+"), "sk-ant-" + REDACTED),
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_])sk-ant-[a-zA-Z0-9_\\-]{20,}+"), "sk-ant-" + REDACTED),
 
             // OpenAI API keys: sk-... (at least 20 chars). Underscores and hyphens
-            // included — sk-proj-... keys carry both.
-            new RedactionRule(Pattern.compile("sk-[a-zA-Z0-9_\\-]{20,}+"), "sk-" + REDACTED),
+            // included — sk-proj-... keys carry both. Both sk- rules start at a word
+            // boundary: without one, "risk-assessment-workflow-handler" lost everything
+            // after "ri" once these rules ran over prose (export, instance sync).
+            new RedactionRule(Pattern.compile("(?<![A-Za-z0-9_])sk-[a-zA-Z0-9_\\-]{20,}+"), "sk-" + REDACTED),
 
             // Bearer tokens — JWTs AND opaque tokens. A single possessive character
             // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
@@ -608,6 +610,24 @@ public final class SecretRedactionFilter {
      *            the raw log message
      * @return the message with secrets replaced by {@code <REDACTED>}
      */
+    /**
+     * Only the rules that recognise a credential by its SHAPE alone (an {@code sk-}
+     * key, a long bearer token, ...), never the name-bound rules
+     * ({@code password: ...}, {@code token=...}). For text that is prose rather
+     * than request material — a system prompt, an output text — where the
+     * name-bound rules would rewrite ordinary sentences.
+     */
+    public static String redactCredentialShapes(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        String result = text;
+        for (RedactionRule rule : SHAPE_RULES) {
+            result = rule.pattern.matcher(result).replaceAll(rule.replacement);
+        }
+        return result;
+    }
+
     public static String redact(String message) {
         if (message == null || message.isEmpty()) {
             return message;

@@ -3,7 +3,7 @@ import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient, ke
 import { ENVIRONMENTS, type Environment } from "@/lib/constants";
 import { withAnyDeployedVersion } from "@/lib/deployment-environments";
 import { updateDescriptor } from "@/lib/api/descriptors";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys, agentDeploymentQueries } from "@/lib/query-keys";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import {
   getAgentDescriptors,
@@ -57,6 +57,9 @@ export function useInfiniteAgentDescriptors(filter = "", space = "", ownership: 
       ? [...agentKeys.descriptorsInfinite(filter), space, ownership, keySuffix]
       : [...agentKeys.descriptorsInfinite(filter), space, ownership],
     queryFn: ({ pageParam = 0 }) => getAgentDescriptors(PAGE_SIZE, pageParam, filter, space, ownership),
+    // Keep showing the previous results while a new filter loads, instead of
+    // dropping the list back to its loading skeleton on every keystroke.
+    placeholderData: keepPreviousData,
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {
       // If we got a full page, there are probably more
@@ -399,8 +402,8 @@ export function useDeployAgent() {
       }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
-      queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+      void queryClient.invalidateQueries(agentDeploymentQueries([agentId]));
+      void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
 
       const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
       const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
@@ -458,8 +461,8 @@ export function useUndeployAgent() {
       }
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
-      queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+      void queryClient.invalidateQueries(agentDeploymentQueries([agentId]));
+      void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
 
       const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
       const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];

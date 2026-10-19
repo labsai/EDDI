@@ -2890,6 +2890,7 @@
     "question": "问题",
     "readyToDiscuss": "准备讨论",
     "responding": "正在响应…",
+    "usingTool": "正在使用 {{tool}}…",
     "reviewMemberRoster": "成员名单",
     "reviewMembers": "成员",
     "reviewModerator": "主持人",
@@ -3527,7 +3528,7 @@
     "intent": "意图",
     "deployments": "代理部署",
     "addDeployment": "添加代理",
-    "agents": "个代理",
+    "intentPlaceholder": "例如 booking_request",
     "empty": "尚未配置触发器",
     "created": "触发器已创建",
     "updated": "触发器已更新",
@@ -3980,7 +3981,10 @@
     "targetType": "类型",
     "triggerHint": "用户输入“关键词：消息”以路由到此目标",
     "triggerKeywords": "触发关键词",
-    "triggers": "触发器",
+    "targetFallback": "目标 {{number}}",
+    "untitledChannel": "未命名频道",
+    "triggerCount_one": "{{count}} 个触发词",
+    "triggerCount_other": "{{count}} 个触发词",
     "type": "频道类型",
     "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
     "webhookUrl": "Webhook URL",
@@ -4952,6 +4956,7 @@
       "action": "启用"
     },
     "activation": {
+      "storedPromptConfirm": "这些指令沿用自已保存的配置，任何可以编辑平台设置的人都可能修改过它。我已阅读上方内容并希望安装。",
       "title": "启用平台操作员",
       "subtitle": "选择驱动操作员的模型，检查它的指令，然后部署。",
       "modelStep": "模型",
@@ -5054,7 +5059,11 @@
       "gateUnverifiedHelp": "无法在该代理的文档上验证审批门禁。",
       "agentId": "智能体",
       "platformBaseUrl": "调用平台地址",
-      "platformBaseUrlUnknown": "未记录"
+      "platformBaseUrlUnknown": "未记录",
+      "unregister": "取消注册操作员",
+      "unregisterConfirmTitle": "取消注册平台操作员？",
+      "unregisterConfirmBody": "仅移除已保存的操作员配置。无法验证已注册的智能体是由此管理器设置的操作员，因此不会部署、取消部署或删除它——请在“智能体”页面查看。",
+      "unverifiedActions": "无法验证此智能体是由管理器设置的操作员，因此本页面不会探测、取消部署或删除它。“重新配置”会创建一个新的操作员，并保留此智能体不动。"
     },
     "chat": {
       "empty": "来问问你的部署。操作员会去查，并向你展示它发出的每一次调用。",
@@ -5144,7 +5153,8 @@
       "activatedChecking": "平台操作员已激活。连接检查正在后台运行。",
       "writeProbeVerified": "写入权限已验证 — 一次受审批门保护的真实写入已暂停等待审批。",
       "writeProbeFailed": "审批门未能拦截 — 操作员已被移除。",
-      "writeProbeInconclusive": "实时写入探测未得出结论。"
+      "writeProbeInconclusive": "实时写入探测未得出结论。",
+      "unregistered": "平台操作员已取消注册"
     },
     "canary": {
       "genericFailure": "连接检查未通过。",
@@ -5183,7 +5193,22 @@
     "superseded": {
       "title": "之前的运维助手智能体仍处于部署状态。"
     },
+    "trust": {
+      "checking": "正在验证操作员，之后才会打开聊天…",
+      "title": "无法验证平台操作员",
+      "body": "聊天已关闭，因为注册为操作员的智能体（{{agentId}}）无法证明就是此管理器所设置的那个。任何可以编辑平台设置的人都能更改它指向哪个智能体。",
+      "reasonMarker": "它没有平台操作员标记，因此可能不是管理器所创建的智能体。",
+      "reasonGate": "无法验证其审批关卡：{{detail}}",
+      "reasonUnreadable": "检查未能完成：{{detail}}",
+      "recheck": "重新检查",
+      "manage": "打开操作员页面"
+    },
     "upgrade": {
+      "reviewTitle": "查看已存储的指令",
+      "reviewBody": "这些指令是之前保存的，将安装到新的操作员上。任何可以编辑平台设置的人都可能修改过它们，请在继续之前阅读与默认内容不同的部分。",
+      "reviewSummary": "新增 {{added}} 行，移除 {{removed}} 行默认内容",
+      "reviewFull": "显示完整的已存储文本",
+      "reviewConfirm": "我已阅读这些指令并希望安装它们",
       "hint": "Platform Operator 有可用更新。",
       "blockerBaseUrl": "其模型服务器地址未被记录——请重新输入以进行升级。",
       "addedTools_other": "{{count}} 个新工具",
@@ -6305,5 +6330,14 @@
     "cancelled": "未部署：保管库密钥尚未授权。智能体已创建——请重试以授权并部署它们，或从各自的智能体页面部署。",
     "failed": "已创建但未部署：{{names}}。{{reason}} 请重试，或从各自的智能体页面部署。",
     "memberCancelled": "未部署：保管库密钥尚未授权"
+  },
+  "modelCombobox": {
+    "toggle": "显示模型建议",
+    "listLabel": "模型建议",
+    "matching": "匹配“{{query}}”",
+    "otherModels": "其他模型",
+    "default": "默认",
+    "noMatch": "没有与“{{query}}”匹配的建议——将按输入内容使用。",
+    "customHint": "列表中没有？可输入提供商支持的任意模型 ID。"
   }
 }

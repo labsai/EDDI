@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { BearerEventSource } from "../bearer-event-source";
+import { seg } from "./path-segment";
 
 /**
  * The cluster console API (`/administration/cluster`, EDDI 6.6+).
@@ -260,7 +261,7 @@ export function getClusterLeases(q?: string, flagged = false, limit = 200): Prom
 }
 
 export function releaseLease(conversationId: string, expectedRevision: string | null): Promise<ActionResult> {
-  return api.post<ActionResult>(`${BASE}/leases/${encodeURIComponent(conversationId)}/release`, { expectedRevision });
+  return api.post<ActionResult>(`${BASE}/leases/${seg(conversationId)}/release`, { expectedRevision });
 }
 
 export function getClusterActivity(limit = 200): Promise<ActivityEvent[]> {
@@ -268,7 +269,7 @@ export function getClusterActivity(limit = 200): Promise<ActivityEvent[]> {
 }
 
 export function diagnoseConversation(conversationId: string): Promise<Diagnosis> {
-  return api.get<Diagnosis>(`${BASE}/diagnose/${encodeURIComponent(conversationId)}`);
+  return api.get<Diagnosis>(`${BASE}/diagnose/${seg(conversationId)}`);
 }
 
 export function getClusterDeadLetters(filter: DeadLetterFilter, after?: string | null, limit = 50): Promise<DeadLetterPage> {
@@ -300,7 +301,7 @@ export function reconcileDeployments(): Promise<ActionResult> {
 }
 
 export function drainNode(nodeId: string, drain: boolean): Promise<ActionResult> {
-  return api.post<ActionResult>(`${BASE}/nodes/${encodeURIComponent(nodeId)}/${drain ? "drain" : "undrain"}`);
+  return api.post<ActionResult>(`${BASE}/nodes/${seg(nodeId)}/${drain ? "drain" : "undrain"}`);
 }
 
 /**

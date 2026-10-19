@@ -14,6 +14,7 @@ import com.networknt.schema.SchemaId;
 import com.networknt.schema.SchemaLocation;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.resource.AllowSchemaLoader;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -47,7 +48,38 @@ public final class ArtifactValidators {
      */
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final JsonSchemaFactory SCHEMA_FACTORY = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
+    /**
+     * The only IRIs a schema may load: the JSON Schema meta-schemas the library
+     * bundles on the classpath (the {@code https://json-schema.org/...} ids are
+     * mapped to these before any loader runs). Everything else — {@code http(s):},
+     * {@code file:}, {@code jar:}, any other classpath resource — is refused before
+     * a connection or a file read happens. A schema is a group author's text:
+     * letting its {@code $ref} reach the network or the disk made it an SSRF
+     * primitive and a local-file oracle.
+     */
+    private static final List<String> LOADABLE_IRI_PREFIXES = List.of("classpath:draft/", "classpath:draft-0");
+
+    static boolean isLoadableSchemaIri(String iri) {
+        if (iri == null) {
+            return false;
+        }
+        for (String prefix : LOADABLE_IRI_PREFIXES) {
+            if (iri.startsWith(prefix) && !iri.contains("..")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Schema factory whose first loader vetoes every IRI outside
+     * {@link #LOADABLE_IRI_PREFIXES}. {@code AllowSchemaLoader} throws for a
+     * refused IRI, so the library's default classpath/URI loaders behind it never
+     * see one.
+     */
+    private static final JsonSchemaFactory SCHEMA_FACTORY = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012,
+            builder -> builder.schemaLoaders(loaders -> loaders.values(list -> list.addFirst(
+                    new AllowSchemaLoader(iri -> isLoadableSchemaIri(iri.toString()))))));
 
     /**
      * The 2020-12 meta-schema, resolved from the library's bundled copy (no network
@@ -207,11 +239,28 @@ public final class ArtifactValidators {
             }
         }
         try {
-            SCHEMA_FACTORY.getSchema(spec);
+            // initializeValidators resolves every $ref now, so a reference to a
+            // remote or file schema fails the save instead of the first write
+            SCHEMA_FACTORY.getSchema(spec).initializeValidators();
         } catch (Exception e) {
-            return e.getMessage();
+            return refProblem(e);
         }
         return null;
+    }
+
+    /**
+     * A refused {@code $ref} surfaces as a nested exception whose message names the
+     * IRI; say plainly that only inline and bundled schemas are allowed.
+     */
+    private static String refProblem(Exception e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String message = t.getMessage();
+            if (message != null && message.contains("is not allowed to be loaded")) {
+                return "$ref may only point inside the schema itself (e.g. \"#/$defs/x\") or at a bundled JSON Schema meta-schema; "
+                        + "remote and file references are not loaded (" + message + ")";
+            }
+        }
+        return e.getMessage();
     }
 
     /**
@@ -264,6 +313,7 @@ public final class ArtifactValidators {
         JsonSchema schema;
         try {
             schema = SCHEMA_FACTORY.getSchema(spec);
+            schema.initializeValidators();
         } catch (Exception e) {
             return "This discussion's artifact schema validator is misconfigured; the write was refused.";
         }
@@ -273,7 +323,14 @@ public final class ArtifactValidators {
         } catch (Exception e) {
             return "The content must be valid JSON to pass this discussion's artifact schema, and it is not. Fix the JSON and retry.";
         }
-        Set<ValidationMessage> violations = schema.validate(node);
+        Set<ValidationMessage> violations;
+        try {
+            violations = schema.validate(node);
+        } catch (Exception e) {
+            // a $ref first reached during validation (e.g. under a dynamic ref) that the
+            // loader refused — fail closed, never admit the write
+            return "This discussion's artifact schema validator is misconfigured; the write was refused.";
+        }
         if (!violations.isEmpty()) {
             String quoted = violations.stream()
                     .limit(MAX_QUOTED_VIOLATIONS)

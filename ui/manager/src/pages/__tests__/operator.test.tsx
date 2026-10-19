@@ -7,6 +7,7 @@ import { OperatorPage } from "../operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
@@ -66,6 +67,7 @@ describe("OperatorPage", () => {
     // on those, per src/test/setup.ts).
     useOperatorChatStore.getState().reset();
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),

@@ -52,6 +52,7 @@ import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.engine.security.spaces.WorkspaceSettings;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -3419,11 +3420,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * anything. Every other relaxation is the operator's explicit decision.
      */
     private void validateSourceUrl(String sourceUrl) {
-        SyncSourcePolicy effective = isDevMode()
-                ? new SyncSourcePolicy(false, syncSourcePolicy.allowPrivateTargets(), syncSourcePolicy.allowedSources())
-                : syncSourcePolicy;
         try {
-            SourceUrlValidator.validate(sourceUrl, effective);
+            SourceUrlValidator.validate(sourceUrl, effectiveSyncSourcePolicy());
         } catch (IllegalArgumentException e) {
             // A refused source URL is the caller's input, not a server fault. It used
             // to reach the client as a 500 with no body, which the Manager rendered as
@@ -3432,11 +3430,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    private SyncSourcePolicy effectiveSyncSourcePolicy() {
+        return isDevMode()
+                ? new SyncSourcePolicy(false, syncSourcePolicy.allowPrivateTargets(), syncSourcePolicy.allowedSources())
+                : syncSourcePolicy;
+    }
+
+    /**
+     * The SSRF policy the facade re-applies to every request sent to this source —
+     * see {@link SourceUrlValidator#connectPolicy}.
+     */
+    private SsrfPolicy peerSsrf(String sourceUrl) {
+        return SourceUrlValidator.connectPolicy(sourceUrl, effectiveSyncSourcePolicy());
+    }
+
     @Override
     public List<DocumentDescriptor> listRemoteAgents(String sourceUrl, String sourceAuth) {
         validateSourceUrl(sourceUrl);
         try {
-            return RemoteApiResourceSource.listRemoteAgentDescriptors(outbound(), sourceUrl, sourceAuth, jsonSerialization);
+            return RemoteApiResourceSource.listRemoteAgentDescriptors(outbound(), sourceUrl, sourceAuth, jsonSerialization,
+                    peerSsrf(sourceUrl));
         } catch (Exception e) {
             LOGGER.errorf("Failed to list remote agents from %s: %s",
                     LogSanitizer.sanitize(sourceUrl), LogSanitizer.sanitize(e.getMessage()));
@@ -3449,7 +3462,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                      String targetAgentId, String sourceAuth, Boolean createNew) {
         validateSourceUrl(sourceUrl);
         try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization,
-                remoteSecretScrubber, outbound())) {
+                remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
             return redactForCaller(previewOnto(source, sourceAgentId, targetAgentId, createNew));
         } catch (WebApplicationException e) {
             // An unreadable target agent is a 404 the operator can act on.
@@ -3472,7 +3485,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         for (SyncMapping mapping : mappings) {
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
-                    sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
+                    sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
                 previews.add(redactForCaller(previewOnto(source, mapping.sourceAgentId(), mapping.targetAgentId(), mapping.createNew())));
             } catch (Exception e) {
                 LOGGER.warnf(e, "Batch preview failed for agent %s", LogSanitizer.sanitize(mapping.sourceAgentId()));
@@ -3506,7 +3519,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         targetAgentId = resolvedTarget;
 
         try (var source = new RemoteApiResourceSource(
-                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
+                sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
             List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
             return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
@@ -3553,7 +3566,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         metrics.upgradeAttempted();
         byte[] archive;
         try {
-            archive = RemoteApiResourceSource.exportAgentArchive(outbound(), sourceUrl, sourceAgentId, sourceVersion, sourceAuth);
+            archive = RemoteApiResourceSource.exportAgentArchive(outbound(), sourceUrl, sourceAgentId, sourceVersion, sourceAuth,
+                    peerSsrf(sourceUrl));
         } catch (Exception e) {
             metrics.upgradeFailed();
             LOGGER.errorf(e, "Could not fetch agent %s from %s for a first-time sync",
@@ -3727,7 +3741,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
         try (var source = new RemoteApiResourceSource(
                 sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
-                sourceAuth, jsonSerialization, remoteSecretScrubber, outbound())) {
+                sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
             return upgradeExecutor.executeUpgrade(source, targetAgentId,
                     request.selectedResources(), request.workflowOrder());
         }

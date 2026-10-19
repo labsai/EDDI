@@ -381,6 +381,13 @@ public class VaultSecretProvider implements ISecretProvider {
     @Override
     public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
             throws SecretProviderException {
+        return storeIfAbsent(reference, plaintext, description, allowedAgents, null);
+    }
+
+    @Override
+    public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents,
+                                 List<String> allowedHosts)
+            throws SecretProviderException {
         ensureAvailable();
         storeCounter.increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -391,7 +398,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // Always an insert, so the grant is required outright — the pass-through
             // in store() exists to protect a row that already has one.
             requireExplicitGrant(reference, allowedAgents);
-            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, null, null, Instant.now(), null);
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, allowedHosts, null, Instant.now(), null);
 
             boolean created = persistence.insertSecretIfAbsent(secret);
             if (created) {

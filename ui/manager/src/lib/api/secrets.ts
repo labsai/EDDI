@@ -1,4 +1,5 @@
 import { api, ApiClientError } from "../api-client";
+import { seg, nameSeg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -180,8 +181,8 @@ const BASE = "/secretstore/secrets";
  * its segments; the raw `fetch` calls here did not.
  */
 function secretPath(tenantId: string, keyName?: string): string {
-  const tenant = `${BASE}/${encodeURIComponent(tenantId)}`;
-  return keyName === undefined ? tenant : `${tenant}/${encodeURIComponent(keyName)}`;
+  const tenant = `${BASE}/${nameSeg(tenantId)}`;
+  return keyName === undefined ? tenant : `${tenant}/${nameSeg(keyName)}`;
 }
 
 /**
@@ -340,7 +341,7 @@ export function grantAgentToSecret(
 ): Promise<SecretGrantAppendResponse> {
   const query = options?.dryRun ? "?dryRun=true" : "";
   return api.post<SecretGrantAppendResponse>(
-    `${secretPath(tenantId, keyName)}/grant/agents/${encodeURIComponent(agentId)}${query}`,
+    `${secretPath(tenantId, keyName)}/grant/agents/${seg(agentId)}${query}`,
   );
 }
 

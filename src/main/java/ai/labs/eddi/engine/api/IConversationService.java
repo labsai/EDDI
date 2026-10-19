@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Core conversation lifecycle service — extracted from RestAgentEngine. All
@@ -165,6 +166,51 @@ public interface IConversationService {
     }
 
     /**
+     * Optional capability of a {@link ConversationResponseHandler}: observe the
+     * tool names this (non-streaming) turn's tool loop is about to run - name only,
+     * never arguments. It does NOT make the turn streamed: no event sink is
+     * installed, so tokens and the LLM execution path are unchanged. May be called
+     * from the coordinator thread, possibly after the caller has stopped waiting.
+     * <p>
+     * A separate interface, not a method on the handler, so the engine's only
+     * contact with a plain handler stays its completion callbacks.
+     */
+    interface ToolCallObserving {
+        Consumer<String> toolCallObserver();
+    }
+
+    /** The handler {@code delegate} with a tool-call observer attached. */
+    static ConversationResponseHandler observing(Consumer<String> observer, ConversationResponseHandler delegate) {
+        return new ObservingHandler(observer, delegate);
+    }
+
+    /** See {@link #observing}. */
+    final class ObservingHandler implements ConversationResponseHandler, ToolCallObserving {
+        private final Consumer<String> observer;
+        private final ConversationResponseHandler delegate;
+
+        private ObservingHandler(Consumer<String> observer, ConversationResponseHandler delegate) {
+            this.observer = observer;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+            delegate.onComplete(snapshot);
+        }
+
+        @Override
+        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            delegate.onSkipped(snapshot);
+        }
+
+        @Override
+        public Consumer<String> toolCallObserver() {
+            return observer;
+        }
+    }
+
+    /**
      * Callback for streaming conversation responses via SSE.
      */
     interface StreamingResponseHandler {
@@ -239,6 +285,17 @@ public interface IConversationService {
      * Get the conversation state — no environment needed.
      */
     ConversationState getConversationState(String conversationId);
+
+    /**
+     * Refuses a turn up front when this node is already at its effective turn
+     * limit, before anything is read for it. Throws a
+     * {@code RejectedExecutionException} (answered 503 {@code capacity_exceeded}
+     * with {@code Retry-After}). Not atomic: the turn is still admitted against the
+     * limit when it starts — this only spares a turn that is going to be refused
+     * the database reads of loading its conversation. A no-op by default.
+     */
+    default void refuseIfAtCapacity(String conversationId) {
+    }
 
     /**
      * Process user input — resolves agentId + environment from the stored record.

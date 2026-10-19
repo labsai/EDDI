@@ -58,12 +58,30 @@ class UrlValidationUtilsTest {
         }
 
         @Test
-        @DisplayName("an unparseable URL or unresolvable host is left to the caller's own checks")
+        @DisplayName("an unresolvable host, or a URL that is not http(s), is left to the caller's own checks")
         void unusableUrlsAreLeftToTheCaller() {
-            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("http://exa mple.com/", unresolvable));
             assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("http://nope.invalid/", unresolvable));
+            assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("mailto:ops@example.com", unresolvable));
             assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget(null));
             assertDoesNotThrow(() -> UrlValidationUtils.rejectCloudMetadataTarget("  "));
+        }
+
+        /**
+         * Security review 2026-10-17, H2. {@code java.net.URI} reads these authorities
+         * as registry-based and returns a null host; the Vert.x httpcalls client parses
+         * the same string with {@code java.net.URL}, gets a host, resolves it and
+         * connects. A name such as {@code x_y.attacker.com} with an A record of
+         * 169.254.169.254 used to pass the guard untouched. The resolver here answers
+         * "public" for everything, so only the null-host rule can refuse them.
+         */
+        @ParameterizedTest
+        @ValueSource(strings = {"http://x_y.example/latest/meta-data/iam/security-credentials/", "http://169.254.169.254./latest/meta-data/",
+                "http://169%2e254%2e169%2e254/latest/meta-data/", "https://x_y.example:8443/", "http:/169.254.169.254/",
+                "http://exa mple.com/"})
+        @DisplayName("an http(s) URL whose host java.net.URI cannot read is refused, whatever it resolves to")
+        void unreadableHostIsRefused(String url) {
+            var e = assertThrows(IllegalArgumentException.class, () -> UrlValidationUtils.rejectCloudMetadataTarget(url, PUBLIC_RESOLVER));
+            assertTrue(e.getMessage().contains("cannot be read"), e.getMessage());
         }
 
         @Test

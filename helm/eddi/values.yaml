@@ -204,13 +204,22 @@ eddi:
       # deployment reachable by name.
       resource: ""
 
+  # Sized for production, one node. EDDI waits on LLMs far more than it computes, so
+  # memory, not CPU, decides how many conversation turns a node runs at once: the heap
+  # is 75 % of the memory limit (JAVA_MAX_MEM_RATIO in the image), about 2.25 GB here,
+  # and each in-flight turn holds its conversation (~1 MB for short ones). Memory request
+  # equals the limit (Guaranteed QoS: not the first pod evicted under node pressure).
+  # Keep a CPU limit: the JVM sizes its GC, carrier and Jlama threads from it, and
+  # without one it sees every core on the node. 4 leaves headroom for bursts of JSON
+  # (de)serialisation and GC; the request reserves one core. Scale up for more turns
+  # per node (e.g. 6Gi) or out with cluster mode; see docs/kubernetes.md#sizing-a-node.
   resources:
     requests:
-      cpu: 250m
-      memory: 384Mi
+      cpu: "1"
+      memory: 3Gi
     limits:
-      cpu: "2"
-      memory: 1Gi
+      cpu: "4"
+      memory: 3Gi
 
   # Startup probe. It checks LIVENESS, not readiness, on purpose. Readiness is
   # false for as long as the startup migrations run, and the first boot of a
@@ -315,7 +324,11 @@ postgres:
   enabled: false
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "16.15-alpine"
+  # The uid (and gid, and fsGroup) PostgreSQL runs as. 70 is `postgres` in the
+  # alpine image; set 999 for a Debian-based postgres image. Running as it from
+  # the start lets the container drop every capability.
+  runAsUser: 70
   database: eddi
   username: eddi
   # REQUIRED when postgres.enabled=true — no default is shipped.
