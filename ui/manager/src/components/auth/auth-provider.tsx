@@ -249,7 +249,7 @@ function KeycloakAuthProvider({
   if (loading) {
     return (
       <div
-        className="flex h-screen items-center justify-center bg-background"
+        className="flex h-dvh items-center justify-center bg-background"
         data-testid="auth-loading"
       >
         <div className="flex flex-col items-center gap-4">
@@ -263,7 +263,7 @@ function KeycloakAuthProvider({
   if (initFailed) {
     return (
       <div
-        className="flex h-screen items-center justify-center bg-background px-4"
+        className="flex h-dvh items-center justify-center bg-background px-4"
         data-testid="auth-error"
       >
         <div className="flex max-w-md flex-col items-center gap-4 text-center">

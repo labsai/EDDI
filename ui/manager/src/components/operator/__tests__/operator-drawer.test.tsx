@@ -139,8 +139,14 @@ describe("OperatorDrawer", () => {
     await userEvent.click(screen.getByTestId("operator-drawer-fab"));
 
     const panel = await screen.findByTestId("operator-drawer-panel");
-    expect(panel.className).toContain("absolute");
-    expect(panel.className).not.toContain("fixed");
+    // From sm up the panel is a popover anchored under its launcher.
+    const classes = panel.className.split(/\s+/);
+    expect(classes).toContain("sm:absolute");
+    expect(classes).toContain("sm:top-full");
+    // Below sm a 24rem popover overflowed the start edge, so it spans the
+    // viewport instead — but pinned under the header, never to a bottom corner.
+    expect(classes).toContain("fixed");
+    expect(classes).toContain("top-16");
     expect(container.querySelector('[class*="bottom-"]')).not.toBeInTheDocument();
   });
 

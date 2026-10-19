@@ -3527,7 +3527,7 @@
     "intent": "인텐트",
     "deployments": "에이전트 배포",
     "addDeployment": "에이전트 추가",
-    "agents": "에이전트",
+    "intentPlaceholder": "예: booking_request",
     "empty": "아직 트리거가 설정되지 않았습니다",
     "created": "트리거가 생성되었습니다",
     "updated": "트리거가 업데이트되었습니다",
@@ -3980,7 +3980,10 @@
     "targetType": "유형",
     "triggerHint": "사용자가 \"키워드: 메시지\"를 입력하면 이 대상으로 라우팅됩니다",
     "triggerKeywords": "트리거 키워드",
-    "triggers": "트리거",
+    "targetFallback": "대상 {{number}}",
+    "untitledChannel": "제목 없는 채널",
+    "triggerCount_one": "트리거 {{count}}개",
+    "triggerCount_other": "트리거 {{count}}개",
     "type": "채널 유형",
     "webhookHint": "이 URL을 Slack 앱의 Event Subscriptions → Request URL 필드에 붙여넣으세요.",
     "webhookUrl": "Webhook URL",
@@ -6305,5 +6308,14 @@
     "cancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다. 에이전트는 생성되었습니다. 다시 시도하여 키를 부여하고 배포하거나, 각 에이전트 페이지에서 배포하세요.",
     "failed": "생성되었지만 배포되지 않음: {{names}}. {{reason}} 다시 시도하거나 각 에이전트 페이지에서 배포하세요.",
     "memberCancelled": "배포되지 않음: 보관함 키가 부여되지 않았습니다"
+  },
+  "modelCombobox": {
+    "toggle": "모델 추천 보기",
+    "listLabel": "모델 추천",
+    "matching": "“{{query}}”와(과) 일치",
+    "otherModels": "기타 모델",
+    "default": "기본값",
+    "noMatch": "“{{query}}”와(과) 일치하는 추천이 없습니다. 입력한 그대로 사용됩니다.",
+    "customHint": "목록에 없나요? 공급자가 지원하는 모델 ID를 직접 입력하세요."
   }
 }
