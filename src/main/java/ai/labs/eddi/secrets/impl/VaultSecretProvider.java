@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
+import java.util.concurrent.ConcurrentHashMap;
 
 import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -292,7 +293,11 @@ public class VaultSecretProvider implements ISecretProvider {
             // newest generation: a row the last rotation's sweep has not reached yet is
             // still sealed with an older one, and that one still exists.
             byte[] dek = dekFor(reference.tenantId(), secret.getDekId());
-            String plaintext = decryptSecretWithFallback(secret, dek);
+            Opened opened = openSecret(secret, dek);
+            String plaintext = opened.plaintext();
+            if (opened.legacy()) {
+                retireLegacySealing(secret, dek, plaintext);
+            }
 
             // Update last accessed timestamp (best-effort, fire-and-forget)
             updateLastAccessed(secret);
@@ -1324,6 +1329,9 @@ public class VaultSecretProvider implements ISecretProvider {
      * A {@code null} context means the caller has none to give, so only the unbound
      * form is tried.
      */
+    /** Tenants already announced as holding unbound sealed data. */
+    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
+
     private String openSealedData(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
         byte[] dek = dekFor(tenantId, sealed.dekId());
         if (context == null) {
@@ -1332,11 +1340,19 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek, sealedDataAad(tenantId, sealed.dekId(), context));
         } catch (EnvelopeCrypto.CryptoException boundFailed) {
+            String opened;
             try {
-                return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
+                opened = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw boundFailed;
             }
+            // The provider does not own these rows (a participant does), so it cannot
+            // re-seal them here; a DEK rotation does. Said once per tenant.
+            if (legacySealedDataLogged.add(tenantId)) {
+                LOGGER.infof("[VAULT] Tenant '%s' holds sealed data written before context binding (no AAD). It still opens; "
+                        + "POST /secretstore/secrets/%s/rotate-dek re-seals it bound.", sanitize(tenantId), sanitize(tenantId));
+            }
+            return opened;
         }
     }
 
@@ -2072,16 +2088,78 @@ public class VaultSecretProvider implements ISecretProvider {
      * the intended outcome.
      */
     private String decryptSecretWithFallback(EncryptedSecret secret, byte[] dek) {
+        return openSecret(secret, dek).plaintext();
+    }
+
+    /** A decrypted secret and whether it only opened through the legacy path. */
+    private record Opened(String plaintext, boolean legacy) {
+    }
+
+    /** {@link #decryptSecretWithFallback}, saying which path opened the row. */
+    private Opened openSecret(EncryptedSecret secret, byte[] dek) {
         byte[] aad = secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId());
         try {
-            return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad);
+            return new Opened(EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad), false);
         } catch (EnvelopeCrypto.CryptoException withAadFailed) {
             // Legacy row written before AAD binding — retry without AAD. If this also
             // fails, the original (AAD) failure is the more informative one to surface.
             try {
-                return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+                return new Opened(EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek), true);
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw withAadFailed;
+            }
+        }
+    }
+
+    /**
+     * Rows already announced as legacy-sealed, as {@code tenant/key}, so each is
+     * logged once per node rather than on every read.
+     */
+    private final Set<String> legacySealingLogged = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Re-seals a row that opened only without AAD, bound to its row identity, so
+     * the legacy fallback retires itself (L10 of the 2026-10-17 security review).
+     * <p>
+     * <b>Why on read.</b> The fallback exists for rows written before AAD binding;
+     * while one exists, the ciphertexts of two such rows can be swapped by anyone
+     * with database write access and each still decrypts. A DEK rotation re-seals
+     * every row bound, but a deployment that never rotates kept the fallback
+     * forever. Re-sealing the first time a row is read closes it for every row in
+     * use without an operator action.
+     * <p>
+     * <b>Concurrency.</b> Same value, same DEK generation, so the plaintext the
+     * caller gets is unaffected either way. The write is guarded on the IV the row
+     * was read with ({@link ISecretPersistence#resealSecretInPlace}): a concurrent
+     * {@code store} draws a fresh IV and wins, a concurrent DEK rotation moves the
+     * row to a new generation and IV and wins, and two nodes re-sealing at once
+     * leave one bound row. A lost guard, an unsupported store or a failure only
+     * leaves the row on the legacy path, where the next read or rotation retries —
+     * resolution never fails because of this.
+     */
+    private void retireLegacySealing(EncryptedSecret secret, byte[] dek, String plaintext) {
+        String id = secret.getTenantId() + "/" + secret.getKeyName();
+        try {
+            EnvelopeCrypto.EncryptionResult bound = EnvelopeCrypto.encrypt(plaintext, dek,
+                    secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId()));
+            boolean written = persistence.resealSecretInPlace(secret.getTenantId(), secret.getKeyName(), secret.getDekId(), secret.getIv(),
+                    bound.ciphertext(), bound.iv());
+            if (legacySealingLogged.add(id)) {
+                if (written) {
+                    LOGGER.infof("[VAULT] Secret '%s' was sealed before row binding (no AAD); re-sealed it bound on read.", sanitize(id));
+                } else {
+                    LOGGER.infof("[VAULT] Secret '%s' was sealed before row binding (no AAD) and was not re-sealed on read (changed "
+                            + "concurrently, or the store does not support it); POST /secretstore/secrets/{tenantId}/rotate-dek "
+                            + "re-seals every such row.", sanitize(id));
+                }
+            }
+        } catch (RuntimeException e) {
+            // PersistenceException, CryptoException, or an unchecked error a store did
+            // not wrap (a driver or pool exception): the write-back is best effort and
+            // the plaintext is already in hand, so none of them may fail the read.
+            if (legacySealingLogged.add(id)) {
+                LOGGER.warnf("[VAULT] Secret '%s' was sealed before row binding (no AAD) and could not be re-sealed on read: %s. "
+                        + "POST /secretstore/secrets/{tenantId}/rotate-dek re-seals every such row.", sanitize(id), sanitize(e.getMessage()));
             }
         }
     }
