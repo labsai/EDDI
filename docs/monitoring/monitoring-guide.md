@@ -88,7 +88,7 @@ can reach EDDI.
 
 | Type | Protocol | Backend | What's captured |
 |------|----------|---------|-----------------|
-| **Traces** | OTLP (gRPC) | Jaeger / Tempo / Datadog | REST requests, pipeline tasks, LLM provider calls (`gen_ai.client.inference`) |
+| **Traces** | OTLP (gRPC or HTTP) | Jaeger / Tempo / Langfuse / Phoenix / Datadog | REST requests, pipeline tasks, LLM provider calls (`gen_ai.client.inference`), tool calls (`execute_tool`); W3C trace context propagated on outbound tool calls |
 | **Metrics** | Prometheus scrape | Prometheus → Grafana | Counters, gauges, histograms for all EDDI subsystems |
 
 ## Metrics Reference
@@ -169,8 +169,10 @@ which OpenTelemetry does not instrument. LLM calls are covered by EDDI's own
 
 ### EDDI's Own Spans
 
-`LifecycleManager` adds a span per pipeline task, and `LlmTelemetryListener` one
-per LLM provider call, following the OpenTelemetry GenAI conventions:
+`LifecycleManager` adds a span per pipeline task, `LlmTelemetryListener` one
+per LLM provider call, and `ToolExecutionService` one per tool call, following the
+OpenTelemetry GenAI conventions (the revision is pinned in the
+`eddi.semconv.schema_version` attribute):
 
 ```text
 Trace: POST /agents/{conversationId}
@@ -179,11 +181,55 @@ Trace: POST /agents/{conversationId}
   └── eddi.pipeline.task [eddi.task.id=ai.labs.llm, eddi.task.type=langchain]
       └── gen_ai.client.inference [gen_ai.provider.name=openai, gen_ai.request.model=…,
                                    gen_ai.usage.input_tokens, gen_ai.usage.output_tokens]
+      └── execute_tool lookupOrder [gen_ai.operation.name=execute_tool, gen_ai.tool.name,
+                                    gen_ai.tool.call.id, eddi.tool.source=mcp]
+          └── (the MCP server's own spans, if it is instrumented — see below)
   └── eddi.pipeline.task [eddi.task.id=ai.labs.output, eddi.task.type=output]
 ```
 
 A failed LLM call sets the span's status to ERROR with `error.type`; the provider's
 error text is redacted and capped, never copied raw (it can echo the prompt).
+
+Every tool call the model makes gets an `execute_tool {tool}` span (kind
+`INTERNAL`), including the ones that never reach the tool: a cache hit carries
+`eddi.tool.cache_hit=true`, a rate-limited call `error.type=rate_limited`, a
+timed-out one `error.type=timeout`, and a failing one `error.type=<exception class>`,
+each with status ERROR except the cache hit. `eddi.tool.source` is one of `builtin`,
+`http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`. Tools run by an `mcpcalls`
+workflow step get the span too, without a source or call id.
+
+**Finding a slow tool:** open the turn's trace in your backend and sort its
+`execute_tool` spans by duration. The span name is the tool, `eddi.tool.source` says
+where it lives, and its child span — present when the downstream service is traced —
+shows whether the time went on the network or inside that service.
+
+### Trace propagation to the services EDDI calls
+
+While a tool runs, its `execute_tool` span is current, and EDDI adds the W3C
+`traceparent` (and `tracestate`, when set) of that span to the outbound request, so
+a downstream service that is itself traced joins the same trace:
+
+| Outbound path | Where the trace context goes |
+|---|---|
+| httpcalls (rule-triggered and LLM tools) | HTTP header on the first request and on same-origin redirect hops. It is not written into the request record kept in conversation memory, so a human-approved call's fingerprint does not change. Quarkus' own Vert.x HTTP client instrumentation is switched off for this client (`TracingPolicy.IGNORE`), so it neither adds a client span nor rewrites the header — the parent `execute_tool` (or pipeline-task) span times the call |
+| Everything on the outbound HTTP facade (`OutboundHttp`): built-in tools (web search, scraper, PDF, weather), A2A peers, the RAG crawler, attachment downloads, OAuth token requests, Slack, remote agent sync | HTTP header on the first hop and on same-origin redirect hops. Outside a tool call the parent is whatever span is current — the REST request's server span, for example |
+| MCP servers | `params._meta.traceparent` / `tracestate` (SEP-414) **and** the HTTP header, on every request including discovery |
+
+Rules that apply to all of them:
+
+- **Only W3C trace context.** `baggage` is never sent — it is free-form and could
+  carry user data to a third party.
+- **Never overwritten.** A `traceparent` or `tracestate` header already on the
+  request — one the agent author configured on an httpcall, say — is sent as
+  configured, and EDDI adds neither header to it. Nothing downstream in EDDI
+  rewrites it either: the Vert.x client's own tracer is off for httpcalls. (A
+  cross-origin redirect still drops it, per the next rule.)
+- **Not across origins.** A redirect to a different origin (scheme, host or port)
+  drops the trace headers, as it drops credentials.
+- **Inert while OTel is off.** With `quarkus.otel.sdk.disabled=true` (the default) no
+  span is valid, so nothing is added — never an all-zero `traceparent`.
+- **Switchable.** `eddi.tracing.propagate-outbound=false` keeps EDDI's own spans but
+  stops revealing trace ids to the services it calls.
 
 **Span attributes:**
 
@@ -220,6 +266,50 @@ uncomment and narrow it when you turn tracing on.
 is a Jaeger 1.x setting and does nothing on the 2.x image the compose stack runs.
 
 **Switching backends:** EDDI uses standard OTLP protocol. To switch from Jaeger to Grafana Tempo, Datadog, or Honeycomb, just change the endpoint URL — no code changes needed.
+
+### Sending traces to Langfuse / Arize Phoenix / Jaeger / Tempo
+
+All four accept OTLP, so EDDI needs only the Quarkus exporter settings — no agent
+or code change. Each is an environment variable (or the matching
+`quarkus.otel.exporter.otlp.traces.*` property). With `http/protobuf`, Quarkus keeps
+the endpoint's path and appends `/v1/traces` to it, so give the **base** URL from the
+table, not a `/v1/traces` URL.
+
+```bash
+QUARKUS_OTEL_SDK_DISABLED=false
+QUARKUS_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=<endpoint>
+QUARKUS_OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=<grpc|http/protobuf>   # default grpc
+QUARKUS_OTEL_EXPORTER_OTLP_TRACES_HEADERS=<name>=<value>          # only where a backend needs auth
+```
+
+| Backend | Endpoint | Protocol | Auth header |
+|---|---|---|---|
+| **Jaeger** (2.x) | `http://<host>:4317` (gRPC) or `http://<host>:4318` (HTTP) | `grpc` or `http/protobuf` | none by default |
+| **Grafana Tempo** | `http://<distributor>:4317` (gRPC) or `http://<distributor>:4318` (HTTP) | `grpc` or `http/protobuf` | none by default; Grafana Cloud and gateways in front of Tempo add their own |
+| **Langfuse** | `https://cloud.langfuse.com/api/public/otel` (EU), `https://us.cloud.langfuse.com/api/public/otel` (US), `https://<your-host>/api/public/otel` (self-hosted, v3.22.0+) | `http/protobuf` only — Langfuse does not accept gRPC | `Authorization=Basic <base64 of public_key:secret_key>` **plus** `x-langfuse-ingestion-version=4` for real-time ingestion (see below) |
+| **Arize Phoenix** (self-hosted) | `http://<host>:6006` (HTTP) or `http://<host>:4317` (gRPC) | `http/protobuf` or `grpc` | none unless auth is enabled; then `Authorization=Bearer <PHOENIX_API_KEY>` |
+
+Notes and caveats:
+
+- **Tempo's** OTLP receivers bind to `localhost` by default; configure the
+  distributor to listen on an external interface, or EDDI cannot reach it.
+- **Langfuse: send `x-langfuse-ingestion-version=4` as well**, or traces show up with
+  a delay rather than in real time — that header is what selects Langfuse's real-time
+  ingestion path, and a trace that arrives minutes later is no use while you are
+  chasing a slow tool. Several headers go in one comma-separated value:
+  `QUARKUS_OTEL_EXPORTER_OTLP_TRACES_HEADERS=Authorization=Basic <base64>,x-langfuse-ingestion-version=4`.
+  Langfuse also documents a Japan region (`https://jp.cloud.langfuse.com/api/public/otel`).
+- **Phoenix:** the Bearer header is what Phoenix's own OTel SDK sends for
+  `PHOENIX_API_KEY`; its documentation does not spell the header out for every
+  deployment, so confirm it against your instance. **Phoenix Cloud / Arize AX**
+  endpoints and auth headers were not verified for this guide — take them from your
+  Phoenix instance's *Settings* page.
+- Verified against each project's documentation in October 2026:
+  [Langfuse](https://langfuse.com/integrations/native/opentelemetry),
+  [Phoenix](https://arize.com/docs/phoenix/sdk-api-reference/python/arize-phoenix-otel),
+  [Jaeger](https://www.jaegertracing.io/docs/latest/apis/),
+  [Tempo](https://grafana.com/docs/tempo/latest/configuration/).
+- A cloud backend is a third party: read the privacy note below first.
 
 ### Privacy Note (GDPR / HIPAA)
 
