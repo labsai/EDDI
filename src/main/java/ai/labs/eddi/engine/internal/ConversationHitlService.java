@@ -1512,7 +1512,10 @@ class ConversationHitlService {
     AgentConfigLookup lookupAgentConfigPinned(String agentId, Integer agentVersion) {
         try {
             if (agentVersion != null && agentVersion > 0) {
-                return new AgentConfigLookup(agentStore.read(agentId, agentVersion), false);
+                // A stored version never changes, so it is read once and then served from
+                // memory (see AgentConfigurationCache) — this runs on every turn.
+                var cache = conversationService.agentConfigurationCache;
+                return new AgentConfigLookup(cache != null ? cache.read(agentId, agentVersion) : agentStore.read(agentId, agentVersion), false);
             }
         } catch (IResourceStore.ResourceNotFoundException pinnedGone) {
             // The pinned VERSION is genuinely absent (deleted, or never existed).
