@@ -396,9 +396,19 @@ class ApiClient {
       status: response.status,
     });
 
-    // Handle 202 Accepted and 204 No Content (empty body responses)
-    if (response.status === 202 || response.status === 204) {
+    // 204 No Content has no body. 202 Accepted usually has none either, but
+    // POST /agenttests/runs answers it with the RUNNING record (its id is the
+    // only handle on the run), so a 202 body is kept when it parses.
+    if (response.status === 204) {
       return envelope(undefined as T);
+    }
+    if (response.status === 202) {
+      const accepted = await response.text();
+      try {
+        return envelope((accepted.trim() ? JSON.parse(accepted) : undefined) as T);
+      } catch {
+        return envelope(undefined as T);
+      }
     }
 
     // Handle Location header (POST 201, PUT 200 with new version)

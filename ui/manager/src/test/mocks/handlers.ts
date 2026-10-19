@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
+import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
   {
@@ -289,7 +290,7 @@ function isNotAnId(pathname: string): boolean {
  * be swallowed. `groupstore` was, silently, for as long as this list said only
  * `channelstore`.
  */
-const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore", "testsuitestore"];
 
 /**
  * The extension each resource store stamps on its `eddi://` URIs — the backend's
@@ -308,6 +309,7 @@ const STORE_EXTENSIONS: Record<string, string> = {
   ragstore: "ai.labs.rag",
   snippetstore: "ai.labs.snippet",
   parserstore: "ai.labs.parser",
+  testsuitestore: "ai.labs.testsuite",
 };
 
 /**
@@ -5816,5 +5818,125 @@ export const connectionHandlers = [
     // 204 whether or not a grant existed — whether a given user had linked a
     // given connection is not something a caller learns by probing.
     return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ---------------------------------------------------------------------------
+// Agent regression harness — test suites (`/testsuitestore/testsuites`) and runs
+// (`/agenttests/runs`). Its own group rather than `createResourceHandlers`
+// because that factory also mocks `jsonSchema` and `POST /{id}` (duplicate),
+// which this store does not have — see ResourceTypeConfig.duplicable/jsonSchema.
+// ---------------------------------------------------------------------------
+
+/** Runs started through the mock, by id. A RUNNING run turns PASSED after `MOCK_RUN_DURATION_MS`. */
+const startedMockRuns = new Map<string, ReturnType<typeof buildRunningRun>>();
+export const MOCK_RUN_DURATION_MS = 4000;
+
+function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
+  if (Date.now() - run.startedAt < MOCK_RUN_DURATION_MS) return run;
+  const [, passed] = buildMockRuns(run.agentId);
+  return {
+    ...passed!,
+    id: run.id,
+    suiteId: run.suiteId,
+    suiteVersion: run.suiteVersion ?? passed!.suiteVersion,
+    agentVersion: run.agentVersion,
+    startedAt: run.startedAt,
+    finishedAt: run.startedAt + MOCK_RUN_DURATION_MS,
+    durationMs: MOCK_RUN_DURATION_MS,
+  };
+}
+
+/**
+ * The suite store: id -> every saved version (index 0 is version 1). The list,
+ * a read, a create, a save and a delete all go through it, so a suite created or
+ * edited in mock mode is the one the list and the run picker then show.
+ */
+const suiteStore = new Map<string, { docs: unknown[]; createdOn: number; lastModifiedOn: number }>();
+function seedSuites() {
+  suiteStore.clear();
+  const t = Date.now();
+  suiteStore.set("res1", { docs: [MOCK_SUITE], createdOn: t - 86400000, lastModifiedOn: t - 3600000 });
+}
+seedSuites();
+/** Restores the seeded suite; tests that save or create suites call it in afterEach. */
+export function resetAgentTestMockState(): void {
+  seedSuites();
+  startedMockRuns.clear();
+}
+
+export const agentTestHandlers = [
+  http.get("*/testsuitestore/testsuites/descriptors", () => {
+    return HttpResponse.json(
+      [...suiteStore.entries()].map(([id, s]) => ({
+        resource: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${s.docs.length}`,
+        name: ((s.docs[s.docs.length - 1] as { name?: string }).name ?? "") || id,
+        description: ((s.docs[s.docs.length - 1] as { description?: string }).description ?? ""),
+        createdOn: s.createdOn,
+        lastModifiedOn: s.lastModifiedOn,
+        deleted: false,
+      }))
+    );
+  }),
+  http.get("*/testsuitestore/testsuites/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (isNotAnId(url.pathname)) return;
+    const stored = suiteStore.get(String(params.id));
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const version = Number(url.searchParams.get("version") ?? stored.docs.length);
+    return HttpResponse.json((stored.docs[version - 1] ?? stored.docs[stored.docs.length - 1]) as Record<string, unknown>);
+  }),
+  http.post("*/testsuitestore/testsuites", async ({ request }) => {
+    const id = `suite${String(suiteStore.size + 1).padStart(20, "0")}`;
+    const t = Date.now();
+    suiteStore.set(id, { docs: [await request.json()], createdOn: t, lastModifiedOn: t });
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/testsuitestore/testsuites/${id}?version=1` },
+    });
+  }),
+  http.put("*/testsuitestore/testsuites/:id", async ({ request, params }) => {
+    const id = String(params.id);
+    const stored = suiteStore.get(id);
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    stored.docs.push(await request.json());
+    stored.lastModifiedOn = Date.now();
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${stored.docs.length}` },
+    });
+  }),
+  http.delete("*/testsuitestore/testsuites/:id", ({ params }) => {
+    suiteStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/agenttests/runs", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId") ?? "";
+    const started = [...startedMockRuns.values()].filter((r) => r.agentId === agentId).map(settleMockRun);
+    const all = [...started.reverse(), ...buildMockRuns(agentId)];
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
+  }),
+  http.get("*/agenttests/runs/:runId", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (started) return HttpResponse.json(settleMockRun(started));
+    // Fixture runs carry an agent id of their own; the id is all the lookup needs.
+    const found = buildMockRuns("agent1").find((r) => r.id === runId);
+    return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
+  http.post("*/agenttests/runs", async ({ request }) => {
+    const body = (await request.json()) as {
+      suiteId: string;
+      agentId: string;
+      suiteVersion?: number;
+      agentVersion?: number;
+    };
+    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion, body.agentVersion);
+    startedMockRuns.set(run.id, run);
+    return HttpResponse.json(run, { status: 202 });
   }),
 ];
