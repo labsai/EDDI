@@ -1952,11 +1952,12 @@ public class AuditLedgerService implements UserErasureParticipant {
     private AuditEntry applyAgentSignature(AuditEntry entry) {
         try {
             String payload = entry.hmac() != null ? entry.hmac() : entry.id();
-            String signature = agentSigningService.sign(defaultTenantId, entry.agentId(), payload);
-            return entry.withAgentSignature(signature);
+            // Runs on the turn's thread for every entry. An agent without a key — almost
+            // every agent — is answered from memory, not with a vault read per entry.
+            String signature = agentSigningService.signIfKeyPresent(defaultTenantId, entry.agentId(), payload);
+            return signature != null ? entry.withAgentSignature(signature) : entry;
         } catch (AgentSigningService.AgentSigningException e) {
-            // No signing key for this agent — this is expected for agents without identity
-            // setup.
+            // A key that exists but could not be used, or a vault that could not answer.
             // Log at debug level to avoid noise.
             LOGGER.debugv("Agent signing skipped for agent '{0}': {1}", sanitize(entry.agentId()), sanitize(e.getMessage()));
             return entry;
