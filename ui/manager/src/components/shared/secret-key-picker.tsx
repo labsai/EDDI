@@ -19,7 +19,18 @@ import { useHasRole } from "@/hooks/use-auth";
 import { groupAgentsByName } from "@/hooks/use-agents";
 import { getAgentDescriptors } from "@/lib/api/agents";
 import { agentKeys } from "@/lib/query-keys";
-import { SecretsError, SECRET_EXISTS, grantsAllAgents } from "@/lib/api/secrets";
+import {
+  SecretsError,
+  SECRET_EXISTS,
+  grantsAllAgents,
+  ALL_AGENTS,
+  allowedHostsMissing,
+  hostFromUrl,
+  newAllowedHostsDraft,
+  resolveAllowedHostsDraft,
+  type AllowedHostsDraft,
+} from "@/lib/api/secrets";
+import { AllowedHostsField } from "@/components/secrets/allowed-hosts-field";
 import { toast } from "sonner";
 import { createPortal } from "react-dom";
 import {
@@ -106,6 +117,14 @@ interface SecretKeyPickerProps {
    * agent is one of the allowed ones.
    */
   agentId?: string;
+  /**
+   * The URL the secret in this field will be sent to, when the caller knows it
+   * (an MCP server, an A2A agent, a model's base URL). Opt-in: its host
+   * prefills the destination of a secret created from here, which a create must
+   * name (`allowedHosts`). Without it the user types the host or picks "any
+   * host".
+   */
+  destinationUrl?: string;
 }
 
 /** How many agents to pull in to put names on a grant's ids. Shared with the grant dialogs. */
@@ -168,10 +187,16 @@ function toVaultRef(keyName: string): string {
 function CreateSecretModal({
   onClose,
   tenantId,
+  agentId,
+  initialHost,
   onSuccess,
 }: {
   onClose: () => void;
   tenantId: string;
+  /** The agent the new secret is granted to; absent, it is granted to every agent. */
+  agentId?: string;
+  /** Prefills the destination list; absent, it starts empty. */
+  initialHost?: string;
   onSuccess: (keyName: string) => void;
 }) {
   const { t } = useTranslation();
@@ -181,6 +206,8 @@ function CreateSecretModal({
   const [valueVisible, setValueVisible] = useState(false);
   /* The name a create was refused for because it is already in the vault. */
   const [existingKey, setExistingKey] = useState<string | null>(null);
+  /* Where the new secret may be sent — required on a create, see AllowedHostsField. */
+  const [hosts, setHosts] = useState<AllowedHostsDraft>(() => newAllowedHostsDraft(initialHost));
   const storeMut = useStoreSecret();
 
   // Reset form state whenever the modal closes (security: clear secret value from memory)
@@ -190,7 +217,8 @@ function CreateSecretModal({
     setNewDescription("");
     setValueVisible(false);
     setExistingKey(null);
-  }, []);
+    setHosts(newAllowedHostsDraft(initialHost));
+  }, [initialHost]);
 
   const handleClose = useCallback(() => {
     resetForm();
@@ -200,6 +228,12 @@ function CreateSecretModal({
   const handleCreate = () => {
     if (!newKeyName.trim() || !newValue.trim()) return;
     const savedKey = newKeyName.trim();
+    const resolved = resolveAllowedHostsDraft(hosts);
+    if ("problem" in resolved) {
+      const problem = resolved.problem;
+      if (problem !== "missing") setHosts((d) => ({ ...d, problem }));
+      return;
+    }
     setExistingKey(null);
     storeMut.mutate(
       {
@@ -208,10 +242,16 @@ function CreateSecretModal({
         // Sent as typed: trimming changed the credential being stored.
         value: newValue,
         description: newDescription.trim() || undefined,
+        // Granted to the agent this picker edits when it is known, otherwise to
+        // every agent — said explicitly, because under grant-enforcement=enforce
+        // the backend refuses a create that leaves the grant to a default.
+        allowedAgents: agentId ? [agentId] : [ALL_AGENTS],
+        // Required on a create for the same reason: hosts, or the explicit ["*"].
+        allowedHosts: resolved.allowedHosts,
         // This dialog makes a NEW secret for the field it was opened from. The
-        // store endpoint is an upsert, and this dialog sends no grant, so typing
-        // an existing name here used to replace that secret's value — and, on a
-        // backend before the vault-key-safety fix, open it to every agent.
+        // store endpoint is an upsert, so typing an existing name here used to
+        // replace that secret's value — and, on a backend before the
+        // vault-key-safety fix, open it to every agent.
         createOnly: true,
       },
       {
@@ -239,14 +279,20 @@ function CreateSecretModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={handleClose}
       onKeyDown={(e) => {
-        if (e.key === "Escape") handleClose();
+        // preventDefault marks it handled: this modal is portalled, but React
+        // still bubbles the key to the dialog that hosts the picker, which
+        // must not close as well.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleClose();
+        }
       }}
     >
       <div
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -256,7 +302,9 @@ function CreateSecretModal({
             {t("secrets.createTitle", "Add Secret")}
           </h2>
           <button
+            type="button"
             onClick={handleClose}
+            aria-label={t("common.close", "Close")}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted transition-colors"
           >
             <X className="h-4 w-4" />
@@ -330,6 +378,7 @@ function CreateSecretModal({
               autoComplete="off"
             />
           </div>
+          <AllowedHostsField draft={hosts} onChange={setHosts} testId="create-secret-modal-hosts" />
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -341,7 +390,7 @@ function CreateSecretModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={!newKeyName.trim() || !newValue.trim() || storeMut.isPending}
+            disabled={!newKeyName.trim() || !newValue.trim() || allowedHostsMissing(hosts) || storeMut.isPending}
             data-testid="create-secret-modal-submit"
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
@@ -662,6 +711,7 @@ export function SecretKeyPicker({
   referenceOnly = false,
   connections = false,
   agentId,
+  destinationUrl,
 }: SecretKeyPickerProps) {
   const { t } = useTranslation();
   const offerConnections = connections && !referenceOnly;
@@ -1291,6 +1341,8 @@ export function SecretKeyPicker({
       {/* Create secret modal */}
       {showCreateDialog && (
         <CreateSecretModal
+          agentId={agentId}
+          initialHost={hostFromUrl(destinationUrl)}
           onClose={() => {
             setShowCreateDialog(false);
             // "Create new secret" is the fourth way out of the popup, and it

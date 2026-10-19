@@ -16,9 +16,12 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -47,16 +50,21 @@ public class RestRagStore implements IRestRagStore {
     private final IRagStore ragStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<RagConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
     private final RagSourceIngestionService sourceIngestionService;
+    private final EmbeddingStoreFactory embeddingStoreFactory;
     private final KnowledgeBaseStorageGuard storageGuard;
 
     @Inject
     public RestRagStore(IRagStore ragStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
-            ResourceAccessGuard resourceAccessGuard, RagSourceIngestionService sourceIngestionService) {
+            ResourceAccessGuard resourceAccessGuard, RagSourceIngestionService sourceIngestionService,
+            EmbeddingStoreFactory embeddingStoreFactory) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, ragStore, documentDescriptorStore, resourceAccessGuard);
         this.ragStore = ragStore;
+        this.resourceAccessGuard = resourceAccessGuard;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.sourceIngestionService = sourceIngestionService;
+        this.embeddingStoreFactory = embeddingStoreFactory;
         // Built here from collaborators this class already has, rather than injected,
         // so every way of constructing it applies the same storage rules.
         this.storageGuard = new KnowledgeBaseStorageGuard(ragStore, documentDescriptorStore, resourceAccessGuard);
@@ -78,6 +86,22 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public RagConfiguration readRag(String id, Integer version) {
+        RagConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin() ? stored : ConfigSecretRedactor.redact(stored, RagConfiguration.class);
+    }
+
+    /**
+     * {@link #readRag} without the redaction, for the server-side work an editor's
+     * request starts: ingestion builds the embedding model and store from this
+     * document (a redacted {@code apiKey} would fail it), and upgrade and sync
+     * compare against it and write it back. The same access check applies, and the
+     * document never leaves the server.
+     */
+    public RagConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
@@ -94,12 +118,35 @@ public class RestRagStore implements IRestRagStore {
         storageGuard.prepareUpdate(id, previous, ragConfiguration);
         Set<String> previousSourceIds = sourceIdsOf(previous);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
+        releaseSupersededInMemoryStore(id, previous, ragConfiguration);
         forgetIngestionStateOnMove(id, previous, ragConfiguration);
         // Before the schedules, and only once the write succeeded: a source that is
         // gone from the document must not leave its documents answering questions.
         discardRemovedSources(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
         return response;
+    }
+
+    /**
+     * Frees the in-memory vector store an update leaves behind — moved to another
+     * key (a rename in the 6.5.0 name layout, a switch to {@code storeNamespace:
+     * "id"}), to another store type, or to another embedding model. Its documents
+     * are unreachable or meaningless from now on, and an in-memory store is never
+     * evicted on its own, so it would otherwise hold memory, and count against the
+     * deployment's in-memory segment cap, until the next restart. An update that
+     * keeps the store's key and the embedding configuration keeps the data.
+     * <p>
+     * Unlike the persistent stores, nothing is lost that the move rule below
+     * protects: an in-memory store does not survive a restart in any case, and the
+     * sources re-embed into the store the knowledge base now addresses.
+     */
+    private void releaseSupersededInMemoryStore(String id, RagConfiguration previous, RagConfiguration updated) {
+        try {
+            embeddingStoreFactory.dropSupersededInMemoryStore(id, previous, updated);
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not release the in-memory vector store knowledge base %s no longer uses",
+                    LogSanitizer.sanitize(id));
+        }
     }
 
     /**
@@ -277,6 +324,9 @@ public class RestRagStore implements IRestRagStore {
             // RestVersionInfo rejects null with its own error message.
             return;
         }
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(ragConfiguration);
 
         normalizeLegacyChunkStrategy(ragConfiguration);
         warnOnPlaintextSecrets(ragConfiguration);
@@ -465,6 +515,14 @@ public class RestRagStore implements IRestRagStore {
                 LOGGER.errorf(e, "Could not remove ingestion schedules for knowledge base %s",
                         LogSanitizer.sanitize(id));
             }
+            // Same rule as the schedules: deleting an old version of a knowledge base
+            // that is still live at a newer one must not empty its in-memory store.
+            try {
+                embeddingStoreFactory.dropInMemoryStore(id, deleted);
+            } catch (RuntimeException e) {
+                LOGGER.errorf(e, "Could not release the in-memory vector store of deleted knowledge base %s",
+                        LogSanitizer.sanitize(id));
+            }
         }
         return response;
     }
@@ -473,6 +531,7 @@ public class RestRagStore implements IRestRagStore {
     public Response duplicateRag(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         RagConfiguration config = restVersionInfo.read(id, version);
+        RedactionMarkerGuard.requireNone(config);
         // Normalize only — see normalizeLegacyChunkStrategy: a copy of an existing
         // document must not be refused just because the rules tightened after it was
         // stored.

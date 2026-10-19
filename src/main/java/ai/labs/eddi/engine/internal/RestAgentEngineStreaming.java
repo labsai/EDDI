@@ -158,12 +158,17 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         final String safeConversationId = sanitize(conversationId);
 
+        // A node at capacity answers a plain 503 before the sink is touched and
+        // before the ownership check reads the database for a turn it will refuse.
+        conversationService.refuseIfAtCapacity(conversationId);
+
         // Same owner-or-admin gate the non-streaming twin applies (RestAgentEngine)
         // — without it, anyone who learns a conversationId could drive a turn under
         // its owner's identity. Runs BEFORE the sink is touched so the denial
         // surfaces as a plain 403 rather than an SSE 'error' event on a 200 stream.
         // ConversationService re-checks: this layer is defence in depth.
-        conversationAccessGuard.requireConversationOwner(conversationId);
+        // Owner or admin, plus the agent USE re-check every turn gets (L4).
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         // The input cap, before the sink for the same reason: an oversized input is the
         // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200

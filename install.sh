@@ -797,17 +797,26 @@ resolve_stack_passwords() {
     GRAFANA_ADMIN_PASSWORD=$(generate_password)
     GRAFANA_PASSWORD_GENERATED=true
   fi
+  # The PostgreSQL password: docker-compose.postgres-only.yml requires it (no
+  # `eddi`/`eddi` default any more), and the postgres image reads it at initdb
+  # only, so a stored value is carried forward for the same reason as the
+  # Keycloak one — a fresh value on a re-run would stop matching the volume.
+  [[ -n "${POSTGRES_PASSWORD:-}" ]] || POSTGRES_PASSWORD=$(env_file_value POSTGRES_PASSWORD)
+  if [[ "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ]]; then
+    POSTGRES_PASSWORD=$(generate_password)
+  fi
   # Written single-quoted into .env, where compose reads the value literally;
   # a single quote is the one character that cannot be carried that way.
   local value
-  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD"; do
+  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
     if [[ "$value" == *"'"* ]]; then
-      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+      fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
     fi
   done
   if [[ ( "$WITH_AUTH" == "true" && -z "$KC_BOOTSTRAP_ADMIN_PASSWORD" ) \
-     || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) ]]; then
-    fail "Could not generate an admin password (neither openssl nor /dev/urandom produced one)."
+     || ( "$WITH_MONITORING" == "true" && -z "$GRAFANA_ADMIN_PASSWORD" ) \
+     || ( "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ) ]]; then
+    fail "Could not generate a password (neither openssl nor /dev/urandom produced one)."
   fi
 }
 
@@ -948,8 +957,72 @@ else
   SCRIPT_DIR=""
 fi
 
+# ── Release checksums ─────────────────────────────────────
+#
+# Every file this script downloads (compose files, the Keycloak realm and theme,
+# the monitoring configuration) comes from raw.githubusercontent.com over TLS.
+# When EDDI_BRANCH is a release tag, the release job in ci.yml publishes a
+# SHA256SUMS asset listing the hash of each of those files AT THAT TAG, and a
+# downloaded file whose hash disagrees is refused — so a tag moved after the
+# release, or a tampered file, does not get installed. A ref with no SHA256SUMS
+# (main, a branch, a release older than the asset) is installed as before, with a
+# warning that only TLS vouches for it.
+RELEASE_CHECKSUMS=""
+RELEASE_CHECKSUMS_LOADED=false
+
+sha256_of() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+
+load_release_checksums() {
+  [[ "$RELEASE_CHECKSUMS_LOADED" == "true" ]] && return 0
+  RELEASE_CHECKSUMS_LOADED=true
+  if [[ ! "$EDDI_BRANCH" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+    warn "Files from '${EDDI_BRANCH}' are not a release: no checksums to verify them against (TLS only)."
+    return 0
+  fi
+  if ! sha256_of /dev/null &>/dev/null; then
+    warn "Neither sha256sum nor shasum is installed — downloaded files are not checksum-verified."
+    return 0
+  fi
+  local sums
+  sums=$(mktemp "${TMPDIR:-/tmp}/eddi-sums.XXXXXX")
+  if curl -fsSL --max-time 20 "https://github.com/labsai/EDDI/releases/download/${EDDI_BRANCH}/SHA256SUMS" -o "$sums" 2>/dev/null \
+      && [[ -s "$sums" ]]; then
+    RELEASE_CHECKSUMS="$sums"
+    info "Verifying downloads against the SHA256SUMS of release ${EDDI_BRANCH}"
+  else
+    rm -f "$sums"
+    warn "Release ${EDDI_BRANCH} publishes no SHA256SUMS — downloaded files are verified by TLS only."
+  fi
+}
+
+# verify_download <repository path> <downloaded file>: refuses a file whose hash
+# is not the one the release lists. Returns 0 when there is nothing to check.
+verify_download() {
+  local rel="$1" file="$2" expected actual
+  [[ -n "$RELEASE_CHECKSUMS" ]] || return 0
+  expected=$(awk -v f="$rel" '$2 == f || $2 == "*" f { print $1; exit }' "$RELEASE_CHECKSUMS")
+  if [[ -z "$expected" ]]; then
+    warn "${rel} is not listed in the SHA256SUMS of release ${EDDI_BRANCH} — not verified."
+    return 0
+  fi
+  actual=$(sha256_of "$file") || return 0
+  if [[ "$actual" != "$expected" ]]; then
+    rm -f "$file"
+    fail "Checksum mismatch for ${rel} from release ${EDDI_BRANCH}.\n     Expected: ${expected}\n     Got:      ${actual}\n     The file was not installed. Retry later; if it persists, report it."
+  fi
+}
+
 resolve_compose_files() {
   mkdir -p "$EDDI_DIR"
+  load_release_checksums
 
   local needed_files=()
   COMPOSE_FILES=()
@@ -998,6 +1071,7 @@ resolve_compose_files() {
       local download_url="${COMPOSE_BASE_URL}/${f}"
       echo -ne "  Downloading ${f}... "
       if curl -fsSL "${download_url}" -o "$target"; then
+        verify_download "$f" "$target"
         echo -e "${GREEN}✅${RESET}"
       else
         fail "Failed to download ${f}.\n     URL: ${download_url}\n     Check your internet connection and that the branch '${EDDI_BRANCH}' exists."
@@ -1032,6 +1106,7 @@ resolve_compose_files() {
         local mf_url="${COMPOSE_BASE_URL}/${mf}"
         echo -ne "  Downloading ${mf}... "
         if curl -fsSL "${mf_url}" -o "$mf_target"; then
+          verify_download "$mf" "$mf_target"
           echo -e "${GREEN}✅${RESET}"
         else
           # Every one of these is bind-mounted as a FILE by
@@ -1102,6 +1177,7 @@ resolve_compose_files() {
         local kf_url="${COMPOSE_BASE_URL}/${kf}"
         echo -ne "  Downloading ${kf}... "
         if curl -fsSL "${kf_url}" -o "$kf_target"; then
+          verify_download "$kf" "$kf_target"
           echo -e "${GREEN}✅${RESET}"
         elif [[ "$kf" == "keycloak/eddi-realm.json" ]]; then
           fail "Failed to download ${kf} (required for Keycloak).\n     URL: ${kf_url}"
@@ -1171,6 +1247,19 @@ EOF
   if [[ -n "${EDDI_BIND:-}" ]]; then
     echo "EDDI_BIND=$EDDI_BIND" >> "$EDDI_DIR/.env"
   fi
+  # docker-compose.yml refuses a non-loopback EDDI_BIND while authentication is
+  # off (its bind-guard service) unless this acknowledgement is set — the GCP
+  # provisioner sets it for --i-understand-public. Persisted so `eddi restart`
+  # keeps the choice the operator made.
+  if [[ "${EDDI_I_UNDERSTAND_PUBLIC:-}" == "true" ]]; then
+    echo "EDDI_I_UNDERSTAND_PUBLIC=true" >> "$EDDI_DIR/.env"
+  fi
+  # The PostgreSQL password, which docker-compose.postgres-only.yml requires.
+  # Written whenever one is known (a stored value survives a re-run that picks
+  # MongoDB, so a later switch back finds the volume's password).
+  if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
+    echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'" >> "$EDDI_DIR/.env"
+  fi
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT
   # would otherwise outlive the overlay that used it.
@@ -1237,6 +1326,20 @@ start_eddi() {
   # remote install (e.g. the GCP provisioner) sets EDDI_BIND=0.0.0.0 so the VM's
   # own IP is reachable; it is persisted to .env below so `eddi restart` keeps it.
   export EDDI_BIND
+  # The base stack's bind-guard (docker-compose.yml and
+  # docker-compose.postgres-only.yml both carry it) refuses a non-loopback EDDI_BIND while
+  # authentication is off. Say so here, before pulling images, with the same
+  # ways out the guard prints — unless the operator acknowledged it
+  # (EDDI_I_UNDERSTAND_PUBLIC=true, which --i-understand-public on the GCP
+  # provisioner sets).
+  case "${EDDI_BIND:-}" in
+    ""|127.0.0.1|localhost|::1|"[::1]") ;;
+    *)
+      if [[ "$WITH_AUTH" != "true" && "${EDDI_I_UNDERSTAND_PUBLIC:-}" != "true" ]]; then
+        fail "EDDI_BIND=${EDDI_BIND} would publish an UNAUTHENTICATED EDDI on the network: every API\n     endpoint — agents, conversations, the secrets vault, MCP — reachable without a token.\n     Re-run with --with-auth, keep EDDI_BIND unset (loopback only), or set\n     EDDI_I_UNDERSTAND_PUBLIC=true to expose an open instance on purpose."
+      fi
+      ;;
+  esac
 
   if [[ "$LOCAL_IMAGE" == "true" ]]; then
     echo "  Building local Docker image..."

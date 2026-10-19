@@ -242,6 +242,41 @@ class PostgresSecretPersistenceUnitTest {
         assertThrows(PersistenceException.class, () -> persistence.updateSecretSealing(createTestSecret(), "dek-0"));
     }
 
+    // ─── resealSecretInPlace (L10) ───
+
+    @Test
+    void resealSecretInPlace_guardsOnTheIv_andRewritesOnlyCiphertextAndIv() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.resealSecretInPlace("tenant-1", "key-1", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String statement = sql.getAllValues().getLast();
+        assertTrue(statement.contains("SET encrypted_value = ?, iv = ?"), statement);
+        assertTrue(statement.contains("AND iv = ?"), statement);
+        assertFalse(statement.contains("last_rotated_at"), statement);
+        verify(preparedStatement).setString(1, "new-ciphertext");
+        verify(preparedStatement).setString(2, "new-iv");
+        verify(preparedStatement).setString(5, "dek-0");
+        verify(preparedStatement).setString(6, "old-iv");
+    }
+
+    @Test
+    void resealSecretInPlace_guardLost_returnsFalse() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.resealSecretInPlace("tenant-1", "key-1", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+    }
+
+    @Test
+    void resealSecretInPlace_sqlException_throwsPersistenceException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(PersistenceException.class,
+                () -> persistence.resealSecretInPlace("tenant-1", "key-1", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+    }
+
     // ─── updateSecretGrant ───
 
     @Test
@@ -482,8 +517,10 @@ class PostgresSecretPersistenceUnitTest {
         persistence.upsertSecret(secret);
 
         // The CASE guards in the ON CONFLICT branch: false keeps the stored column.
-        verify(preparedStatement).setBoolean(12, false);
         verify(preparedStatement).setBoolean(13, false);
+        verify(preparedStatement).setBoolean(14, false);
+        // allowedHosts not supplied either: kept on conflict.
+        verify(preparedStatement).setBoolean(15, false);
     }
 
     @Test
@@ -492,8 +529,20 @@ class PostgresSecretPersistenceUnitTest {
 
         persistence.upsertSecret(createTestSecret());
 
-        verify(preparedStatement).setBoolean(12, true);
         verify(preparedStatement).setBoolean(13, true);
+        verify(preparedStatement).setBoolean(14, true);
+    }
+
+    @Test
+    void upsertSecret_suppliedAllowedHosts_areWritten() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedHosts(List.of("api.openai.com"));
+
+        persistence.upsertSecret(secret);
+
+        verify(preparedStatement).setString(9, "[\"api.openai.com\"]");
+        verify(preparedStatement).setBoolean(15, true);
     }
 
     @Test

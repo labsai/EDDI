@@ -131,7 +131,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
 >
-> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
+> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — is written at **DEBUG**, so `logRequests: true` shows nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG; the response line stays at INFO. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
 
@@ -548,7 +548,9 @@ is exactly why each is worth setting explicitly.
   files, so the weights land in RSS and page cache, not the Java heap. They still count
   against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
   note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
-  for the model — it takes room away.
+  for the model — it takes room away. The image sets it to 75 % for EDDI's own work; with
+  an in-process Jlama model, lower it (for example `JAVA_MAX_MEM_RATIO=50`) and raise the
+  memory limit by the size of the weights.
 
 For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
 access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is
@@ -705,8 +707,10 @@ Moonshot fixes `temperature` on `kimi-k2.7-code` and `kimi-k2.6`, so do not set 
 
 **Precedence.**
 - Endpoint: an explicit `baseUrl`, then the `region` parameter (a region id from the table), then
-  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is still
-  checked against the cloud-metadata block list.
+  the default endpoint. An unknown region fails with the list of valid ids. `baseUrl` is always
+  checked against the cloud-metadata block list, and with `eddi.security.ssrf-protection.enabled`
+  it must also be a public address (or this deployment's own `eddi.self.base-url`) — the same
+  rule as for every provider's `baseUrl`/`endpoint`, see [security.md](security.md#ssrf-protection--urlvalidationutils).
 - Model: `modelName`, then the provider default.
 - Any parameter you set beats the preset's defaults (below).
 - `apiKey` is required. Use a vault reference, for example `${vault:xai-key}`; the error names
@@ -842,10 +846,11 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxToolIterations`        | int      | Most model↔tool rounds in one turn before the turn answers with what it has. Values above the engine ceiling of 100 are clamped (WARN) | 10 |
 | `maxToolCallsPerIteration` | int      | Most tool calls executed from a **single model response**. Calls past the cap are not run: each gets a `NOT_EXECUTED` result naming the limit, so the model can answer with what it has. `-1`/`0` disables. See [Tool-call caps](#tool-call-caps) | 20 |
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
+| `toolRepeatGuard` | object | Refuses a tool call that already failed identically with nothing succeeding since, instead of re-running it. **On by default**; `{"enabled": false}` turns it off. See [Repeated failing tool calls](#repeated-failing-tool-calls) | enabled |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
 | **Cost & Performance**     |          |                                                  |                        |
-| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Records cost; only refuses calls when `enforceBudget` is on | (unlimited) |
-| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-in** — a ceiling without it is report-only, and is named in a startup WARN | false (`eddi.tools.budget.enforce-by-default`) |
+| `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
+| `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
@@ -992,6 +997,8 @@ A task can screen the **user's message before the model is called** (`inputGuard
 | `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
 | `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
 
+A block message is served the way an [`onError` fallback](#fallback-answers-and-onerror) is: the turn is flagged as a fallback, so later turns' history keeps the user's question but not the block message, and a `convertToObject` task with `responseValidation.fallbackField` gets it wrapped as `{"<fallbackField>": "<block message>"}` — the shape its `postResponse` reads. Because the history builder merges a fallback turn's question into the next user message, input guardrails treat only that message's last text part as the current turn; the earlier parts are screened as history.
+
 **When a guardrail fails.** A guardrail that throws, or returns no verdict, could not check the text. What happens then is its `failMode`:
 
 | `failMode` | Effect | Default for |
@@ -1010,7 +1017,7 @@ A `block` is a returned value, never an exception, so a block message can never 
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
 | `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
-| `max-length` | input, output | Text longer than `maxChars`; `redact` truncates, `reprompt` asks for a shorter answer. | `maxChars` (default `8000`) |
+| `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
@@ -1154,7 +1161,7 @@ When `enableBuiltInTools: true`, you can use these tools:
 | **Text Summarizer** | Summarize long text                             | `textsummarizer` |
 | **PDF Reader**      | Extract text from PDF URLs (SSRF-protected)     | `pdfreader`      |
 | **Weather**         | Get weather information                         | `weather`        |
-| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits` | `fetch_page` / `fetch_tool_response_page` |
+| **Tool Response Paging** | Fetch the next page of a tool response that was truncated by `toolResponseLimits`. Pages are scoped to the conversation that produced them; another conversation's `responseId` is not found | `fetch_page` / `fetch_tool_response_page` |
 | **Conversation Recall** | Drill back into turns the [rolling summary](#rolling-conversation-summary) has compressed. Only assembled when `conversationSummary.enabled` is true | `conversationRecall` |
 
 > Because a non-empty `builtInToolsWhitelist` enables **only** the tools it names, a whitelist that includes verbose tools should also include `fetch_page` — otherwise truncated tool responses cannot be paged through.
@@ -1771,7 +1778,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (t
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
-| **Cost Tracking** | Per-conversation tool-cost accounting, with an opt-in ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
+| **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
 
 #### Tool names: dispatch name vs. configuration slug
@@ -1823,6 +1830,50 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Repeated failing tool calls
+
+Inside the iteration cap a model can still send the *same* failing call (a 403, a 404, a
+schema-rejected body) in every round. The tool repeat guard stops that: a call is refused,
+**without being executed**, when an identical call (same tool, same arguments, JSON key order
+ignored) already failed and no *other* call has succeeded since. Another success in between lifts
+the refusal, because the model may have fixed the precondition (404 on `getUser`, then a successful
+`createUser`, then `getUser` again is allowed).
+
+It is **enabled by default**, with the defaults below. Configure it per LLM task; `{"enabled": false}`
+restores the previous behaviour exactly:
+
+```json
+"toolRepeatGuard": {
+  "enabled": true,
+  "maxIdenticalFailures": 2,
+  "maxIdenticalCalls": -1,
+  "maxRefusalsPerTurn": 3,
+  "exemptTools": ["get_job_status"]
+}
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `enabled` | `true` | `false` disables the guard |
+| `maxIdenticalFailures` | `2` | Identical *retryable* failures tolerated; the next identical call is refused. A *terminal* failure is refused on the very next identical call |
+| `maxIdenticalCalls` | `-1` | Opt-in ceiling on identical *successful* calls (polling is legitimate, so unlimited by default) |
+| `maxRefusalsPerTurn` | `3` | Refusals after which the loop stops asking the model and ends the turn with a fixed message. `-1`/`0` = never stop, only refuse |
+| `exemptTools` | none | Tools never tracked, by dispatch name or built-in slug |
+
+Outcomes are classified from the tool's raw result (before the provenance envelope): an HTTP result
+with `httpCode` 2xx is a success, 408/425/429/5xx are retryable, every other status is terminal;
+`Error: ...` strings and `{"error": ...}` objects are retryable, except rejected arguments and an unknown
+tool, which are terminal. A call the loop refused itself (`NOT_EXECUTED`, budget, quota, expired deadline)
+is never counted as a failure. A refused call receives
+
+```json
+{"status":"NOT_EXECUTED","reason":"identical call already failed (HTTP 403) and nothing has changed since; do not repeat it. Report the failure to the user or try a different approach"}
+```
+
+and is traced as `tool_repeat_refused` (metric `eddi.tool.repeat.refused`). A refused repeat still counts toward `maxToolCallsPerTurn`, because the model did issue it. The state lives for one run of the
+tool loop: a HITL resume starts with a fresh guard, and each model-cascade step has its own. Rule-triggered
+`httpcalls` (no LLM) are out of scope, as they cannot loop.
 
 #### Execution timeouts
 
@@ -1884,19 +1935,21 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
-Enforcement is **opt-in**: a configured ceiling records cost but refuses nothing
-until you add `enforceBudget: true`. Built-in tools priced at $0.00 until the
-canonical-slug fix in this release, so enforcing automatically would make those
-ceilings bind for the first time and start aborting tool calls mid-conversation
-on upgrade.
+Enforcement is the **default** (since 6.6.0): a configured ceiling refuses the
+tool call after the one that crosses it. To keep a ceiling advisory, opt out with
+`enforceBudget: false` on the task, or `eddi.tools.budget.enforce-by-default=false`
+for the whole deployment — cost is still tracked and reported
+(`GET /llm/tools/costs`, `eddi.tool.costs`), nothing is refused, and every task
+whose ceiling is opted out is named once in a WARN so an advisory ceiling is a
+visible decision rather than a silent one. The effective default is reported by
+the MCP `get_agent` and `deploy_agent` tools (`toolBudgetEnforcedByDefault`).
 
-That choice has a real cost, which is why the engine warns rather than staying
-quiet: http, MCP, A2A and dynamic tools dispatch under their configured name, so
-a tool called `websearch` **was** priced and refused before `enforceBudget`
-existed. If you relied on such a ceiling, add the flag — every task carrying a
-ceiling without it is named once in a startup WARN. Cost is tracked and reported
-(`GET /llm/tools/costs`, `eddi.tool.costs`) either way. The deployment-wide
-default comes from `eddi.tools.budget.enforce-by-default` (default `false`).
+Before 6.6.0 enforcement was an opt-in, and the deployment key was not declared,
+so every stored ceiling without an explicit `enforceBudget: true` was advisory
+(security review 2026-10-15, finding M8). The reason for the opt-in — built-in
+tools priced at $0.00 until the canonical-slug fix — has passed; a deployment
+that upgrades with ceilings on built-in-only agents will see them bind for the
+first time.
 
 The check runs *before* each call and uses `<=`, so the call that crosses the
 ceiling still completes and the next one is refused with

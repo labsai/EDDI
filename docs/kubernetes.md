@@ -346,7 +346,48 @@ Three ways to manage it:
      --from-file=application-secrets.properties="$secrets_file"
    ```
 
-3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.
+3. **External secrets** (production): Use [External Secrets Operator](https://external-secrets.io/) to sync from AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc. With Helm, point the chart at the synced Secret — see [Bringing your own Secrets](#bringing-your-own-secrets-helm) — and no credential ever passes through a values file.
+
+### Bringing your own Secrets (Helm)
+
+Every credential the chart renders can instead come from a Secret you manage
+(External Secrets Operator, Sealed Secrets, `kubectl create secret`). Name it in
+the matching `existingSecret` value and the chart renders **no** Secret of its
+own for that component; the corresponding password value is then ignored and
+need not be set:
+
+| Value | Replaces | Keys the Secret must carry |
+|---|---|---|
+| `eddi.existingSecret` | `<release>-eddi-secrets` | `application-secrets.properties` — a Quarkus properties file with `eddi.vault.master-key=…` and the datastore line (`mongodb.connectionString=…` for MongoDB, percent-encoding the password; `quarkus.datasource.username=` / `.password=` for an external PostgreSQL), plus `eddi.nats.username=` / `eddi.nats.password=` for an in-chart NATS with auth |
+| `mongodb.existingSecret` | `<release>-eddi-mongodb` | `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`. Requires `eddi.existingSecret` too: the chart can no longer build EDDI's connection string without the password, so it refuses to render otherwise |
+| `postgres.existingSecret` | `<release>-eddi-postgres` | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `postgres-secrets.properties` (`quarkus.datasource.username=` / `quarkus.datasource.password=`) |
+| `keycloak.existingSecret` | `<release>-eddi-keycloak` | `password` — the bootstrap admin password, the same shape as the Kustomize overlay's `keycloak-admin` Secret |
+
+The chart's own Keycloak Secret is where `keycloak.adminPassword` now lands: the
+StatefulSet reads `KC_BOOTSTRAP_ADMIN_PASSWORD` through a `secretKeyRef`, never
+as a plain `value:` in the pod spec (which showed the master-realm superuser
+password in every `kubectl get sts -o yaml` and in the release manifest). The
+reference is not `optional`, so a missing Secret leaves the pod in
+`CreateContainerConfigError` rather than booting with no admin.
+
+> **`start-dev` behind an Ingress.** The in-chart Keycloak runs in development
+> mode (embedded H2 on one PVC, no HA, no production hardening). The chart
+> therefore refuses `keycloak.enabled=true` together with `ingress.enabled=true`
+> unless you set `keycloak.devModeAcknowledged=true` — a demo or staging cluster
+> you understand. For production, run Keycloak with `start` against an external
+> database and point `eddi.oidc.authServerUrl` at it with `keycloak.enabled=false`.
+> Setting `keycloak.publicOrigin` also strips the `http://localhost:*` redirect
+> URIs and the `+` wildcard web origin from the realm's `eddi-frontend` client, so
+> a realm published under a real hostname no longer completes a login for a page
+> on the operator's own machine; the `eddi-mcp` client keeps its loopback
+> redirects, which is how MCP clients sign in.
+>
+> With an Ingress and OIDC on, the chart also pins the MCP resource identifier
+> EDDI advertises (`QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE`) to
+> `https://<ingress.hosts[0].host>/mcp` (`http://` when neither `ingress.tls` nor
+> `eddi.oidc.resourceMetadata.forceHttpsScheme` is set) instead of deriving it
+> from each request's `Host` header. An explicit `eddi.oidc.resourceMetadata.resource`
+> still wins.
 
 > **No manifest ever writes this Secret.** `k8s/base/eddi-secret.yaml.example` is
 > a commented template that kustomize does not include, and `k8s/quickstart.yaml`
@@ -395,7 +436,9 @@ kubectl create secret generic keycloak-admin -n eddi \
 `secretKeyRef` with no default, so a missing Secret fails closed — the pod stays
 in `CreateContainerConfigError` with `secret "keycloak-admin" not found` rather
 than coming up with a known password. Helm asks for the same value as
-`keycloak.adminPassword`, which `required` refuses to default.
+`keycloak.adminPassword`, which `required` refuses to default, renders it into
+the `<release>-eddi-keycloak` Secret and reads it the same way; or name your own
+Secret in `keycloak.existingSecret` (see [Bringing your own Secrets](#bringing-your-own-secrets-helm)).
 
 **2. Give the `eddi` account a password after the first boot.** The realm seeds
 it with the `eddi-admin`, `eddi-editor` and `eddi-viewer` roles and **no
@@ -573,6 +616,34 @@ and caches live in the JVM. The Helm chart refuses `eddi.replicas` above 1,
 rolls out with `Recreate` so two JVMs never share the database. Scale **vertically**
 via `eddi.resources`.
 
+### Sizing a node
+
+EDDI waits on LLMs far more than it computes, so **memory, not CPU**, decides how many
+conversation turns a node runs at once. Each in-flight turn holds its conversation (about
+1 MB for short conversations in load tests, more with long histories and tool payloads).
+
+| Setting | Default | Why |
+|---|---|---|
+| Memory limit | 3 GiB (Helm, base), 4 GiB (production overlay) | The heap is **75 %** of it (`JAVA_MAX_MEM_RATIO` in the image); the rest covers metaspace, thread stacks and direct buffers. Raise it for more turns per node |
+| Memory request | equal to the limit | Guaranteed QoS: the pod is not the first evicted under node pressure |
+| CPU | request 1, limit 4 | The JVM sizes its GC, virtual-thread carrier and Jlama threads from the **limit**; without one it sees every core on the node |
+| GC | G1 (`GC_CONTAINER_OPTIONS`) | Short pauses with hundreds of turns in flight. For heaps of 8 GB and more, `-XX:+UseZGC` |
+| Out of memory | the JVM exits (`-XX:+ExitOnOutOfMemoryError`) | The orchestrator restarts it instead of a half-working JVM holding its turns |
+
+Guidelines:
+
+- **Keep the database close.** A turn makes about 20 database round trips, so latency to
+  MongoDB or PostgreSQL matters more than CPU speed. Size its pool with the node (MongoDB
+  `maxPoolSize` in the connection string, default 100; PostgreSQL
+  `quarkus.datasource.jdbc.max-size`, Quarkus default 50).
+- **File descriptors:** allow at least 65536 (`nofile`). The compose file sets it; on
+  Kubernetes it is a property of the node's container runtime.
+- **Scale out** with cluster mode (below) when one node would need a heap above about
+  16 GB, when CPU stays above 60–70 %, or when you need availability during upgrades.
+- **In-process Jlama models** are memory-mapped outside the heap: lower
+  `JAVA_MAX_MEM_RATIO` and add the model size to the memory limit, see
+  [LLM configuration](langchain.md).
+
 ### Upgrades replace the pod (no surge)
 
 With in-memory messaging the EDDI Deployment uses the **`Recreate`** strategy (Helm
@@ -630,6 +701,7 @@ helm install eddi ./helm/eddi \
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
 | `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %, memory 80 %) |
+| `autoscaling.extraMetrics` / `autoscaling.behavior` | `[]` / `{}` | Further `autoscaling/v2` metrics and scaling behavior, as given. CPU is a weak signal for a node that mostly waits on LLMs; scale on in-flight turns instead — see [Clustering → Autoscaling](clustering.md#autoscaling). A target set to `null` drops that metric |
 | `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |
 | `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |

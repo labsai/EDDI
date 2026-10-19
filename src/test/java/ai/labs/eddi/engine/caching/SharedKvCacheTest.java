@@ -21,15 +21,21 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 @DisplayName("Cluster-shared and cluster-invalidated caches")
@@ -48,6 +54,81 @@ class SharedKvCacheTest {
         assertNull(nodeA.putIfAbsent("nonce-1", Boolean.TRUE));
         assertEquals(Boolean.TRUE, nodeB.putIfAbsent("nonce-1", Boolean.TRUE), "a nonce used on A is a replay on B");
         assertTrue(kv.keys().stream().allMatch(k -> k.startsWith("h_")), "keys are hashed, never in clear");
+    }
+
+    @Test
+    @DisplayName("replace(key, expected, next) is a revision-checked compare-and-set on the bucket, not get-then-put")
+    void replaceIsACompareAndSet() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        ICache<String, String> nodeA = new SharedKvCache<>(local("a"), kv, false);
+        ICache<String, String> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        nodeA.put("k", "v0");
+
+        // Both nodes read v0; only the first replace lands, the second sees the
+        // revision moved and fails instead of overwriting the first.
+        assertTrue(nodeA.replace("k", "v0", "a1"));
+        assertFalse(nodeB.replace("k", "v0", "b1"));
+        assertEquals("a1", nodeB.get("k"));
+        assertTrue(nodeB.replace("k", "a1", "b2"));
+        assertEquals("b2", nodeA.get("k"));
+        assertFalse(nodeA.replace("missing", "x", "y"));
+    }
+
+    /**
+     * The case get-then-put gets wrong: the compare passes on the value this node
+     * read, another node writes in between, and the update must then be refused
+     * because the revision moved — not land and erase the other node's write.
+     */
+    /**
+     * A node with no local copy reads the bucket's value, compares, and the bucket
+     * goes away before the update. The replacement must land node-locally with the
+     * whole value — not answer false and leave the caller to retry from an empty
+     * local copy, which rebuilt the A2A principal index without its existing ids.
+     */
+    @Test
+    @DisplayName("when the bucket fails after the comparison, the whole replacement is kept node-locally")
+    void replaceKeepsTheWholeValueWhenTheBucketFailsAfterTheRead() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        new SharedKvCache<String, String>(local("seed"), kv, false).put("k", "ids:1,2,3");
+        ISharedKv failingUpdate = spy(kv);
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).update(any(), any(), anyLong());
+        ICache<String, String> noLocalCopy = new SharedKvCache<>(local("fresh"), failingUpdate, false);
+
+        assertTrue(noLocalCopy.replace("k", "ids:1,2,3", "ids:1,2,3,4"), "the comparison passed; the write is taken node-locally");
+        // The bucket is still unreachable for this node: the node-local copy answers,
+        // and it holds the complete value, not a fragment.
+        doThrow(new ClusterUnavailableException("NATS is down (test)")).when(failingUpdate).get(any());
+        assertEquals("ids:1,2,3,4", noLocalCopy.get("k"));
+    }
+
+    @Test
+    @DisplayName("when the bucket cannot even be read and there is no local copy, replace answers false and changes nothing")
+    void replaceWithoutAnyCopyIsFalse() {
+        ICache<String, String> node = new SharedKvCache<>(local("none"), new DownSharedKv(), false);
+
+        assertFalse(node.replace("k", "old", "new"));
+        assertNull(node.get("k"));
+    }
+
+    @Test
+    @DisplayName("a write that lands between the read and the update defeats the replace")
+    void replaceLosesToAWriteInBetween() {
+        var kv = new InMemorySharedKv("A2A_INDEX", Duration.ofMinutes(5));
+        ICache<String, String> nodeB = new SharedKvCache<>(local("b"), kv, false);
+        var slipIn = new AtomicBoolean(true);
+        ISharedKv racy = spy(kv);
+        doAnswer(invocation -> {
+            Object read = invocation.callRealMethod();
+            if (slipIn.getAndSet(false)) {
+                nodeB.put("k", "b1");
+            }
+            return read;
+        }).when(racy).get(any()); // the cache hashes its keys, so match any
+        ICache<String, String> nodeA = new SharedKvCache<>(local("a"), racy, false);
+        new SharedKvCache<String, String>(local("seed"), kv, false).put("k", "v0");
+
+        assertFalse(nodeA.replace("k", "v0", "a1"), "the revision moved under the replace, so it must not land");
+        assertEquals("b1", nodeB.get("k"), "the write that slipped in is kept");
     }
 
     @Test
@@ -204,5 +285,31 @@ class SharedKvCacheTest {
         assertSame(writer, reader);
         assertEquals("big", reader.get("page-1"));
         assertNotSame(writer, factory.getCache("paginated-tool-responses", Duration.ofMinutes(5)), "another TTL is another local cache");
+    }
+
+    /**
+     * Security review L15: the value's class name comes from the NATS bucket and is
+     * loaded, so only the exact classes the shared caches store are accepted.
+     */
+    @Test
+    @DisplayName("a shared entry naming any class but the stored value types is refused, not loaded")
+    void decodeAcceptsOnlyTheStoredValueClasses() {
+        var kv = new InMemorySharedKv("X", Duration.ofMinutes(5));
+        ICache<String, Object> cache = new SharedKvCache<>(local("l15"), kv, false);
+        for (String type : new String[]{"java.util.logging.FileHandler", "java.util.HashMap", "java.lang.ProcessBuilder",
+                "ai.labs.eddi.engine.caching.CacheFactory"}) {
+            kv.put(KvKeys.hashed("k-" + type), ("{\"t\":\"" + type + "\",\"v\":{}}").getBytes(StandardCharsets.UTF_8));
+            assertNull(cache.get("k-" + type), type + " must be refused");
+        }
+        kv.put(KvKeys.hashed("ok"), "{\"t\":\"java.lang.String\",\"v\":\"fine\"}".getBytes(StandardCharsets.UTF_8));
+        assertEquals("fine", cache.get("ok"));
+    }
+
+    @Test
+    @DisplayName("every allow-listed value class exists, so a rename cannot silently disable a shared cache")
+    void allowListedClassesExist() {
+        for (String type : SharedKvCache.ALLOWED_VALUE_CLASSES) {
+            assertDoesNotThrow(() -> Class.forName(type, false, SharedKvCache.class.getClassLoader()), type);
+        }
     }
 }

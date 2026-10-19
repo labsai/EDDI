@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMappe
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -146,6 +147,12 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response startConversationWithContext(String agentId, Environment environment, String userId, Map<String, Context> context) {
+        // As on say(): a start that is going to be refused for capacity must not first
+        // spend the access check, the GDPR read and the agent lookup. Under a burst
+        // every
+        // refused client comes back after Retry-After, so that work repeats per refusal
+        // and takes the CPU the admitted turns need. admitTurn stays the real check.
+        conversationService.refuseIfAtCapacity("(new conversation of agent " + agentId + ")");
         try {
             // USE, not VIEW: talking to an agent is not reading how it was built. Checked
             // here rather than in ConversationService, because the system-initiated starts
@@ -223,7 +230,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     public void rerunLastConversationStep(String conversationId, String language, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
-        validateConversationOwnership(conversationId);
+        conversationService.refuseIfAtCapacity(conversationId);
+        // Runs a turn, so the agent's USE is re-checked as for say() (L4).
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         // language is optional, as it is on say(). Requiring it here 400'd every
         // rerun call that followed the endpoint's own description, which never
@@ -251,7 +260,13 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
-        validateConversationOwnership(conversationId);
+        // Before the access check: under overload a turn that is going to be
+        // refused should not first spend database reads on its descriptor.
+        conversationService.refuseIfAtCapacity(conversationId);
+        // Owner or admin, and — under enforced workspaces — still allowed to USE the
+        // conversation's agent (L4): a revoked share stops the next turn, not only the
+        // next conversation.
+        conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
                 response);
@@ -490,18 +505,34 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response cancelConversation(String conversationId) {
-        validateConversationOwnership(conversationId, true);
+        String ownerId = validateConversationOwnership(conversationId, true);
         try {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-            // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
-            // REST contract (IRestAgentEngine#cancelConversation) takes no mode
-            // parameter and documents a graceful cancel, so there is no caller
-            // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
-            // no implementation at all — ConversationService silently degrades it to
-            // graceful — which is why it is not, and must not be, reachable from
-            // this API until it either does something or is deleted from the enum.
-            var outcome = conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+            IConversationService.CancelOutcome outcome;
+            if (hitlAccessGuard.mayCancelExecuting(ownerId)) {
+                // GRACEFUL is deliberate and is the ONLY mode this endpoint offers: the
+                // REST contract (IRestAgentEngine#cancelConversation) takes no mode
+                // parameter and documents a graceful cancel, so there is no caller
+                // intent to downgrade here. On the regular surface CANCEL_IMMEDIATE has
+                // no implementation at all — ConversationService silently degrades it to
+                // graceful — which is why it is not, and must not be, reachable from
+                // this API until it either does something or is deleted from the enum.
+                outcome = conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+            } else {
+                // A caller who is only an approver (L9 of the 2026-10-15 security
+                // review): the role exists to decide pauses, and a cancel of an
+                // executing turn is the owner's or an admin's to make. The paused-only
+                // cancel is one compare-and-set on AWAITING_HUMAN, so the entitlement
+                // check and the cancel are the same operation — a resume that lands in
+                // between cannot turn this into a stop of another user's running turn.
+                outcome = conversationService.cancelPausedConversation(conversationId, cancelledBy);
+                if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL) {
+                    LOGGER.warnf("Cancel of conversation %s refused: the caller holds only the approver role and the conversation is "
+                            + "not awaiting a decision", sanitize(conversationId));
+                    throw new ForbiddenException(
+                            "Access denied: an approver may only cancel a conversation that is awaiting a human decision");
+                }
+            }
             // Plain-text, curated bodies: never reflect the raw conversationId (it is
             // a caller-supplied path param — echoing it is a reflected-XSS vector) and
             // never leak internal exception detail to the client.

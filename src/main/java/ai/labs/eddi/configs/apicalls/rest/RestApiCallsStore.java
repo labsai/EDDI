@@ -6,6 +6,8 @@ package ai.labs.eddi.configs.apicalls.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.apicalls.ApiCallsConfigurationValidator;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
@@ -19,10 +21,13 @@ import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.mcp.McpApiToolBuilder;
+import ai.labs.eddi.engine.mcp.OpenApiSpecFetcher;
 import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -33,6 +38,7 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,11 +55,25 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     private final IApiCallsStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<ApiCallsConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     // Field-injected, like the other optional collaborators, so the direct
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Fetches the spec at a discovery request's specUrl under the deployment's
+    // eddi.security.ssrf-protection.enabled setting (every redirect hop checked,
+    // body capped). Null outside CDI, where the protection-off fetcher is used.
+    @Inject
+    OpenApiSpecFetcher specFetcher;
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    private static final String KIND = "httpcalls";
 
     // Field-injected so the direct constructions in tests keep compiling; the
     // initializer is the property's own default.
@@ -66,6 +86,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -84,11 +105,41 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
     @Override
     public ApiCallsConfiguration readApiCalls(String id, Integer version) {
+        ApiCallsConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        // Literal Authorization/X-Api-Key headers, credential-named query values in
+        // request.path and credential-shaped values in request.body are what this
+        // catches here; httpCalls[].parameters are the tool's parameter
+        // DESCRIPTIONS, keyed by names like "token", and are left alone.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, ApiCallsConfiguration.class, NOT_CONFIGURATION);
+    }
+
+    /**
+     * Containers in an httpcalls document that hold descriptions rather than
+     * configuration.
+     */
+    public static final Set<String> NOT_CONFIGURATION = Set.of("httpCalls[].parameters");
+
+    /**
+     * {@link #readApiCalls} without the read-redaction, for server-side work an
+     * editor's request starts whose result never reaches the caller as this
+     * document — upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public ApiCallsConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
     @Override
     public Response updateApiCalls(String id, Integer version, ApiCallsConfiguration httpCallsConfiguration) {
+        requireMayAuthorCallerToken(httpCallsConfiguration);
         Response invalid = validateBatchLimits(httpCallsConfiguration);
         if (invalid != null) {
             return invalid;
@@ -99,11 +150,15 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     @Override
     public Response patchApiCalls(String id, Integer version, String jsonPatch) {
         // The same pre-write check updateApiCalls runs.
-        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, this::validateBatchLimits);
+        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, patched -> {
+            requireMayAuthorCallerToken(patched);
+            return validateBatchLimits(patched);
+        });
     }
 
     @Override
     public Response createApiCalls(ApiCallsConfiguration httpCallsConfiguration) {
+        requireMayAuthorCallerToken(httpCallsConfiguration);
         Response invalid = validateBatchLimits(httpCallsConfiguration);
         if (invalid != null) {
             return invalid;
@@ -126,6 +181,10 @@ public class RestApiCallsStore implements IRestApiCallsStore {
         if (configuration == null || configuration.getHttpCalls() == null) {
             return null;
         }
+        String problem = ApiCallsConfigurationValidator.firstProblem(configuration);
+        if (problem != null) {
+            return badRequest(problem);
+        }
         for (ApiCall call : configuration.getHttpCalls()) {
             HttpPreRequest preRequest = call != null ? call.getPreRequest() : null;
             BatchRequestBuildingInstruction batch = preRequest != null ? preRequest.getBatchRequests() : null;
@@ -137,6 +196,20 @@ public class RestApiCallsStore implements IRestApiCallsStore {
             }
         }
         return null;
+    }
+
+    /**
+     * Refuses {@code ${caller:token}} from a caller who may not author it — see
+     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
+     * path treats a non-200 update as "create it directly instead".
+     */
+    private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
+        }
     }
 
     @Override
@@ -240,7 +313,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
             String effectiveBaseUrl = trimToNull(apiBaseUrl);
 
-            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef);
+            McpApiToolBuilder.ApiBuildResult result = McpApiToolBuilder.parseAndBuild(specUrl, null, effectiveBaseUrl, authHeaderRef, null,
+                    specFetcher != null ? specFetcher : OpenApiSpecFetcher.permissive());
 
             if (result.configsByGroup().isEmpty()) {
                 return Response.ok(Map.of("title", "API", "baseUrl", "", "endpointCount", 0, "groups", Map.of())).build();

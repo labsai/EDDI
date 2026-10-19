@@ -26,7 +26,10 @@ The 4a guardrails are deterministic heuristics. Phase 4b adds one generic model-
 - **Llama Guard:** not given a worked example. Meta's Llama 3.2/3.3/4 acceptable-use policies withhold the licence rights for their multimodal models from EU-domiciled companies, which covers Llama Guard 4 and Llama Guard 3 Vision; the text-only Llama Guard 3 is mentioned with that caveat, and ShieldGemma is the Ollama example. EDDI takes no position on any model's licence.
 - **Provider error messages are never logged or propagated** (they can echo the screened text); only the exception class.
 
+### Manager
+
+- The guardrails editor from the merged Manager PR offers `classifier` again on both sides (`GUARDRAIL_TYPES`, phases, no-rewrite set and type text in `guardrails.ts`); its settings panel and warnings were already in place. The editor test that asserted it was not offered now asserts it is. `operator-revision.json` is bumped for the operator prompt change.
+
 ### Not done
 
-- No Manager guardrail-list editor (the plan allows a follow-up PR).
 - The Granite Guardian `chat_template_kwargs` example is per the model card and vLLM's request extension; it was not run against a live vLLM here.

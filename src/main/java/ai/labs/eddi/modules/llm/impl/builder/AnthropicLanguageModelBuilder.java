@@ -4,14 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.anthropic.AnthropicStreamingChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -39,6 +39,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_TEMPERATURE = "temperature";
     private static final String KEY_MODEL_NAME = "modelName";
@@ -90,10 +98,10 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
             Boolean logRequests, Boolean logResponses, Map<String, String> customHeaders, Map<String, Object> customParameters) {
     }
 
-    private static Settings read(Map<String, String> p) {
+    private static Settings read(Map<String, String> p, OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(p, KEY_BASE_URL);
         if (baseUrl != null) {
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            targetPolicy.validateUrl(baseUrl);
         }
         // Lenient reads: these values are typed by a user in the Manager, so a
         // stray character is a config mistake, not a reason to fail every
@@ -124,7 +132,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -133,7 +141,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
      * {@link #build(Map)}.
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AnthropicChatModel.builder().httpClientBuilder(httpClientBuilder);
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
@@ -195,12 +203,12 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        return buildStreaming(parameters, JdkHttpClient.builder());
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder());
     }
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
     StreamingChatModel buildStreaming(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
-        Settings s = read(parameters);
+        Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         var b = AnthropicStreamingChatModel.builder().httpClientBuilder(httpClientBuilder);
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());

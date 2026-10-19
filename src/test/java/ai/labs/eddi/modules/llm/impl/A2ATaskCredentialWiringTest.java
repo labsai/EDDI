@@ -8,9 +8,17 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,16 +26,13 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -36,8 +41,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -59,9 +62,9 @@ import static org.mockito.Mockito.when;
  * actually asked to make. Only asserting on the request the task call builds
  * can catch a caller going its own way again.
  * <p>
- * The outbound client is a mock installed into the manager's field, so nothing
- * here binds a socket: the manager builds its {@code HttpClient} lazily and the
- * double-checked read returns whatever is already there.
+ * The manager talks to a real {@code OutboundHttp} facade whose engine records
+ * every hop and answers it from memory, so nothing here binds a socket and the
+ * assertions see exactly what the facade would put on the wire.
  */
 @DisplayName("A2AToolProviderManager — what lands on the wire")
 class A2ATaskCredentialWiringTest {
@@ -79,61 +82,41 @@ class A2ATaskCredentialWiringTest {
     private GlobalVariableResolver globalVariableResolver;
     private SecretResolver secretResolver;
     private ConnectionResolver connectionResolver;
-    private HttpClient httpClient;
 
-    /** Every request the manager handed to the client, in order. */
-    private final List<HttpRequest> sent = new ArrayList<>();
+    /** Every hop the facade sent, in order. */
+    private final List<Hop> sent = new ArrayList<>();
+
+    /** When set, every hop fails with it, as a transport error would. */
+    private final AtomicReference<IOException> transportFailure = new AtomicReference<>();
+
+    /**
+     * Answers the card fetch with {@link #AGENT_CARD} and the task call with
+     * {@link #TASK_RESULT}.
+     */
+    private final OutboundEngine engine = hop -> {
+        sent.add(hop);
+        if (transportFailure.get() != null) {
+            throw transportFailure.get();
+        }
+        String body = hop.uri().toString().endsWith("/agent.json") ? AGENT_CARD : TASK_RESULT;
+        return new OutboundEngine.Received(200, null, Map.of(), new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
+    };
 
     @BeforeEach
     void setUp() throws Exception {
         globalVariableResolver = mock(GlobalVariableResolver.class);
         secretResolver = mock(SecretResolver.class);
         connectionResolver = mock(ConnectionResolver.class);
-        httpClient = mock(HttpClient.class);
         sent.clear();
+        transportFailure.set(null);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        // doAnswer rather than when(...): the stubbed call takes matchers for both
-        // arguments and its answer has to READ the request that was passed.
-        doAnswer(invocation -> {
-            HttpRequest request = invocation.getArgument(0);
-            sent.add(request);
-            return response(request.uri().toString().endsWith("/agent.json") ? AGENT_CARD : TASK_RESULT);
-        }).when(httpClient).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static HttpResponse<InputStream> response(String body) {
-        // The manager now reads the body via BodyHandlers.ofInputStream() and a
-        // bounded stream read, so the mocked response must expose an InputStream body
-        // (a String body would ClassCastException inside the bounded read and the
-        // card would silently fail to parse).
-        HttpResponse<InputStream> response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(200);
-        when(response.body()).thenReturn(new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
-        return response;
     }
 
     private A2AToolProviderManager manager() {
-        var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false, connectionResolver);
-        installHttpClient(manager, httpClient);
-        return manager;
-    }
-
-    /**
-     * The manager creates its client lazily precisely so an injected bean that
-     * never talks to a peer does not pay for one; that same laziness is what lets a
-     * test put a mock there instead of standing up a server.
-     */
-    private static void installHttpClient(A2AToolProviderManager manager, HttpClient client) {
-        try {
-            Field field = A2AToolProviderManager.class.getDeclaredField("httpClient");
-            field.setAccessible(true);
-            field.set(manager, client);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("A2AToolProviderManager no longer keeps its outbound client in a 'httpClient' field — this test "
-                    + "asserts what actually reaches a peer and must be re-pointed rather than deleted.", e);
-        }
+        return new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver, TestOutbound.facade(engine));
     }
 
     private static A2AAgentConfig config(String apiKey) {
@@ -144,8 +127,49 @@ class A2ATaskCredentialWiringTest {
         return config;
     }
 
-    private static String header(HttpRequest request, String name) {
-        return request.headers().firstValue(name).orElse(null);
+    private static String header(Hop hop, String name) {
+        List<String> values = hop.headers().get(name);
+        return values == null || values.isEmpty() ? null : values.getFirst();
+    }
+
+    @Nested
+    @DisplayName("W3C trace context")
+    class TraceContext {
+
+        @Test
+        @DisplayName("the card fetch and the task call carry the current span's traceparent, and never baggage")
+        void bothRequestsCarryTraceparent() {
+            SdkTracerProvider tracerProvider = SdkTracerProvider.builder().build();
+            Span span = tracerProvider.get("test").spanBuilder("execute_tool peer_lookup").startSpan();
+            var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                    A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                    A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver,
+                    TestOutbound.facade(engine, new TracePropagation(true)));
+            try (Scope ignored = span.makeCurrent()) {
+                var executor = manager.discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+                executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+            } finally {
+                span.end();
+                tracerProvider.close();
+            }
+
+            SpanContext sc = span.getSpanContext();
+            String expected = "00-" + sc.getTraceId() + "-" + sc.getSpanId() + "-" + sc.getTraceFlags().asHex();
+            assertEquals(2, sent.size());
+            assertEquals(expected, header(sent.get(0), "traceparent"));
+            assertEquals(expected, header(sent.get(1), "traceparent"));
+            assertNull(header(sent.get(1), "baggage"));
+            assertEquals("Bearer sk-static", header(sent.get(1), "Authorization"), "the trace header is added, not substituted");
+        }
+
+        @Test
+        @DisplayName("a facade without propagation adds nothing")
+        void nothingWithoutPropagator() {
+            var executor = manager().discoverTools(List.of(config("sk-static"))).executors().get("peer_lookup");
+            executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
+
+            assertNull(header(sent.get(1), "traceparent"));
+        }
     }
 
     @Nested
@@ -191,7 +215,7 @@ class A2ATaskCredentialWiringTest {
             var executor = manager().discoverTools(List.of(config("${connection:sf}"))).executors().get("peer_lookup");
             executor.execute(ToolExecutionRequest.builder().name("peer_lookup").arguments("{\"message\":\"hi\"}").build(), null);
 
-            HttpRequest taskRequest = sent.get(1);
+            Hop taskRequest = sent.get(1);
             assertEquals("task-key", header(taskRequest, "X-Api-Key"));
             assertNull(header(taskRequest, "Authorization"),
                     "a connection supplies the whole value; adding Authorization as well would send two credentials");
@@ -236,6 +260,31 @@ class A2ATaskCredentialWiringTest {
     }
 
     @Nested
+    @DisplayName("redirects")
+    class Redirects {
+
+        @Test
+        @DisplayName("a peer's redirect is never followed, so its credential never reaches the Location")
+        void redirectIsNotFollowed() {
+            when(connectionResolver.resolveForDiscovery(anyString(), any(URI.class)))
+                    .thenReturn(Optional.of(new ResolvedCredential("Authorization", "Bearer discovery-token")));
+            OutboundEngine redirecting = hop -> {
+                sent.add(hop);
+                return new OutboundEngine.Received(307, null, Map.of("Location", List.of("https://203.0.113.50/steal")),
+                        new ByteArrayInputStream(new byte[0]));
+            };
+            var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
+                    A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,
+                    A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES_PER_AGENT, connectionResolver, TestOutbound.facade(redirecting));
+
+            assertTrue(manager.discoverTools(List.of(config("${connection:sf}"))).executors().isEmpty());
+
+            assertTrue(sent.stream().noneMatch(hop -> "203.0.113.50".equals(hop.uri().getHost())),
+                    "the Location must never be requested: " + sent.stream().map(Hop::uri).toList());
+        }
+    }
+
+    @Nested
     @DisplayName("the circuit breaker shields a flaky peer, not a missing credential")
     class CircuitBreaker {
 
@@ -258,7 +307,7 @@ class A2ATaskCredentialWiringTest {
             // circuit is that the fourth turn is skipped before resolution is even
             // attempted. Four attempts means the circuit stayed closed.
             verify(connectionResolver, times(4)).resolveForDiscovery(anyString(), any(URI.class));
-            verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            assertTrue(sent.isEmpty(), "nothing may be sent when the credential cannot be resolved");
         }
 
         @Test
@@ -266,8 +315,7 @@ class A2ATaskCredentialWiringTest {
         void transportFailureStillOpensTheCircuit() throws Exception {
             // The counterpart. Without it the test above would still pass if the
             // breaker had been switched off entirely.
-            doThrow(new IOException("connection refused")).when(httpClient)
-                    .send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            transportFailure.set(new IOException("connection refused"));
             var manager = manager();
             var config = config(null);
 
@@ -275,7 +323,7 @@ class A2ATaskCredentialWiringTest {
                 assertTrue(manager.discoverTools(List.of(config)).executors().isEmpty(), "turn " + turn);
             }
 
-            verify(httpClient, times(3)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+            assertEquals(3, sent.size(), "three failed turns open the circuit; the fourth is skipped");
         }
     }
 }

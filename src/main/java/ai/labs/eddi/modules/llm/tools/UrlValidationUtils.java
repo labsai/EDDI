@@ -5,8 +5,10 @@
 package ai.labs.eddi.modules.llm.tools;
 
 import java.net.InetAddress;
+import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -60,7 +62,7 @@ public final class UrlValidationUtils {
      * Validates URL safety using a custom host resolver. Returns the resolved
      * addresses for callers that wish to implement socket-level IP pinning.
      * <p>
-     * <b>Note:</b> The default {@link SafeHttpClient} code path does NOT pin the
+     * <b>Note:</b> The default {@code OutboundHttp} code path does NOT pin the
      * resolved addresses — the JDK {@code HttpClient} re-resolves DNS
      * independently. This means a short-TTL DNS rebinding attack is theoretically
      * possible between validation and connect. The risk is accepted because
@@ -145,7 +147,7 @@ public final class UrlValidationUtils {
      * Checks whether the hostname is a known internal/local hostname that should be
      * blocked.
      */
-    static boolean isBlockedHostname(String host) {
+    public static boolean isBlockedHostname(String host) {
         return host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]") || host.equals("::1") || host.endsWith(".local")
                 || host.endsWith(".internal") || host.equals("metadata.google.internal") || host.equals("169.254.169.254"); // Cloud metadata endpoint
     }
@@ -174,14 +176,26 @@ public final class UrlValidationUtils {
      * whole link-local range (169.254.0.0/16, fe80::/10) goes with it: nothing
      * addressed there is a real API, and it is where the metadata service lives.
      * <p>
-     * Deliberately lenient about everything else — an unparseable URL or an
-     * unresolvable host is left for the caller's own checks and the request itself
-     * to reject. This checks one URL; with protection off redirects are still
-     * followed, so the httpcalls client applies it to every redirect hop as well
+     * <b>Fails closed on a host it cannot read.</b> An unparseable URL, or an
+     * {@code http(s)} URL whose {@link URI#getHost()} is null or blank, is refused.
+     * {@code java.net.URI} reads a registry-style authority — an underscore
+     * ({@code x_y.attacker.com}), a percent-encoded host, an IP literal with a
+     * trailing dot ({@code 169.254.169.254.}) — as having no host, while the Vert.x
+     * httpcalls client parses the same string with {@code java.net.URL}, gets a
+     * host, resolves it and connects. Returning quietly on a null host let any such
+     * name with an A record of {@code 169.254.169.254} through the one check that
+     * path applies (security review 2026-10-17, H2). For the same reason the host
+     * {@code java.net.URL} reads is checked too when it differs.
+     * <p>
+     * Deliberately lenient about everything else: a URL with another scheme is left
+     * to the caller's own checks, and an unresolvable host to the request itself.
+     * This checks one URL; with protection off redirects are still followed, so the
+     * httpcalls client applies it to every redirect hop as well
      * ({@code HttpClientModule.refusingMetadataHops}).
      *
      * @throws IllegalArgumentException
-     *             when the host is, or resolves to, a metadata/link-local address
+     *             when the host is, or resolves to, a metadata/link-local address,
+     *             or cannot be read from the URL
      */
     public static void rejectCloudMetadataTarget(String url) {
         rejectCloudMetadataTarget(url, DEFAULT_RESOLVER);
@@ -194,15 +208,52 @@ public final class UrlValidationUtils {
         if (url == null || url.isBlank()) {
             return;
         }
-        String host;
+        String trimmed = url.trim();
+        URI uri;
         try {
-            host = new URI(url.trim()).getHost();
+            uri = new URI(trimmed);
         } catch (URISyntaxException e) {
+            throw unreadableHostRefusal();
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
             return;
         }
+        String host = uri.getHost();
         if (host == null || host.isBlank()) {
-            return;
+            throw unreadableHostRefusal();
         }
+        rejectMetadataHost(host, resolver);
+        String clientHost = javaNetUrlHost(trimmed);
+        if (clientHost != null && !clientHost.isBlank() && !clientHost.equalsIgnoreCase(host)) {
+            rejectMetadataHost(clientHost, resolver);
+        }
+    }
+
+    /**
+     * The host {@code java.net.URL} — the parser Vert.x's {@code ClientUri} uses —
+     * reads from {@code url}, or {@code null} when it cannot parse it.
+     */
+    @SuppressWarnings("deprecation") // the deprecated constructor IS the parser the client uses
+    private static String javaNetUrlHost(String url) {
+        try {
+            return new URL(url).getHost();
+        } catch (MalformedURLException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The URL itself is left out of the message: it is routinely templated, and a
+     * templated URL can carry a credential.
+     */
+    private static IllegalArgumentException unreadableHostRefusal() {
+        return new IllegalArgumentException("URL refused: its host cannot be read as a standard host name or IP address (an underscore, a "
+                + "percent-encoded character or a trailing dot after an IP literal), so it cannot be checked against the cloud "
+                + "instance-metadata block. Use a standard host name.");
+    }
+
+    private static void rejectMetadataHost(String host, HostResolver resolver) {
         String bareHost = host.toLowerCase(Locale.ROOT);
         if (bareHost.startsWith("[") && bareHost.endsWith("]")) {
             bareHost = bareHost.substring(1, bareHost.length() - 1);

@@ -235,7 +235,7 @@ export function AddExtensionDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
       data-testid="add-extension-dialog"
     >
       {/* Backdrop */}
@@ -247,7 +247,7 @@ export function AddExtensionDialog({
 
       {/* Dialog */}
       <div
-        className="relative z-10 w-full max-w-md rounded-xl border bg-card shadow-xl mx-4"
+        className="relative z-10 w-full max-w-md rounded-xl border bg-card shadow-xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-ext-dialog-title"
@@ -257,6 +257,7 @@ export function AddExtensionDialog({
           <div className="flex items-center gap-2">
             {step === "pick-resource" ? (
               <button
+                aria-label={t("common.back", "Back")}
                 onClick={() => {
                   setStep("pick-type");
                   setSelectedType(null);

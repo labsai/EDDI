@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import ai.labs.eddi.utils.JsonStringField;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -37,7 +38,6 @@ import java.time.Duration;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
@@ -408,7 +408,15 @@ public class LifecycleManager implements ILifecycleManager {
                 // execution where the loop index is offset-relative.
                 checkIfPauseConversationAction(conversationMemory, absoluteIndex, actionsBefore);
 
-            } catch (LifecycleException | RuntimeException e) {
+            } catch (LifecycleException | RuntimeException | StackOverflowError caught) {
+                // A StackOverflowError is an Error, so it used to escape this block: no
+                // error counter, no task_failed event, no audit entry, no strict-write
+                // rollback — the turn just died. The stack has unwound by the time the
+                // catch runs, so handling it here is as safe as any other task failure.
+                // It is wrapped so the accounting below, typed on Exception, is unchanged.
+                Exception e = caught instanceof StackOverflowError soe
+                        ? new IllegalStateException("Task overflowed the stack (unbounded recursion on its input)", soe)
+                        : (Exception) caught;
                 // HITL tool pause: a gated LLM tool call is NOT a task failure. Convert
                 // it to a ConversationPauseException(TOOL_CALL) BEFORE the error counter
                 // and strict-write rollback — the partially-executed step data (incl. the
@@ -1056,6 +1064,24 @@ public class LifecycleManager implements ILifecycleManager {
      * @return the digest text
      */
     private String reportFailureToCaller(ConversationStep step, ILifecycleTask task, Exception exception) {
+        try {
+            return reportFailureToCallerUnguarded(step, task, exception);
+        } catch (StackOverflowError overflow) {
+            // The handler itself must not throw out of the turn's failure path: report
+            // the bare failure type rather than nothing (security review L14).
+            String digestText = String.format("Task '%s' failed: %s", task.getId(), exception.getClass().getSimpleName());
+            var errorOutput = new LinkedHashMap<String, Object>();
+            errorOutput.put("type", "errorDigest");
+            errorOutput.put("taskId", task.getId().name());
+            errorOutput.put("taskType", task.getType());
+            errorOutput.put("errorType", "stack_overflow");
+            errorOutput.put("text", digestText);
+            step.addConversationOutputList(TASK_ERRORS, List.of(errorOutput));
+            return digestText;
+        }
+    }
+
+    private String reportFailureToCallerUnguarded(ConversationStep step, ILifecycleTask task, Exception exception) {
         String digestText = String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
@@ -1085,6 +1111,16 @@ public class LifecycleManager implements ILifecycleManager {
      * leaves the server.
      */
     static String summarizeException(Throwable e) {
+        try {
+            return summarizeUnguarded(e);
+        } catch (StackOverflowError | RuntimeException failure) {
+            // This runs inside the failure handler: whatever the summary trips over
+            // must not replace the failure being reported (security review L14).
+            return e.getClass().getSimpleName();
+        }
+    }
+
+    private static String summarizeUnguarded(Throwable e) {
         String msg = describeFailure(e);
 
         // Strip common noise patterns
@@ -1107,8 +1143,14 @@ public class LifecycleManager implements ILifecycleManager {
         return msg;
     }
 
-    /** {@code "message":"..."} in a provider's JSON error body. */
-    private static final Pattern PROVIDER_ERROR_MESSAGE = Pattern.compile("\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+    /**
+     * The {@code "message":"..."} member of a provider's JSON error body, found by
+     * {@link JsonStringField}'s linear scan. It was the regex
+     * {@code "message"\s*:\s*"((?:[^"\\]|\\.)*)"}, which recursed once per
+     * character: a provider echoing a 2 kB user string into {@code message}
+     * overflowed the stack inside this failure handler (security review L14).
+     */
+    private static final String PROVIDER_ERROR_MESSAGE_KEY = "message";
 
     /**
      * What actually went wrong, rather than what the outermost wrapper says.
@@ -1147,10 +1189,11 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     private static String providerMessage(String message) {
-        Matcher matcher = PROVIDER_ERROR_MESSAGE.matcher(message);
-        return message.trim().startsWith("{") && matcher.find()
-                ? matcher.group(1).replace("\\\"", "\"").replace("\\\\", "\\")
-                : message;
+        if (!message.trim().startsWith("{")) {
+            return message;
+        }
+        String raw = JsonStringField.firstRawValue(message, PROVIDER_ERROR_MESSAGE_KEY);
+        return raw != null ? raw.replace("\\\"", "\"").replace("\\\\", "\\") : message;
     }
 
     // ==================== OpenTelemetry ====================
@@ -1195,6 +1238,9 @@ public class LifecycleManager implements ILifecycleManager {
             if (current instanceof ConnectException
                     || current instanceof UnknownHostException) {
                 return "transport";
+            }
+            if (current instanceof StackOverflowError) {
+                return "stack_overflow";
             }
         }
         // Substring matching is easily fooled (e.g. "failed after 429ms"), so it only

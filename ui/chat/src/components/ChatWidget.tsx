@@ -4,7 +4,7 @@
    and composes all sub-components.
    ────────────────────────────────────────────── */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
@@ -34,6 +34,7 @@ import {
 } from "@/api/chat-api";
 import { setAuthToken } from "@/api/http";
 import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
+import { readUrlToken } from "@/api/chat-config";
 import {
   isDemoMode,
   demoStartConversation,
@@ -241,6 +242,29 @@ export function applyColorOverrides(params: URLSearchParams): void {
 }
 
 /**
+ * True when `raw` parses, against this page's origin, to a URL on that same
+ * origin whose pathname is exactly `raw` and which carries no query or fragment.
+ * `http.ts` builds request URLs by concatenating `${base}${path}`, so a `?` or
+ * `#` in the base turns the real path into a query string
+ * (`/administration/cluster/caches/resync?` + `/agents/...`) and the widget
+ * fires a state-changing request at a path the page owner never named. `..`
+ * segments fail the pathname comparison because the URL parser collapses them.
+ */
+function isCleanSameOriginPath(raw: string): boolean {
+  try {
+    const url = new URL(raw, window.location.origin);
+    return (
+      url.origin === window.location.origin &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.pathname === raw
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Sanitize the `?apiServer=` param so it can never redirect API traffic
  * off-origin. This is an ALLOW-list, not a deny-list: the value must be a clean
  * same-origin absolute path (a single leading `/`, as the dev proxy and sub-path
@@ -249,7 +273,10 @@ export function applyColorOverrides(params: URLSearchParams): void {
  * URL parser strips before resolving, turning `${base}${path}` into the attacker
  * origin and leaking the bearer token. So anything carrying a control character
  * or whitespace (the smuggling vector), a backslash, or not starting with a
- * single `/` is rejected.
+ * single `/` is rejected. Beyond that the value must round-trip through
+ * `new URL(raw, origin)` unchanged with no `?`, `#` or `%` (see
+ * `isCleanSameOriginPath`), so it cannot smuggle a query string into the
+ * concatenated request URL.
  */
 export function sanitizeApiServer(raw: string | null): string | null {
   if (!raw) return null;
@@ -258,8 +285,9 @@ export function sanitizeApiServer(raw: string | null): string | null {
     // eslint-disable-next-line no-control-regex
     /[\u0000- \u007f\\]/.test(raw) || // control chars, whitespace, DEL, backslash
     !raw.startsWith("/") || // must be an absolute path...
-    raw.startsWith("//"); // ...but not a protocol-relative //host
-  if (rejected) {
+    raw.startsWith("//") || // ...but not a protocol-relative //host
+    raw.includes("%"); // no percent-encoded segments (%2F, %2e%2e, %09 ...)
+  if (rejected || !isCleanSameOriginPath(raw)) {
     console.warn(
       "[eddi-chat] ignoring apiServer query param: only a clean same-origin path (single leading '/') is allowed",
     );
@@ -300,9 +328,11 @@ export function ChatWidget() {
   /**
    * `?token=` is read ONCE and then removed from the address bar. Left there,
    * a bearer token sat in the visible URL, the history entry, and anything the
-   * user copied or bookmarked.
+   * user copied or bookmarked. It is honoured only when the operator set
+   * `eddi.chat.url-token.enabled` (readUrlToken warns and yields null
+   * otherwise); the parameter is stripped either way.
    */
-  const [urlToken] = useState(() => searchParams.get("token"));
+  const [urlToken] = useState(() => readUrlToken(searchParams));
   const tokenOriginParam = searchParams.get("tokenOrigin");
   /**
    * False while a token is still expected from the embedding page. With
@@ -355,6 +385,16 @@ export function ChatWidget() {
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   /** Bumped to move focus into the composer once the field that replaced it goes. */
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  /**
+   * isProcessing is also raised by undo, redo, retry and cancel, which use it
+   * as the re-entrancy guard. Those are not the agent composing a reply, so
+   * this flag keeps the typing dots and the Stop button (which would cancel
+   * the conversation and raise a false "interrupted" banner) off for them.
+   */
+  const [historyBusy, setHistoryBusy] = useState(false);
+  useEffect(() => {
+    if (!state.isProcessing) setHistoryBusy(false);
+  }, [state.isProcessing]);
   /** Controller for the in-flight SSE read, so it can be stopped on demand. */
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -424,10 +464,12 @@ export function ChatWidget() {
     // `urlToken` was read once and stripped from the address above, so it does
     // not linger in the address bar, history, a Referer header or access logs.
     //
-    // NOTE (residual risk): accepting a token straight from the URL is still a
+    // NOTE (residual risk): accepting a token straight from the URL is a
     // login-CSRF vector — a crafted link can silently authenticate the widget as
-    // someone else's session. Fully closing this needs a PKCE/OIDC login flow
-    // (out of scope here). Prefer the postMessage handshake below, or config.
+    // someone else's session — and the first request logs it before the strip
+    // above. That is why `urlToken` is null unless the operator opted in with
+    // eddi.chat.url-token.enabled. Prefer the postMessage handshake below, or
+    // config.
     //
     // Only a token that is actually present is installed: clearing it here
     // would wipe one the host handed over by postMessage.
@@ -1490,6 +1532,7 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
       await undoConversation("", "", state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId);
@@ -1530,6 +1573,7 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
       await redoConversation("", "", state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId);
@@ -1562,6 +1606,9 @@ export function ChatWidget() {
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
     (value: string) => {
+      // The clicked button unmounts with the replies; keep a keyboard user's
+      // place by moving focus to the composer once it is enabled again.
+      setComposerFocusSignal((n) => n + 1);
       handleSend(value);
     },
     [handleSend],
@@ -1587,6 +1634,15 @@ export function ChatWidget() {
    * Stop — so when there is something to lose it asks first. An untouched
    * conversation has nothing to lose and restarts at once.
    */
+  // Cancelling the confirmation unmounts the focused button; give focus back
+  // to the control that opened it.
+  const closeRestartConfirm = useCallback(() => {
+    setConfirmingRestart(false);
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>('[data-testid="restart-btn"]')?.focus(),
+    );
+  }, []);
+
   const requestRestart = useCallback(() => {
     if (state.messages.some((m) => m.role === "user")) {
       setConfirmingRestart(true);
@@ -1655,6 +1711,7 @@ export function ChatWidget() {
     const gen = generationRef.current;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       await cancelConversation(state.conversationId);
       // "This request was cancelled." and EXECUTION_INTERRUPTED describe the
       // conversation that was cancelled, not one started since.
@@ -1689,6 +1746,7 @@ export function ChatWidget() {
     if (!state.conversationId) return;
     const gen = generationRef.current;
     dispatch({ type: "SET_PROCESSING", value: true });
+    setHistoryBusy(true);
     try {
       await rerunLastStep(state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId, true);
@@ -1725,6 +1783,8 @@ export function ChatWidget() {
     // Abort the local read first so tokens stop arriving immediately, then ask
     // the server to stop producing them.
     abortRef.current?.abort();
+    // The Stop button unmounts when the turn ends; hand focus to the composer.
+    setComposerFocusSignal((n) => n + 1);
     abortRef.current = null;
     // Stopping before the first token left an empty bubble rendering
     // "No response", implying the agent answered with nothing.
@@ -1754,28 +1814,76 @@ export function ChatWidget() {
   // scroll on every token, smoothly, which fought anyone scrolling up to
   // re-read mid-reply (and the smooth animation never caught up with the
   // tokens). Following is an instant jump; leaving the bottom ends it.
-  useEffect(() => {
+  // A layout effect, so the jump lands before the browser paints the new
+  // content instead of one frame after it.
+  // Where the transcript was last scrolled to, by the reader or by us. Moving
+  // up from here is what tells "the reader left the bottom" apart from a
+  // smooth scroll still on its way down.
+  const lastScrollTopRef = useRef(0);
+  useLayoutEffect(() => {
     const el = messagesContainerRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    lastScrollTopRef.current = el.scrollTop;
   }, [state.messages, state.isProcessing]);
+
+  // Content also grows without a state change: the throttled trailing render
+  // of a streaming reply, lazy images, KaTeX and highlight.js arriving late,
+  // the paused card filling in, and the viewport shrinking under an on-screen
+  // keyboard. Re-pin for all of them while the reader is following.
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const repin = () => {
+      if (!stickToBottomRef.current) return;
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+    };
+    const mutations =
+      typeof MutationObserver === "function" ? new MutationObserver(repin) : null;
+    mutations?.observe(el, { childList: true, subtree: true, characterData: true });
+    const resizes = typeof ResizeObserver === "function" ? new ResizeObserver(repin) : null;
+    resizes?.observe(el);
+    // `load` does not bubble, so listen in the capture phase for images.
+    el.addEventListener("load", repin, true);
+    return () => {
+      mutations?.disconnect();
+      resizes?.disconnect();
+      el.removeEventListener("load", repin, true);
+    };
+  }, []);
 
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
-    stickToBottomRef.current = atBottom;
-    setShowScrollBtn(!atBottom);
+    const scrolledUp = el.scrollTop < lastScrollTopRef.current - 1;
+    lastScrollTopRef.current = el.scrollTop;
+    // Only the reader moving UP ends following. A smooth scroll towards the
+    // bottom fires scroll events that are "not at bottom yet" all the way
+    // down; treating those as leaving used to turn following off again right
+    // after the Scroll-to-bottom button was pressed.
+    if (atBottom) stickToBottomRef.current = true;
+    else if (scrolledUp) stickToBottomRef.current = false;
+    setShowScrollBtn(!atBottom && !stickToBottomRef.current);
   }, []);
 
   const scrollToBottom = useCallback(() => {
+    const el = messagesContainerRef.current;
     stickToBottomRef.current = true;
+    setShowScrollBtn(false);
+    if (!el) return;
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    messagesEndRef.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
-    setShowScrollBtn(false);
+    // Scroll the transcript itself: scrollIntoView would also scroll the host
+    // page when the widget is embedded in an iframe.
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
   }, []);
 
   /* ─── Composer focus handoff ────────────────── */
@@ -1795,6 +1903,11 @@ export function ChatWidget() {
   }, [dispatch]);
 
   /* ─── Derived state ─────────────────────────── */
+  // Once the reply's text is arriving, the bubble itself shows the agent at
+  // work; dots below it would be a second "agent is typing".
+  const lastMessage = state.messages[state.messages.length - 1];
+  const replyIsStreaming =
+    !!lastMessage?.isStreaming && lastMessage.role !== "user" && !!lastMessage.content;
   const isEnded = state.conversationState === "ENDED";
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
@@ -1863,9 +1976,11 @@ export function ChatWidget() {
                   />
                 )}
                 {state.isProcessing &&
+                  !historyBusy &&
                   !state.isThinking &&
                   !state.isEscalating &&
-                  !state.activeTool && <TypingIndicator />}
+                  !state.activeTool &&
+                  !replyIsStreaming && <TypingIndicator />}
               </>
             )}
 
@@ -1899,6 +2014,7 @@ export function ChatWidget() {
           <QuickReplies
             replies={state.quickReplies}
             onSelect={handleQuickReply}
+            disabled={state.isProcessing || !profileSettled}
           />
         )}
 
@@ -1998,7 +2114,7 @@ export function ChatWidget() {
                   )}
                 </div>
                 <div className="chat-actions__right">
-                  {state.isProcessing && !isPaused && (
+                  {state.isProcessing && !historyBusy && !isPaused && (
                     <button
                       className="chat-actions__btn chat-actions__btn--stop"
                       onClick={handleStop}
@@ -2035,7 +2151,7 @@ export function ChatWidget() {
                 aria-describedby="chat-confirm-text"
                 data-testid="restart-confirm"
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") setConfirmingRestart(false);
+                  if (e.key === "Escape") closeRestartConfirm();
                 }}
               >
                 <span id="chat-confirm-text" className="chat-confirm__text">
@@ -2053,7 +2169,7 @@ export function ChatWidget() {
                   <button
                     type="button"
                     className="chat-confirm__btn"
-                    onClick={() => setConfirmingRestart(false)}
+                    onClick={closeRestartConfirm}
                     autoFocus
                     data-testid="restart-confirm-cancel"
                   >
@@ -2072,6 +2188,7 @@ export function ChatWidget() {
                 onSend={handleRequestedFieldSend}
                 onCancel={handleRequestedFieldCancel}
                 disabled={state.isProcessing}
+                autoFocus={state.messages.some((m) => m.role === "user")}
               />
             ) : (
               <ChatInput

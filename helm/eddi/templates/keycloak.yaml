@@ -22,6 +22,49 @@
   carry no path at all. configmap.yaml trims the same way for the issuer.
 */}}
 {{- $realmOrigin := trimSuffix "/" (default "https://eddi.example.com" .Values.keycloak.publicOrigin) }}
+{{- /*
+  start-dev behind an Ingress. The StatefulSet below runs Keycloak in its
+  DEVELOPMENT mode (H2 on one PVC, no production hardening, no HA), which is
+  fine on a port-forward and is not an identity provider to publish under a
+  hostname. An Ingress is exactly that, so the pair is refused unless the
+  operator says they know: keycloak.devModeAcknowledged=true.
+*/}}
+{{- if and .Values.ingress.enabled (not .Values.keycloak.devModeAcknowledged) }}
+{{- fail "keycloak.enabled=true together with ingress.enabled=true: the in-chart Keycloak runs `start-dev` (development mode — embedded H2 on a single PVC, no production hardening, no HA), which must not be the identity provider behind a deployment reachable by name. Either run your own Keycloak with `start` against an external database and point eddi.oidc.authServerUrl at it (keycloak.enabled=false), or, for a demo or staging cluster, acknowledge it explicitly: --set keycloak.devModeAcknowledged=true." }}
+{{- end }}
+{{- $realm := .Files.Get "files/eddi-realm.json" | replace "https://eddi.example.com" $realmOrigin }}
+{{- if .Values.keycloak.publicOrigin }}
+{{- /*
+  A real hostname was given, so the eddi-frontend client loses the entries that
+  only make sense on a port-forward: the http(s)://localhost:* redirects and
+  the `+` wildcard web origin (which admits every redirect host as a CORS
+  origin). Left in, a realm published under https://eddi.example.com still
+  completes a login for a page on http://localhost:<any port> — any local
+  listener, including one a malicious site opened — and hands it the code.
+  The eddi-mcp client is untouched: its loopback redirects are how MCP clients
+  on a workstation sign in (RFC 8252), and it has no web origins.
+
+  Parsed and re-serialised rather than string-edited, so the stripping cannot
+  silently miss an entry when the realm is reformatted. toPrettyJson reorders
+  keys; Keycloak's importer does not care.
+*/}}
+{{- $doc := fromJson $realm }}
+{{- range $client := $doc.clients }}
+{{- if eq $client.clientId "eddi-frontend" }}
+{{- $redirects := list }}
+{{- range $uri := $client.redirectUris }}
+{{- if not (regexMatch "^https?://localhost(:|/|$)" $uri) }}{{ $redirects = append $redirects $uri }}{{ end }}
+{{- end }}
+{{- $origins := list }}
+{{- range $origin := $client.webOrigins }}
+{{- if not (or (eq $origin "+") (regexMatch "^https?://localhost(:|/|$)" $origin)) }}{{ $origins = append $origins $origin }}{{ end }}
+{{- end }}
+{{- $_ := set $client "redirectUris" $redirects }}
+{{- $_ := set $client "webOrigins" $origins }}
+{{- end }}
+{{- end }}
+{{- $realm = toPrettyJson $doc }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,8 +74,31 @@ metadata:
     app.kubernetes.io/component: auth
 data:
   eddi-realm.json: |
-{{ .Files.Get "files/eddi-realm.json" | replace "https://eddi.example.com" $realmOrigin | indent 4 }}
+{{ $realm | indent 4 }}
 ---
+{{- /*
+  The bootstrap admin password lives in a Secret and reaches the pod through
+  secretKeyRef, as in the kustomize overlay (keycloak-admin / password). It
+  used to be a plain `value:` in the pod spec, where `kubectl get sts -o yaml`,
+  the release manifest in the Helm Secret and every describe/audit log showed
+  the master-realm superuser password in clear. `required` moved here with it:
+  the chart still ships no default. keycloak.existingSecret skips this object
+  and reads the operator's own Secret instead.
+*/}}
+{{- $kcSecretName := .Values.keycloak.existingSecret | default (printf "%s-keycloak" (include "eddi.fullname" .)) }}
+{{- if not .Values.keycloak.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "eddi.fullname" . }}-keycloak
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: auth
+type: Opaque
+stringData:
+  password: {{ required "keycloak.adminPassword is required when keycloak.enabled=true and keycloak.existingSecret is empty — the chart no longer ships a default. Generate one: openssl rand -base64 24" .Values.keycloak.adminPassword | quote }}
+---
+{{- end }}
 {{- /*
   A StatefulSet, not a Deployment. `start-dev` keeps Keycloak's H2 database
   under ${kc.home.dir}/data, which without a volume is the container's ephemeral
@@ -89,9 +155,15 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: keycloak
           image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           # --import-realm reads /opt/keycloak/data/import. Import is ONE-SHOT:
           # it seeds an empty database and is skipped once the realm exists, so
           # console edits survive restarts and ConfigMap edits do not reach an
@@ -109,11 +181,17 @@ spec:
           env:
             - name: KC_BOOTSTRAP_ADMIN_USERNAME
               value: {{ .Values.keycloak.adminUsername | quote }}
-              # No default password — `required` fails rendering rather than
-              # shipping admin/admin as the identity provider for the whole
-              # deployment.
+              # From the <release>-keycloak Secret above (or keycloak.existingSecret),
+              # never a `value:` in this pod spec. No default — `required` on the
+              # Secret fails rendering rather than shipping admin/admin as the
+              # identity provider for the whole deployment. secretKeyRef without
+              # `optional` fails closed: a missing Secret leaves the pod in
+              # CreateContainerConfigError rather than booting with no admin.
             - name: KC_BOOTSTRAP_ADMIN_PASSWORD
-              value: {{ required "keycloak.adminPassword is required when keycloak.enabled=true — the chart no longer ships a default. Generate one: openssl rand -base64 24" .Values.keycloak.adminPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $kcSecretName }}
+                  key: password
             - name: KC_HTTP_PORT
               value: "8080"
             # /health/* stay disabled unless this is set, whatever port you probe.

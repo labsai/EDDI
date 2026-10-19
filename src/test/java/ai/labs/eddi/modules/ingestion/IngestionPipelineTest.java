@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.FakeSite;
+import ai.labs.eddi.modules.ingestion.crawl.PageFetcher;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.extract.CsvTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
@@ -22,11 +23,14 @@ import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -89,6 +94,7 @@ class IngestionPipelineTest {
         embeddingModel = mock(EmbeddingModel.class);
 
         when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+        when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
         when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
                 .thenReturn(embeddingModel);
         when(embeddingModel.embedAll(any())).thenAnswer(invocation -> {
@@ -180,7 +186,7 @@ class IngestionPipelineTest {
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
             ArgumentCaptor<String> kbId = ArgumentCaptor.forClass(String.class);
-            verify(storeFactory).getOrCreate(kbId.capture(), any(RagConfiguration.class));
+            verify(storeFactory).getOrCreateForIngestion(kbId.capture(), any(RagConfiguration.class));
             assertEquals(KB_RESOURCE_ID, kbId.getValue(),
                     "the store must be keyed by the knowledge base's id, not by " + SOURCE_NAME + " nor by a name another knowledge base can share");
         }
@@ -307,6 +313,7 @@ class IngestionPipelineTest {
         void unsupportedRemovalIsReported() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
             when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
             FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
 
             IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
@@ -596,7 +603,7 @@ class IngestionPipelineTest {
             var site = new FakeSite().page(SITE + "/", pageWith("Here."));
             pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
 
-            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class)))
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class)))
                     .thenReturn(new RecordingEmbeddingStore().withFailingRemoval());
 
             var gone = new FakeSite().status(SITE + "/", 404);
@@ -819,6 +826,44 @@ class IngestionPipelineTest {
             assertEquals(IIngestionStateStore.IngestionRun.Status.COMPLETED, runs.get(0).status());
             assertEquals(1, runs.get(0).documentsIngested());
             assertTrue(runs.get(0).segmentsStored() > 0);
+        }
+
+        @Test
+        @DisplayName("a run records what started it and why it stopped")
+        void recordsTriggerAndStopReason() {
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Content."));
+
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST, null,
+                    IIngestionStateStore.IngestionRun.Trigger.SCHEDULED);
+
+            var run = stateStore.listRuns(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), 10).get(0);
+            assertEquals(IIngestionStateStore.IngestionRun.Trigger.SCHEDULED, run.trigger());
+            assertEquals("COMPLETED", run.stopReason());
+        }
+
+        @Test
+        @DisplayName("a running run shows its counters before it finishes")
+        void progressIsVisibleMidRun() {
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><head><title>Index</title></head><body><main><p>Index.</p>"
+                            + "<a href=\"" + SITE + "/a\">a</a><a href=\"" + SITE + "/b\">b</a></main></body></html>")
+                    .page(SITE + "/a", pageWith("Page A."))
+                    .page(SITE + "/b", pageWith("Page B."));
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+            List<Integer> ingestedWhileRunning = new ArrayList<>();
+            doAnswer(invocation -> {
+                // Read from the store itself, mid-run: what the Manager would see.
+                stateStore.activeRun(sourceKey).ifPresent(run -> ingestedWhileRunning.add(run.documentsIngested()));
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            IngestionPipeline pipeline = pipelineFor(site);
+            pipeline.progressReportInterval = Duration.ZERO;
+
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(List.of(0, 1, 2), ingestedWhileRunning,
+                    "each embedding saw the documents ingested before it already on the running row");
         }
 
         @Test
@@ -1598,6 +1643,7 @@ class IngestionPipelineTest {
         void forgetDocumentReportsAnUndeletableStore() {
             embeddingStore = new RecordingEmbeddingStore().withoutRemovalSupport();
             when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+            when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
 
             var removed = uploadPipeline()
                     .forgetDocument(KB_RESOURCE_ID, knowledgeBase(), uploadSource(), "secret.md");
@@ -1627,6 +1673,223 @@ class IngestionPipelineTest {
             // three — and must not delete them.
             assertTrue(report.tombstoningSkipped());
             assertEquals(0, report.documentsTombstoned());
+        }
+    }
+
+    /**
+     * An in-memory knowledge base is empty after a restart while its content hashes
+     * survive in the state store. Every document used to read "unchanged" over the
+     * empty store, so a scheduled run never refilled it and the agent retrieved
+     * nothing until an operator purged the state by hand.
+     *
+     * <p>
+     * These run the real {@link EmbeddingStoreFactory}: a new factory instance is a
+     * restarted process, and its in-memory stores have a new epoch.
+     */
+    @Nested
+    @DisplayName("vector store epoch")
+    class StoreEpoch {
+
+        private final GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+        private final SecretResolver secrets = mock(SecretResolver.class);
+
+        private EmbeddingStoreFactory restartedProcess() {
+            return new EmbeddingStoreFactory(variables, secrets, 50_000);
+        }
+
+        private EmbeddingStoreFactory processWithCap(int maxSegments) {
+            return new EmbeddingStoreFactory(variables, secrets, maxSegments);
+        }
+
+        private int segmentsIn(EmbeddingStoreFactory factory) {
+            return factory.getOrCreate(KB_RESOURCE_ID, knowledgeBase())
+                    .search(EmbeddingSearchRequest.builder()
+                            .queryEmbedding(Embedding.from(new float[]{0.1f, 0.2f}))
+                            .maxResults(100)
+                            .minScore(0.0)
+                            .build())
+                    .matches().size();
+        }
+
+        private String sourceKey() {
+            return IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+        }
+
+        @Test
+        @DisplayName("a restarted in-memory store is refilled on the next run instead of reported unchanged")
+        void restartedStoreIsReEmbedded() {
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+            storeFactory = restartedProcess();
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertEquals(1, segmentsIn(storeFactory));
+
+            storeFactory = restartedProcess();
+            assertEquals(0, segmentsIn(storeFactory), "a new process starts with an empty store");
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(1, report.documentsIngested(), "the unchanged page must be embedded again");
+            assertEquals(0, report.documentsUnchanged());
+            assertEquals(1, segmentsIn(storeFactory), "retrieval must find the page again");
+        }
+
+        @Test
+        @DisplayName("the same store keeps trusting its content hashes")
+        void sameStoreSkipsUnchangedPages() {
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+            storeFactory = restartedProcess();
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(1, report.documentsUnchanged());
+            assertEquals(0, report.documentsIngested());
+            assertEquals(1, segmentsIn(storeFactory));
+        }
+
+        @Test
+        @DisplayName("state written before the epoch existed is re-embedded for an in-memory store")
+        void legacyStateIsReEmbeddedForInMemory() {
+            // The mocked factory reports no fingerprint, as every build before this one
+            // effectively did, so the first run records none.
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertTrue(stateStore.storeFingerprint(sourceKey()).isEmpty());
+
+            storeFactory = restartedProcess();
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(1, report.documentsIngested());
+            assertEquals(1, segmentsIn(storeFactory));
+            assertTrue(stateStore.storeFingerprint(sourceKey()).isPresent(), "the epoch is recorded from now on");
+        }
+
+        @Test
+        @DisplayName("an external store's state without a fingerprint keeps working unchanged")
+        void legacyStateStaysTrustedForExternalStores() {
+            // storeFactory is the mock: an external store has no fingerprint (null), and
+            // its data outlives the process, so nothing may change for it.
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertEquals(1, report.documentsUnchanged());
+            assertTrue(stateStore.storeFingerprint(sourceKey()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("after a restart no validator is sent, so a 304 cannot skip the page")
+        void noConditionalRequestAgainstANewStore() {
+            storeFactory = restartedProcess();
+            FakeSite first = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .pageWithValidators(SITE + "/leaf", pageWith("Content."), "\"v1\"", null);
+            pipelineFor(first).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            storeFactory = restartedProcess();
+            FakeSite second = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .conditional(SITE + "/leaf", pageWith("Content."), "\"v1\"");
+            IngestionReport report = pipelineFor(second).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(),
+                    Mode.INGEST);
+
+            assertEquals(2, report.documentsIngested());
+            var leafRequest = second.requests().stream()
+                    .filter(request -> request.url().equals(SITE + "/leaf"))
+                    .findFirst().orElseThrow();
+            assertNull(leafRequest.ifNoneMatch(), "a validator would earn a 304 for a page the new store lacks");
+        }
+
+        @Test
+        @DisplayName("a preview after a restart reports the re-embedding and records nothing")
+        void previewReportsWithoutRecording() {
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Install the thing."));
+            storeFactory = restartedProcess();
+            pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            String recorded = stateStore.storeFingerprint(sourceKey()).orElseThrow();
+
+            storeFactory = restartedProcess();
+            IngestionReport preview = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.PREVIEW);
+
+            assertEquals(1, preview.documentsIngested(), "the run would embed the page again");
+            assertEquals(recorded, stateStore.storeFingerprint(sourceKey()).orElseThrow());
+            IngestionReport run = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            assertEquals(1, run.documentsIngested(), "the preview must not have settled the mismatch");
+        }
+
+        @Test
+        @DisplayName("a full in-memory store fails the run with an actionable error instead of evicting")
+        void fullStoreFailsTheRun() {
+            storeFactory = processWithCap(1);
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .page(SITE + "/leaf", pageWith("Content."));
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertNotNull(report.message());
+            assertTrue(report.message().contains("eddi.rag.in-memory.max-segments"), report.message());
+            assertEquals(1, report.documentsIngested());
+            assertEquals(1, segmentsIn(storeFactory), "the segment already stored stays; nothing was evicted");
+            var runs = stateStore.listRuns(sourceKey(), 10);
+            assertEquals(IIngestionStateStore.IngestionRun.Status.FAILED, runs.get(0).status());
+        }
+
+        @Test
+        @DisplayName("a store replaced while the run holds it fails that run; the next run refills the new store")
+        void storeReplacedMidRunFailsTheRunThenRefills() {
+            storeFactory = restartedProcess();
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .page(SITE + "/leaf", pageWith("Content."));
+            // The knowledge base is deleted (or moved, or remodelled) while the run is
+            // crawling: the store the run took at its start is gone from the registry.
+            PageFetcher dropsTheStoreMidRun = command -> {
+                if (command.url().endsWith("/leaf")) {
+                    storeFactory.dropInMemoryStore(KB_RESOURCE_ID, knowledgeBase());
+                }
+                return site.fetch(command);
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(dropsTheStoreMidRun), new HtmlToMarkdownConverter(), stateStore,
+                    fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertNotNull(report.message());
+            assertTrue(report.message().contains("replaced or removed"), report.message());
+            assertEquals(0, segmentsIn(storeFactory), "nothing landed in the orphan, and the current store is new");
+
+            IngestionReport next = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertNotEquals(IngestionReport.Outcome.FAILED, next.outcome());
+            assertTrue(segmentsIn(storeFactory) > 0, "the next run re-embeds into the current store");
+        }
+
+        @Test
+        @DisplayName("an all-unchanged run whose checked store is dropped mid-run does not report success over an empty store")
+        void unchangedRunOverADroppedStoreIsNotASuccess() {
+            storeFactory = restartedProcess();
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(SITE + "/leaf"))
+                    .page(SITE + "/leaf", pageWith("Content."));
+            IngestionReport first = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+            assertNotEquals(IngestionReport.Outcome.FAILED, first.outcome());
+
+            // Same content, so every document reads "unchanged" against the store whose
+            // fingerprint the run checked, and the run never writes. The store is
+            // dropped after that check.
+            PageFetcher dropsTheStoreMidRun = command -> {
+                if (command.url().endsWith("/leaf")) {
+                    storeFactory.dropInMemoryStore(KB_RESOURCE_ID, knowledgeBase());
+                }
+                return site.fetch(command);
+            };
+            var pipeline = new IngestionPipeline(new WebCrawler(dropsTheStoreMidRun), new HtmlToMarkdownConverter(), stateStore,
+                    fileStore, extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), leafSource(), Mode.INGEST);
+
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome(),
+                    "its documents are not in the current store, which is empty");
+            assertTrue(report.message().contains("replaced or removed"), report.message());
+            assertEquals(0, segmentsIn(storeFactory));
         }
     }
 

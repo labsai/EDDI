@@ -29,6 +29,7 @@ import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -45,10 +46,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -171,8 +174,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final CallerIdentityResolver callerIdentityResolver;
     private final CallerIdentityContext callerIdentityContext;
     private final RequestRedactor requestRedactor;
+
+    /**
+     * Enforces a secret's {@code allowedHosts} against the call's target once every
+     * reference in the request is known. Field-injected to keep the constructor
+     * signature, which another change owns; null only in tests that construct the
+     * executor directly, where there is no vault to consult.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
+    private final Set<String> ssrfAllowedHosts;
     private final long defaultTimeoutInMillis;
     private final int defaultMaxResponseSizeInBytes;
 
@@ -181,8 +194,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
             GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
             CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
+            @ConfigProperty(name = "eddi.security.ssrf-protection.allowed-hosts") Optional<String> ssrfAllowedHosts,
             @ConfigProperty(name = "eddi.httpcalls.default-timeout-millis", defaultValue = "30000") long defaultTimeoutInMillis,
             @ConfigProperty(name = "eddi.httpcalls.default-max-response-size-bytes", defaultValue = "2000000") int defaultMaxResponseSizeInBytes) {
+        this(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, callerIdentityResolver,
+                callerIdentityContext, requestRedactor, connectionResolver, ssrfProtectionEnabled, defaultTimeoutInMillis,
+                defaultMaxResponseSizeInBytes);
+        this.ssrfAllowedHosts.addAll(parseAllowedHosts(ssrfAllowedHosts.orElse("")));
+    }
+
+    /**
+     * Without an SSRF allow-list: every target is checked when protection is on.
+     */
+    public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, CallerIdentityResolver callerIdentityResolver,
+            CallerIdentityContext callerIdentityContext, RequestRedactor requestRedactor, ConnectionResolver connectionResolver,
+            boolean ssrfProtectionEnabled, long defaultTimeoutInMillis, int defaultMaxResponseSizeInBytes) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
@@ -194,6 +221,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         this.requestRedactor = requestRedactor;
         this.connectionResolver = connectionResolver;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
+        this.ssrfAllowedHosts = new HashSet<>();
         this.defaultTimeoutInMillis = defaultTimeoutInMillis;
         this.defaultMaxResponseSizeInBytes = defaultMaxResponseSizeInBytes;
     }
@@ -257,6 +285,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // LLM tool result and truncated from the front, so key order decides
                 // what survives a cap. See the ordered "headers" insert below.
                 Map<String, Object> result = new LinkedHashMap<>();
+
+                // saveResponse without a responseObjectName stored the body under a null
+                // key, which the memory serializer refuses — so EVERY turn running the
+                // call failed. The store refuses that config at save time now; one stored
+                // before the check skips the save and says so, instead of failing the turn.
+                boolean saveResponse = Boolean.TRUE.equals(call.getSaveResponse());
+                if (saveResponse && (call.getResponseObjectName() == null || call.getResponseObjectName().isBlank())) {
+                    LOGGER.warnf("ApiCall (%s) has saveResponse=true but no responseObjectName; its response is not stored", call.getName());
+                    saveResponse = false;
+                }
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -341,7 +379,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         result.put("body", toolErrorBody);
 
                         // Store error body in memory so downstream templates / rules can inspect it
-                        if (call.getSaveResponse()) {
+                        if (saveResponse) {
                             String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
                                 prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
@@ -362,7 +400,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // NOT put into `result` here — see the ordered insert below.
                     }
 
-                    if (isResponseSuccessful && call.getSaveResponse()) {
+                    if (isResponseSuccessful && saveResponse) {
                         // Success bodies land in conversation memory, which is persisted as a
                         // single document — cap them just like the error bodies above.
                         // A response echoing a credential this request sent must not carry it
@@ -963,6 +1001,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
      *            header names written from a {@code ${connection:…}} reference;
      *            never null, empty when none was
      */
+    /**
+     * The plaintexts substituted into one request (the set every redaction reads)
+     * plus the references they came from, which the destination check needs after
+     * the target URL is known.
+     */
+    static final class ResolvedSecrets extends HashSet<String> {
+        private final Set<String> vaultReferences = new LinkedHashSet<>();
+
+        Set<String> vaultReferences() {
+            return vaultReferences;
+        }
+    }
+
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
@@ -983,7 +1034,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties)
             throws ITemplatingEngine.TemplateEngineException {
-        var resolvedSecrets = new HashSet<String>();
+        var resolvedSecrets = new ResolvedSecrets();
         try {
             BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, resolvedSecrets);
             if (ApprovedCallScope.isActive()) {
@@ -1121,7 +1172,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
-                                      Map<String, Property> conversationProperties, Set<String> resolvedSecrets)
+                                      Map<String, Property> conversationProperties, ResolvedSecrets resolvedSecrets)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -1130,6 +1181,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             path = SLASH_CHAR + path;
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        rejectTemplatedAuthority(targetDestination);
         var targetUriStr = templateTargetUri(targetDestination, templateDataObjects);
         // Resolve global variable references, then vault references in URL
         targetUriStr = resolveGuardedVariables(targetDestination, targetUriStr, "the request path", templateDataObjects, conversationProperties);
@@ -1148,9 +1200,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
-        // Off by default to preserve calls to internal/private APIs.
+        // Off by default to preserve calls to internal/private APIs. A host on the
+        // operator's allow-list skips the address check (it is an internal API the
+        // operator named on purpose) but never the metadata check.
         if (ssrfProtectionEnabled) {
-            UrlValidationUtils.validateUrl(targetUri.toString());
+            if (isAllowListed(targetUri)) {
+                UrlValidationUtils.validateUrlSyntax(targetUri.toString());
+                UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
+            } else {
+                UrlValidationUtils.validateUrl(targetUri.toString());
+            }
         } else {
             // Opting out of SSRF protection keeps private and loopback targets
             // reachable (configured internal APIs), but never the cloud instance-
@@ -1211,15 +1270,28 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);
-            int secretsBefore = resolvedSecrets.size();
+            // Judged by the reference, not by the resolved set growing: a secret the
+            // URL or body already resolved is in the set before this header is
+            // reached, so a header reusing it added nothing and went unflagged.
+            boolean headerReferencesVault = headerValue != null && SecretReference.compiledPattern().matcher(headerValue).find();
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
-            if (resolvedSecrets.size() > secretsBefore) {
+            if (headerReferencesVault) {
                 // A vault ${secret} was substituted into this header.
                 headerCarriesCredential = true;
             }
             // Caller identity resolves last and needs the target URI: the token is
             // only released when the call goes back to the caller's own origin.
             boolean callerTokenReferenced = headerValue != null && headerValue.contains(CALLER_TOKEN_REFERENCE);
+            if (callerTokenReferenced && !CallerIdentityResolver.containsTokenReference(headers.get(headerName))) {
+                // Only an author role may save ${caller:token} (CallerTokenAuthorPolicy),
+                // and that check reads the configuration as written. A reference that
+                // arrives through a ${vars:...} or ${vault:...} value bypasses it, and a
+                // variable can be changed after the config was saved — so the token is
+                // released only to a reference written in the header itself.
+                throw new CallerIdentityResolver.CallerIdentityException("Header '" + headerName + "' receives ${caller:token} from a "
+                        + "${vars:...} or ${vault:...} value. Write ${caller:token} in the header itself, where saving it is "
+                        + "restricted to eddi.caller-identity.author-roles.");
+            }
             String beforeCallerResolution = headerValue;
             headerValue = callerIdentityResolver.resolveValue(headerValue, targetUri);
             if (callerTokenReferenced) {
@@ -1300,6 +1372,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
+        }
+        // Last, with every reference the request carries collected and the target
+        // fully resolved: a secret whose allowedHosts does not name this host is
+        // refused here, before anything is sent.
+        if (vaultHostAllowlist != null) {
+            vaultHostAllowlist.requireAllowed(resolvedSecrets.vaultReferences(), targetUri.toString(), "API call '" + call.getName() + "'");
         }
         return new BuiltRequest(request, Set.copyOf(connectionOwnedHeaders), Set.copyOf(resolvedSecrets));
     }
@@ -1387,7 +1465,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * @param location
      *            human-readable field name for the error, e.g. "a request body"
      */
-    private String resolveSecrets(String value, Set<String> resolvedSecrets, String location) {
+    private String resolveSecrets(String value, ResolvedSecrets resolvedSecrets, String location) {
         if (value == null) {
             return null;
         }
@@ -1396,6 +1474,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         String unresolved = null;
         while (references.find()) {
             String reference = references.group();
+            resolvedSecrets.vaultReferences().add(reference);
             String plaintext = secretResolver.resolveValue(reference);
             if (plaintext == null || plaintext.equals(reference)) {
                 unresolved = reference;
@@ -1596,6 +1675,103 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 encodedView(templateDataObjects, HOST_UNRESERVED));
         String rest = prePostUtils.templateValues(targetDestination.substring(authorityEnd), pathSafeView(templateDataObjects));
         return authority + rest;
+    }
+
+    /**
+     * Refuses a target whose host or port is a template while SSRF protection is
+     * off.
+     * <p>
+     * <b>Why:</b> with protection off, loopback and private addresses are
+     * reachable. That is fine for a host the agent author wrote down, and not for
+     * one rendered from conversation data: a property is routinely captured from
+     * user input ({@code PropertySetterTask} slot-filling), so
+     * {@code https://{properties.apiHost}} lets whoever is chatting pick the host,
+     * {@code 127.0.0.1:7070} included, i.e. EDDI's own admin API. Who
+     * <em>authored</em> the template is not who <em>controls</em> the value. With
+     * protection on, the rendered host is validated like any other and the template
+     * is allowed.
+     * <p>
+     * A {@code ${vars:...}} or {@code ${vault:...}} reference is not a template:
+     * its value is set by an operator, not by a conversation.
+     *
+     * @throws IllegalArgumentException
+     *             naming the flag that allows it
+     */
+    @Override
+    public void rejectTemplatedAuthority(String targetDestination) {
+        if (ssrfProtectionEnabled || targetDestination == null || !hasTemplatedAuthority(targetDestination)) {
+            return;
+        }
+        throw new IllegalArgumentException("The host of '" + LogSanitizer.sanitize(targetDestination)
+                + "' is a template. With eddi.security.ssrf-protection.enabled=false a templated host or port could be steered by "
+                + "conversation input to loopback or private addresses, so it is refused. Write the host literally (or as a "
+                + "${vars:...} reference), or set eddi.security.ssrf-protection.enabled=true and list internal hosts in "
+                + "eddi.security.ssrf-protection.allowed-hosts.");
+    }
+
+    /**
+     * Whether the scheme, host or port of {@code url} contains a template
+     * expression ({@code {...}} not preceded by {@code $}). A URL that does not
+     * start with a literal {@code http://} or {@code https://} is checked up to its
+     * first {@code /}, {@code ?} or {@code #} outside braces, so a template
+     * standing in for the scheme counts too.
+     */
+    static boolean hasTemplatedAuthority(String url) {
+        int end = authorityEnd(url);
+        if (end < 0) {
+            end = url.length();
+            int depth = 0;
+            for (int i = 0; i < url.length(); i++) {
+                char c = url.charAt(i);
+                if (c == '{') {
+                    depth++;
+                } else if (c == '}' && depth > 0) {
+                    depth--;
+                } else if (depth == 0 && (c == '/' || c == '?' || c == '#')) {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        for (int i = 0; i < end; i++) {
+            if (url.charAt(i) == '{' && (i == 0 || url.charAt(i - 1) != '$')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Parses {@code eddi.security.ssrf-protection.allowed-hosts}: comma-separated
+     * {@code host} or {@code host:port} entries, compared case-insensitively. An
+     * entry without a port matches that host on any port.
+     */
+    static Set<String> parseAllowedHosts(String raw) {
+        var hosts = new HashSet<String>();
+        if (raw == null) {
+            return hosts;
+        }
+        for (String entry : raw.split(",")) {
+            String trimmed = entry.trim().toLowerCase(Locale.ROOT);
+            if (!trimmed.isEmpty()) {
+                hosts.add(trimmed);
+            }
+        }
+        return hosts;
+    }
+
+    /** Whether the target's host, or host:port, is on the SSRF allow-list. */
+    boolean isAllowListed(URI target) {
+        if (ssrfAllowedHosts.isEmpty() || target.getHost() == null) {
+            return false;
+        }
+        String host = target.getHost().toLowerCase(Locale.ROOT);
+        // A URL without a port uses its scheme's default, so "host:443" matches
+        // https://host as well as https://host:443.
+        int port = target.getPort() >= 0
+                ? target.getPort()
+                : "https".equalsIgnoreCase(target.getScheme()) ? 443 : "http".equalsIgnoreCase(target.getScheme()) ? 80 : -1;
+        return ssrfAllowedHosts.contains(host) || (port >= 0 && ssrfAllowedHosts.contains(host + ":" + port));
     }
 
     /**

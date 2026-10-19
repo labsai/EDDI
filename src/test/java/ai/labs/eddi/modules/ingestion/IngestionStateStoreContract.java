@@ -421,6 +421,57 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a running run shows its progress before it finishes")
+    default void runningRunShowsProgress() {
+        String runId = openRun(SOURCE);
+
+        store().reportProgress(new IngestionRun(runId, SOURCE, IngestionRun.Status.RUNNING, null, null,
+                7, 4, 2, 1, 0, 19, 0.05, null, 3, null, IngestionRun.Trigger.SCHEDULED));
+
+        IngestionRun run = store().activeRun(SOURCE).orElseThrow();
+        assertEquals(IngestionRun.Status.RUNNING, run.status());
+        assertEquals(7, run.documentsSeen());
+        assertEquals(4, run.documentsIngested());
+        assertEquals(2, run.documentsUnchanged());
+        assertEquals(1, run.documentsFailed());
+        assertEquals(3, run.documentsSkipped());
+        assertEquals(19, run.segmentsStored());
+        assertEquals(IngestionRun.Trigger.SCHEDULED, run.trigger());
+        assertNull(run.finishedAt());
+    }
+
+    @Test
+    @DisplayName("a late progress write never reopens or overwrites a finished run")
+    default void progressAfterFinishIsIgnored() {
+        String runId = openRun(SOURCE);
+        store().finishRun(new IngestionRun(runId, SOURCE, IngestionRun.Status.COMPLETED, null, Instant.now(),
+                10, 3, 6, 1, 0, 42, 0.0, null, 2, "COMPLETED", IngestionRun.Trigger.MANUAL));
+
+        store().reportProgress(new IngestionRun(runId, SOURCE, IngestionRun.Status.RUNNING, null, null,
+                1, 1, 0, 0, 0, 1, 0.0, null, 0, null, IngestionRun.Trigger.SCHEDULED));
+
+        IngestionRun run = store().listRuns(SOURCE, 10).get(0);
+        assertEquals(IngestionRun.Status.COMPLETED, run.status());
+        assertEquals(10, run.documentsSeen());
+        assertEquals(2, run.documentsSkipped());
+        assertEquals("COMPLETED", run.stopReason());
+        assertEquals(IngestionRun.Trigger.MANUAL, run.trigger());
+        assertTrue(store().activeRun(SOURCE).isEmpty());
+    }
+
+    @Test
+    @DisplayName("finishing without a trigger keeps the one progress recorded")
+    default void finishKeepsTheRecordedTrigger() {
+        String runId = openRun(SOURCE);
+        store().reportProgress(new IngestionRun(runId, SOURCE, IngestionRun.Status.RUNNING, null, null,
+                0, 0, 0, 0, 0, 0, 0.0, null, 0, null, IngestionRun.Trigger.SCHEDULED));
+
+        closeRun(runId, SOURCE, IngestionRun.Status.CANCELLED);
+
+        assertEquals(IngestionRun.Trigger.SCHEDULED, store().listRuns(SOURCE, 10).get(0).trigger());
+    }
+
+    @Test
     @DisplayName("a failed run records why, so the Manager can show it")
     default void failedRunKeepsItsError() {
         String runId = openRun(SOURCE);
@@ -852,6 +903,44 @@ public interface IngestionStateStoreContract {
         store().recordIngested(SOURCE, DOC, "hash-1", null, null, owner);
         assertFalse(store().lookup(SOURCE, DOC).orElseThrow().hasChanged("hash-1"),
                 "embedding it again settles it");
+    }
+
+    // === store fingerprint ===
+
+    @Test
+    @DisplayName("a source without a recorded store fingerprint reads as unknown")
+    default void storeFingerprintIsAbsentUntilRecorded() {
+        // Every source whose state predates the fingerprint is in this state, and the
+        // pipeline treats it as "unknown → re-embed" for an in-memory store.
+        String run = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, run);
+
+        assertTrue(store().storeFingerprint(SOURCE).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a recorded store fingerprint is read back, replaced by the next, and kept per source")
+    default void storeFingerprintIsRecordedPerSource() {
+        store().recordStoreFingerprint(SOURCE, "store-epoch=a");
+        store().recordStoreFingerprint(OTHER_SOURCE, "store-epoch=x");
+        assertEquals(Optional.of("store-epoch=a"), store().storeFingerprint(SOURCE));
+
+        store().recordStoreFingerprint(SOURCE, "store-epoch=b");
+
+        assertEquals(Optional.of("store-epoch=b"), store().storeFingerprint(SOURCE));
+        assertEquals(Optional.of("store-epoch=x"), store().storeFingerprint(OTHER_SOURCE));
+    }
+
+    @Test
+    @DisplayName("purging a source forgets its store fingerprint")
+    default void purgeForgetsTheStoreFingerprint() {
+        store().recordStoreFingerprint(SOURCE, "store-epoch=a");
+        store().recordStoreFingerprint(OTHER_SOURCE, "store-epoch=x");
+
+        store().purgeSource(SOURCE);
+
+        assertTrue(store().storeFingerprint(SOURCE).isEmpty());
+        assertEquals(Optional.of("store-epoch=x"), store().storeFingerprint(OTHER_SOURCE));
     }
 
     // === purge ===

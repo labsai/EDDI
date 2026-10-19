@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.GroupMemoryAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.utils.PageBounds;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
@@ -63,6 +64,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     @Override
     public List<UserMemoryEntry> getVisibleMemories(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries) {
         ownershipValidator.validateUserAccess(identity, userId);
+        PageBounds.requireLimit(maxEntries);
         // Every group a recall names must be one the caller is entitled to: a group id
         // also admits the team-owned "group:<id>" lessons a RETRO writes, so taking the
         // ids verbatim let anybody read any team's lessons by naming its group id. USE

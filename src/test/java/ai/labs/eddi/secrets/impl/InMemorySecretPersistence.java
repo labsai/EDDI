@@ -38,6 +38,13 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     int findSecretCalls;
     int updateSecretGrantCalls;
     int findDekCalls;
+    int resealInPlaceCalls;
+
+    /**
+     * When set, runs at the start of {@link #resealSecretInPlace} — a concurrent
+     * writer landing between a read and its write-back, made deterministic.
+     */
+    Runnable beforeResealInPlace;
 
     /**
      * When set, every {@link #getMetaValue} throws it — a transient store error.
@@ -95,7 +102,8 @@ final class InMemorySecretPersistence implements ISecretPersistence {
 
     static EncryptedSecret copyOf(EncryptedSecret s) {
         return new EncryptedSecret(s.getId(), s.getTenantId(), s.getKeyName(), s.getEncryptedValue(), s.getIv(), s.getDekId(), s.getChecksum(),
-                s.getDescription(), s.getAllowedAgents() == null ? null : List.copyOf(s.getAllowedAgents()), s.getCreatedAt(), s.getLastAccessedAt(),
+                s.getDescription(), s.getAllowedAgents() == null ? null : List.copyOf(s.getAllowedAgents()),
+                s.getAllowedHosts() == null ? null : List.copyOf(s.getAllowedHosts()), s.getCreatedAt(), s.getLastAccessedAt(),
                 s.getLastRotatedAt());
     }
 
@@ -119,6 +127,9 @@ final class InMemorySecretPersistence implements ISecretPersistence {
             }
             if (secret.getDescription() == null) {
                 written.setDescription(existing.getDescription());
+            }
+            if (secret.getAllowedHosts() == null) {
+                written.setAllowedHosts(existing.getAllowedHosts());
             }
         } else if (secret.getAllowedAgents() == null) {
             written.setAllowedAgents(List.of(SecretMetadata.WILDCARD_AGENT));
@@ -174,6 +185,21 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        resealInPlaceCalls++;
+        if (beforeResealInPlace != null) {
+            beforeResealInPlace.run();
+        }
+        EncryptedSecret stored = secrets.get(key(tenantId, keyName));
+        if (stored == null || !Objects.equals(stored.getDekId(), dekId) || !Objects.equals(stored.getIv(), expectedIv)) {
+            return false;
+        }
+        stored.setEncryptedValue(encryptedValue);
+        stored.setIv(iv);
+        return true;
+    }
+
+    @Override
     public boolean updateSecretGrant(String tenantId, String keyName, List<String> allowedAgents, String description) {
         updateSecretGrantCalls++;
         EncryptedSecret stored = secrets.get(key(tenantId, keyName));
@@ -182,6 +208,16 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         }
         stored.setAllowedAgents(allowedAgents == null ? null : List.copyOf(allowedAgents));
         stored.setDescription(description);
+        return true;
+    }
+
+    @Override
+    public boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts) {
+        EncryptedSecret stored = secrets.get(key(tenantId, keyName));
+        if (stored == null) {
+            return false;
+        }
+        stored.setAllowedHosts(allowedHosts == null ? List.of() : List.copyOf(allowedHosts));
         return true;
     }
 

@@ -969,14 +969,31 @@ export const handlers = [
   // the list the page re-reads. Values are never returned, as on the server.
   http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
   http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { description?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+      allowedHosts?: string[];
+    };
     const key = String(params.key);
+    const existing = (readSpaceStore(request, "secrets") as { keyName: string; allowedAgents?: string[]; allowedHosts?: string[]; createdAt?: string }[])
+      .find((s) => s.keyName === key);
+    // Both lists are required on a create under grant-enforcement=enforce (the
+    // shipped default); `["*"]` is the explicit "every agent" / "any host". A
+    // rotation may omit either and keeps the stored one.
+    if (!existing && (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0)) {
+      return HttpResponse.json({ error: "allowedAgents is required on create" }, { status: 400 });
+    }
+    if (!existing && (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0)) {
+      return HttpResponse.json({ error: "allowedHosts is required on create" }, { status: 400 });
+    }
+    const anyHost = body.allowedHosts?.length === 1 && body.allowedHosts[0] === "*";
     const secret = {
       keyName: key,
       reference: `\${vault:${tenantOf(request)}/${key}}`,
       description: body.description ?? null,
-      allowedAgents: ["*"],
-      createdAt: new Date().toISOString(),
+      allowedAgents: body.allowedAgents ? [...body.allowedAgents] : (existing?.allowedAgents ?? ["*"]),
+      allowedHosts: body.allowedHosts ? (anyHost ? [] : [...body.allowedHosts]) : (existing?.allowedHosts ?? []),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
     writeSpaceStore(request, "secrets", key, secret);
     return HttpResponse.json(secret);
@@ -2547,6 +2564,28 @@ export const handlers = [
     });
   }),
 
+  // Cron preview (RagSourceIngestionService.previewCron). Before the KB handler.
+  http.get("*/ragstore/rags/cron/preview", ({ request }) => {
+    const cron = new URL(request.url).searchParams.get("cron") ?? "";
+    if (cron.trim().split(/\s+/).length !== 5) {
+      return HttpResponse.json({
+        cron,
+        valid: false,
+        error: "Cron expression must have exactly 5 fields (min hour dom month dow), got " +
+          cron.trim().split(/\s+/).filter(Boolean).length,
+        timeZone: "UTC",
+        nextFires: [],
+      });
+    }
+    return HttpResponse.json({
+      cron,
+      valid: true,
+      error: null,
+      timeZone: "UTC",
+      nextFires: ["2026-10-16T02:00:00Z", "2026-10-17T02:00:00Z", "2026-10-18T02:00:00Z"],
+    });
+  }),
+
   // RAG Knowledge Base mock data (BEFORE generic handlers)
   http.get("*/ragstore/rags/:id", ({ request }) => {
     const url = new URL(request.url);
@@ -2637,6 +2676,9 @@ export const handlers = [
         segmentsStored: 57,
         costUsd: 0.0,
         error: null,
+        documentsSkipped: 2,
+        stopReason: "COMPLETED",
+        trigger: "SCHEDULED",
       },
     ]);
   }),
@@ -2703,6 +2745,101 @@ export const handlers = [
 
   http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
     return HttpResponse.json({ status: "deleted", fileId: params.fileId });
+  }),
+
+  // A source's schedule (RestRagIngestion.readSourceSchedule)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/schedule", () => {
+    return HttpResponse.json({
+      scheduled: true,
+      scheduleId: "sched-rag-1",
+      cron: "0 2 * * *",
+      timeZone: "UTC",
+      enabled: true,
+      disabledReason: null,
+      nextFire: "2026-10-16T02:00:00Z",
+      lastFired: "2026-10-15T02:00:00Z",
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      nextRetryAt: null,
+      recentFires: [
+        {
+          fireTime: "2026-10-15T02:00:00Z",
+          completedAt: "2026-10-15T02:00:01Z",
+          status: "COMPLETED",
+          errorMessage: null,
+          attemptNumber: 1,
+        },
+      ],
+    });
+  }),
+
+  // What a source has ingested (RestRagIngestion.readSourceDocuments)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/documents", ({ request }) => {
+    const q = new URL(request.url).searchParams.get("q")?.toLowerCase() ?? "";
+    const documents = [
+      {
+        documentId: "https://example.com/docs/intro",
+        label: "https://example.com/docs/intro",
+        url: "https://example.com/docs/intro",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-10-15T02:01:00Z",
+        missedRuns: 0,
+        tombstoned: false,
+      },
+      {
+        documentId: "https://example.com/docs/old-page",
+        label: "https://example.com/docs/old-page",
+        url: "https://example.com/docs/old-page",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-09-17T02:01:00Z",
+        missedRuns: 2,
+        tombstoned: true,
+      },
+    ].filter((document) => !q || document.label.toLowerCase().includes(q));
+    return HttpResponse.json({ total: documents.length, truncated: false, documents });
+  }),
+
+  http.get("*/ragstore/rags/:id/sources/:sourceId/chunks", ({ request }) => {
+    const documentId = new URL(request.url).searchParams.get("documentId");
+    return HttpResponse.json({
+      documentId,
+      chunks: [
+        {
+          index: 0,
+          score: null,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "0" },
+        },
+        {
+          index: 1,
+          score: null,
+          text: "Agents are assembled from workflows of JSON configurations.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "1" },
+        },
+      ],
+    });
+  }),
+
+  // A test retrieval (RestRagIngestion.searchKnowledgeBase)
+  http.post("*/ragstore/rags/:id/search", async ({ request }) => {
+    const body = (await request.json()) as { maxResults?: number; minScore?: number };
+    return HttpResponse.json({
+      maxResults: body.maxResults ?? 5,
+      minScore: body.minScore ?? 0.6,
+      results: [
+        {
+          index: 0,
+          score: 0.873,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: {
+            documentId: "https://example.com/docs/intro",
+            url: "https://example.com/docs/intro",
+            title: "Introduction",
+            sourceName: "public-docs",
+          },
+        },
+      ],
+    });
   }),
 
   // --- Group Store Mock Handlers ---
@@ -3779,6 +3916,8 @@ type MockSecret = {
   checksum: string;
   description: string;
   allowedAgents: string[];
+  /** Omitted when unrestricted, as EDDI's mapper drops null fields. */
+  allowedHosts?: string[];
 };
 
 /** The seed. Never mutated: the handlers work on `secretsState` below. */
@@ -3812,6 +3951,7 @@ const MOCK_SECRETS: readonly MockSecret[] = [
     checksum: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
     description: "Google Gemini 2.5 Flash API key",
     allowedAgents: ["agent5", "agent7"],
+    allowedHosts: ["generativelanguage.googleapis.com"],
   },
   {
     tenantId: "default",
@@ -4029,6 +4169,7 @@ export const secretsHandlers = [
       const body = (await request.json()) as {
         allowedAgents?: string[];
         description?: string;
+        allowedHosts?: string[];
       };
       const existing = findMockSecret(tenantId, keyName);
       if (!existing) {
@@ -4049,7 +4190,14 @@ export const secretsHandlers = [
       if (!dryRun) {
         existing.allowedAgents = [...body.allowedAgents];
         if (body.description !== undefined) existing.description = body.description;
+        // Present means "replace"; `[]` or `["*"]` lifts the restriction, as on the backend.
+        if (body.allowedHosts !== undefined) {
+          const lifts =
+            body.allowedHosts.length === 0 || (body.allowedHosts.length === 1 && body.allowedHosts[0] === "*");
+          existing.allowedHosts = lifts ? undefined : [...body.allowedHosts];
+        }
       }
+      const allowedHosts = body.allowedHosts ?? existing.allowedHosts;
       return HttpResponse.json({
         reference:
           tenantId === "default"
@@ -4065,6 +4213,7 @@ export const secretsHandlers = [
         createdAt: existing.createdAt,
         lastRotatedAt: existing.lastRotatedAt,
         agentsLosingAccess: [],
+        ...(allowedHosts && allowedHosts.length > 0 ? { allowedHosts } : {}),
       });
     },
   ),
@@ -4119,14 +4268,28 @@ export const secretsHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       description?: string;
       allowedAgents?: string[];
+      allowedHosts?: string[];
     };
     const now = new Date().toISOString();
     const existing = findMockSecret(tenantId, keyName);
+    // `["*"]` is the explicit "no restriction", stored as no list at all.
+    const storedHosts = (hosts: string[]) => (hosts.length === 1 && hosts[0] === "*" ? undefined : [...hosts]);
     if (existing) {
       existing.lastRotatedAt = now;
       if (body.description !== undefined) existing.description = body.description;
       if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+      // Omitted on an update keeps the stored list, as on the backend.
+      if (body.allowedHosts) existing.allowedHosts = storedHosts(body.allowedHosts);
     } else {
+      // Under grant-enforcement=enforce (the shipped default) a create must say
+      // where the secret may go: hosts, or the explicit ["*"]. An empty list is
+      // refused too — it would read as "anywhere" without anybody saying so.
+      if (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedHosts is required on create: list the hosts, or [\"*\"] for any host" },
+          { status: 400 },
+        );
+      }
       secretsState.push({
         tenantId,
         keyName,
@@ -4136,6 +4299,7 @@ export const secretsHandlers = [
         checksum: "0".repeat(64),
         description: body.description ?? "",
         allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+        allowedHosts: storedHosts(body.allowedHosts),
       });
     }
     const ref = tenantId === "default"
@@ -4573,6 +4737,7 @@ export const scheduleHandlers = [
       }),
       sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
       sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("member_tool_call", { agentId: "agent1", displayName: "Support Agent", tool: "search_knowledge_base" }),
       sseEvent("speaker_complete", {
         agentId: "agent1",
         displayName: "Support Agent",
@@ -4613,6 +4778,8 @@ export const scheduleHandlers = [
         for (const event of events) {
           await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
           controller.enqueue(encoder.encode(event));
+          // Hold after a tool call so the member card's "using <tool>…" is visible.
+          if (event.startsWith("event: member_tool_call")) await new Promise((r) => setTimeout(r, 4000));
         }
         controller.close();
       },

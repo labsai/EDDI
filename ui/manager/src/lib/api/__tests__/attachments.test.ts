@@ -110,8 +110,8 @@ describe("attachments API", () => {
 
   describe("downloadAttachment / getAttachmentDownloadUrl", () => {
     it("builds an encoded download URL", () => {
-      const url = getAttachmentDownloadUrl("conv 1", "gridfs://a/b");
-      expect(url).toContain(encodeURIComponent("conv 1"));
+      const url = getAttachmentDownloadUrl("conv:1", "gridfs://a/b");
+      expect(url).toContain(encodeURIComponent("conv:1"));
       expect(url).toContain(encodeURIComponent("gridfs://a/b"));
       expect(url).not.toMatch(/gridfs:\/\//);
     });

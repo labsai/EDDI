@@ -78,12 +78,11 @@ services:
       # a Keycloak the browser can actually reach — the container name above is
       # only resolvable inside the compose network.
       EDDI_KEYCLOAK_PUBLIC_URL: "http://localhost:8180"
-      # application.properties forces the advertised OAuth resource identifier to
-      # https, because a deployment with authentication on belongs behind TLS and
-      # the scheme would otherwise be read from a request that a terminating proxy
-      # already downgraded. This tier is plain http on loopback, so leaving it on
-      # would advertise a URL nothing here can fetch and the discovery assertions
-      # would be testing a document no client could follow.
+      # The advertised OAuth resource identifier takes its scheme from the
+      # request (application.properties no longer forces https). This tier is
+      # plain http on loopback and says so explicitly, so the discovery
+      # assertions test a document a client could follow whatever the default
+      # becomes.
       QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: "false"
       QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:7070"
       # No EDDI_SECURITY_ALLOW_UNAUTHENTICATED here, deliberately: OIDC is

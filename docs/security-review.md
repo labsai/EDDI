@@ -60,6 +60,15 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 - Cosign keyless signing of all published images
 - CycloneDX SBOM attached to every release
 
+### Full-Stack Security Reviews — October 2026
+
+**Scope:** backend (REST, MCP, A2A, outbound HTTP, templating, secrets vault, GDPR), both web UIs, and the deployment layer (compose, Helm, kustomize, installers, CI), each followed by a live run of the image under review behind Keycloak
+**Reviewers:** Project maintainers with AI-assisted review and implementation
+**Dates:** October 15 and October 17, 2026
+
+- **2026-10-15** — two High findings (templated httpCall hosts reachable with SSRF protection off; `${caller:token}` writable by editors) and a dozen Medium/Low ones, fixed the same week (`docs/changelog.d/2026-10-15-fix-*`).
+- **2026-10-17** — three High findings (editor exfiltration of wizard-vaulted provider keys, a `java.net.URI`/`java.net.URL` parser differential bypassing the cloud-metadata guard, a cubic ReDoS on LLM output), eleven Medium and sixteen Low. The full report, with reproductions, what was verified clean and the remediation table, is [planning/security-review-2026-10-17.md](../planning/security-review-2026-10-17.md); the fixes are the `fix/security-review-*` pull requests it lists.
+
 ### Code Review Security Passes
 
 | Date | Scope | Key Findings |
@@ -70,13 +79,15 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 | 2026-04-17 | Code review remediation | Post-review fixes from security audit |
 | 2026-04-22 | CI security scanning hardening | Trivy, Gitleaks, dependency review pipeline |
 | 2026-04-23 | Fuzzing + SLSA provenance | ClusterFuzzLite, Jazzer targets, build attestation |
+| 2026-10-15 | Full-stack review of `main` | Templated SSRF hosts; the caller-identity confused deputy; A2A and ownership gaps |
+| 2026-10-17 | Full-stack review of `main` + live probe | Vaulted-key exfiltration, metadata-guard parser bypass, LLM-output ReDoS — see `planning/security-review-2026-10-17.md` |
 
 ## Threat Model
 
 EDDI's security architecture is documented in [docs/security.md](security.md). Key threats and mitigations:
 
 - **T1: Prompt injection** — mitigated by template sandboxing, PathNavigator (no OGNL)
-- **T2: SSRF via tool execution** — mitigated by `SafeHttpClient`, URL validation
+- **T2: SSRF via tool execution** — mitigated by `OutboundHttp` (per-hop SSRF policy), URL validation
 - **T3: Secret exfiltration** — mitigated by vault encryption, property visibility scoping
 - **T4: Supply chain compromise** — mitigated by digest-pinned images, Cosign, SBOM, Dependabot
 - **T5: Unauthorized access** — mitigated by OIDC auth, `AuthStartupGuard`, role checks

@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import jakarta.ws.rs.BadRequestException;
 
 import java.util.List;
@@ -57,7 +58,7 @@ class RestRagStoreWriteValidationTest {
         ragStore = mock(IRagStore.class);
         restRagStore = new RestRagStore(ragStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
                 mock(ResourceAccessGuard.class),
-                mock(RagSourceIngestionService.class));
+                mock(RagSourceIngestionService.class), mock(EmbeddingStoreFactory.class));
 
         when(ragStore.create(any())).thenReturn(resourceId(RAG_ID, 1));
         when(ragStore.update(anyString(), anyInt(), any())).thenReturn(2);

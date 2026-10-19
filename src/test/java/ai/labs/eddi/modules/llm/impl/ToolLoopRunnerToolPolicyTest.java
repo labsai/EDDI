@@ -8,8 +8,10 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.ToolRepeatGuardConfig;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
@@ -37,12 +39,15 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -86,7 +91,7 @@ class ToolLoopRunnerToolPolicyTest {
         service.init();
 
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(1));
+        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(), null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
@@ -164,8 +169,8 @@ class ToolLoopRunnerToolPolicyTest {
     @Test
     @DisplayName("discover_tools activates from its untruncated result even when a response limit applies")
     void discoverToolsParsesUntruncatedResult() {
-        when(truncator.truncateIfNeeded(anyString(), anyString(), any(), any(), any())).thenAnswer(i -> {
-            String result = i.getArgument(1);
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> {
+            String result = i.getArgument(2);
             return result.substring(0, Math.min(20, result.length()));
         });
         StringBuilder json = new StringBuilder("{\"tools\":[");
@@ -181,6 +186,110 @@ class ToolLoopRunnerToolPolicyTest {
         run(request, Map.of("discover_tools", (req, id) -> json.toString()), memory("conv-1"), true, builtIns, active);
 
         assertEquals(30, active.size(), "every discovered tool is activated");
+    }
+
+    @Nested
+    @DisplayName("repeat guard")
+    class RepeatGuardTests {
+
+        private final AtomicInteger executed = new AtomicInteger();
+        private final List<ChatRequest> requests = new ArrayList<>();
+
+        private AgentOrchestrator.ToolSetup setup(String result) {
+            ToolExecutor failing = (request, memoryId) -> {
+                executed.incrementAndGet();
+                return result;
+            };
+            var spec = ToolSpecification.builder().name("getUser").description("d").build();
+            return new AgentOrchestrator.ToolSetup(List.of(spec), Map.of("getUser", failing), Map.of("getUser", "http"), List.of(spec),
+                    Map.of(), Map.of(), Map.of());
+        }
+
+        /**
+         * A model that sends the same call every round, with the key order shuffled.
+         */
+        private ChatModel stubbornModel() {
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                String args = requests.size() % 2 == 0 ? "{\"a\":1,\"b\":2}" : "{\"b\":2,\"a\":1}";
+                return ChatResponse.builder().aiMessage(AiMessage
+                        .from(ToolExecutionRequest.builder().id("call_" + requests.size()).name("getUser").arguments(args).build())).build();
+            });
+            return model;
+        }
+
+        private AgentOrchestrator.ExecutionResult runStubborn() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            return runner.executeWithTools(stubbornModel(), null, List.of(UserMessage.from("go")),
+                    setup("{\"httpCode\":403,\"body\":\"no\"}"), task, memory("conv-1"), null, -1, 0, null);
+        }
+
+        @Test
+        @DisplayName("a repeated 403 runs once, is refused, and the turn ends with the escalation message after 3 refusals")
+        void repeatedTerminalFailureIsRefusedThenEscalates() throws Exception {
+            var result = runStubborn();
+
+            assertEquals(1, executed.get(), "the failing tool must run exactly once");
+            assertEquals(4, requests.size(), "1 executed round + 3 refused rounds, then no further model request");
+            assertEquals(ToolRepeatGuard.stoppedMessage(3), result.response());
+        }
+
+        @Test
+        @DisplayName("the classifier sees the RAW result: a 403 wrapped by the provenance guardrail is still refused")
+        void classifiesRawResultNotTheGovernedOne() throws Exception {
+            String raw = "{\"httpCode\":403,\"body\":\"no\"}";
+            runStubborn();
+
+            var firstResult = requests.get(1).messages().stream().filter(m -> m instanceof ToolExecutionResultMessage)
+                    .map(m -> ((ToolExecutionResultMessage) m).text()).findFirst().orElseThrow();
+            assertTrue(!firstResult.equals(raw) && !firstResult.stripLeading().startsWith("{"),
+                    "precondition: the model is shown a guardrail-wrapped result, not the raw JSON: " + firstResult);
+            assertEquals(1, executed.get(), "refused although the governed text no longer looks like a 403");
+        }
+
+        /**
+         * Maps that tolerate a null key, like the real ones; Map.of throws on a null
+         * lookup.
+         */
+        private AgentOrchestrator.ToolSetup hashMapSetup() {
+            var spec = ToolSpecification.builder().name("getUser").description("d").build();
+            return new AgentOrchestrator.ToolSetup(List.of(spec), new HashMap<>(), new HashMap<>(), List.of(spec),
+                    new HashMap<>(), new HashMap<>(), new HashMap<>());
+        }
+
+        @Test
+        @DisplayName("a repeated nameless call degrades to tool-not-found instead of failing the turn")
+        void namelessRepeatedCallDoesNotFailTheTurn() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                return requests.size() <= 3
+                        ? ChatResponse.builder().aiMessage(AiMessage.from(
+                                ToolExecutionRequest.builder().id("call_" + requests.size()).name(null).arguments("{}").build())).build()
+                        : ChatResponse.builder().aiMessage(AiMessage.from("done")).build();
+            });
+
+            var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), hashMapSetup(), task, memory("conv-1"), null, -1,
+                    0, null);
+
+            assertEquals("done", result.response());
+        }
+
+        @Test
+        @DisplayName("enabled:false restores the old behaviour: the call runs every round up to the iteration cap")
+        void disabledGuardRunsEveryRound() throws Exception {
+            var config = new ToolRepeatGuardConfig();
+            config.setEnabled(false);
+            task.setToolRepeatGuard(config);
+
+            runStubborn();
+
+            assertEquals(10, executed.get());
+        }
     }
 
     @Nested
@@ -242,6 +351,37 @@ class ToolLoopRunnerToolPolicyTest {
             assertEquals(List.of("call_0", "call_1", "call_2"), resultIds);
             var last = (ToolExecutionResultMessage) requests.get(1).messages().getLast();
             assertTrue(last.text().contains("NOT_EXECUTED"), last.text());
+        }
+
+        @Test
+        @DisplayName("a turn cancelled mid-loop (lost cluster lease, /cancel, GDPR stop) runs no further tool and no further model call")
+        void cancelledTurnStopsTheLoop() {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            AtomicBoolean cancelled = new AtomicBoolean();
+            AtomicInteger executed = new AtomicInteger();
+            ToolExecutor calc = (request, memoryId) -> {
+                executed.incrementAndGet();
+                cancelled.set(true); // e.g. the lease was taken over while this tool ran
+                return "result";
+            };
+            var spec = ToolSpecification.builder().name("calculate").description("d").build();
+            var setup = new AgentOrchestrator.ToolSetup(List.of(spec), Map.of("calculate", calc), Map.of("calculate", "builtin"), List.of(spec),
+                    Map.of(), Map.of(), Map.of());
+            ChatModel model = mock(ChatModel.class);
+            AtomicInteger modelCalls = new AtomicInteger();
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                modelCalls.incrementAndGet();
+                return ChatResponse.builder().aiMessage(response(3)).build();
+            });
+            IConversationMemory memory = memory("conv-1");
+            when(memory.isCancelled()).thenAnswer(i -> cancelled.get());
+
+            assertThrows(LifecycleException.class, () -> runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup, task,
+                    memory, null, -1, 0, null));
+
+            assertEquals(1, executed.get(), "the other two calls of the batch must not run once the turn is cancelled");
+            assertEquals(1, modelCalls.get(), "no further model call for a cancelled turn");
         }
 
         @Test

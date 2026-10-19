@@ -419,7 +419,7 @@ public class LlmTask implements ILifecycleTask {
                 if (httpCallContext != null) {
                     retrievedContext.append(httpCallContext);
                     systemMessage += "\n\n## Search Results:\n" + markRetrievedContext(task, "httpcall:" + httpCallRag, httpCallContext);
-                    LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
+                    LOGGER.debugf("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
                     var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
                             Map.of("httpCall", httpCallRag, "contextLength", httpCallContext.length()));
                     currentStep.storeData(traceData);
@@ -440,7 +440,7 @@ public class LlmTask implements ILifecycleTask {
                     }
                     retrievedContext.append(ragContext);
                     systemMessage += "\n\n## Relevant Context:\n" + markRetrievedContext(task, "knowledge-base", ragContext);
-                    LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
+                    LOGGER.debugf("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
             } catch (Exception e) {
                 LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", taskId, e.getMessage());
@@ -498,7 +498,7 @@ public class LlmTask implements ILifecycleTask {
                 summaryPrefix = "## CONVERSATION SUMMARY (turns 1-" + throughStep + " condensed)\n" + existingSummary + "\n\n"
                         + "[You can use the recallConversationDetail tool to access full details from these summarized turns.]";
                 skipSteps = throughStep;
-                LOGGER.infof("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
+                LOGGER.debugf("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
                         throughStep + 1);
             }
         }
@@ -886,7 +886,9 @@ public class LlmTask implements ILifecycleTask {
                     accumulateCost(currentStep, screened.costUsd());
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
-                        fallbackServed = guardrailBlock(screened.text());
+                        fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
+                        // Stored like every other fallback: the fallbackField-wrapped content.
+                        responseContent = fallbackServed.content();
                     }
                 }
             } catch (LifecycleException validationFailure) {
@@ -1853,7 +1855,9 @@ public class LlmTask implements ILifecycleTask {
                     accumulateCost(currentStep, screened.costUsd());
                     responseContent = screened.text();
                     if (screened.isBlocked()) {
-                        fallbackServed = guardrailBlock(screened.text());
+                        fallbackServed = guardrailBlock(task, currentStep, screened.text(), convertObject);
+                        // Stored like every other fallback: the fallbackField-wrapped content.
+                        responseContent = fallbackServed.content();
                     }
                 }
             } catch (LifecycleException validationFailure) {
@@ -2473,15 +2477,17 @@ public class LlmTask implements ILifecycleTask {
      * task's response — stored, visible to output templates under the response
      * object name, shown and streamed unless {@code addToOutput} is explicitly
      * false. The model is not called; neither {@code preRequest} nor
-     * {@code postResponse} runs. The output item is marked as engine text
-     * ({@code fallback}), so later turns' history leaves it out.
+     * {@code postResponse} runs. It is served as a fallback: the step's
+     * {@code llm:fallback:<taskId>} flag keeps it out of later turns' history, and
+     * a {@code convertToObject} task gets it wrapped under {@code fallbackField}.
      */
     private void answerInputBlocked(IConversationMemory memory, IWritableConversationStep currentStep, Task task, Map<String, String> processedParams,
                                     Map<String, Object> templateDataObjects, String blockMessage) {
-        currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), blockMessage));
+        var served = guardrailBlock(task, currentStep, blockMessage, Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)));
+        currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), served.content()));
         String responseObjectName = isNullOrEmpty(task.getResponseObjectName()) ? task.getId() : task.getResponseObjectName();
         if (responseObjectName != null) {
-            templateDataObjects.put(responseObjectName, blockMessage);
+            templateDataObjects.put(responseObjectName, served.object());
         }
         if ("false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
             return;
@@ -2508,12 +2514,14 @@ public class LlmTask implements ILifecycleTask {
     }
 
     /**
-     * An output guardrail's block, served like a fallback: the engine's text, not
-     * parsed as JSON, not recorded as what the model said, left out of later
-     * history.
+     * A guardrail's block, served as a fallback: the engine's text, not parsed as
+     * JSON, not recorded as what the model said, flagged on the step so later
+     * history leaves it out, and wrapped under {@code fallbackField} for a
+     * {@code convertToObject} task.
      */
-    private static LlmFallbackHandler.Fallback guardrailBlock(String blockMessage) {
-        return new LlmFallbackHandler.Fallback(blockMessage, blockMessage, blockMessage);
+    private LlmFallbackHandler.Fallback guardrailBlock(Task task, IWritableConversationStep currentStep, String blockMessage,
+                                                       boolean convertObject) {
+        return fallbackHandler.serveText(task, currentStep, blockMessage, convertObject);
     }
 
     /**
@@ -2840,7 +2848,7 @@ public class LlmTask implements ILifecycleTask {
 
                         String serialized = jsonSerialization.serialize(result);
 
-                        LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());
+                        LOGGER.debugf("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());
                         return serialized;
 
                     } catch (Exception e) {

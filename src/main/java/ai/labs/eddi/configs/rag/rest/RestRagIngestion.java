@@ -5,11 +5,13 @@
 package ai.labs.eddi.configs.rag.rest;
 
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.rag.IRestRagIngestion;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
@@ -24,6 +26,7 @@ import org.jboss.resteasy.reactive.multipart.FileUpload;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.nio.file.Files;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,13 +45,15 @@ public class RestRagIngestion implements IRestRagIngestion {
     private final RagIngestionService ragIngestionService;
     private final RagSourceIngestionService sourceIngestionService;
     private final IngestedFileService ingestedFileService;
+    private final KnowledgeBaseInspector inspector;
 
     private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
             RagSourceIngestionService sourceIngestionService, IngestedFileService ingestedFileService,
-            ResourceAccessGuard resourceAccessGuard) {
+            KnowledgeBaseInspector inspector, ResourceAccessGuard resourceAccessGuard) {
+        this.inspector = inspector;
         this.resourceAccessGuard = resourceAccessGuard;
         this.restRagStore = restRagStore;
         this.ragIngestionService = ragIngestionService;
@@ -57,9 +62,32 @@ public class RestRagIngestion implements IRestRagIngestion {
     }
 
     /**
+     * The knowledge base's configuration as the engine needs it. Every use here
+     * builds an embedding model or store from it, so it must carry the real
+     * credentials: {@link RestRagStore#readRag} redacts plaintext literals for a
+     * non-administrator, and an editor ingesting into a knowledge base whose
+     * {@code apiKey} is a literal would otherwise send the redaction marker to the
+     * provider. {@link RestRagStore#readUnredacted} applies the same access check
+     * without the redaction; the document never leaves the server. Anything other
+     * than the real store (a test double) is read through the interface.
+     */
+    private RagConfiguration readEngineConfig(String ragConfigId, Integer version) {
+        return restRagStore instanceof RestRagStore store
+                ? store.readUnredacted(ragConfigId, version)
+                : restRagStore.readRag(ragConfigId, version);
+    }
+
+    /**
      * The name {@code documentName} defaults to — see {@link IRestRagIngestion}.
      */
     static final String UNNAMED_DOCUMENT = "unnamed";
+
+    private static final int DEFAULT_DOCUMENT_PAGE = 50;
+
+    private static final int MAX_DOCUMENT_PAGE = 500;
+
+    /** A test query, not a document: anything longer is a mistake or abuse. */
+    static final int MAX_SEARCH_QUERY_LENGTH = 2000;
 
     @Override
     public Response ingestDocument(String ragConfigId, Integer version, String kbId, String documentName, Boolean replace,
@@ -87,7 +115,7 @@ public class RestRagIngestion implements IRestRagIngestion {
 
         RagConfiguration ragConfig;
         try {
-            ragConfig = restRagStore.readRag(ragConfigId, version);
+            ragConfig = readEngineConfig(ragConfigId, version);
         } catch (Exception e) {
             LOGGER.warnf("Failed to load RAG config %s v%d: %s", sanitize(ragConfigId), version, e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version))
@@ -168,7 +196,10 @@ public class RestRagIngestion implements IRestRagIngestion {
         }
 
         return sourceIngestionService.runAsync(ragConfigId, resolved.knowledgeBase(), resolved.source())
-                .map(runKey -> Response.accepted(Map.of("status", "started", "sourceId", sourceId)).build())
+                // The run id lets a caller follow this run in the history rather than
+                // guessing which RUNNING row is theirs.
+                .map(runId -> Response.accepted(Map.of("status", "started", "sourceId", sourceId, "runId", runId))
+                        .build())
                 .orElseGet(() -> Response.status(Response.Status.CONFLICT)
                         .entity(Map.of("error", "A run is already in flight for this source", "sourceId", sourceId))
                         .build());
@@ -231,6 +262,198 @@ public class RestRagIngestion implements IRestRagIngestion {
         }
         LOGGER.infof("Purged ingestion state for source %s of RAG config %s", sanitize(sourceId), sanitize(ragConfigId));
         return Response.ok(Map.of("status", "purged", "sourceId", sourceId)).build();
+    }
+
+    // --- Schedules ---
+
+    @Override
+    public Response readSourceSchedule(String ragConfigId, String sourceId, Integer version) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        RagSourceIngestionService.SourceSchedule status;
+        try {
+            status = sourceIngestionService.scheduleStatus(ragConfigId, resolved.source());
+        } catch (IResourceStore.ResourceStoreException e) {
+            LOGGER.errorf(e, "Failed to read the schedule of source %s of RAG config %s", sanitize(sourceId),
+                    sanitize(ragConfigId));
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The schedule store could not be read: " + e.getMessage())).build();
+        }
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        var schedule = status.schedule();
+        body.put("scheduled", schedule != null);
+        if (schedule != null) {
+            body.put("scheduleId", schedule.getId());
+            body.put("cron", schedule.getCronExpression());
+            body.put("timeZone", schedule.getTimeZone());
+            body.put("enabled", schedule.isEnabled());
+            body.put("disabledReason", schedule.getDisabledReason());
+            body.put("nextFire", isoOrNull(schedule.getNextFire()));
+            body.put("lastFired", isoOrNull(schedule.getLastFired()));
+            body.put("fireStatus", schedule.getFireStatus() == null ? null : schedule.getFireStatus().name());
+            body.put("failCount", schedule.getFailCount());
+            body.put("nextRetryAt", isoOrNull(schedule.getNextRetryAt()));
+        }
+        List<Map<String, Object>> fires = new ArrayList<>();
+        for (var fire : status.recentFires()) {
+            Map<String, Object> described = new LinkedHashMap<>();
+            described.put("fireTime", isoOrNull(fire.fireTime()));
+            described.put("completedAt", isoOrNull(fire.completedAt()));
+            described.put("status", fire.status());
+            described.put("errorMessage", fire.errorMessage());
+            described.put("attemptNumber", fire.attemptNumber());
+            fires.add(described);
+        }
+        body.put("recentFires", fires);
+        return Response.ok(body).build();
+    }
+
+    @Override
+    public Response previewCron(String cron, Integer count) {
+        var preview = sourceIngestionService.previewCron(cron, count == null ? 3 : count);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("cron", preview.cron());
+        body.put("valid", preview.error() == null);
+        body.put("error", preview.error());
+        body.put("timeZone", preview.zone());
+        body.put("nextFires", preview.nextFires().stream().map(Object::toString).toList());
+        return Response.ok(body).build();
+    }
+
+    private static String isoOrNull(Instant instant) {
+        return instant == null ? null : instant.toString();
+    }
+
+    // --- Inspecting what a knowledge base holds ---
+
+    @Override
+    public Response readSourceDocuments(String ragConfigId, String sourceId, Integer version, String query,
+                                        Integer offset, Integer limit) {
+        // VIEW, like the run history and the file list: this is the ingestion state
+        // -- ids, URLs, file names and timestamps -- not the text itself.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.VIEW, "RAG configuration");
+
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        int pageSize = limit == null ? DEFAULT_DOCUMENT_PAGE : Math.min(limit, MAX_DOCUMENT_PAGE);
+        var page = inspector.listDocuments(ragConfigId, resolved.source(), query, offset == null ? 0 : offset,
+                pageSize);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("total", page.total());
+        body.put("truncated", page.truncated());
+        body.put("documents", page.documents().stream().map(RestRagIngestion::describeDocument).toList());
+        return Response.ok(body).build();
+    }
+
+    @Override
+    public Response readDocumentChunks(String ragConfigId, String sourceId, Integer version, String documentId,
+                                       Integer limit) {
+        // EDIT: this returns the knowledge base's text, and every call costs an
+        // embedding. A published configuration grants VIEW to everyone.
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        if (documentId == null || documentId.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Query parameter 'documentId' is required")).build();
+        }
+        var resolved = resolveSource(ragConfigId, sourceId, version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        try {
+            var chunks = inspector.documentChunks(ragConfigId, resolved.knowledgeBase(), resolved.source(), documentId,
+                    limit == null ? 100 : limit);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("documentId", documentId);
+            body.put("chunks", chunks.stream().map(RestRagIngestion::describeChunk).toList());
+            return Response.ok(body).build();
+        } catch (UnsupportedOperationException e) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+        } catch (RuntimeException e) {
+            return inspectionFailed(ragConfigId, e);
+        }
+    }
+
+    @Override
+    public Response searchKnowledgeBase(String ragConfigId, Integer version, KnowledgeBaseSearch search) {
+        resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
+
+        if (search == null || search.query() == null || search.query().isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "A non-empty 'query' is required")).build();
+        }
+        if (search.query().length() > MAX_SEARCH_QUERY_LENGTH) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "The query is longer than " + MAX_SEARCH_QUERY_LENGTH + " characters"))
+                    .build();
+        }
+        var resolved = search.sourceId() == null || search.sourceId().isBlank()
+                ? resolveKnowledgeBase(ragConfigId, version)
+                : resolveSource(ragConfigId, search.sourceId(), version);
+        if (resolved.error() != null) {
+            return resolved.error();
+        }
+        RagConfiguration knowledgeBase = resolved.knowledgeBase();
+        int maxResults = search.maxResults() != null
+                ? search.maxResults()
+                : knowledgeBase.getMaxResults() != null ? knowledgeBase.getMaxResults() : 5;
+        double minScore = search.minScore() != null
+                ? search.minScore()
+                : knowledgeBase.getMinScore() != null ? knowledgeBase.getMinScore() : 0.0;
+        try {
+            var hits = inspector.search(ragConfigId, knowledgeBase, resolved.source(), search.query(), maxResults,
+                    minScore);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("maxResults", maxResults);
+            body.put("minScore", minScore);
+            body.put("results", hits.stream().map(RestRagIngestion::describeChunk).toList());
+            return Response.ok(body).build();
+        } catch (UnsupportedOperationException e) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+        } catch (RuntimeException e) {
+            return inspectionFailed(ragConfigId, e);
+        }
+    }
+
+    /**
+     * An embedding provider or vector store that failed. Said as a 502 with the
+     * cause, because the cause -- a bad API key, an unreachable store -- is exactly
+     * what the operator opened this view to find out.
+     */
+    private static Response inspectionFailed(String ragConfigId, RuntimeException e) {
+        LOGGER.warnf(e, "Inspecting knowledge base %s failed", sanitize(ragConfigId));
+        return Response.status(Response.Status.BAD_GATEWAY)
+                .entity(Map.of("error", "The embedding model or vector store failed: " + e.getMessage()))
+                .build();
+    }
+
+    private static Map<String, Object> describeDocument(KnowledgeBaseInspector.DocumentSummary document) {
+        Map<String, Object> described = new LinkedHashMap<>();
+        described.put("documentId", document.documentId());
+        described.put("label", document.label());
+        described.put("url", document.url());
+        described.put("firstIngestedAt", document.firstIngestedAt() == null ? null : document.firstIngestedAt().toString());
+        described.put("lastIngestedAt", document.lastIngestedAt() == null ? null : document.lastIngestedAt().toString());
+        described.put("missedRuns", document.missedRuns());
+        described.put("tombstoned", document.tombstoned());
+        return described;
+    }
+
+    private static Map<String, Object> describeChunk(KnowledgeBaseInspector.Chunk chunk) {
+        Map<String, Object> described = new LinkedHashMap<>();
+        described.put("index", chunk.index());
+        described.put("score", chunk.score());
+        described.put("text", chunk.text());
+        described.put("metadata", chunk.metadata());
+        return described;
     }
 
     // --- Uploaded files ---
@@ -387,6 +610,20 @@ public class RestRagIngestion implements IRestRagIngestion {
      * is a 403 rather than being masked as the 404 this produces.
      */
     private ResolvedSource resolveSource(String ragConfigId, String sourceId, Integer version) {
+        ResolvedSource knowledgeBase = resolveKnowledgeBase(ragConfigId, version);
+        if (knowledgeBase.error() != null) {
+            return knowledgeBase;
+        }
+        IngestionSource source = knowledgeBase.knowledgeBase().findSource(sourceId);
+        if (source == null) {
+            return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "No ingestion source '" + sourceId + "' on this knowledge base")).build());
+        }
+        return new ResolvedSource(knowledgeBase.knowledgeBase(), source, null);
+    }
+
+    /** As {@link #resolveSource}, for a request about the whole knowledge base. */
+    private ResolvedSource resolveKnowledgeBase(String ragConfigId, Integer version) {
         if (version == null) {
             // An omitted ?version binds as null, which RestVersionInfo.read rejects
             // with an IllegalArgumentException — caught below and answered as a 404,
@@ -397,7 +634,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         }
         RagConfiguration ragConfig;
         try {
-            ragConfig = restRagStore.readRag(ragConfigId, version);
+            ragConfig = readEngineConfig(ragConfigId, version);
         } catch (IllegalArgumentException e) {
             // A version that cannot be used at all — negative, say — is a bad request.
             // Answering "not found" sends the caller looking for a knowledge base
@@ -414,13 +651,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version)).build());
         }
-
-        IngestionSource source = ragConfig.findSource(sourceId);
-        if (source == null) {
-            return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
-                    .entity(Map.of("error", "No ingestion source '" + sourceId + "' on this knowledge base")).build());
-        }
-        return new ResolvedSource(ragConfig, source, null);
+        return new ResolvedSource(ragConfig, null, null);
     }
 
     private record ResolvedSource(RagConfiguration knowledgeBase, IngestionSource source, Response error) {

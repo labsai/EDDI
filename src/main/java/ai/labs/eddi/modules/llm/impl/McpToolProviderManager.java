@@ -11,10 +11,13 @@ import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
+import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.McpToolProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,6 +26,7 @@ import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpBlobResourceContents;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.mcp.client.McpMetaSupplier;
 import dev.langchain4j.mcp.client.McpReadResourceResult;
 import dev.langchain4j.mcp.client.McpResource;
 import dev.langchain4j.mcp.client.McpResourceContents;
@@ -30,6 +34,7 @@ import dev.langchain4j.mcp.client.McpResourceTemplate;
 import dev.langchain4j.mcp.client.McpTextResourceContents;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
+import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -83,6 +88,16 @@ public class McpToolProviderManager {
     private final CallerIdentityContext callerIdentityContext;
     private final boolean ssrfProtectionEnabled;
     private final int maxDescriptionChars;
+    private final int maxSchemaBytes;
+    private final long maxSchemaBytesPerServer;
+
+    /**
+     * Enforces a vault apiKey's {@code allowedHosts} against the server URL.
+     * Field-injected so the constructors keep their shape; null only in tests that
+     * construct the manager directly.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
 
     /**
      * Resolves a {@code ${connection:name}} apiKey per request. Injected as an
@@ -116,6 +131,22 @@ public class McpToolProviderManager {
     /** Default cap for a remote tool description before it reaches the model. */
     static final int DEFAULT_MAX_DESCRIPTION_CHARS = 1024;
 
+    /**
+     * Default cap on one tool's serialised parameter schema (M7). Real tool schemas
+     * are a few hundred bytes to a few KB; the largest public MCP servers stay well
+     * under 16 KB per tool, so 32 KB admits every legitimate schema while refusing
+     * one written to fill the context window.
+     */
+    static final int DEFAULT_MAX_SCHEMA_BYTES = 32_768;
+
+    /**
+     * Default cap on the schema bytes one server may put into the prompt across all
+     * of its tools (M7): 512 KB, i.e. a server advertising hundreds of large tools
+     * stops contributing once it has consumed that much, rather than consuming the
+     * context window of every agent that lists it.
+     */
+    static final long DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER = 524_288L;
+
     // ----- Circuit breaker state -----
     /** Maximum failures within the window before the circuit opens. */
     private static final int CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -130,6 +161,13 @@ public class McpToolProviderManager {
      */
     @Inject
     MeterRegistry meterRegistry;
+
+    /**
+     * Outbound W3C trace propagation into MCP requests. Field-injected and
+     * null-tolerant like {@link #meterRegistry}: null means no propagation.
+     */
+    @Inject
+    TracePropagation tracePropagation;
 
     /**
      * Count an MCP discovery outcome.
@@ -151,6 +189,8 @@ public class McpToolProviderManager {
             CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext,
             @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled,
             @ConfigProperty(name = "eddi.mcp.tool-description.max-chars", defaultValue = "1024") int maxDescriptionChars,
+            @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes", defaultValue = "32768") int maxSchemaBytes,
+            @ConfigProperty(name = "eddi.mcp.tool-schema.max-bytes-per-server", defaultValue = "524288") long maxSchemaBytesPerServer,
             @ConfigProperty(name = "eddi.mcp.tool-cache.ttl-ms", defaultValue = "300000") long toolCacheTtlMillis,
             ConnectionResolver connectionResolver) {
         this.connectionResolver = connectionResolver;
@@ -160,6 +200,8 @@ public class McpToolProviderManager {
         this.callerIdentityContext = callerIdentityContext;
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.maxDescriptionChars = maxDescriptionChars > 0 ? maxDescriptionChars : DEFAULT_MAX_DESCRIPTION_CHARS;
+        this.maxSchemaBytes = maxSchemaBytes > 0 ? maxSchemaBytes : DEFAULT_MAX_SCHEMA_BYTES;
+        this.maxSchemaBytesPerServer = maxSchemaBytesPerServer > 0 ? maxSchemaBytesPerServer : DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER;
         this.toolCacheTtlMillis = toolCacheTtlMillis >= 0 ? toolCacheTtlMillis : DEFAULT_TOOL_CACHE_TTL_MILLIS;
     }
 
@@ -229,7 +271,7 @@ public class McpToolProviderManager {
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver, boolean ssrfProtectionEnabled,
             int maxDescriptionChars, long toolCacheTtlMillis) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT,
-                ssrfProtectionEnabled, maxDescriptionChars, toolCacheTtlMillis, null);
+                ssrfProtectionEnabled, maxDescriptionChars, DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, toolCacheTtlMillis, null);
     }
 
     /**
@@ -241,7 +283,7 @@ public class McpToolProviderManager {
             CallerIdentityResolver callerIdentityResolver, CallerIdentityContext callerIdentityContext, boolean ssrfProtectionEnabled,
             int maxDescriptionChars, long toolCacheTtlMillis) {
         this(globalVariableResolver, secretResolver, callerIdentityResolver, callerIdentityContext, ssrfProtectionEnabled, maxDescriptionChars,
-                toolCacheTtlMillis, null);
+                DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, toolCacheTtlMillis, null);
     }
 
     /**
@@ -251,7 +293,7 @@ public class McpToolProviderManager {
      */
     McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this(globalVariableResolver, secretResolver, new CallerIdentityResolver(UNBOUND_CALLER_CONTEXT, true), UNBOUND_CALLER_CONTEXT, false,
-                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_TOOL_CACHE_TTL_MILLIS, null);
+                DEFAULT_MAX_DESCRIPTION_CHARS, DEFAULT_MAX_SCHEMA_BYTES, DEFAULT_MAX_SCHEMA_BYTES_PER_SERVER, DEFAULT_TOOL_CACHE_TTL_MILLIS, null);
     }
 
     /**
@@ -386,6 +428,7 @@ public class McpToolProviderManager {
                 validateTransport(serverConfig.getTransport());
                 validateCallerBoundKey(serverConfig);
                 validateConnectionBoundKey(serverConfig);
+                validateSecretDestination(serverConfig);
             } catch (IllegalArgumentException e) {
                 LOGGER.errorf("MCP server '%s' was NOT contacted because its configuration is invalid: %s — "
                         + "the agent runs without this server's tools until the config is fixed",
@@ -406,6 +449,9 @@ public class McpToolProviderManager {
                 List<ToolSpecification> serverSpecs = new ArrayList<>();
                 Map<String, ToolExecutor> serverExecutors = new HashMap<>();
                 if (result != null && result.tools() != null) {
+                    // M7: one byte budget per server per discovery pass, so a server
+                    // cannot fill the prompt with schemas tool by tool.
+                    var schemaBudget = new ToolSchemaGovernor.ServerBudget(maxSchemaBytesPerServer);
                     for (var toolEntry : result.tools().entrySet()) {
                         // F16: the description is authored by the REMOTE server and lands
                         // verbatim in the model's tool definitions — cap and sanitize it
@@ -424,6 +470,15 @@ public class McpToolProviderManager {
                         if (serverExecutors.containsKey(spec.name())) {
                             LOGGER.warnf("MCP server '%s' advertises tool '%s' more than once — keeping the first, dropping the duplicate",
                                     sanitize(serverName), sanitize(spec.name()));
+                            continue;
+                        }
+
+                        // M7: every description, title and enum value in the parameter
+                        // schema is remote text too — govern and bound it. After the two
+                        // drops above, so a tool that is dropped anyway is not charged
+                        // against the per-server budget ahead of the ones that are kept.
+                        spec = governSchema(spec, serverName, schemaBudget);
+                        if (spec == null) {
                             continue;
                         }
 
@@ -602,6 +657,7 @@ public class McpToolProviderManager {
         validateTransport(serverConfig.getTransport());
         validateCallerBoundKey(serverConfig);
         validateConnectionBoundKey(serverConfig);
+        validateSecretDestination(serverConfig);
 
         String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
         String prefix = toolNamePrefix(serverName, url);
@@ -885,7 +941,15 @@ public class McpToolProviderManager {
 
             McpTransport transport = createTransport(config, timeout);
 
-            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client").build();
+            // The trace context goes into params._meta (SEP-414) through the meta
+            // supplier, which DefaultMcpClient invokes on the calling thread —
+            // where the execute_tool span is current — just before handing the
+            // message to the transport. The transport then mirrors it into the
+            // HTTP headers from the message itself (see createTransport). The
+            // supplier reads the context per request, never at build time: this
+            // client is cached and shared across conversations.
+            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
+                    .metaSupplier(traceMetaSupplier()).build();
         });
     }
 
@@ -966,6 +1030,36 @@ public class McpToolProviderManager {
         if (ConnectionResolver.containsReference(config.getApiKey())) {
             ConnectionReference.requireSole(config.getApiKey(), "apiKey");
         }
+    }
+
+    /**
+     * Refuses a static apiKey whose vault secret's {@code allowedHosts} does not
+     * name the server URL — a static configuration error, so reported as one
+     * ({@code INVALID_CONFIGURATION}) and kept away from the circuit breaker. A
+     * caller- or connection-bound key is not a vault reference and is left alone.
+     *
+     * @throws IllegalArgumentException
+     *             when the secret may not be sent to this server
+     */
+    void validateSecretDestination(McpServerConfig config) {
+        String apiKey = config.getApiKey();
+        if (vaultHostAllowlist == null || isNullOrEmpty(apiKey) || CallerIdentityResolver.containsReference(apiKey)
+                || ConnectionResolver.containsReference(apiKey)) {
+            return;
+        }
+        try {
+            requireSecretsAllowedAt(globalVariableResolver.resolveValue(apiKey), config);
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    private void requireSecretsAllowedAt(String apiKey, McpServerConfig config) {
+        if (vaultHostAllowlist == null || apiKey == null) {
+            return;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(apiKey)), config.getUrl(), "MCP server '" + serverName + "'");
     }
 
     void validateServerUrl(String url) {
@@ -1051,6 +1145,59 @@ public class McpToolProviderManager {
     }
 
     /**
+     * Governs a remote tool's parameter schema (security review 2026-10-15, finding
+     * M7): every {@code description}, {@code title} and enum value in it is
+     * redacted and capped like the tool description, the serialised schema is
+     * bounded per tool ({@code eddi.mcp.tool-schema.max-bytes}) and per server
+     * ({@code eddi.mcp.tool-schema.max-bytes-per-server}), and anything that was
+     * redacted, truncated or dropped is counted in
+     * {@code eddi.mcp.tool-schema.governed}.
+     *
+     * @return the governed spec, or {@code null} when the tool must be dropped
+     */
+    ToolSpecification governSchema(ToolSpecification spec, String serverName, ToolSchemaGovernor.ServerBudget budget) {
+        ToolSchemaGovernor.Result result = ToolSchemaGovernor.govern(spec.parameters(), maxDescriptionChars, maxSchemaBytes);
+        if (result.dropped()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: its parameter %s", sanitize(spec.name()), sanitize(serverName),
+                    sanitize(result.dropReason()));
+            countSchema("dropped");
+            return null;
+        }
+        if (!budget.admit(result.bytes())) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' dropped: the server's tool schemas already fill %d of the %d bytes allowed per "
+                    + "server (eddi.mcp.tool-schema.max-bytes-per-server) and this one adds %d", sanitize(spec.name()), sanitize(serverName),
+                    budget.used(), budget.maxBytes(), result.bytes());
+            countSchema("dropped_server_cap");
+            return null;
+        }
+        if (result.redacted()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' had directive-shaped content in its parameter schema — redacted before prompting",
+                    sanitize(spec.name()), sanitize(serverName));
+            countSchema("redacted");
+        }
+        if (result.truncated()) {
+            LOGGER.warnf("MCP tool '%s' from server '%s' parameter schema was cut to fit: text over %d chars, or descriptions stripped "
+                    + "to stay under %d bytes", sanitize(spec.name()), sanitize(serverName), maxDescriptionChars, maxSchemaBytes);
+            countSchema("truncated");
+        }
+        if (!result.changed()) {
+            return spec;
+        }
+        return ToolSpecification.builder().name(spec.name()).description(spec.description()).parameters(result.schema()).build();
+    }
+
+    /**
+     * {@code eddi.mcp.tool-schema.governed}, tag {@code outcome}: redacted,
+     * truncated, dropped, dropped_server_cap.
+     */
+    private void countSchema(String outcome) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter("eddi.mcp.tool-schema.governed", "outcome", outcome).increment();
+    }
+
+    /**
      * Create the appropriate MCP transport based on configuration.
      */
     private McpTransport createTransport(McpServerConfig config, Duration timeout) {
@@ -1084,12 +1231,25 @@ public class McpToolProviderManager {
         }
         if (!isNullOrEmpty(apiKey) && !callerBound && !connectionBound) {
             apiKey = globalVariableResolver.resolveValue(apiKey);
+            // Checked again here, immediately before resolution, because a transport
+            // is also built for a tool call on a client the discovery pass never saw.
+            requireSecretsAllowedAt(apiKey, config);
             apiKey = secretResolver.resolveValue(apiKey);
         }
 
         // StreamableHttpMcpTransport (recommended, replaces deprecated
-        // HttpMcpTransport)
-        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout);
+        // HttpMcpTransport).
+        //
+        // followRedirects(false) — pinned, not left to the library default. Only
+        // the configured URL above is validated; a 3xx from it would carry every
+        // POST (the handshake, tools/list, each tool call with its Authorization
+        // header) to a Location nobody checked, an internal host included
+        // (security review 2026-10-15, finding M2). langchain4j-mcp 1.22 happens to
+        // default to Redirect.NEVER, but earlier releases built the client with
+        // Redirect.NORMAL and the builder flag exists precisely so a caller can
+        // decide; McpTransportRedirectTest holds this line to its word against an
+        // embedded redirecting server. The A2A client makes the same choice.
+        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout).followRedirects(false);
 
         if (!isNullOrEmpty(apiKey)) {
             final String configuredKey = apiKey;
@@ -1097,10 +1257,74 @@ public class McpToolProviderManager {
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(callContext -> authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext));
+            transportBuilder.customHeaders(callContext -> withTraceHeaders(
+                    authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext));
+        } else {
+            // No credential configured: the server decides whether it needs one.
+            // The trace context still goes out, mirrored from params._meta.
+            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
         }
 
         return transportBuilder.build();
+    }
+
+    /**
+     * The {@code params._meta} entries for one MCP message: {@code traceparent} and
+     * {@code tracestate} of the current span (SEP-414 reserves exactly these keys,
+     * plus {@code baggage}, which is never sent). Empty — so langchain4j adds
+     * nothing — when propagation is off or no valid span is current.
+     * <p>
+     * Must run on the thread that issues the request, which it does: the client
+     * calls its meta supplier synchronously before the transport is involved.
+     */
+    McpMetaSupplier traceMetaSupplier() {
+        return callContext -> traceMeta(tracePropagation);
+    }
+
+    static Map<String, Object> traceMeta(TracePropagation propagation) {
+        if (propagation == null) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(propagation.currentHeaders());
+    }
+
+    /**
+     * {@code headers} plus the trace headers this message carries in its
+     * {@code params._meta}.
+     * <p>
+     * Read from the message rather than from {@code Context.current()} on purpose.
+     * The transport usually builds the request on the calling thread, but its
+     * session-expiry retry rebuilds it from a completion callback on an HTTP client
+     * thread, where the current context is empty. The message is the same object on
+     * both paths, and its {@code _meta} was written on the calling thread, so
+     * header and {@code _meta} cannot disagree and neither depends on which thread
+     * the transport happens to use.
+     */
+    static Map<String, String> withTraceHeaders(Map<String, String> headers, McpCallContext callContext) {
+        if (callContext == null || !(callContext.message() instanceof McpClientRequest request) || request.getParams() == null
+                || request.getParams().getMeta() == null) {
+            return headers;
+        }
+        Map<String, Object> meta = request.getParams().getMeta();
+        Map<String, String> merged = null;
+        for (String name : TracePropagation.HEADERS) {
+            if (meta.get(name) instanceof String value && !value.isBlank() && !containsIgnoreCase(headers, name)) {
+                if (merged == null) {
+                    merged = new LinkedHashMap<>(headers);
+                }
+                merged.put(name, value);
+            }
+        }
+        return merged != null ? merged : headers;
+    }
+
+    private static boolean containsIgnoreCase(Map<String, String> headers, String name) {
+        for (String key : headers.keySet()) {
+            if (key.equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

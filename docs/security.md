@@ -21,7 +21,7 @@ The shipped `docker-compose.yml` sets all three opt-outs so the laptop quick sta
 
 EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The **Manager SPA** performs the interactive login via `keycloak-js` and sends Bearer tokens to the backend for validation.
 
-The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token may also be passed as `?token=` for convenience, but the widget strips it from the URL on load (so it does not linger in history/Referer/logs); accepting a token straight from the URL remains a login-CSRF vector and should be avoided in favour of the config or `postMessage` paths.
+The **Chat UI does not run `keycloak-js`** and has no login flow of its own. It is an embeddable widget: it receives a Bearer token from its host — via `setAuthToken`/`ChatConfig`, or a `postMessage` hand-off from its parent page at an allow-listed origin (`?tokenOrigin=`) — and forwards it as `Authorization: Bearer <token>`. The hand-off posts only to exact origins (never `*`), asks the host for a new token before the current one expires and on any `401`, holds the start of the conversation for up to 5 seconds until the first token arrives (then starts without one), and keeps the token in memory only; [chat-ui-embedding.md](chat-ui-embedding.md) is the full contract. A token in the URL (`?token=`) is a login-CSRF vector and is logged by the first request before the widget can strip it, so the widget ignores it unless the operator sets `eddi.chat.url-token.enabled=true` (served to the widget by `/chat/__config__.js`); enabled, it is read once and stripped from the address bar on load. Prefer the config or `postMessage` paths.
 
 ```
 Browser (EDDI Manager)                  Browser (EDDI Chat UI widget)
@@ -123,6 +123,68 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 > vault and index setup first, so a start that also had no reachable database spent its
 > server-selection timeout on MongoDB and exited with a MongoDB error instead of the reason.
 
+### Running without authentication
+
+With OIDC off (`authorization.enabled=false`, the quick start's
+`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) every endpoint, `/mcp` and
+`/secretstore` answer anyone who reaches the port. The compose stacks therefore
+publish on loopback only — but loopback stops the network, not the browser on the
+same machine. A page on `evil.example` whose DNS name is re-pointed at `127.0.0.1`
+(DNS rebinding) becomes same-origin with EDDI and can read and write the whole API;
+without rebinding, a page can still send CORS "simple" requests (a form-encoded or
+body-less `POST`) that execute although it cannot read the answer.
+
+So while authentication is off, `UnauthenticatedRequestGuard` (a Vert.x route
+filter, so it also covers `/mcp`, `/q/*` and static assets):
+
+- answers **421** to a request whose `Host` is not `localhost` (or a
+  `*.localhost` name), an IP address, one of the container-host names
+  `host.docker.internal`, `gateway.docker.internal` and `host.containers.internal`
+  (Podman), or an entry of `eddi.security.unauthenticated.allowed-hosts`
+  (`EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS`; `host` or `host:port`,
+  comma-separated, a bare host matching any port). IP addresses pass because a
+  rebinding attack needs a DNS name the attacker controls — and kubelet probes,
+  Prometheus scrapes and `eddi.self.base-url` address EDDI that way. The
+  container-host names are how a container (Open WebUI, an MCP client) reaches an
+  EDDI running on the host; Docker's and Podman's own resolvers answer them, and
+  `.internal` is a reserved top-level domain that public DNS never delegates. The raw
+  `Host` header is read, never a forwarded one: a rebound page is same-origin and
+  may set `X-Forwarded-Host` itself. `*` turns the check off;
+- answers **403** to a `POST`, `PUT`, `PATCH` or `DELETE` a browser marks as
+  cross-site: an `Origin` that is neither the request's own origin (host and port;
+  the scheme may differ behind a TLS-terminating proxy) nor in
+  `quarkus.http.cors.origins` — `Origin: null` included — or, with no `Origin`,
+  `Sec-Fetch-Site: cross-site` or `same-site`. A request with neither header
+  comes from a non-browser client (curl, an SDK) and passes.
+
+`/q/health` is exempt from both. EDDI logs one `[SECURITY]` WARN at startup
+describing the policy, and a WARN the first time it refuses each host (at most 32
+distinct hosts). With authentication on nothing is registered: every endpoint then
+needs a token, which a cross-site page does not have. The compose stacks set the
+allow-list to `eddi`, their service name on the compose network; add the name you
+browse to when it is not `localhost`. The MCP endpoint's own `Origin` validation
+still applies on top.
+
+> **Dev mode answers 400 for more hosts — that is Quarkus.** Under
+> `./mvnw quarkus:dev` (and in tests) the server binds `localhost`, which switches on
+> Quarkus' own `HostValidationFilter`: it accepts only `localhost`, `127.0.0.1` and
+> `[::1]` and ends every other `Host` — `eddi.localhost`, `localhost.`, any name on
+> `/q/health` — with an empty `400`, before or after this filter. Widen it with
+> `quarkus.http.host-validation.allowed-hosts`. A container binds `0.0.0.0`, does not
+> enable it, and answers those requests as described above.
+
+### Shipped realm hardening
+
+`keycloak/eddi-realm.json` (and its copies under `helm/eddi/files/` and
+`k8s/overlays/auth/`) sets a password policy (`length(12) and maxLength(128) and
+notUsername and notEmail and passwordHistory(3)`), records login and admin events
+(30-day retention, admin event bodies off), requires consent on `eddi-mcp` and limits
+that client's tokens to the `eddi-*` realm roles (`fullScopeAllowed: false` plus a scope
+mapping), and seeds its three accounts with `emailVerified: false` — their placeholder
+addresses were never verified, and the user directory resolves shares by verified e-mail.
+Realm import is one-shot: a realm imported before these settings keeps its old ones until
+you change them in the admin console or re-provision it.
+
 ### The Token Must Name the User
 
 EDDI files conversations, memories and approvals under the principal name.
@@ -138,12 +200,35 @@ a nameless caller with `403` as a second line of defence. Background work
 (schedule fires, group members, sub-agents) never authenticates a request and is
 unaffected.
 
+The principal is also the id a share is stored under and the `subject` the
+[user directory](workspaces.md#finding-people-the-user-directory) returns beside a
+person's name, so whatever claim it comes from is visible to anyone who can share
+with that person. Where `preferred_username` is an email address, set
+`quarkus.oidc.token.principal-claim` to a stable, non-address claim such as `sub`
+if colleagues' addresses are not everyone's business; the directory hides
+addresses it holds as *email* or *username*, but cannot hide the principal itself.
+
 If you see that WARN, either add one of those claims to the access token — for the
 shipped realm, [Identity claims, and realms imported from EDDI
 6.1.0–6.4.0](#identity-claims-and-realms-imported-from-eddi-610640) below is the
 repair — or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` to a claim your provider does
 emit. Pick a claim that is stable and unique per user: ownership is keyed on its
 value, so a changed name orphans everything filed under the old one.
+
+**Some names are EDDI's own.** EDDI also files work under principals it makes up
+for callers that bring no token: `slack:<team>:<user>` for a Slack user,
+`openwebui:…` for a header-named Open WebUI user, `group:<id>` for a group's
+shared memory, `system:…` for the scheduler and other engine work, `a2a:…`,
+`mcp:…`, `webhook:…`, `agent-test:…`, `anonymous-…` and `anonymous`, and the
+`gdpr-erased:…` pseudonym. Because ownership is a string comparison, a token
+whose principal were `slack:T1:U2` would own that Slack user's conversations.
+EDDI therefore **rejects a token whose principal starts with any of these
+prefixes (case-insensitively) with `401`**, and logs a `[SECURITY]` WARN naming
+the prefix and the issuer, throttled like the one above. Only an identity
+provider that allows `:` in usernames can issue such a name; if you see the WARN,
+rename the account or point `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` at a claim that
+cannot take that value. The list lives in `ReservedPrincipals`, and a unit test
+fails when the code starts minting a new prefix without adding it there.
 
 > **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
 > *every* configuration in the deployment. To scope agents, workflows and the
@@ -202,6 +287,19 @@ Conversation descriptors share the `descriptors` collection with configuration d
 - `GET /descriptorstore/descriptors` requires `type` to name a configuration type (one of the types the configuration stores declare, e.g. `ai.labs.agent`); anything else — `ai.labs.conversation`, a blank type, a prefix — is a `400`.
 - `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
 - **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
+
+### Editors never read a plaintext credential back
+
+Vault values belong to the administrator, so a configuration store does not hand a literal credential to anyone else. `GET` on an LLM, MCP-calls, httpcalls, RAG or channel configuration — including `?version=` reads of old versions, and MCP `read_resource` / `read_channel_integration`, which go through the same REST stores — returns the document as stored to `eddi-admin` and a redacted copy to every other caller (`ConfigSecretRedactor`):
+
+- a string under a credential-named field (`apiKey`, `botToken`, `signingSecret`, `password`, `clientSecret`, `connectionString`, …) anywhere in the document — LLM task parameters, `a2aAgents[].apiKey`, `mcpServers[].apiKey`, `modelCascade` step and judge parameters, `platformConfig`, `embeddingParameters`, `storeParameters` — is replaced by a `<redacted: …>` marker;
+- an httpcall's credential headers (`Authorization`, `X-Api-Key`, `*-Key`, `Cookie`) are replaced whole; credential-named query values in `request.path`, a userinfo password in any URL, and credential-shaped values in `request.body` are replaced in place with `<redacted: credential>`.
+
+A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`.
+
+**A document carrying the marker is never stored.** Every write to these five stores — create, update, JSON Patch, duplicate — and every import or upgrade that creates one directly answers `400` with `{"error": "bad_request", "message": …, "fields": [<paths>]}` when any string in the document contains `<redacted: ` (the whole-value marker and the in-string `<redacted: credential>` both begin with it), for administrators too. Re-enter the credential or replace it with a `${vault:…}` reference. Without this, an editor who opened a configuration in the Manager and saved it would silently replace the stored key with the marker. The store deliberately does not merge the stored literal back in either, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault.
+
+Server-side work started by an editor reads the unredacted document, with the same access check: RAG ingestion (so a knowledge base whose key is a literal still ingests) and agent upgrade and sync (`StructuralMatcher` compares against, and `UpgradeExecutor` writes back, the target's stored values — an export's `${vault:REDACTED}` placeholder is replaced by the target's own key, never by the marker). A sync **source** read from a peer through a non-admin credential does carry the marker, so its affected resources are refused rather than stored. The upgrade and sync **previews** those reads feed are redacted again at the REST boundary for anyone who is not `eddi-admin` (`PreviewRedaction`), so an editor's preview shows the marker where the stored document holds a literal.
 
 ### RestAgentManagement Gate
 
@@ -431,17 +529,73 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > variable). Leave it off only if every outbound target is a fixed literal and you
 > genuinely need to reach private addresses.
 >
+> **A templated host is refused while it is off.** An httpCall whose scheme, host
+> or port contains a template expression (`https://{properties.apiHost}`,
+> `http://127.0.0.1:{properties.port}`) fails to deploy, and a turn that still
+> reaches one fails, with a message naming this flag. A property is routinely
+> captured from user input, so without validation of the rendered host the
+> chatting user could pick loopback — EDDI's own admin API included. A
+> `${vars:…}` reference in the host is still accepted: its value is set by an
+> operator. Templating the *path* or query is unaffected.
+>
+> **Keep internal APIs with protection on** by listing them:
+>
+> ```properties
+> eddi.security.ssrf-protection.enabled=true
+> eddi.security.ssrf-protection.allowed-hosts=billing.internal,10.0.0.5:9200
+> ```
+>
+> Entries are exact `host` or `host:port` values, compared case-insensitively,
+> with no wildcards; a bare host matches any port. An httpCall to a listed host
+> skips the private-address check but never the cloud-metadata check, and
+> redirects stay off. A templated host can then only resolve to a listed host or
+> a public one. The allow-list applies to httpCalls; MCP servers and A2A peers
+> are validated as before.
+>
+> **Production warns when it is off.** `AuthStartupGuard` logs a `[SECURITY]`
+> WARN at startup in production while `eddi.security.ssrf-protection.enabled` is
+> `false`. The default stays `false` because configured targets legitimately reach
+> internal hosts (the rule-based reference agent calls `http://localhost:7070`).
+>
 > **The cloud instance-metadata service is blocked either way.** With protection
 > off, httpCalls, MCP servers and A2A peers still refuse
 > `169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`,
 > `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
 > `fe80::/10`) — including a hostname that resolves there
 > (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
-> the instance's cloud credentials; nobody configures it as an API. With protection
+> the instance's cloud credentials; nobody configures it as an API. A URL whose
+> host the check cannot read is refused too: an `http(s)` URL with an underscore
+> in its host (`x_y.example`), a percent-encoded host, or an IP literal with a
+> trailing dot (`169.254.169.254.`) has no host to `java.net.URI`, while the
+> httpCalls client parses it with `java.net.URL`, resolves it and connects — so a
+> registry-style name pointed at `169.254.169.254` used to pass unchecked
+> (security review 2026-10-17, H2). Use a standard host name; a Docker service
+> name with an underscore needs a hyphenated alias. With protection
 > off redirects are still followed, so the httpCalls client checks every redirect
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
-> instead of being followed. For MCP servers and A2A peers only the configured
-> target is checked while protection is off; turn it on to stop a redirect there.
+> instead of being followed. The MCP client and the A2A client never follow a
+> redirect at all, protection on or off: the transport is built with
+> `followRedirects(false)` (pinned in `McpToolProviderManager`, held to its word
+> by `McpTransportRedirectTest` against an embedded redirecting server), so a
+> `3xx` from a configured MCP URL fails the handshake instead of carrying the
+> session — and its `Authorization` header — to a host nobody validated. (Until
+> 6.6.0 the MCP transport followed redirects: security review 2026-10-15, M2.)
+>
+> **Configured endpoints beyond httpCalls are covered by the same switch.** LLM
+> provider `baseUrl`/`endpoint`/`apiEndpoint` in every builder, embedding
+> endpoints, vector-store addresses (Elasticsearch, Chroma as URLs; pgvector,
+> Qdrant and every host in a MongoDB connection string as bare hosts, opened as
+> raw connections) and the OpenAPI spec location of endpoint discovery and the
+> setup wizard all go through `OutboundTargetPolicy`: the metadata service is
+> refused always, and with protection on any private, loopback or link-local
+> address is too — with two exemptions: a host on
+> `eddi.security.ssrf-protection.allowed-hosts` (the same list httpCalls honour),
+> and a URL on this deployment's own origin (`eddi.self.base-url`), so an agent
+> may still call EDDI's own `/v1` API. The spec document is fetched by EDDI
+> itself (`OpenApiSpecFetcher`: every redirect hop checked, body capped at 16 MB)
+> rather than by swagger-parser. Residual:
+> `$ref`s inside a fetched spec are resolved by swagger-parser's own resolver,
+> which checks each reference's URL but follows that URL's redirects itself.
 
 ### Scheme Allowlist
 
@@ -575,6 +729,24 @@ Runtime templates are **not** rendered by the Qute engine Quarkus injects — th
 
 A render that exceeds a limit fails like any other malformed template: the output path substitutes an empty string and logs it, and every other caller handles it exactly as it handles a template syntax error. `0` disables a limit — only do that for a deployment whose agent configurations are fully trusted.
 
+`str.replace` and `str.concat` apply the output bound *before* they allocate: the size the call would produce is computed first and refused with the same `TemplateLimitExceededException` a too-long rendered value raises. `str:fmt`/`str:format` and the `String.fmt`/`format` instance forms do the same: an upper bound for the formatted length is computed from the format specifiers (literal text, and per specifier the larger of its width and its content — the argument's length for `%s`, a numeric bound plus the precision for numbers) and refused before `String.format` runs, so `{str:fmt('%2000000000d', 1)}` fails in milliseconds instead of allocating 2 GB. A render that still runs out of memory is caught by `processTemplate` and reported the same way, naming the bound, instead of escaping as an `Error`; so is a `StackOverflowError` from a template that nests thousands of sections.
+
+`quarkus.qute.timeout` (default 10 s) bounds the wall-clock time of one render. EDDI's resolvers render synchronously, so the timeout is enforced from inside the render: every value resolution and every loop iteration checks the render's deadline and fails it once passed, which stops a CPU-bound template that stays under every size and iteration cap.
+
+---
+
+## Parser and Matcher Bounds
+
+Three small parsers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
+
+| Parser | Reached by | Bound | On exceeding it |
+|---|---|---|---|
+| Expression parser (`ExpressionProvider`) | Any client — a `context` entry of type `expressions` is parsed by the property-setter and by every `contextmatcher` rule; also dictionaries, `inputmatcher` text | `eddi.expressions.max-length` (32,768 characters) and `eddi.expressions.max-depth` (32 nested parentheses), checked in one linear scan before parsing; the parser itself works on index ranges of the one string | A client-sent context entry: `413` `input_too_large` before the turn starts. Inside a turn: the task fails, counted and audited like any other task failure |
+| Dictionary `regEx` (`RegEx`) | Every token of every user input, against every pattern of the deployed dictionaries | 200 ms per match, enforced through a deadline-checking `CharSequence` (`RegexDeadline`); the pattern must also compile when the dictionary is **saved** | A match past its budget is a miss (logged at WARN); an invalid pattern is refused with `400` at save time, naming the syntax error |
+| Path expressions (`PathNavigator`) | `fromObjectPath` and the other property-instruction paths in `httpcalls`/`mcpcalls`/`property` configs | 64 `+`/`-` operands per expression (the longest-prefix search is quadratic in that count) | The expression resolves to nothing |
+
+A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.
+
 ---
 
 ## Tool Execution Pipeline
@@ -609,11 +781,11 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool �
 
 ### Cost Tracking
 
-- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `false`, deployment fallback `eddi.tools.budget.enforce-by-default`)
+- **Configuration:** `enableCostTracking` (default `true`), `toolPricing` (per-call price overrides), `maxBudgetPerConversation` (no default — unlimited), `enforceBudget` (default `true`, deployment fallback `eddi.tools.budget.enforce-by-default`)
 - **Scope:** `maxBudgetPerConversation` bounds **tool** cost only. LLM token spend is governed separately and per run by the model cascade's `maxCostPerRun`; the two are not summed
 - **Pricing:** default per-call prices are keyed on the built-in slug (`webscraper` $0.002, `websearch` $0.001, `pdfreader` $0.001, `weather` $0.0005; `calculator`/`datetime`/`dataformatter`/`textsummarizer` free). Everything else — http, mcp, a2a, dynamic — is $0.00 until priced via `toolPricing`, which accepts a slug or a dispatch name (dispatch name wins). Operator-supplied prices are clamped at 0.0, so a negative value cannot credit a conversation and make a ceiling unreachable
 - **Eviction:** To prevent unbounded memory growth, the tracker caps per-conversation entries at 10 000 and evicts the oldest ~10% when the limit is reached
-- **Behaviour:** Enforcement is **opt-in**. A configured `maxBudgetPerConversation` records cost but refuses nothing until `enforceBudget: true` (per task) or `eddi.tools.budget.enforce-by-default=true` (per deployment). Once enforced, the budget is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Enforcing by default was rejected because built-ins priced at $0.00 until the canonical-slug fix, so it would make those ceilings bind for the first time and abort tool calls on upgrade. The converse cost is real — http/MCP/A2A/dynamic tools dispatch under their configured name, so an agent with a tool called `websearch`/`webscraper`/`pdfreader` *was* being refused before this release — so every task carrying a ceiling without the flag is named once in a startup WARN rather than lapsing silently
+- **Behaviour:** Enforcement is the **default** (6.6.0, security review finding M8). A configured `maxBudgetPerConversation` is checked *before* each call using `<=` — the call that crosses the ceiling completes and the next one returns `Error: Budget exceeded for conversation <id>` to the LLM. Opting out — `enforceBudget: false` per task, or `eddi.tools.budget.enforce-by-default=false` per deployment — keeps cost tracking and reporting and turns the refusal off; every task whose ceiling is opted out is named once in a WARN rather than lapsing silently, and the MCP `get_agent`/`deploy_agent` tools report the effective default as `toolBudgetEnforcedByDefault`. Until 6.6.0 this was an opt-in whose deployment key was not declared, so every stored ceiling was advisory
 
 ### Configuration Example
 
@@ -685,6 +857,14 @@ if no TLS certificate is detected.
 Configure your reverse proxy to terminate TLS and forward traffic to EDDI
 on `localhost:7070`. This is the standard production pattern.
 
+**HSTS.** Once the public origin is https only, set
+`eddi.security.hsts.enabled=true` (`EDDI_SECURITY_HSTS_ENABLED`): every response then
+carries `Strict-Transport-Security: max-age=31536000` (`eddi.security.hsts.max-age`), so
+a browser that has seen the origin once refuses plain http to it afterwards. It is off by
+default because EDDI usually serves plain http behind the proxy; the Helm chart turns it
+on when `ingress.tls` is set, and the GCP provisioner's nginx sends it itself. Add
+`includeSubDomains`/`preload` at the proxy if the whole domain is https-only.
+
 ### Option 2: TLS Directly in Quarkus
 
 ```properties
@@ -695,6 +875,8 @@ quarkus.http.ssl-port=8443
 # defaults to `enabled`, so port 7070 keeps serving cleartext alongside 8443.
 quarkus.http.insecure-requests=disabled
 ```
+
+For post-quantum key exchange (`X25519MLKEM768`) and what the JDK supports today, see [Cryptography → TLS key exchange](cryptography.md#tls-key-exchange).
 
 ### Internal Traffic
 
@@ -728,6 +910,22 @@ For audited false positives, EDDI provides override files at the repository root
 - **`.gitleaksignore`** — Suppress specific Gitleaks fingerprints with justification
 
 Both files should be reviewed periodically to ensure suppressions remain valid.
+
+### Installer Downloads
+
+`install.sh` and `install.ps1` fetch the compose files, the Keycloak realm and login
+theme, and the monitoring configuration from `raw.githubusercontent.com` at a git ref
+(`EDDI_BRANCH`; by default the newest release tag). Each release now publishes a
+`SHA256SUMS` asset — the release job in `ci.yml` hashes those files at the tag — and when
+the ref is a release tag the installers check every downloaded file against it and refuse
+one whose hash differs. A ref without the asset (`main`, a branch, a release published
+before it existed) still installs, with a warning that only TLS vouches for the files; an
+unlisted file is warned about, not refused. The installers do not verify themselves —
+fetch `install.sh` from a release tag rather than `main` for a pinned install. The CLI's
+`eddi update` re-downloads compose files without this check. The GCP provisioner
+(`gcp/provision-vm.sh`) now defaults `--eddi-branch` to `--eddi-version`'s tag or the
+newest stable release instead of `main`, falling back to `main` with a warning when the
+lookup fails.
 
 ### Fuzz Testing
 
@@ -773,3 +971,4 @@ are not printed by the script. See [Kubernetes](kubernetes.md) for the secret-ba
 - [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide
 - [EU AI Act Compliance](eu-ai-act-compliance.md) — EU AI Act compliance
 - [Compliance Data Flow](compliance-data-flow.md) — Data flow diagram for auditors
+- [Cryptography](cryptography.md) — Algorithm inventory and post-quantum readiness

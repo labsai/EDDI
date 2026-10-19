@@ -104,7 +104,7 @@ Left empty, EDDI derives `<issuer>/protocol/openid-connect/token`, taking
 > discovery (`<issuer>/.well-known/openid-configuration`) would remove the
 > assumption rather than document it, and is the right follow-up — it is not done
 > here because it turns rendering an anonymous card into an outbound HTTP call,
-> which needs `SafeHttpClient`, a cache and a failure policy of its own.
+> which needs `OutboundHttp`, a cache and a failure policy of its own.
 
 > **Implementation note.** `@PermitAll` on the JAX-RS method is only half of
 > this. Quarkus evaluates the `quarkus.http.auth.permission.*` path policies

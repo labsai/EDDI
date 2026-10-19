@@ -53,16 +53,23 @@ public record DirectoryUser(String principal, String subject, String username, S
 
     /**
      * How to show this person: their name, else their username, else the principal.
-     * Never an email on its own — that is the secondary line.
+     * Never an email on its own — that is the secondary line — and a username that
+     * is itself an address counts as one, so it is skipped and the principal shown
+     * instead: whoever may see the address gets it on the secondary line.
      */
     public String label() {
         if (displayName != null && !displayName.isBlank()) {
             return displayName.trim();
         }
-        if (username != null && !username.isBlank()) {
+        if (username != null && !username.isBlank() && !emailForm(username)) {
             return username.trim();
         }
         return principal;
+    }
+
+    /** Whether {@code value} is shaped like an email address. */
+    static boolean emailForm(String value) {
+        return value != null && value.contains("@");
     }
 
     /** Lower-cased for case-insensitive lookups; null stays null. */

@@ -104,6 +104,30 @@ public interface ISecretPersistence {
     boolean updateSecretSealing(EncryptedSecret secret, String expectedDekId);
 
     /**
+     * Replaces one secret's ciphertext and IV with a re-seal of the SAME value
+     * under the SAME DEK generation, but only while the row still carries
+     * {@code expectedIv}.
+     * <p>
+     * Exists to retire the pre-AAD form of a row the moment it is read (L10 of the
+     * 2026-10-17 security review). The guard is the IV rather than the dekId,
+     * because the row stays on its generation: a concurrent {@code store} that
+     * replaced the value under the same generation changes the IV (every seal draws
+     * a fresh one), and a dekId guard would not see it — the re-seal would then
+     * write the OLD value back over the new one. Neither {@code dekId} nor
+     * {@code lastRotatedAt} is touched: this is not a rotation.
+     * <p>
+     * The default writes nothing, so an implementation that does not support it
+     * simply keeps reading the row through the legacy path.
+     *
+     * @return whether the row was rewritten
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    default boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        return false;
+    }
+
+    /**
      * Rewrites one secret's {@code allowedAgents} and {@code description}, and
      * nothing else.
      * <p>
@@ -150,6 +174,23 @@ public interface ISecretPersistence {
      */
     boolean updateSecretGrantIfUnchanged(String tenantId, String keyName, List<String> expectedAllowedAgents, List<String> allowedAgents,
                                          String description);
+
+    /**
+     * Rewrites one secret's {@code allowedHosts} and nothing else — the destination
+     * allow-list counterpart of {@link #updateSecretGrant}, narrow for the same
+     * reason: an operator adding a host to a vaulted key no longer has its
+     * plaintext, and a method whose signature cannot name the ciphertext cannot
+     * touch it.
+     *
+     * @param allowedHosts
+     *            the replacement list, already validated and lower-cased by the
+     *            caller; an empty list removes the restriction
+     * @return false if no such {@code (tenantId, keyName)} row exists, in which
+     *         case nothing was written
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    boolean updateSecretAllowedHosts(String tenantId, String keyName, List<String> allowedHosts);
 
     /**
      * Records that a secret was just resolved, writing {@code lastAccessedAt} and

@@ -5,6 +5,8 @@ import { ShareDialog } from "@/components/workspaces/share-dialog";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
+import { QueryClient } from "@tanstack/react-query";
+import { agentKeys } from "@/lib/query-keys";
 
 const RESOURCE_ID = "aaaaaaaaaaaaaaaaaaaaaaaa";
 const SHARES = `*/descriptorstore/descriptors/${RESOURCE_ID}/shares`;
@@ -265,6 +267,32 @@ describe("ShareDialog", () => {
 
     expect(await screen.findByTestId("share-owner-warning")).toBeInTheDocument();
     expect(shared).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the agent's own detail and descriptor after a change, not only the lists", async () => {
+    // agentKeys.detail / .descriptor have their own roots ("agent",
+    // "agent-descriptor"), so invalidating agentKeys.all ("agents") misses them.
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    server.use(
+      http.get(SHARES, () =>
+        HttpResponse.json(
+          shareInfo({
+            grants: [{ subject: "user:bob@example.com", level: "VIEW", grantedBy: "alice", grantedOn: 0 }],
+          })
+        )
+      ),
+      http.delete(SHARES, () => HttpResponse.json({ updated: [{ id: RESOURCE_ID, name: "Test Agent" }], skipped: [] }))
+    );
+
+    renderWithProviders(<ShareDialog {...props} />);
+    await waitFor(() => expect(screen.getByText("bob@example.com")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: /stop sharing with/i }));
+
+    await waitFor(() => {
+      const keys = invalidate.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+      expect(keys).toContain(JSON.stringify(agentKeys.detail(RESOURCE_ID)));
+      expect(keys).toContain(JSON.stringify(agentKeys.descriptor(RESOURCE_ID)));
+    });
   });
 
   it("removes a grant and says so in the past tense", async () => {

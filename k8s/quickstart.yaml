@@ -88,16 +88,37 @@ data:
   QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:7070"
   QUARKUS_OIDC_TENANT_ENABLED: "false"
 
-  # Authentication escape hatches. OIDC is off by default in this quickstart, and
-  # AuthStartupGuard refuses a production boot in that state without an explicit
-  # opt-out — so these three are what make the manifest actually start. The MCP
-  # endpoint and the secrets vault need their OWN opt-in on top of the first flag:
-  # inheriting it must not be enough to expose agent CRUD or vault writes.
-  # Set all three to "false" and QUARKUS_OIDC_TENANT_ENABLED to "true" for anything
-  # reachable from outside the cluster.
+  # ⚠️  ⚠️  ⚠️  EVERY ENDPOINT IS OPEN — EVALUATION ONLY  ⚠️  ⚠️  ⚠️
+  #
+  # The three flags below switch authentication OFF for the whole API, for the
+  # MCP server (agent CRUD, conversations, memories, audit trails) AND for the
+  # secrets vault (/secretstore: writes, key rotation, reset). Anyone who can
+  # reach the eddi Service — every pod in the cluster, and the whole network if
+  # you add an Ingress or a LoadBalancer — is an administrator. There is no
+  # token, no role, no audit identity. Treat this manifest exactly like the
+  # unauthenticated MongoDB it ships: a port-forward demo on a cluster you alone
+  # can reach, never a shared, staging or internet-facing one.
+  #
+  # Why all three are "true" rather than only the first: OIDC is off here, and
+  # with OIDC off EDDI refuses to boot (HighValueSurfaceGuard) unless the MCP
+  # server and the vault are EACH opted in explicitly — "false" on either one is
+  # not a safer quickstart, it is a CrashLoopBackOff. The Helm chart makes the
+  # same choice visible at render time: it refuses an OIDC-off release until
+  # both opt-ins are set. So the only way to close these is to turn OIDC on:
+  # set QUARKUS_OIDC_TENANT_ENABLED to "true", all three flags to "false", and
+  # add an identity provider — k8s/overlays/auth does exactly that (see
+  # docs/kubernetes.md, "Authentication (Keycloak)"). Do it BEFORE anything
+  # but you can reach the Service.
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
   EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
+  # While authentication is off EDDI answers only requests addressed to localhost,
+  # an IP address (kubelet probes, Prometheus, port-forward) or a host listed here,
+  # and refuses cross-site POST/PUT/PATCH/DELETE — the DNS-rebinding defence of
+  # UnauthenticatedRequestGuard (docs/security.md, "Running without
+  # authentication"). These are the Service's in-cluster names; add an Ingress
+  # host here if you publish one. Ignored once OIDC is on.
+  EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: "eddi,eddi.eddi,eddi.eddi.svc,eddi.eddi.svc.cluster.local"
 
 ---
 # --- EDDI Secret ---
@@ -157,11 +178,23 @@ spec:
     spec:
       # MongoDB never calls the Kubernetes API.
       automountServiceAccountToken: false
+      # Runs as the image's mongodb user from the start (uid/gid 999), so the
+      # entrypoint has no chown or gosu step and the container can drop every
+      # capability. Existing data directories are already owned by 999.
       securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
         fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mongodb
           image: mongo:7.0.43
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 27017
               name: mongo
@@ -366,7 +399,7 @@ spec:
           resources:
             requests:
               cpu: 250m
-              memory: 384Mi
+              memory: 1Gi
             limits:
               cpu: "2"
-              memory: 1Gi
+              memory: 2Gi

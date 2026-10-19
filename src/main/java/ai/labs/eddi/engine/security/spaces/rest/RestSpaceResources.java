@@ -12,6 +12,9 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultGrantGate;
+import ai.labs.eddi.secrets.VaultGrantRequests;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,6 +25,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -48,15 +52,24 @@ public class RestSpaceResources implements IRestSpaceResources {
     private final SecretResolver secretResolver;
     private final IGlobalVariableStore variableStore;
     private final GlobalVariableResolver variableResolver;
+    /** See {@link VaultGrantRequests#requireGrantOnCreate}. */
+    private final VaultGrantGate.Mode grantEnforcement;
 
     @Inject
     public RestSpaceResources(ResourceAccessGuard accessGuard, ISecretProvider secretProvider, SecretResolver secretResolver,
-            IGlobalVariableStore variableStore, GlobalVariableResolver variableResolver) {
+            IGlobalVariableStore variableStore, GlobalVariableResolver variableResolver,
+            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME) String grantEnforcement) {
+        this(accessGuard, secretProvider, secretResolver, variableStore, variableResolver, VaultGrantGate.Mode.parseStrict(grantEnforcement));
+    }
+
+    RestSpaceResources(ResourceAccessGuard accessGuard, ISecretProvider secretProvider, SecretResolver secretResolver,
+            IGlobalVariableStore variableStore, GlobalVariableResolver variableResolver, VaultGrantGate.Mode grantEnforcement) {
         this.accessGuard = accessGuard;
         this.secretProvider = secretProvider;
         this.secretResolver = secretResolver;
         this.variableStore = variableStore;
         this.variableResolver = variableResolver;
+        this.grantEnforcement = grantEnforcement;
     }
 
     @Override
@@ -87,8 +100,29 @@ public class RestSpaceResources implements IRestSpaceResources {
             throw new BadRequestException("A secret value is required.");
         }
         var reference = new SecretReference(tenant, keyName);
+        List<String> allowedAgents;
+        List<String> allowedHosts;
         try {
-            secretProvider.store(reference, body.value(), body.description(), body.allowedAgents());
+            allowedAgents = VaultGrantRequests.validatedGrant(body.allowedAgents());
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+        try {
+            boolean exists = exists(reference);
+            if (!exists) {
+                try {
+                    VaultGrantRequests.requireGrantOnCreate(grantEnforcement, allowedAgents);
+                    VaultGrantRequests.requireHostsOnCreate(grantEnforcement, body.allowedHosts());
+                } catch (IllegalArgumentException e) {
+                    throw new BadRequestException(e.getMessage());
+                }
+                if (allowedAgents == null) {
+                    // warn / off: the convenience those modes opted into, said here.
+                    allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
+                }
+            }
+            secretProvider.store(reference, body.value(), body.description(), allowedAgents, allowedHosts);
             // A model built with the old key, or with the unresolved reference, is cached
             // downstream — the same reason RestSecretStore always invalidates.
             secretResolver.invalidateCache(reference);
@@ -203,9 +237,19 @@ public class RestSpaceResources implements IRestSpaceResources {
         }
     }
 
+    private boolean exists(SecretReference reference) throws ISecretProvider.SecretProviderException {
+        try {
+            secretProvider.getMetadata(reference);
+            return true;
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            return false;
+        }
+    }
+
     private static SpaceSecret toSecret(SecretMetadata metadata) {
         return new SpaceSecret(metadata.keyName(), new SecretReference(metadata.tenantId(), metadata.keyName()).toReferenceString(),
-                metadata.description(), metadata.allowedAgents(), metadata.createdAt() == null ? null : metadata.createdAt().toString());
+                metadata.description(), metadata.allowedAgents(), metadata.createdAt() == null ? null : metadata.createdAt().toString(),
+                metadata.allowedHosts() == null ? List.of() : metadata.allowedHosts());
     }
 
     /**

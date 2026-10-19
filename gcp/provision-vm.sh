@@ -52,7 +52,10 @@ DEFAULT_IMAGE_FAMILY="ubuntu-2204-lts"
 DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_EDDI_PORT="7070"
 DEFAULT_EDDI_HTTPS_PORT="7443"
-DEFAULT_EDDI_BRANCH="main"
+# Empty = the newest stable release tag, looked up at create time (resolve_eddi_branch),
+# falling back to main with a warning. It used to be `main`, so a VM ran whatever
+# install.sh and compose files main held at that moment, as root.
+DEFAULT_EDDI_BRANCH=""
 DEFAULT_EDDI_VERSION="latest"
 NETWORK_TAG="eddi-server"
 FIREWALL_RULE_HTTP="allow-eddi-http"
@@ -102,7 +105,7 @@ ${BOLD}Create options:${RESET}
   --machine-type=TYPE       GCP machine type             [${DEFAULT_MACHINE_TYPE}]
   --disk-size=GB            Boot disk size in GB         [${DEFAULT_DISK_SIZE}]
   --project=PROJECT_ID      GCP project ID               [from gcloud config]
-  --eddi-branch=BRANCH      EDDI GitHub branch           [${DEFAULT_EDDI_BRANCH}]
+  --eddi-branch=BRANCH      EDDI git ref for install.sh  [--eddi-version's tag, else the latest release]
   --eddi-version=TAG        EDDI Docker image tag        [${DEFAULT_EDDI_VERSION}]
   --with-auth               Enable Keycloak OIDC auth
   --with-monitoring         Include Grafana + Prometheus
@@ -416,6 +419,7 @@ build_startup_script() {
   local p_setup_https="${SETUP_HTTPS}"
   local p_le_email="${LETSENCRYPT_EMAIL:-admin@example.com}"
   local p_with_auth="${WITH_AUTH}"
+  local p_i_understand_public="${I_UNDERSTAND_PUBLIC}"
   local p_kc_admin_file="${KC_ADMIN_FILE}"
 
   cat <<STARTUP_SCRIPT
@@ -541,6 +545,12 @@ export EDDI_HTTPS_PORT="${p_https_port}"
 # 0.0.0.0. Off-box exposure is controlled by the now IP-scoped firewall and the
 # require_auth_or_public_ack gate, not by the bind address, so this is safe here.
 export EDDI_BIND="0.0.0.0"
+# docker-compose.yml refuses that bind address while authentication is off
+# (its bind-guard service), and install.sh checks the same thing before pulling
+# images. The require_auth_or_public_ack gate above already made the operator
+# choose --with-auth or --i-understand-public, so this carries that choice to
+# the VM: "true" only when --i-understand-public was passed.
+export EDDI_I_UNDERSTAND_PUBLIC="${p_i_understand_public}"
 # Keycloak master-realm admin password (--with-auth only). Generated HERE, on the
 # VM, and kept in a root-only file — never on the provisioning machine and never
 # in this script: the startup script is instance metadata, which every process
@@ -599,6 +609,10 @@ server {
 
     client_max_body_size 50m;
 
+    # Browsers that have seen this origin once refuse plain http to it for a
+    # year. No includeSubDomains: sslip.io names are not ours to bind.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
     location / {
         proxy_pass         http://localhost:__EDDI_PORT__;
         proxy_http_version 1.1;
@@ -637,6 +651,19 @@ server {
     location = /admin {
         return 404;
     }
+    # The master realm's endpoints too — its token endpoint is where the bootstrap
+    # admin password is tried. Nothing public needs it; this provisioner talks to
+    # it over localhost:8180, not through nginx.
+    location ^~ /realms/master/ {
+        return 404;
+    }
+    location = /realms/master {
+        return 404;
+    }
+
+    # Browsers that have seen this origin once refuse plain http to it for a
+    # year. No includeSubDomains: sslip.io names are not ours to bind.
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
     location / {
         proxy_pass         http://localhost:8180;
@@ -675,6 +702,13 @@ services:
       EDDI_KEYCLOAK_PUBLIC_URL: "https://\${KC_DOMAIN}"
       QUARKUS_OIDC_TOKEN_ISSUER: "https://\${KC_DOMAIN}/realms/eddi"
       QUARKUS_HTTP_CORS_ORIGINS: "https://\${EDDI_DOMAIN},http://localhost:${p_port}"
+      # nginx terminates TLS on this VM and proxies to EDDI over plain http, so
+      # the request EDDI sees is http and so would be the OAuth resource
+      # identifier it advertises for /mcp (the scheme follows the request since
+      # 6.6.1; MCP clients bind their token to that identifier). Name the public
+      # endpoint outright, which also pins the host - what docs/mcp-server.md
+      # asks of every production deployment.
+      QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: "https://\${EDDI_DOMAIN}/mcp"
   keycloak:
     environment:
       KC_HOSTNAME: "https://\${KC_DOMAIN}"
@@ -1018,7 +1052,44 @@ print_config_summary() {
 
 # ── Command: create ───────────────────────────────────────────────────────────
 
+# The git ref install.sh and the compose files are fetched from: --eddi-branch when
+# given, else the tag of a pinned --eddi-version, else the newest stable release,
+# else main (with a warning). Release tags are immutable in practice and match the
+# image `latest` points at; `main` is whatever was merged last.
+# The VM's startup script downloads install.sh from EDDI_BRANCH on first boot,
+# so a ref that does not exist would surface only as a failed install minutes
+# after `create` reported success. Check it here, while the operator is still
+# watching: an image tag that was never pushed as a git tag fails fast.
+require_eddi_ref_exists() {
+  local ref="$1"
+  curl -fsSL --max-time 15 -o /dev/null "https://raw.githubusercontent.com/labsai/EDDI/${ref}/install.sh"     || fail "No git ref '${ref}' in labsai/EDDI (install.sh could not be fetched from it). Pass --eddi-branch=<existing tag or branch>, or --eddi-version=latest."
+}
+
+resolve_eddi_branch() {
+  if [[ -n "$EDDI_BRANCH" ]]; then
+    require_eddi_ref_exists "$EDDI_BRANCH"
+    return 0
+  fi
+  if [[ "$EDDI_VERSION" != "latest" ]]; then
+    EDDI_BRANCH="$EDDI_VERSION"
+    require_eddi_ref_exists "$EDDI_BRANCH"
+    return 0
+  fi
+  local body tag
+  body=$(curl -fsSL --max-time 10 -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/labsai/EDDI/releases/latest" 2>/dev/null) || body=""
+  tag=$(printf '%s\n' "$body" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/') || tag=""
+  if [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    EDDI_BRANCH="$tag"
+  else
+    EDDI_BRANCH="main"
+    warn "Could not look up the newest EDDI release; the VM will install from 'main'. Pass --eddi-branch=<tag> to pin it."
+  fi
+}
+
 cmd_create() {
+  resolve_eddi_branch
   require_auth_or_public_ack
   check_prerequisites
   resolve_project

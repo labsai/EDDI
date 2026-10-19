@@ -7,6 +7,7 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.engine.runtime.rest.interceptors.DocumentDescriptorFilter;
 import ai.labs.eddi.engine.runtime.service.WorkflowStoreService;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.backup.IResourceSource;
 import ai.labs.eddi.backup.IResourceSource.*;
@@ -56,6 +57,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
@@ -99,6 +101,19 @@ public class UpgradeExecutor {
     private final BackupMetrics metrics;
 
     private final ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * Who may write {@code ${caller:token}}. Null when built outside the container,
+     * where the check is skipped. Updates go through the REST stores, which apply
+     * it themselves; the direct create in createExtension bypasses them, so they
+     * apply it here.
+     */
+    private CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    @Inject
+    void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
+        this.callerTokenAuthorPolicy = policy;
+    }
 
     @Inject
     public UpgradeExecutor(IRestAgentStore agentStore,
@@ -832,7 +847,22 @@ public class UpgradeExecutor {
         try {
             ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
             IResourceStore<Object> store = getStore(ops.storeClass());
-            IResourceId created = store.create(jsonSerialization.deserialize(source.contentJson(), ops.configClass()));
+            if (callerTokenAuthorPolicy != null) {
+                // Inside the per-resource try on purpose: an upgrade is not transactional
+                // and reports each resource's outcome, so a refusal is recorded as that
+                // resource failing (nothing is written), exactly as the same refusal from
+                // the REST store does on the update path. Throwing here would abort the
+                // run with earlier resources already written and no rollback.
+                callerTokenAuthorPolicy.requireMayAuthor(source.contentJson(), source.type());
+            }
+            Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
+            // The REST stores refuse a document carrying the read-redaction marker; this
+            // direct create must too, for the five types whose reads produce it. A sync
+            // source read through a non-admin peer credential carries it, and storing
+            // it would replace a credential with the marker. Recorded as this resource
+            // failing, like the check above.
+            RedactionMarkerGuard.requireNoneIfRedactedType(content);
+            IResourceId created = store.create(content);
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());

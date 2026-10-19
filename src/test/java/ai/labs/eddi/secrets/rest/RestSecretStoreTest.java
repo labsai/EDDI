@@ -6,13 +6,14 @@ package ai.labs.eddi.secrets.rest;
 
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.UnrestrictedSecretsCheck;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -57,10 +59,11 @@ class RestSecretStoreTest {
     void storeSecret_creates201WhenNew() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", "desc", null));
+        Response resp = rest.storeSecret("default", "myKey",
+                new IRestSecretStore.SecretRequest("secret123", "desc", List.of("*"), List.of("api.example.com")));
 
         assertEquals(201, resp.getStatus());
-        verify(secretProvider).store(any(SecretReference.class), eq("secret123"), eq("desc"), isNull());
+        verify(secretProvider).store(any(SecretReference.class), eq("secret123"), eq("desc"), eq(List.of("*")), eq(List.of("api.example.com")));
     }
 
     @Test
@@ -70,7 +73,7 @@ class RestSecretStoreTest {
         // so creating the secret must evict that stale cache entry.
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", null, null));
+        rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", null, List.of("*"), List.of("*")));
 
         verify(secretResolver).invalidateCache(any(SecretReference.class));
     }
@@ -106,7 +109,7 @@ class RestSecretStoreTest {
         Response resp = rest.storeSecret("default", reserved, new IRestSecretStore.SecretRequest("val", null, null));
 
         assertEquals(400, resp.getStatus());
-        verify(secretProvider, never()).store(any(), any(), any(), any());
+        verify(secretProvider, never()).store(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -156,7 +159,7 @@ class RestSecretStoreTest {
         assertEquals(200, resp.getStatus());
         verify(secretProvider).updateGrant(any(SecretReference.class), eq(List.of("agentOne", "agentTwo", "agentThree")), isNull());
         // The whole point: nothing on this path can write a value.
-        verify(secretProvider, never()).store(any(), any(), any(), any());
+        verify(secretProvider, never()).store(any(), any(), any(), any(), any());
 
         Map<String, Object> body = entityOf(resp);
         assertEquals(List.of("agentOne", "agentTwo", "agentThree"), body.get("allowedAgents"));
@@ -591,8 +594,32 @@ class RestSecretStoreTest {
 
         Response resp = rest.listSecrets("default");
         assertEquals(200, resp.getStatus());
-        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
-        assertTrue(list.stream().allMatch(m -> m.checksum() == null), "no listed row may carry a checksum");
+        List<SecretListing> list = (List<SecretListing>) resp.getEntity();
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(list);
+        assertFalse(json.contains("checksum"), "no listed row may carry a checksum: " + json);
+        assertFalse(json.contains("h1:aaa"), json);
+        assertFalse(json.contains("abc123"), json);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("H1 residual (2026-10-17): the listing marks an open destination and names the configs that reference it")
+    void listSecrets_marksUnrestrictedDestinationAndReferences() throws Exception {
+        when(secretProvider.listKeys("default")).thenReturn(List.of(
+                new SecretMetadata("default", "open", Instant.now(), null, null, null, "d", List.of("*"), null),
+                new SecretMetadata("default", "narrow", Instant.now(), null, null, null, "d", List.of("*"), List.of("api.openai.com"))));
+        var check = mock(UnrestrictedSecretsCheck.class);
+        when(check.referencedBy(new SecretReference("default", "open")))
+                .thenReturn(Optional.of(List.of("eddi://ai.labs.llm/llmstore/llms/68a1b2c3d4e5f60718293a4b?version=1")));
+        when(check.referencedBy(new SecretReference("default", "narrow"))).thenReturn(Optional.of(List.of()));
+        rest.unrestrictedSecretsCheck = check;
+
+        List<SecretListing> list = (List<SecretListing>) rest.listSecrets("default").getEntity();
+
+        assertTrue(list.get(0).unrestrictedDestination());
+        assertEquals(List.of("eddi://ai.labs.llm/llmstore/llms/68a1b2c3d4e5f60718293a4b?version=1"), list.get(0).referencedBy());
+        assertFalse(list.get(1).unrestrictedDestination());
+        assertEquals(List.of(), list.get(1).referencedBy());
     }
 
     @Test
@@ -613,8 +640,9 @@ class RestSecretStoreTest {
 
         Response resp = rest.listSecrets("default");
         assertEquals(200, resp.getStatus());
-        List<SecretMetadata> list = (List<SecretMetadata>) resp.getEntity();
+        List<SecretListing> list = (List<SecretListing>) resp.getEntity();
         assertEquals(2, list.size());
+        assertNull(list.get(0).referencedBy(), "no scan has run in a unit test");
     }
 
     @Test
@@ -702,7 +730,8 @@ class RestSecretStoreTest {
     void storeSecret_returnsShortFormRefForDefaultTenant() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("default", "openaiKey", new IRestSecretStore.SecretRequest("sk-xxx", "OpenAI key", null));
+        Response resp = rest.storeSecret("default", "openaiKey",
+                new IRestSecretStore.SecretRequest("sk-xxx", "OpenAI key", List.of("*"), List.of("api.openai.com")));
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -714,7 +743,7 @@ class RestSecretStoreTest {
     void storeSecret_returnsFullFormRefForCustomTenant() throws Exception {
         when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        Response resp = rest.storeSecret("acme-corp", "dbPassword", new IRestSecretStore.SecretRequest("pass123", null, null));
+        Response resp = rest.storeSecret("acme-corp", "dbPassword", new IRestSecretStore.SecretRequest("pass123", null, List.of("*"), List.of("*")));
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -733,10 +762,10 @@ class RestSecretStoreTest {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
             doThrow(new ISecretProvider.SecretProviderException("IO error"))
-                    .when(secretProvider).store(any(), any(), any(), any());
+                    .when(secretProvider).store(any(), any(), any(), any(), any());
 
             Response resp = rest.storeSecret("default", "myKey",
-                    new IRestSecretStore.SecretRequest("secret123", "desc", null));
+                    new IRestSecretStore.SecretRequest("secret123", "desc", List.of("*"), List.of("*")));
 
             assertEquals(500, resp.getStatus());
         }
@@ -933,7 +962,7 @@ class RestSecretStoreTest {
         void returns200OnSuccess() throws Exception {
             when(secretProvider.resetTenant("default")).thenReturn(3);
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(200, resp.getStatus());
             Map<String, Object> body = (Map<String, Object>) resp.getEntity();
@@ -947,7 +976,7 @@ class RestSecretStoreTest {
         void returns503WhenUnavailable() {
             when(secretProvider.isAvailable()).thenReturn(false);
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(503, resp.getStatus());
         }
@@ -955,7 +984,7 @@ class RestSecretStoreTest {
         @Test
         @DisplayName("should return 400 for path-traversal tenantId")
         void returns400ForPathTraversalTenantId() {
-            Response resp = rest.resetTenant("../etc/passwd");
+            Response resp = rest.resetTenant("../etc/passwd", true);
 
             assertEquals(400, resp.getStatus());
         }
@@ -963,7 +992,7 @@ class RestSecretStoreTest {
         @Test
         @DisplayName("should return 400 for blank tenantId")
         void returns400ForBlankTenantId() {
-            Response resp = rest.resetTenant(" ");
+            Response resp = rest.resetTenant(" ", true);
 
             assertEquals(400, resp.getStatus());
         }
@@ -974,7 +1003,7 @@ class RestSecretStoreTest {
             when(secretProvider.resetTenant("default"))
                     .thenThrow(new ISecretProvider.SecretProviderException("DEK corrupted"));
 
-            Response resp = rest.resetTenant("default");
+            Response resp = rest.resetTenant("default", true);
 
             assertEquals(500, resp.getStatus());
         }
@@ -984,9 +1013,22 @@ class RestSecretStoreTest {
         void invalidatesCacheOnSuccess() throws Exception {
             when(secretProvider.resetTenant("default")).thenReturn(2);
 
-            rest.resetTenant("default");
+            rest.resetTenant("default", true);
 
             verify(secretResolver).invalidateAll();
+        }
+
+        @Test
+        @DisplayName("L11 (2026-10-17): without confirm=true it is a 400 naming the flag, and nothing is deleted")
+        @SuppressWarnings("unchecked")
+        void refusesWithoutConfirm() throws Exception {
+            Response resp = rest.resetTenant("default", false);
+
+            assertEquals(400, resp.getStatus());
+            Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+            assertEquals("confirm=true is required", body.get("error"));
+            verify(secretProvider, never()).resetTenant(anyString());
+            verify(secretResolver, never()).invalidateAll();
         }
     }
 }

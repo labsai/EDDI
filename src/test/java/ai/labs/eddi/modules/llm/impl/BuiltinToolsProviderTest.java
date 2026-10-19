@@ -16,6 +16,7 @@ import ai.labs.eddi.modules.llm.tools.impl.WeatherTool;
 import ai.labs.eddi.modules.llm.tools.impl.WebScraperTool;
 import ai.labs.eddi.modules.llm.tools.impl.WebSearchTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -63,6 +64,26 @@ class BuiltinToolsProviderTest {
         task.setBuiltInToolsWhitelist(whitelist);
         return new ToolAssemblyContext(mock(IConversationMemory.class), task, whitelist, null,
                 "user-1", "agent-1", null);
+    }
+
+    @Test
+    @DisplayName("L13: the page tool is handed to the turn bound to its conversation; the other beans are shared as they are")
+    void pageToolIsBoundToTheConversation() {
+        var realPageTool = new FetchToolResponsePageTool();
+        var provider = new BuiltinToolsProvider(calculator, dateTime, webSearch, dataFormatter, webScraper,
+                textSummarizer, pdfReader, weather, realPageTool);
+        var memory = mock(IConversationMemory.class);
+        when(memory.getConversationId()).thenReturn("68f1c0ffee0000000000c0de");
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        var ctx = new ToolAssemblyContext(memory, task, null, null, "user-1", "agent-1", null);
+
+        List<Object> tools = provider.collect(ctx);
+
+        var bound = (FetchToolResponsePageTool) tools.get(8);
+        assertNotSame(realPageTool, bound);
+        assertEquals("68f1c0ffee0000000000c0de", bound.conversationId());
+        assertSame(calculator, tools.get(0));
     }
 
     /** The catalog's declaration order — the old if-chain's order, verbatim. */

@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -75,7 +77,30 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      */
     private final int maxDeadLetters;
 
+    /**
+     * Turns one conversation may have waiting behind the one it is running; one
+     * more is refused with 503 {@code capacity_exceeded}. Turns of a conversation
+     * run strictly one after another, so a client (or a loop) that keeps sending
+     * into a busy conversation only builds a queue of turns that each hold a permit
+     * of {@code eddi.conversation.max-in-flight-turns} and a loaded conversation
+     * while they wait. {@code <= 0} disables the cap. Field-injected with the
+     * default in the initializer, so subclasses and tests that construct a
+     * coordinator with {@code new} get the same behaviour.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.conversation.max-queued-turns-per-conversation", defaultValue = "20")
+    int maxQueuedTurnsPerConversation = 20;
+
     private static final Logger log = Logger.getLogger(AbstractQueuedConversationCoordinator.class);
+
+    /**
+     * Overrides {@code eddi.conversation.max-queued-turns-per-conversation} for a
+     * coordinator built outside CDI (tests that construct it with {@code new} and
+     * deliberately queue more turns on one conversation than a client would).
+     */
+    public void setMaxQueuedTurnsPerConversation(int maxQueuedTurnsPerConversation) {
+        this.maxQueuedTurnsPerConversation = maxQueuedTurnsPerConversation;
+    }
 
     protected AbstractQueuedConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry, int maxActiveConversations,
             int maxDeadLetters) {
@@ -163,6 +188,14 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
                     continue; // retry with fresh computeIfAbsent
                 }
 
+                // The head of the queue is the turn that is running; everything behind
+                // it is waiting.
+                if (maxQueuedTurnsPerConversation > 0 && queue.size() > maxQueuedTurnsPerConversation) {
+                    meterRegistry.counter("eddi.turn.rejected", "reason", "conversation_queue").increment();
+                    log.debugf("Turn refused: conversationId=%s already has %d turns waiting", safeConversationId, queue.size() - 1);
+                    throw new RejectedExecutionException("Conversation " + safeConversationId + " already has " + (queue.size() - 1)
+                            + " turns waiting (eddi.conversation.max-queued-turns-per-conversation) — retry once its earlier turns are answered");
+                }
                 boolean wasEmpty = queue.isEmpty();
                 boolean enqueued = queue.offer(callable);
                 if (!enqueued) {
@@ -210,7 +243,7 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * A failed turn is dead-lettered once and the queue moves on.
      */
     protected void execute(String conversationId, BlockingQueue<Callable<Void>> queue, Callable<Void> callable) {
-        runtime.submitCallable(callable, new IRuntime.IFinishedExecution<>() {
+        runtime.submitCallable(callable, new IRuntime.ITurnExecution<>() {
             @Override
             public void onComplete(Void result) {
                 totalProcessed.incrementAndGet();
@@ -244,7 +277,6 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
      * @return the id of the entry recorded
      */
     protected final String recordLocalDeadLetter(String conversationId, Throwable failure, Callable<Void> task) {
-        String id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
         String error = failure.getMessage() != null ? failure.getMessage() : "unknown";
         long timestamp = System.currentTimeMillis();
         String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId, error.replace("\"", "\\\""),
@@ -259,7 +291,14 @@ public abstract class AbstractQueuedConversationCoordinator implements IConversa
         // size() on a ConcurrentLinkedDeque is O(n), so the excess is computed once.
         Map<String, Object> turn = describe(task);
         DeadLetterClassifier.Classification classification = DeadLetterClassifier.classify(failure, turn);
+        String id;
         synchronized (deadLetterLock) {
+            // The id is taken under the same lock as the append, so the deque's order IS
+            // the id order. Taken outside it, two concurrent failures could draw ids 2 and
+            // 3 and append 3 before 2 — and the cursor paging over local entries, which
+            // skips by id number, then dropped an entry from one page or repeated it on
+            // the next (ClusterConversationCoordinatorTest.localDeadLettersPage, flaky).
+            id = nextLocalDeadLetterId(deadLetterIdCounter.incrementAndGet());
             deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload, turn,
                     classification.reason(), localNodeId(), classification.fence()));
             if (maxDeadLetters >= 0) {

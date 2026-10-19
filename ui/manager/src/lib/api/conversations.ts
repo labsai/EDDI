@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { seg } from "./path-segment";
 
 // Types matching EDDI backend
 export type ConversationState = "READY" | "IN_PROGRESS" | "ENDED" | "EXECUTION_INTERRUPTED" | "ERROR" | "AWAITING_HUMAN";
@@ -417,7 +418,7 @@ export function getActiveConversations(
   agentVersion: number
 ): Promise<ConversationStatus[]> {
   return api.get<ConversationStatus[]>(
-    `/conversationstore/conversations/active/${agentId}?agentVersion=${agentVersion}`
+    `/conversationstore/conversations/active/${seg(agentId)}?agentVersion=${agentVersion}`
   );
 }
 
@@ -452,7 +453,7 @@ export function getSimpleConversationLog(
     returnCurrentStepOnly: String(returnCurrentStepOnly),
   });
   return api.get<SimpleConversationMemorySnapshot>(
-    `/conversationstore/conversations/simple/${conversationId}?${params.toString()}`
+    `/conversationstore/conversations/simple/${seg(conversationId)}?${params.toString()}`
   );
 }
 
@@ -461,7 +462,7 @@ export function deleteConversation(
   deletePermanently = false
 ): Promise<void> {
   return api.delete(
-    `/conversationstore/conversations/${conversationId}?deletePermanently=${deletePermanently}`
+    `/conversationstore/conversations/${seg(conversationId)}?deletePermanently=${deletePermanently}`
   );
 }
 
@@ -498,6 +499,6 @@ export function getDetailedConversation(
     returnCurrentStepOnly: "false",
   });
   return api.get<DetailedConversation>(
-    `/agents/${conversationId}?${params.toString()}`,
+    `/agents/${seg(conversationId)}?${params.toString()}`,
   );
 }

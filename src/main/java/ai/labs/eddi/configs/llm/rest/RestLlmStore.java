@@ -9,11 +9,14 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -21,9 +24,7 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -32,14 +33,35 @@ import java.util.Set;
 @ApplicationScoped
 public class RestLlmStore implements IRestLlmStore {
     private static final Logger LOGGER = Logger.getLogger(RestLlmStore.class);
+
+    /**
+     * What a non-administrator reads in place of a plaintext credential — the
+     * shared {@link ConfigSecretRedactor#REDACTED} marker.
+     */
+    static final String REDACTED = ConfigSecretRedactor.REDACTED;
+
+    /**
+     * Maps keyed by tool names rather than parameter names: a tool called
+     * {@code get_token} is not a credential field.
+     */
+    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes");
+
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final RestVersionInfo<LlmConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     // Field-injected, like the other optional collaborators, so the direct
     // constructions in tests keep compiling.
     @Inject
     ConfigJsonPatcher jsonPatcher;
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    CallerTokenAuthorPolicy callerTokenAuthorPolicy;
+
+    private static final String KIND = "langchain";
 
     @Inject
     public RestLlmStore(ILlmStore httpCallsStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -47,6 +69,7 @@ public class RestLlmStore implements IRestLlmStore {
         restVersionInfo = new RestVersionInfo<>(resourceURI, httpCallsStore, documentDescriptorStore, resourceAccessGuard);
         this.httpCallsStore = httpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -65,11 +88,45 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public LlmConfiguration readLlm(String id, Integer version) {
+        LlmConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, plaintext key included, so it
+        // can be found and moved into the vault. Anyone else admitted here
+        // (eddi-editor) gets a copy with such literals redacted: the store only warns
+        // on a plaintext key at write time, and without this an editor who PUT one
+        // could read it back — or read back one another editor saved. Same rule as
+        // RestConnectionStore.readConnection. isAdmin() is true for everyone when
+        // authorization.enabled=false, which is also when @RolesAllowed is off.
+        return resourceAccessGuard.isAdmin() ? stored : redactPlaintextSecrets(stored);
+    }
+
+    /**
+     * {@link #readLlm} without the read-redaction, for server-side work an editor's
+     * request starts whose result never reaches the caller as this document —
+     * upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public LlmConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
+    }
+
+    /**
+     * A copy of {@code stored} with every plaintext credential redacted by the
+     * shared {@link ConfigSecretRedactor} — task parameters, but also
+     * {@code a2aAgents[].apiKey}, {@code mcpServers[].apiKey},
+     * {@code modelCascade.steps[].parameters} and
+     * {@code modelCascade.judgeModel.parameters}, which the first version of this
+     * redaction did not reach (M1 of the 2026-10-17 review). The stored object is
+     * never touched, because the store may hand out a cached instance.
+     */
+    static LlmConfiguration redactPlaintextSecrets(LlmConfiguration stored) {
+        return ConfigSecretRedactor.redact(stored, LlmConfiguration.class, NOT_CONFIGURATION);
     }
 
     @Override
     public Response updateLlm(String id, Integer version, LlmConfiguration llmConfiguration) {
+        requireMayAuthorCallerToken(llmConfiguration);
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.update(id, version, llmConfiguration);
     }
@@ -77,7 +134,8 @@ public class RestLlmStore implements IRestLlmStore {
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
         return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, patched -> {
-            // The same pre-write check updateLlm runs.
+            // The same pre-write checks updateLlm runs.
+            requireMayAuthorCallerToken(patched);
             warnOnPlaintextSecrets(patched);
             return null;
         });
@@ -85,18 +143,10 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response createLlm(LlmConfiguration llmConfiguration) {
+        requireMayAuthorCallerToken(llmConfiguration);
         warnOnPlaintextSecrets(llmConfiguration);
         return restVersionInfo.create(llmConfiguration);
     }
-
-    /**
-     * Task parameter names that carry a provider credential, compared
-     * case-insensitively. Beyond the generic names: {@code accessToken} is the
-     * Hugging Face key and {@code nonAzureApiKey} the OpenAI key the Azure OpenAI
-     * builder accepts.
-     */
-    static final Set<String> SECRET_PARAMETER_NAMES = Set.of("apikey", "nonazureapikey", "accesstoken", "authtoken", "secretkey",
-            "secretaccesskey", "privatekey", "password", "clientsecret", "token");
 
     /**
      * Warns — rather than rejects — when an LLM task stores a credential in
@@ -109,37 +159,23 @@ public class RestLlmStore implements IRestLlmStore {
     private static void warnOnPlaintextSecrets(LlmConfiguration config) {
         List<String> plaintext = plaintextSecretParameters(config);
         if (!plaintext.isEmpty()) {
-            LOGGER.warnf("LLM configuration stores %s in plaintext — it is returned verbatim by GET /llmstore/llms/{id} and "
-                    + "included in exports. Store the key in the secrets vault and reference it as ${vault:<key>} instead.",
+            LOGGER.warnf("LLM configuration stores %s in plaintext — GET /llmstore/llms/{id} returns it to administrators "
+                    + "(redacted for everyone else) and it is scrubbed from exports. Store the key in the secrets vault and "
+                    + "reference it as ${vault:<key>} instead.",
                     String.join(", ", plaintext));
         }
     }
 
     /**
-     * The credential parameters of {@code config} whose value is a literal rather
-     * than a reference ({@code ${vault:…}}, {@code ${vars:…}},
-     * {@code ${connection:…}}) or a template ({@code {properties.x}}).
+     * Where {@code config} stores a credential as a literal rather than a reference
+     * ({@code ${vault:…}}, {@code ${vars:…}}, {@code ${connection:…}}) or a
+     * template ({@code {properties.x}}), as paths such as
+     * {@code tasks[0].parameters.apiKey}. The same rules the read redaction
+     * applies, so what is warned about on write is exactly what an editor cannot
+     * read back.
      */
     static List<String> plaintextSecretParameters(LlmConfiguration config) {
-        List<String> found = new ArrayList<>();
-        if (config == null || config.tasks() == null) {
-            return found;
-        }
-        for (int i = 0; i < config.tasks().size(); i++) {
-            var task = config.tasks().get(i);
-            if (task == null || task.getParameters() == null) {
-                continue;
-            }
-            for (var parameter : task.getParameters().entrySet()) {
-                String name = parameter.getKey();
-                String value = parameter.getValue();
-                if (name != null && SECRET_PARAMETER_NAMES.contains(name.toLowerCase(Locale.ROOT)) && value != null && !value.isBlank()
-                        && !value.contains("{")) {
-                    found.add("tasks[" + i + "].parameters." + name);
-                }
-            }
-        }
-        return found;
+        return ConfigSecretRedactor.plaintextSecretPaths(config, NOT_CONFIGURATION);
     }
 
     @Override
@@ -151,7 +187,23 @@ public class RestLlmStore implements IRestLlmStore {
     public Response duplicateLlm(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         LlmConfiguration llmConfiguration = restVersionInfo.read(id, version);
+        // A copy is a new resource authored by whoever duplicates it.
+        requireMayAuthorCallerToken(llmConfiguration);
         return restVersionInfo.create(llmConfiguration);
+    }
+
+    /**
+     * Refuses {@code ${caller:token}} from a caller who may not author it — see
+     * {@link CallerTokenAuthorPolicy}. Throws, never returns a response: the import
+     * path treats a non-200 update as "create it directly instead".
+     */
+    private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
+        if (callerTokenAuthorPolicy != null) {
+            callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
+        }
     }
 
     @Override

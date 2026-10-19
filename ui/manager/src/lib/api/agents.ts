@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import { getDescriptorVersions } from "./descriptors";
 import { ENVIRONMENTS, type Environment } from "../constants";
+import { seg } from "./path-segment";
 
 // Re-export from shared constants for backward compatibility
 export { ENVIRONMENTS, type Environment };
@@ -73,6 +74,13 @@ export interface Agent {
   conversationReview?: { enabled?: boolean; notice?: string | null };
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
+  /**
+   * Ceiling, in USD, on the PRICED spend of one conversation. Absent = unlimited;
+   * 0 allows no priced spend at all. Unpriced models add nothing to the total,
+   * but are stopped like any other once it is reached. Only written when set —
+   * see `parseCostCeiling`.
+   */
+  maxCostPerConversationUsd?: number;
   /**
    * The version's compatibility generation — SERVER-OWNED. Two versions of an
    * agent with the same generation are compatible: a running conversation moves
@@ -321,7 +329,7 @@ export interface AgentProfile {
 
 export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {
   return api.get<AgentProfile>(
-    `/agents/${encodeURIComponent(agentId)}/profile?environment=${encodeURIComponent(environment)}`
+    `/agents/${seg(agentId)}/profile?environment=${encodeURIComponent(environment)}`
   );
 }
 
@@ -333,7 +341,7 @@ export interface AgentUsage {
 }
 
 export function getAgentUsage(agentId: string): Promise<AgentUsage> {
-  return api.get<AgentUsage>(`/agents/${encodeURIComponent(agentId)}/usage`);
+  return api.get<AgentUsage>(`/agents/${seg(agentId)}/usage`);
 }
 
 /**
@@ -347,7 +355,7 @@ export async function getAgentDescriptorsWithVersions(
   agentId: string
 ): Promise<AgentDescriptor[]> {
   const currentVersion = await api.get<number>(
-    `/agentstore/agents/${encodeURIComponent(agentId)}/currentversion`
+    `/agentstore/agents/${seg(agentId)}/currentversion`
   );
   const flat = await getDescriptorVersions(agentId, currentVersion ?? 1);
   if (flat.length === 0) {
@@ -367,12 +375,12 @@ export async function getAgentDescriptorsWithVersions(
  * an existing agent and an unknown id alike.
  */
 export function getAgentCurrentVersion(id: string): Promise<number> {
-  return api.get<number>(`/agentstore/agents/${id}/currentversion`);
+  return api.get<number>(`/agentstore/agents/${seg(id)}/currentversion`);
 }
 
 export function getAgent(id: string, version?: number): Promise<Agent> {
   const versionSuffix = version != null && version > 0 ? `?version=${version}` : "";
-  return api.get<Agent>(`/agentstore/agents/${id}${versionSuffix}`);
+  return api.get<Agent>(`/agentstore/agents/${seg(id)}${versionSuffix}`);
 }
 
 export function createAgent(agent: Agent): Promise<{ location: string }> {
@@ -398,7 +406,7 @@ export function updateAgent(
 ): Promise<{ location: string }> {
   const params = new URLSearchParams({ version: String(version) });
   if (options?.compatible === true) params.set("compatible", "true");
-  return api.put(`/agentstore/agents/${id}?${params.toString()}`, agent);
+  return api.put(`/agentstore/agents/${seg(id)}?${params.toString()}`, agent);
 }
 
 export function deleteAgent(
@@ -409,7 +417,7 @@ export function deleteAgent(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.cascade) params.set("cascade", "true");
   if (options?.permanent) params.set("permanent", "true");
-  return api.delete(`/agentstore/agents/${id}?${params}`);
+  return api.delete(`/agentstore/agents/${seg(id)}?${params}`);
 }
 
 export function duplicateAgent(
@@ -418,7 +426,7 @@ export function duplicateAgent(
   deepCopy = false
 ): Promise<{ location: string }> {
   return api.post<{ location: string }>(
-    `/agentstore/agents/${id}?version=${version}&deepCopy=${deepCopy}`
+    `/agentstore/agents/${seg(id)}?version=${version}&deepCopy=${deepCopy}`
   );
 }
 
@@ -428,7 +436,7 @@ export function deployAgent(
   version: number
 ): Promise<void> {
   return api.post(
-    `/administration/${environment}/deploy/${agentId}?version=${version}`
+    `/administration/${seg(environment)}/deploy/${seg(agentId)}?version=${version}`
   );
 }
 
@@ -460,7 +468,7 @@ export function undeployAgent(
     params.set("undeployThisAndAllPreviousAgentVersions", "true");
   }
   return api.post(
-    `/administration/${environment}/undeploy/${agentId}?${params.toString()}`
+    `/administration/${seg(environment)}/undeploy/${seg(agentId)}?${params.toString()}`
   );
 }
 
@@ -498,7 +506,7 @@ export function getDeploymentImpact(
   version: number
 ): Promise<DeploymentImpact> {
   return api.get<DeploymentImpact>(
-    `/administration/${environment}/deploymentimpact/${encodeURIComponent(agentId)}?version=${version}`
+    `/administration/${seg(environment)}/deploymentimpact/${seg(agentId)}?version=${version}`
   );
 }
 
@@ -513,7 +521,7 @@ export function getDeploymentStatus(
 ): Promise<DeploymentStatus> {
   const format = options?.detailed ? "&format=detailed" : "";
   return api.get<DeploymentStatus>(
-    `/administration/${environment}/deploymentstatus/${agentId}?version=${version}${format}`
+    `/administration/${seg(environment)}/deploymentstatus/${seg(agentId)}?version=${version}${format}`
   );
 }
 
@@ -529,7 +537,7 @@ export function preflightDeploy(
   version: number
 ): Promise<DeploymentPreflight> {
   return api.get<DeploymentPreflight>(
-    `/administration/${encodeURIComponent(environment)}/deploy/${encodeURIComponent(agentId)}/preflight?version=${version}`
+    `/administration/${seg(environment)}/deploy/${seg(agentId)}/preflight?version=${version}`
   );
 }
 
@@ -556,7 +564,7 @@ export async function deployAgentAndWait(
   signal?: AbortSignal
 ): Promise<DeployResult> {
   const body = await api.post<DeployResult | undefined>(
-    `/administration/${environment}/deploy/${agentId}?version=${version}&waitForCompletion=true`
+    `/administration/${seg(environment)}/deploy/${seg(agentId)}?version=${version}&waitForCompletion=true`
   );
   if (body && typeof body === "object" && typeof body.status === "string") {
     return body;
@@ -603,7 +611,7 @@ export interface AgentDeploymentSummary {
  * at an older version after a save bumped it.
  */
 export function listDeploymentStatuses(environment: Environment): Promise<AgentDeploymentSummary[]> {
-  return api.get<AgentDeploymentSummary[]>(`/administration/${environment}/deploymentstatus`);
+  return api.get<AgentDeploymentSummary[]>(`/administration/${seg(environment)}/deploymentstatus`);
 }
 
 export async function getDeploymentStatuses(

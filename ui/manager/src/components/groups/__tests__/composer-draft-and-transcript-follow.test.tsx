@@ -154,6 +154,7 @@ function streamOf(count: number): GroupStreamState {
     artifactUpdates: [],
     memberCosts: new Map(),
     stances: new Map(),
+    memberToolCalls: new Map(),
     interrupted: false,
     connected: true,
     cancelRequested: false,

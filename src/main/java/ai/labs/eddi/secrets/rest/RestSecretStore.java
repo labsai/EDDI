@@ -7,8 +7,12 @@ package ai.labs.eddi.secrets.rest;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.UnrestrictedSecretsCheck;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
+import ai.labs.eddi.secrets.VaultGrantRequests;
 import ai.labs.eddi.secrets.VaultGrantService;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -16,13 +20,13 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -47,17 +51,17 @@ public class RestSecretStore implements IRestSecretStore {
     private static final Logger LOGGER = Logger.getLogger(RestSecretStore.class);
     private static final Pattern VALID_ID = Pattern.compile("[a-zA-Z0-9._\\-]{1,128}");
 
-    /**
-     * Upper bound on a grant list. Not a security control — an admin who can edit
-     * grants can already delete the vault — but an unbounded list gets written by
-     * mistake far more often than on purpose, and every entry is walked on every
-     * deployment's grant check.
-     */
-    private static final int MAX_ALLOWED_AGENTS = 500;
+    /** See {@link VaultGrantRequests#MAX_ALLOWED_AGENTS}. */
+    private static final int MAX_ALLOWED_AGENTS = VaultGrantRequests.MAX_ALLOWED_AGENTS;
 
     private final ISecretProvider secretProvider;
     private final SecretResolver secretResolver;
     private final VaultGrantImpactAnalyzer grantImpactAnalyzer;
+    /**
+     * Decides whether a create may omit its grant — see
+     * {@link VaultGrantRequests#requireGrantOnCreate}.
+     */
+    private final VaultGrantGate.Mode grantEnforcement;
 
     /**
      * Field-injected so the existing constructor (and its tests) keep their
@@ -70,11 +74,35 @@ public class RestSecretStore implements IRestSecretStore {
     @Inject
     SecurityIdentity identity;
 
+    /**
+     * The startup scan for referenced secrets without a destination allow-list (H1
+     * residual of the 2026-10-17 review); null in tests, which leaves
+     * {@code referencedBy} out of the listing.
+     */
     @Inject
-    public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer) {
+    UnrestrictedSecretsCheck unrestrictedSecretsCheck;
+
+    @Inject
+    public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer,
+            @ConfigProperty(name = "eddi.vault.grant-enforcement", defaultValue = VaultGrantGate.DEFAULT_MODE_NAME) String grantEnforcement) {
+        this(secretProvider, secretResolver, grantImpactAnalyzer, VaultGrantGate.Mode.parseStrict(grantEnforcement));
+    }
+
+    /**
+     * The shipped mode, {@code enforce}. For the tests that construct the store
+     * directly: a test that omits the mode gets the strict one, never a quieter
+     * one.
+     */
+    RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer) {
+        this(secretProvider, secretResolver, grantImpactAnalyzer, VaultGrantGate.Mode.ENFORCE);
+    }
+
+    RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer,
+            VaultGrantGate.Mode grantEnforcement) {
         this.secretProvider = secretProvider;
         this.secretResolver = secretResolver;
         this.grantImpactAnalyzer = grantImpactAnalyzer;
+        this.grantEnforcement = grantEnforcement;
     }
 
     /**
@@ -126,6 +154,16 @@ public class RestSecretStore implements IRestSecretStore {
         if (body == null || body.value() == null || body.value().isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "Secret value must not be empty")).build();
         }
+        List<String> allowedAgents;
+        List<String> allowedHosts;
+        try {
+            // A list that IS present is held to the grant endpoint's rules whatever the
+            // mode: a malformed id or an empty list is wrong in every mode.
+            allowedAgents = VaultGrantRequests.validatedGrant(body.allowedAgents());
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
 
         try {
             var ref = new SecretReference(tenantId, keyName);
@@ -139,7 +177,21 @@ public class RestSecretStore implements IRestSecretStore {
                 exists = false;
             }
 
-            secretProvider.store(ref, body.value(), body.description(), body.allowedAgents());
+            if (!exists) {
+                try {
+                    VaultGrantRequests.requireGrantOnCreate(grantEnforcement, allowedAgents);
+                    VaultGrantRequests.requireHostsOnCreate(grantEnforcement, body.allowedHosts());
+                } catch (IllegalArgumentException e) {
+                    return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+                }
+                if (allowedAgents == null) {
+                    // warn / off: the convenience those modes opted into, stated here rather
+                    // than left to a persistence default.
+                    allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
+                }
+            }
+
+            secretProvider.store(ref, body.value(), body.description(), allowedAgents, allowedHosts);
 
             // Always invalidate: on update, the SecretResolver cache has stale plaintext.
             // On new creation, the ChatModelRegistry may have cached a model that was
@@ -174,9 +226,13 @@ public class RestSecretStore implements IRestSecretStore {
         }
 
         List<String> requested;
+        List<String> allowedHosts;
         try {
             requested = validatedGrant(body);
             validateExpectedGrant(body.expectedAllowedAgents());
+            // ["*"] reads as [] here, the clear it already was on this endpoint, so the
+            // spelling a create requires is accepted on an edit too.
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -207,12 +263,27 @@ public class RestSecretStore implements IRestSecretStore {
                 // path is a dry run that can one day stop being dry.
                 after = new SecretMetadata(before.tenantId(), before.keyName(), before.createdAt(), before.lastAccessedAt(),
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
-                        grant);
+                        grant, allowedHosts != null ? allowedHosts : before.allowedHosts());
             } else {
+                if (allowedHosts != null) {
+                    // Two independent writes, the host list FIRST. The precondition below
+                    // does not cover the hosts, and if the second write fails the row must
+                    // be left in its tighter state: a narrowed host list without the widened
+                    // grant is safe, a widened grant without the narrowed host list is not.
+                    secretProvider.updateAllowedHosts(ref, allowedHosts);
+                }
                 after = expected == null
                         ? secretProvider.updateGrant(ref, grant, body.description())
                         : secretProvider.updateGrant(ref, grant, body.description(), expected);
-                // Deliberately NOT invalidating the SecretResolver cache.
+                if (allowedHosts != null) {
+                    // Invalidated for the host list, unlike the grant below: the list is
+                    // checked when a model, embedding store or MCP client is BUILT, and
+                    // those are cached. Without the eviction their invalidation listeners
+                    // perform, a narrowed list would not reach a client already built.
+                    secretResolver.invalidateCache(ref);
+                }
+                // For the agent grant alone, deliberately NOT invalidating the
+                // SecretResolver cache.
                 //
                 // storeSecret has to, because the plaintext behind the cached entry may
                 // have changed. Here it cannot have: the value is untouched, so every
@@ -259,30 +330,7 @@ public class RestSecretStore implements IRestSecretStore {
             throw new IllegalArgumentException(
                     "allowedAgents is required. Send the full replacement list, or [\"*\"] to allow every agent.");
         }
-        if (body.allowedAgents().isEmpty()) {
-            throw new IllegalArgumentException("allowedAgents must not be empty: an empty list means every agent. "
-                    + "Send [\"*\"] if that is what you intend, or list the agents that may use this secret.");
-        }
-        if (body.allowedAgents().size() > MAX_ALLOWED_AGENTS) {
-            throw new IllegalArgumentException("allowedAgents must not contain more than " + MAX_ALLOWED_AGENTS + " entries.");
-        }
-        // LinkedHashSet: duplicates dropped, operator's order kept, so the list reads
-        // back the way it was written.
-        var distinct = new LinkedHashSet<String>();
-        for (String agentId : body.allowedAgents()) {
-            if (agentId == null || agentId.isBlank()) {
-                throw new IllegalArgumentException("allowedAgents must not contain blank entries.");
-            }
-            String trimmed = agentId.trim();
-            if (!SecretMetadata.WILDCARD_AGENT.equals(trimmed) && !VALID_ID.matcher(trimmed).matches()) {
-                throw new IllegalArgumentException(
-                        "allowedAgents entries must be agent IDs matching [a-zA-Z0-9._-]{1,128}, or \"*\" for all agents. Got: " + trimmed
-                                + ". If this entry is already on the secret's grant, leave it out of the replacement list — it can "
-                                + "never match an agent ID.");
-            }
-            distinct.add(trimmed);
-        }
-        return new ArrayList<>(distinct);
+        return VaultGrantRequests.validatedGrant(body.allowedAgents());
     }
 
     /**
@@ -328,7 +376,19 @@ public class RestSecretStore implements IRestSecretStore {
             return metadata;
         }
         return new SecretMetadata(metadata.tenantId(), metadata.keyName(), metadata.createdAt(), metadata.lastAccessedAt(),
-                metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents());
+                metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents(), metadata.allowedHosts());
+    }
+
+    /**
+     * One entry of {@code GET /{tenantId}}: the metadata without its checksum, plus
+     * whether the secret may be sent anywhere and which configurations the last
+     * startup scan found referencing it.
+     */
+    private SecretListing listing(SecretMetadata metadata) {
+        List<String> referencedBy = unrestrictedSecretsCheck == null
+                ? null
+                : unrestrictedSecretsCheck.referencedBy(new SecretReference(metadata.tenantId(), metadata.keyName())).orElse(null);
+        return SecretListing.of(withoutChecksum(metadata), referencedBy);
     }
 
     /**
@@ -350,6 +410,7 @@ public class RestSecretStore implements IRestSecretStore {
         response.put("allowedAgents", after.allowedAgents());
         response.put("previousAllowedAgents", before.allowedAgents());
         response.put("grantsAllAgents", SecretMetadata.grantsAllAgents(after.allowedAgents()));
+        response.put("allowedHosts", after.allowedHosts() == null ? List.of() : after.allowedHosts());
         response.put("description", after.description());
         // Echoed so the response itself evidences that a grant edit is not a rotation.
         response.put("createdAt", after.createdAt());
@@ -489,7 +550,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(this::listing).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
@@ -586,7 +647,7 @@ public class RestSecretStore implements IRestSecretStore {
                     "message", "The configured master key is now the vault's master key and new secrets can be stored. "
                             + (adoption.tenantsNeedingReset().isEmpty()
                                     ? "No tenant holds unreadable DEKs."
-                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset — "
+                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset?confirm=true — "
                                             + "their secrets were sealed under the lost key.")))
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -596,10 +657,19 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response resetTenant(String tenantId) {
+    public Response resetTenant(String tenantId, boolean confirm) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
+
+        if (!confirm) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "confirm=true is required",
+                            "action", "Resetting a tenant permanently deletes every secret and DEK it holds. Only do this when its "
+                                    + "secrets were sealed under a master key that is lost for good, then repeat the request with "
+                                    + "?confirm=true."))
+                    .build();
+        }
 
         try {
             validateId(tenantId, "tenantId");

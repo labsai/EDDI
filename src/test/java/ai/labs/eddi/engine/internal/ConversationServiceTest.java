@@ -5,6 +5,12 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import java.security.Principal;
+import jakarta.enterprise.inject.Instance;
+import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -37,6 +43,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -203,6 +210,76 @@ class ConversationServiceTest {
 
             assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(null));
             assertDoesNotThrow(() -> conversationService.requireInputWithinLimit(new InputData()));
+        }
+
+        /**
+         * A {@code context} entry of type {@code expressions} is parsed by the
+         * property-setter and by every contextmatcher rule, so its length and nesting
+         * are bounded here too — with the same refusal.
+         */
+        @Nested
+        @DisplayName("expressions context")
+        class ExpressionsContext {
+
+            private InputData withContext(Context.ContextType type, String value) {
+                InputData input = new InputData();
+                input.setInput("hi");
+                input.setContext(new HashMap<>(Map.of("properties", new Context(type, value))));
+                return input;
+            }
+
+            private String nested(int depth) {
+                return "a(".repeat(depth) + ")".repeat(depth);
+            }
+
+            @Test
+            @DisplayName("nesting past eddi.expressions.max-depth is refused, naming the entry and the bound")
+            void tooDeepIsRefused() {
+                int tooDeep = ExpressionLimits.DEFAULT_MAX_DEPTH + 1;
+
+                var ex = assertThrows(IConversationService.InputTooLargeException.class,
+                        () -> conversationService.requireInputWithinLimit(withContext(Context.ContextType.expressions, nested(tooDeep))));
+
+                assertTrue(ex.getMessage().contains("Context 'properties'"), ex.getMessage());
+                assertTrue(ex.getMessage().contains(ExpressionLimits.MAX_DEPTH_PROPERTY), ex.getMessage());
+                assertEquals(tooDeep, ex.getLength());
+                assertEquals(ExpressionLimits.DEFAULT_MAX_DEPTH, ex.getLimit());
+            }
+
+            @Test
+            @DisplayName("length past eddi.expressions.max-length is refused even when the input text is within its own limit")
+            void tooLongIsRefused() {
+                conversationService.maxInputChars = 0;
+                String flat = "a,".repeat(ExpressionLimits.DEFAULT_MAX_LENGTH / 2 + 1);
+
+                var ex = assertThrows(IConversationService.InputTooLargeException.class,
+                        () -> conversationService.requireInputWithinLimit(withContext(Context.ContextType.expressions, flat)));
+
+                assertTrue(ex.getMessage().contains(ExpressionLimits.MAX_LENGTH_PROPERTY), ex.getMessage());
+            }
+
+            @Test
+            @DisplayName("the same payload as a string context is not parsed and passes")
+            void stringContextIsNotBounded() {
+                assertDoesNotThrow(() -> conversationService
+                        .requireInputWithinLimit(withContext(Context.ContextType.string, nested(ExpressionLimits.DEFAULT_MAX_DEPTH + 1))));
+            }
+
+            @Test
+            @DisplayName("expressions within the bounds pass")
+            void withinBoundsPasses() {
+                assertDoesNotThrow(() -> conversationService
+                        .requireInputWithinLimit(withContext(Context.ContextType.expressions, "greeting(hello), property(name(John))")));
+            }
+
+            @Test
+            @DisplayName("the injected limits are the ones applied")
+            void injectedLimitsApply() {
+                conversationService.expressionLimits = new ExpressionLimits(0, 1);
+
+                assertThrows(IConversationService.InputTooLargeException.class,
+                        () -> conversationService.requireInputWithinLimit(withContext(Context.ContextType.expressions, nested(2))));
+            }
         }
     }
 
@@ -821,6 +898,38 @@ class ConversationServiceTest {
             verify(conversationMemoryStore, atLeastOnce()).loadConversationMemorySnapshot(CONVERSATION_ID);
         }
 
+        @Test
+        @DisplayName("WS3a: the conversation is loaded once per turn, not again when the turn is admitted")
+        void loadsTheConversationOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()), false,
+                            (s) -> {
+                            }));
+
+            verify(conversationMemoryStore, times(1)).loadConversationMemorySnapshot(CONVERSATION_ID);
+            // ...and the admission ran against that load: it got as far as asking for the
+            // agent.
+            verify(agentFactory, atLeastOnce()).getAgent(ENV, AGENT_ID, snapshot.getAgentVersion());
+        }
+
+        @Test
+        @DisplayName("WS3a: the streaming entry point loads the conversation once too")
+        void streamingLoadsTheConversationOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()),
+                            mock(IConversationService.StreamingResponseHandler.class)));
+
+            verify(conversationMemoryStore, times(1)).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+
         private void softDeletedBeforeTheFix() throws Exception {
             var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
             snapshot.setEnvironment(ENV);
@@ -872,6 +981,45 @@ class ConversationServiceTest {
                     () -> conversationService.say(CONVERSATION_ID, false, false, null, inputData, false, (s) -> {
                     }));
             verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
+            verify(conversationDescriptorStore, never()).readDescriptorWithHistory(anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("the REST ownership check, say's own check and the soft-delete check share one descriptor read")
+        @SuppressWarnings("unchecked")
+        void preTurnChecks_readTheDescriptorOnce() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            snapshot.setConversationState(ConversationState.READY);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            var descriptor = new ConversationDescriptor();
+            descriptor.setUserId(USER_ID);
+            doReturn(descriptor).when(conversationDescriptorStore).readDescriptor(CONVERSATION_ID, 0);
+
+            Instance<ConversationDescriptorMemo> memo = mock(Instance.class);
+            var requestMemo = new ConversationDescriptorMemo();
+            when(memo.isResolvable()).thenReturn(true);
+            when(memo.get()).thenReturn(requestMemo);
+            var identity = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(USER_ID);
+            when(identity.getPrincipal()).thenReturn(principal);
+            var guard = new ConversationAccessGuard(identity, new OwnershipValidator(true), conversationDescriptorStore);
+            var guardMemo = ConversationAccessGuard.class.getDeclaredField("descriptorMemoInstance");
+            guardMemo.setAccessible(true);
+            guardMemo.set(guard, memo);
+            conversationService.conversationAccessGuard = guard;
+            conversationService.descriptorMemoInstance = memo;
+
+            // RestAgentEngine checks first, then say() checks again and asks whether it was
+            // soft-deleted.
+            guard.requireConversationOwner(CONVERSATION_ID);
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, new InputData("hello", new LinkedHashMap<>()), false,
+                            (s) -> {
+                            }));
+
+            verify(conversationDescriptorStore, times(1)).readDescriptor(CONVERSATION_ID, 0);
             verify(conversationDescriptorStore, never()).readDescriptorWithHistory(anyString(), anyInt());
         }
     }

@@ -4,14 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.Map;
@@ -40,6 +40,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_MODEL = "model";
     private static final String KEY_TIMEOUT = "timeout";
     private static final String KEY_LOG_REQUESTS = "logRequests";
@@ -98,7 +106,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -107,7 +115,7 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      */
     ChatModel build(Map<String, String> parameters, HttpClientBuilder httpClientBuilder) {
         var builder = OllamaChatModel.builder().httpClientBuilder(httpClientBuilder);
-        applyTo(builder, parameters);
+        applyTo(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
 
         // executeWithRetry is the single retry owner; library retries multiply it.
         builder.maxRetries(NO_LIBRARY_RETRIES);
@@ -117,8 +125,8 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(JdkHttpClient.builder());
-        applyTo(builder, parameters);
+        var builder = OllamaStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder());
+        applyTo(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
         return builder.build();
     }
 
@@ -128,12 +136,13 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      * package-private in langchain4j, so it cannot be named here. Change both
      * together.
      */
-    private static void applyTo(OllamaChatModel.OllamaChatModelBuilder builder, Map<String, String> parameters) {
+    private static void applyTo(OllamaChatModel.OllamaChatModelBuilder builder, Map<String, String> parameters,
+                                OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(parameters, KEY_BASE_URL);
         if (baseUrl != null) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(baseUrl);
             builder.baseUrl(baseUrl);
         }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {
@@ -166,12 +175,13 @@ public class OllamaLanguageModelBuilder implements ILanguageModelBuilder {
      * {@link #applyTo(OllamaChatModel.OllamaChatModelBuilder, Map)}; keep
      * identical.
      */
-    private static void applyTo(OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder, Map<String, String> parameters) {
+    private static void applyTo(OllamaStreamingChatModel.OllamaStreamingChatModelBuilder builder, Map<String, String> parameters,
+                                OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(parameters, KEY_BASE_URL);
         if (baseUrl != null) {
-            // Never let a model base URL point at the cloud instance-metadata service
-            // (always-on, independent of eddi.security.ssrf-protection.enabled).
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            // Never the cloud instance-metadata service; with
+            // eddi.security.ssrf-protection.enabled no private address either.
+            targetPolicy.validateUrl(baseUrl);
             builder.baseUrl(baseUrl);
         }
         if (!isNullOrEmpty(parameters.get(KEY_MODEL))) {

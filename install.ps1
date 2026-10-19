@@ -268,6 +268,8 @@ $KeycloakAdminUser = $env:KC_BOOTSTRAP_ADMIN_USERNAME
 $KeycloakAdminSecret = $env:KC_BOOTSTRAP_ADMIN_PASSWORD
 $GrafanaAdminUser = $env:GRAFANA_ADMIN_USER
 $GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
+# The PostgreSQL password docker-compose.postgres-only.yml requires (no default).
+$PostgresSecret = $env:POSTGRES_PASSWORD
 # One entry per realm account this run looked at: Account, and Secret (empty
 # when the account already had a password and was left alone).
 $FirstLogins = @()
@@ -664,10 +666,17 @@ function Resolve-StackCredential {
         $script:GrafanaAdminSecret = Get-StackPassword
         $script:GrafanaPasswordGenerated = $true
     }
+    # The PostgreSQL password: docker-compose.postgres-only.yml requires it (no
+    # eddi/eddi default any more), and the postgres image reads it at initdb
+    # only, so a stored value is carried forward like the Keycloak one.
+    if (-not $script:PostgresSecret) { $script:PostgresSecret = Get-EnvFileValue "POSTGRES_PASSWORD" }
+    if ($Database -eq "postgres" -and -not $script:PostgresSecret) {
+        $script:PostgresSecret = Get-StackPassword
+    }
     # Written single-quoted into .env, where compose reads the value literally.
-    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret)) {
+    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
         if ($value -and $value.Contains("'")) {
-            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must not contain a single quote (')."
+            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
         }
     }
 }
@@ -817,8 +826,90 @@ $script:MonitoringFiles = @(
     "docs/monitoring/eddi-full-metrics-dashboard.json"
 )
 
+# -- Release checksums ------------------------------------
+#
+# Same contract as install.sh: when $EddiBranch is a release tag, every downloaded
+# file is checked against the SHA256SUMS asset the release job publishes, and a
+# mismatch is refused. A ref without one (main, a branch, an older release) is
+# installed as before, with a warning that only TLS vouches for it.
+$script:ReleaseChecksums = $null
+$script:ReleaseChecksumsLoaded = $false
+
+function Initialize-ReleaseChecksums {
+    if ($script:ReleaseChecksumsLoaded) { return }
+    $script:ReleaseChecksumsLoaded = $true
+    if ($EddiBranch -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') {
+        Write-Warn "Files from '$EddiBranch' are not a release: no checksums to verify them against (TLS only)."
+        return
+    }
+    # A missing asset (404) and a network error end the same way: no checksums,
+    # TLS only. Windows PowerShell 5.1 raises an HTTP error status as a terminating
+    # error that -ErrorAction SilentlyContinue does not swallow, so the fetch is
+    # caught, its reason kept for the warning below, and the install continues.
+    $fetchErrors = @()
+    $response = $null
+    try {
+        $response = Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS" -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+    }
+    catch {
+        $fetchErrors = @($_)
+        Write-Verbose "SHA256SUMS for release $EddiBranch could not be fetched: $($_.Exception.Message)"
+    }
+    if ($response -and $response.Content) {
+        $content = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        $table = @{}
+        foreach ($line in ($content -split "`n")) {
+            if ($line -match '^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$') { $table[$Matches[2]] = $Matches[1].ToLowerInvariant() }
+        }
+        if ($table.Count -gt 0) {
+            $script:ReleaseChecksums = $table
+            Write-Information -MessageData "  Verifying downloads against the SHA256SUMS of release $EddiBranch"
+            return
+        }
+    }
+    if ($fetchErrors.Count -gt 0) {
+        $reason = $fetchErrors[0].Exception.Message
+        Write-Warn "Release $EddiBranch publishes no SHA256SUMS ($reason) -- downloaded files are verified by TLS only."
+    } else {
+        Write-Warn "Release $EddiBranch publishes no SHA256SUMS -- downloaded files are verified by TLS only."
+    }
+}
+
+# Downloads a release file to a temporary path beside its target, verifies it
+# against the release checksums, and only then moves it into place: a mismatch
+# never replaces a file that is already installed.
+function Save-VerifiedDownload {
+    param([string]$Uri, [string]$RelativePath, [string]$Target)
+    $temporary = "$Target.download"
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $temporary -UseBasicParsing -ErrorAction Stop
+        Confirm-DownloadChecksum -RelativePath $RelativePath -Path $temporary
+        Move-Item -Path $temporary -Destination $Target -Force
+    }
+    finally {
+        if (Test-Path $temporary) { Remove-Item -Path $temporary -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+# Refuses a downloaded file whose hash is not the one the release lists.
+function Confirm-DownloadChecksum {
+    param([string]$RelativePath, [string]$Path)
+    if (-not $script:ReleaseChecksums) { return }
+    $expected = $script:ReleaseChecksums[$RelativePath]
+    if (-not $expected) {
+        Write-Warn "$RelativePath is not listed in the SHA256SUMS of release $EddiBranch -- not verified."
+        return
+    }
+    $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        Remove-Item -Path $Path -Force -ErrorAction SilentlyContinue
+        Write-Fail "Checksum mismatch for $RelativePath from release $EddiBranch.`n     Expected: $expected`n     Got:      $actual`n     The file was not installed. Retry later; if it persists, report it."
+    }
+}
+
 function Get-ComposeFiles {
     New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
+    Initialize-ReleaseChecksums
 
     # Detect script directory (empty when piped via iwr | iex)
     $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { "" }
@@ -869,7 +960,7 @@ function Get-ComposeFiles {
             $downloadUrl = "$ComposeBaseUrl/$f"
             Write-Information -MessageData "  Downloading $f... "
             try {
-                Invoke-WebRequest -Uri $downloadUrl -OutFile $target -UseBasicParsing -ErrorAction Stop
+                Save-VerifiedDownload -Uri $downloadUrl -RelativePath $f -Target $target
                 Write-Information -MessageData "✅"
             }
             catch {
@@ -897,7 +988,7 @@ function Get-ComposeFiles {
                 $mfUrl = "$ComposeBaseUrl/$mf"
                 Write-Information -MessageData "  Downloading $mf... "
                 try {
-                    Invoke-WebRequest -Uri $mfUrl -OutFile $mfTarget -UseBasicParsing -ErrorAction Stop
+                    Save-VerifiedDownload -Uri $mfUrl -RelativePath $mf -Target $mfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {
@@ -913,10 +1004,15 @@ function Get-ComposeFiles {
                     # This list must stay in step with every file-type bind mount in
                     # docker-compose.monitoring.yml. Adding a dashboard there without
                     # adding it here breaks -WithMonitoring outright.
-                    # -Recurse as well as -Force: what is in the way is most
-                    # likely a DIRECTORY left by a previous run's failed mount,
-                    # and -Force alone will not remove one.
-                    if (Test-Path $mfTarget) { Remove-Item -Path $mfTarget -Recurse -Force -ErrorAction SilentlyContinue }
+                    # Only the EMPTY directory Docker leaves behind after a failed
+                    # bind mount is removed, and only non-recursively: the installer
+                    # does not own a directory with contents, and an existing FILE is
+                    # a valid dashboard from an earlier install that
+                    # Save-VerifiedDownload never touched. Deleting either would turn
+                    # a failed download into a stack that cannot restart.
+                    if ((Test-Path $mfTarget -PathType Container) -and -not (Get-ChildItem -Path $mfTarget -Force | Select-Object -First 1)) {
+                        Remove-Item -Path $mfTarget -Force -ErrorAction SilentlyContinue
+                    }
                     Write-Fail "Failed to download $mf (required for -WithMonitoring).`n     URL: $mfUrl"
                 }
             }
@@ -940,7 +1036,7 @@ function Get-ComposeFiles {
                 $kfUrl = "$ComposeBaseUrl/$kf"
                 Write-Information -MessageData "  Downloading $kf... "
                 try {
-                    Invoke-WebRequest -Uri $kfUrl -OutFile $kfTarget -UseBasicParsing -ErrorAction Stop
+                    Save-VerifiedDownload -Uri $kfUrl -RelativePath $kf -Target $kfTarget
                     Write-Information -MessageData "✅"
                 }
                 catch {
@@ -994,6 +1090,11 @@ EDDI_VERSION=$EddiVersion
         $publishedPorts["GRAFANA_ADMIN_USER"] = "'$(if ($GrafanaAdminUser) { $GrafanaAdminUser } else { 'admin' })'"
         $publishedPorts["GRAFANA_ADMIN_PASSWORD"] = "'$GrafanaAdminSecret'"
     }
+    # Required by docker-compose.postgres-only.yml; written whenever one is known
+    # so a later switch back to PostgreSQL finds the volume's password.
+    if ($script:PostgresSecret) {
+        $publishedPorts["POSTGRES_PASSWORD"] = "'$($script:PostgresSecret)'"
+    }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort
         $publishedPorts["PROMETHEUS_PORT"] = $PrometheusPort
@@ -1042,7 +1143,19 @@ function Protect-SensitiveFile([string]$SecurePath) {
         Set-Acl $SecurePath $acl
     }
     catch {
-        Write-Warn "Could not restrict permissions on $(Split-Path $SecurePath -Leaf)"
+        # A hard stop, not a warning. The file holds the vault master key and the
+        # admin passwords; a warning scrolled past and the installer went on to
+        # start the stack with those readable by every account on the machine.
+        $leaf = Split-Path $SecurePath -Leaf
+        Write-Fail ("Could not restrict permissions on $leaf ($($_.Exception.Message)).`n" +
+            "     This file holds the vault master key and admin passwords, so the installer`n" +
+            "     will not continue while other accounts on this machine can read it.`n" +
+            "     Fix it, then re-run the installer:`n" +
+            "       icacls `"$SecurePath`" /inheritance:r /grant:r `"$([System.Security.Principal.WindowsIdentity]::GetCurrent().Name):F`" /grant:r `"SYSTEM:F`" /grant:r `"Administrators:F`"`n" +
+            "     (or, in Explorer: Properties > Security > Advanced > Disable inheritance,`n" +
+            "     then remove Users / Everyone / Authenticated Users). If the file lives on`n" +
+            "     a filesystem without ACLs (FAT, exFAT, some network shares), move the`n" +
+            "     install directory to an NTFS volume (-InstallDir).")
     }
 }
 

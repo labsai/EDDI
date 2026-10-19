@@ -1,6 +1,7 @@
 import { api } from "../api-client";
 import type { AgentDescriptor } from "./agents";
 import { getDescriptorVersions } from "./descriptors";
+import { seg } from "./path-segment";
 
 export { type AgentDescriptor as WorkflowDescriptor };
 
@@ -35,7 +36,7 @@ export function getWorkflow(
   version: number
 ): Promise<WorkflowConfiguration> {
   return api.get<WorkflowConfiguration>(
-    `/workflowstore/workflows/${id}?version=${version}`
+    `/workflowstore/workflows/${seg(id)}?version=${version}`
   );
 }
 
@@ -47,7 +48,7 @@ export function createWorkflow(
 
 /** The workflow's current version number — `GET /workflowstore/workflows/{id}/currentversion`. */
 export function getWorkflowCurrentVersion(id: string): Promise<number> {
-  return api.get<number>(`/workflowstore/workflows/${id}/currentversion`);
+  return api.get<number>(`/workflowstore/workflows/${seg(id)}/currentversion`);
 }
 
 export function updateWorkflow(
@@ -56,7 +57,7 @@ export function updateWorkflow(
   config: WorkflowConfiguration
 ): Promise<{ location: string }> {
   return api.put(
-    `/workflowstore/workflows/${id}?version=${version}`,
+    `/workflowstore/workflows/${seg(id)}?version=${version}`,
     config
   );
 }
@@ -69,7 +70,7 @@ export function deleteWorkflow(
   const params = new URLSearchParams({ version: String(version) });
   if (options?.cascade) params.set("cascade", "true");
   if (options?.permanent) params.set("permanent", "true");
-  return api.delete(`/workflowstore/workflows/${id}?${params}`);
+  return api.delete(`/workflowstore/workflows/${seg(id)}?${params}`);
 }
 
 /**
@@ -83,7 +84,7 @@ export async function getWorkflowVersions(
   id: string
 ): Promise<AgentDescriptor[]> {
   const currentVersion = await api.get<number>(
-    `/workflowstore/workflows/${encodeURIComponent(id)}/currentversion`
+    `/workflowstore/workflows/${seg(id)}/currentversion`
   );
   const flat = await getDescriptorVersions(id, currentVersion ?? 1);
   if (flat.length === 0) {
@@ -105,6 +106,6 @@ export function duplicateWorkflow(
     deepCopy: String(deepCopy),
   });
   return api.post<{ location: string }>(
-    `/workflowstore/workflows/${id}?${params}`
+    `/workflowstore/workflows/${seg(id)}?${params}`
   );
 }

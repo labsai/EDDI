@@ -123,6 +123,71 @@ class RestGroupConversationTest {
         }
 
         @Test
+        @DisplayName("an inline file over eddi.attachments.max-size-bytes is refused before the service sees it")
+        void oversizedInlineAttachment_isRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentBytes = 4;
+            // "aGVsbG8=" decodes to five bytes, one over the limit.
+            var req = new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png")));
+
+            Response response = restGroupConversation.discuss("group-1", req);
+
+            assertEquals(400, response.getStatus());
+            assertTrue(String.valueOf(response.getEntity()).contains("too large"));
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("more inline files than eddi.attachments.max-per-conversation are refused")
+        void tooManyInlineAttachments_areRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentsPerConversation = 1;
+            var file = new AttachmentRef("image/png", "aGVsbG8=", null, "a.png");
+
+            Response response = restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1", List.of(file, file)));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("inline files totalling more than max-total-bytes-per-conversation are refused")
+        void inlineAttachmentsOverTheConversationTotal_areRefusedAtTheEdge() throws Exception {
+            restGroupConversation.maxAttachmentBytesPerConversation = 9;
+            var file = new AttachmentRef("image/png", "aGVsbG8=", null, "a.png");
+
+            Response response = restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1", List.of(file, file)));
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(groupService);
+        }
+
+        @Test
+        @DisplayName("the streaming start applies the same attachment limits")
+        void streaming_oversizedInlineAttachment_isRefused() throws Exception {
+            restGroupConversation.maxAttachmentBytes = 4;
+            var sink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+
+            restGroupConversation.discussStreaming("group-1",
+                    new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png"))), sink, sse);
+
+            verifyNoInteractions(groupService);
+            verify(sink).close();
+        }
+
+        @Test
+        @DisplayName("a per-user quota refusal at materialization answers 400, not 500")
+        void userQuotaRefusal_isA400() throws Exception {
+            when(groupService.discuss(eq("group-1"), eq("Q"), eq("user-1"), eq(0), isNull(), anyList()))
+                    .thenThrow(new IGroupConversationService.GroupAttachmentRejectedException("user", "store text", null));
+
+            Response response = restGroupConversation.discuss("group-1",
+                    new DiscussRequest("Q", "user-1", List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png"))));
+
+            assertEquals(400, response.getStatus());
+            assertEquals("Attachment refused: the per-user attachment quota is exhausted.", response.getEntity());
+        }
+
+        @Test
         @DisplayName("empty attachments use the plain overload")
         void discussWithEmptyAttachments() throws Exception {
             var gc = new GroupConversation();
@@ -295,10 +360,19 @@ class RestGroupConversationTest {
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
-                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "group conversation");
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "other-user", "group conversation");
 
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.readGroupConversation("group-1", "gc-1"));
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("L2: reading a record with no owner is refused to a non-admin")
+        void readGroupConversation_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+
+            assertThrows(ForbiddenException.class, () -> asNonAdmin("mallory").readGroupConversation("group-1", "gc-1"));
         }
 
         @Test
@@ -315,6 +389,87 @@ class RestGroupConversationTest {
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.deleteGroupConversation("group-1", "gc-1"));
             verify(groupService, never()).deleteGroupConversation(anyString());
+        }
+
+        // L9 (security review 2026-10-15): the write paths used the non-strict check,
+        // which lets any authenticated caller drive a legacy record that names no
+        // owner.
+
+        private GroupConversation unownedLegacyRecord() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId(null);
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            return gc;
+        }
+
+        private RestGroupConversation asNonAdmin(String name) {
+            var caller = mock(SecurityIdentity.class);
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(name);
+            when(caller.getPrincipal()).thenReturn(principal);
+            when(caller.hasRole("eddi-admin")).thenReturn(false);
+            return new RestGroupConversation(groupService, jsonSerialization, caller, new OwnershipValidator(true),
+                    mock(HitlAccessGuard.class), resourceAccessGuard);
+        }
+
+        @Test
+        @DisplayName("L9: a follow-up on a legacy record with no owner is refused to a non-admin")
+        void followUp_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.followUpWithMember("group-1", "gc-1", new IRestGroupConversation.FollowUpRequest("q", "agent-1", null)));
+            verify(groupService, never()).followUpWithMember(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("L9: a continuation of a legacy record with no owner is refused to a non-admin")
+        void continueDiscussion_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.continueDiscussion("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null)));
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("L9: a streamed continuation of a legacy record with no owner is refused to a non-admin")
+        void continueDiscussionStreaming_legacyUnowned_refusedToNonAdmin() throws Exception {
+            unownedLegacyRecord();
+            var rest = asNonAdmin("mallory");
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+
+            assertThrows(ForbiddenException.class,
+                    () -> rest.continueDiscussionStreaming("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null),
+                            eventSink, sse));
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("L9: the write paths consult the strict check, never the lenient one")
+        void writePathsUseTheStrictCheck() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setGroupId("group-1");
+            gc.setUserId("user-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdminStrict(identity, "user-1", "group conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.followUpWithMember("group-1", "gc-1",
+                            new IRestGroupConversation.FollowUpRequest("q", "agent-1", null)));
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.continueDiscussion("group-1", "gc-1", new IRestGroupConversation.DiscussRequest("q", null)));
+
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+            verify(groupService, never()).followUpWithMember(anyString(), anyString(), anyString());
+            verify(groupService, never()).continueDiscussion(anyString(), anyString(), any());
         }
 
         @Test
@@ -534,7 +689,9 @@ class RestGroupConversationTest {
                     new FollowUpRequest("q", "agentA", "user-1"));
 
             assertEquals(200, response.getStatus());
-            verify(ownershipValidator).requireOwnerOrAdmin(identity, "user-1", "group conversation");
+            // Strict (L9): a follow-up writes the transcript, so a legacy record with no
+            // owner is an administrator's to drive.
+            verify(ownershipValidator).requireOwnerOrAdminStrict(identity, "user-1", "group conversation");
         }
 
         @Test

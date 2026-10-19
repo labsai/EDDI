@@ -101,6 +101,14 @@ public final class GroupConversationEventSink {
      * so recomputing it mid-phase would spend on a view nothing displays yet.
      */
     public static final String EVENT_STANCE_UPDATED = "stance_updated";
+    /**
+     * A member's tool loop is about to run one tool — the group twin of the 1:1
+     * stream's {@code tool_call}. Name only, never arguments (they may hold user
+     * data and are redacted in the member's own trace). Best-effort liveness
+     * signal: a member turn is not streamed, so this is the only mid-turn sign of
+     * life, and it is dropped once the orchestrator has cancelled the speaker.
+     */
+    public static final String EVENT_MEMBER_TOOL_CALL = "member_tool_call";
 
     // --- Event payloads ---
 
@@ -112,6 +120,19 @@ public final class GroupConversationEventSink {
     }
 
     public record SpeakerStartEvent(String agentId, String displayName, int phaseIndex, String phaseName) {
+    }
+
+    /**
+     * A member is about to run a tool.
+     *
+     * @param agentId
+     *            the member whose tool loop is running it
+     * @param displayName
+     *            the member's display name, or {@code null} when unknown
+     * @param tool
+     *            the tool's name — never its arguments
+     */
+    public record MemberToolCallEvent(String agentId, String displayName, String tool) {
     }
 
     public record TokenEvent(String agentId, String token) {

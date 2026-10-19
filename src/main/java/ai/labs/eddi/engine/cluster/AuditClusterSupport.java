@@ -31,7 +31,9 @@ import java.util.function.LongSupplier;
  * rejected because a node hand-over would leave gaps that verification reports
  * as deletions. A missing counter is seeded from the store's highest stored
  * position. While NATS is unreachable the entry is recorded unsequenced — never
- * with a position that might already have been handed out elsewhere.
+ * with a position that might already have been handed out elsewhere — and,
+ * after such a failure, for one NATS request timeout without asking again, so a
+ * NATS that hangs instead of refusing costs one timeout, not one per entry.
  */
 @ApplicationScoped
 public class AuditClusterSupport implements IAuditClusterSupport {
@@ -45,6 +47,13 @@ public class AuditClusterSupport implements IAuditClusterSupport {
     private final Instance<IClusterEventBus> events;
     private final MeterRegistry meterRegistry;
     private volatile ISharedKv counters;
+    /**
+     * Until when (monotonic nanos) entries are recorded unsequenced without asking
+     * NATS, after a call found it unreachable. A NATS that keeps the connection
+     * open but does not answer costs every call the full request timeout; without
+     * this pause each audit entry of a turn waited that long in turn.
+     */
+    private volatile long unavailableUntilNanos = System.nanoTime();
 
     @Inject
     public AuditClusterSupport(ClusterConfig config, Instance<NatsSharedStateFactory> sharedState,
@@ -58,7 +67,12 @@ public class AuditClusterSupport implements IAuditClusterSupport {
 
     /** For tests: a counter bucket supplied directly. */
     AuditClusterSupport(ISharedKv counters, MeterRegistry meterRegistry) {
-        this(ClusterConfig.defaults().withMessagingType(ClusterConfig.NATS), null, null, null, meterRegistry);
+        this(counters, ClusterConfig.defaults().withMessagingType(ClusterConfig.NATS), meterRegistry);
+    }
+
+    /** For tests: a counter bucket and a configuration supplied directly. */
+    AuditClusterSupport(ISharedKv counters, ClusterConfig config, MeterRegistry meterRegistry) {
+        this(config, null, null, null, meterRegistry);
         this.counters = counters;
     }
 
@@ -79,6 +93,10 @@ public class AuditClusterSupport implements IAuditClusterSupport {
     @Override
     public OptionalLong nextSequence(String conversationId, LongSupplier seed) {
         String key = "s." + KvKeys.safe(conversationId);
+        if (System.nanoTime() - unavailableUntilNanos < 0) {
+            count("unsequenced");
+            return OptionalLong.empty();
+        }
         try {
             ISharedKv kv = counters();
             for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -97,7 +115,11 @@ public class AuditClusterSupport implements IAuditClusterSupport {
             }
             count("conflict");
             return OptionalLong.empty();
-        } catch (ClusterUnavailableException | NumberFormatException e) {
+        } catch (ClusterUnavailableException e) {
+            unavailableUntilNanos = System.nanoTime() + config.natsRequestTimeout().toNanos();
+            count("unsequenced");
+            return OptionalLong.empty();
+        } catch (NumberFormatException e) {
             count("unsequenced");
             return OptionalLong.empty();
         }

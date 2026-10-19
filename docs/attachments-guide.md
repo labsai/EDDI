@@ -174,10 +174,10 @@ The declared type is checked against the file's content. Images and PDFs must ca
 |---|---|
 | `eddi.attachments.max-per-conversation` | 50 files |
 | `eddi.attachments.max-total-bytes-per-conversation` | 100 MB |
-| `eddi.attachments.max-per-user` | off |
-| `eddi.attachments.max-total-bytes-per-user` | off |
+| `eddi.attachments.max-per-user` | 500 files |
+| `eddi.attachments.max-total-bytes-per-user` | 1 GiB |
 
-The per-user quotas count every blob owned by the conversation's **owner**, across all of their conversations — an admin uploading into a user's conversation fills that user's quota. Blobs stored before the owner was recorded on them (earlier releases) do not count towards it.
+The per-user quotas count every blob owned by the conversation's **owner**, across all of their conversations — an admin uploading into a user's conversation fills that user's quota. A group discussion's inline files count too: they are stored under the discussion's owner (before this, they were stored without one, so no per-user quota counted them). Blobs stored before the owner was recorded on them (earlier releases) do not count towards it. Both are on by default (they used to be off, so one user could fill the store alone); set either to `0` to disable it.
 
 Quotas are enforced atomically: the usage is counted and the blob stored under one lock per scope — a transaction-scoped advisory lock on PostgreSQL (`hashtextextended`, so PostgreSQL 11 or newer), a lease document in `attachments.quota_locks` on MongoDB — so concurrent uploads cannot each see room and together overshoot the limit. A refusal is a `400` with `"code": "ATTACHMENT_REJECTED"` and `"quota": "conversation"` or `"user"`, counted on `eddi_attachments_quota_rejected_total{scope}`.
 
@@ -348,7 +348,9 @@ To act on attachments, read the `attachments` memory key from a task, or match o
 
 ## Group Conversations
 
-Group discussions accept the same three input shapes on `POST /groups/{groupId}/conversations`. Inline `base64Data` is stored in the blob store owned by the group conversation; hosted `url` references and pre-uploaded `storageRef`s pass through.
+Group discussions accept inline data and hosted URLs on `POST /groups/{groupId}/conversations`. Inline data is stored in the blob store owned by the group conversation and counted against the discussion's owner, so the same quotas apply as to a 1:1 upload: `eddi.attachments.max-size-bytes` per file, `max-per-conversation` and `max-total-bytes-per-conversation` for the discussion (checked from the request before anything is decoded or stored), and the per-user quotas (checked atomically when the files are stored). A refusal is a `400` (or a `group_error` event on the `/stream` variant), and nothing from the refused request is kept. Hosted `url` references pass through. A bare `storageRef` is not accepted from a client: only a nested group passes references down, and only those its parent discussion can read.
+
+Deleting a discussion (`DELETE /groups/{groupId}/conversations/{id}`) deletes its blobs, and a GDPR erasure of the owner reaches them — see [gdpr-compliance.md](gdpr-compliance.md).
 
 Each member's private conversation is granted access on its **first** turn and receives the files as `attachment_*` context; from there everything on this page applies unchanged. Later turns rely on the member's own history plus the auto-enabled `readAttachment` tool, so a member does not lose the file after phase one.
 

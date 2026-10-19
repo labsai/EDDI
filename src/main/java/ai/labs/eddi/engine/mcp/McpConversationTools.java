@@ -36,6 +36,7 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -142,6 +143,23 @@ public class McpConversationTools {
     }
 
     /**
+     * Uniform answer when a turn is refused. The turn guard refuses both a caller
+     * who does not own the conversation and an owner who may no longer use its
+     * agent (L4), so the answer names neither reason — as the REST surface does —
+     * rather than tell an owner they do not own their own conversation. A new
+     * conversation has no id yet; there the refusal is the USE check on the agent.
+     */
+    private String turnDenied(String tool, String conversationId) {
+        meterRegistry.counter("eddi.mcp.conversation.access.denied", "tool", tool).increment();
+        if (conversationId == null || conversationId.isBlank()) {
+            LOGGER.infof("%s denied: caller may not use the agent", tool);
+            return errorJson("Access denied: you may not use this agent");
+        }
+        LOGGER.infof("%s denied: caller may not continue conversation %s", tool, LogSanitizer.sanitize(conversationId));
+        return errorJson("Access denied: you may not continue this conversation");
+    }
+
+    /**
      * Uniform answer when the conversation guard reports that a conversation has no
      * descriptor (never existed, or deleted) and the caller is not an admin. An
      * expected outcome of probing an id, so it is logged at debug, not as an error
@@ -230,8 +248,9 @@ public class McpConversationTools {
         try {
             // Driving someone else's conversation is a write — gate it exactly like
             // the REST say() does, or a viewer could inject turns into another
-            // user's conversation and read the agent's reply.
-            conversationAccessGuard.requireConversationOwner(conversationId);
+            // user's conversation and read the agent's reply. Like say(), this also
+            // re-checks USE on the conversation's agent (L4).
+            conversationAccessGuard.requireConversationTurnAccess(conversationId);
 
             var snapshot = sendMessageAndWait(conversationId, message);
 
@@ -245,7 +264,7 @@ public class McpConversationTools {
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
-            return accessDenied("talk_to_agent", conversationId);
+            return turnDenied("talk_to_agent", conversationId);
         } catch (NotFoundException e) {
             return conversationNotFound("talk_to_agent", conversationId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
@@ -296,7 +315,7 @@ public class McpConversationTools {
                 ConversationResult convResult = conversationService.startConversation(env, agentId, ownerUserId, Collections.emptyMap());
                 convId = convResult.conversationId();
             } else {
-                conversationAccessGuard.requireConversationOwner(convId);
+                conversationAccessGuard.requireConversationTurnAccess(convId);
             }
 
             // Step 2: Send the message
@@ -316,7 +335,7 @@ public class McpConversationTools {
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
-            return accessDenied("chat_with_agent", convId);
+            return turnDenied("chat_with_agent", convId);
         } catch (NotFoundException e) {
             return conversationNotFound("chat_with_agent", convId);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
@@ -516,6 +535,10 @@ public class McpConversationTools {
                 LOGGER.debug("Could not read Agent descriptor", e);
             }
             result.put("configuration", config);
+            // The effective fallback for every LLM task of this agent whose
+            // maxBudgetPerConversation does not set enforceBudget itself (M8): an
+            // operator reading the stored ceiling must also see whether it refuses.
+            result.put("toolBudgetEnforcedByDefault", ToolBudgetEnforcement.isEnforcedByDefault());
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_agent failed for Agent " + agentId, e);

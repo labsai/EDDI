@@ -301,6 +301,65 @@ public class GroupConversationStore implements IGroupConversationStore {
     }
 
     /**
+     * One page of the group conversations whose {@code userId} is exactly
+     * {@code userId}, newest first — for GDPR export and for the erasure cascade,
+     * which needs the conversation ids (their attachment blobs are keyed by them)
+     * before {@link #deleteAllForUser} removes the documents.
+     * <p>
+     * Same narrow-then-recheck rule as {@link #deleteAllForUser}: the anchored,
+     * escaped regex only narrows the query, an exact comparison decides. A page can
+     * therefore hold fewer owned rows than it scanned, so a caller pages on
+     * {@link UserPage#scanned()} and stops at a page that scanned fewer rows than
+     * it asked for.
+     *
+     * @param skip
+     *            rows of the narrowed query to skip
+     * @param limit
+     *            at most this many rows of the narrowed query are read (capped at
+     *            {@link IResourceStorage#MAX_RESULT_LIMIT})
+     * @return the owned conversations among those rows, with their ids set, and how
+     *         many rows were scanned
+     */
+    public UserPage listAllForUser(String userId, int skip, int limit) throws IResourceStore.ResourceStoreException {
+        var results = new ArrayList<GroupConversation>();
+        if (userId == null || userId.isBlank()) {
+            return new UserPage(results, 0);
+        }
+        try {
+            var filter = new IResourceFilter.QueryFilters(
+                    List.of(new IResourceFilter.QueryFilter("userId", "^" + escapeRegex(userId) + "$")));
+            var resourceIds = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, "lastModified", skip, limit);
+            if (resourceIds == null) {
+                return new UserPage(results, 0);
+            }
+            for (var resourceId : resourceIds) {
+                var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
+                if (resource != null && userId.equals(resource.getData().getUserId())) {
+                    GroupConversation gc = resource.getData();
+                    gc.setId(resourceId.getId());
+                    results.add(gc);
+                }
+            }
+            return new UserPage(results, resourceIds.size());
+        } catch (Exception e) {
+            // A row that cannot be read is NOT skipped here, unlike the group listing:
+            // for export and erasure a silently missing conversation is a wrong answer.
+            throw new IResourceStore.ResourceStoreException("Failed to list group conversations for user: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * One page of {@link #listAllForUser}.
+     *
+     * @param owned
+     *            the conversations the user owns, by exact match
+     * @param scanned
+     *            how many rows the narrowed query returned — the paging cursor
+     */
+    public record UserPage(List<GroupConversation> owned, int scanned) {
+    }
+
+    /**
      * Backslash-escape the regex metacharacters shared by both backends' engines.
      * Deliberately not {@link Pattern#quote}: its {@code \Q...\E} form is
      * Java-specific and PostgreSQL rejects it.

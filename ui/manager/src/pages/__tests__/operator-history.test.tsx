@@ -7,6 +7,7 @@ import { OperatorPage } from "../operator";
 import { defaultOperatorConfig, OPERATOR_VARIABLE_KEY } from "@/lib/api/operator";
 import type { OperatorConfig } from "@/lib/api/operator";
 import { useOperatorChatStore } from "@/hooks/use-operator-chat";
+import { serveTrustedOperator } from "@/test/operator-trust";
 
 /**
  * The History tab, and restoring a conversation on mount.
@@ -72,6 +73,7 @@ describe("OperatorPage — conversation history", () => {
     useOperatorChatStore.getState().reset();
     sessionStorage.clear();
     server.resetHandlers();
+    serveTrustedOperator("op-1");
     server.use(
       http.get("*/secretstore/secrets/health", () =>
         HttpResponse.json({ status: "UP", provider: "local", available: true }),

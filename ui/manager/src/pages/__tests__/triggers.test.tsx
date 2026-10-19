@@ -41,8 +41,9 @@ describe("TriggersPage", () => {
       // booking_request (2), escalation (2), product_recommendation (2), onboarding_start (2) show "2 agents"
       const twoCounts = screen.getAllByText("2 agents");
       expect(twoCounts.length).toBeGreaterThanOrEqual(1);
-      // faq_query, payment_issue, contract_review, password_reset show "1 agents"
-      const oneCounts = screen.getAllByText("1 agents");
+      // faq_query, payment_issue, contract_review, password_reset: singular,
+      // not "1 agents" — the count is a plural key now.
+      const oneCounts = screen.getAllByText("1 agent");
       expect(oneCounts.length).toBeGreaterThanOrEqual(1);
     });
   });

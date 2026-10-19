@@ -14,11 +14,15 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -121,14 +125,24 @@ public class SecretScrubber {
     /** Known secret field names (case-insensitive matching) */
     private static final Set<String> SECRET_FIELD_NAMES = Set.of("apikey", "api_key", "apitoken", "api_token", "password", "passwd", "secret",
             "secretkey", "secret_key", "token", "accesstoken", "access_token", "authorization", "auth", "credential", "credentials", "privatekey",
-            "private_key", "clientsecret", "client_secret");
+            "private_key", "clientsecret", "client_secret",
+            // The abbreviations and the key-material names a config author reaches for
+            // when the field is not literally called "password": a short pwd/pass/pin/otp
+            // value scores under the entropy threshold, so the name is the only thing that
+            // catches it.
+            "pwd", "pass", "passphrase", "pin", "otp", "private_key_pem", "privatekeypem", "pem");
 
     /**
      * Name suffixes that mark a credential wherever the field appears — unless the
      * name in front of them measures a quantity, see {@link #QUANTITY_QUALIFIERS}.
+     * <p>
+     * {@code pin}, {@code otp} and {@code pem} are deliberately NOT suffixes: as
+     * suffixes they would match {@code spin}, {@code item} and
+     * {@code totalPostsSystem}-style names, and a scrubber that over-matches breaks
+     * the export → import round trip. They are whole-name matches above.
      */
     private static final Set<String> SECRET_FIELD_NAME_SUFFIXES = Set.of("token", "secret", "password", "passwd", "credential", "credentials",
-            "authorization");
+            "authorization", "pwd", "passphrase", "privatekey", "private_key");
 
     /**
      * Qualifiers that turn a credential noun into a COUNT of them.
@@ -155,6 +169,63 @@ public class SecretScrubber {
     private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
 
     private static final Set<String> QUANTITY_QUALIFIERS = Set.of("max", "min", "num", "number", "total", "budget");
+
+    /**
+     * A value that is, in full, an unresolved template expression or a vault
+     * reference — a pointer, never the secret itself. Inside an embedded document
+     * or a query string it is left legible, as a vault reference is everywhere.
+     */
+    private static final Pattern WHOLE_POINTER = Pattern.compile("\\s*+(?:\\$?\\{[^{}]*+\\})\\s*+");
+
+    /**
+     * A Qute expression inside free text — {@code {properties.apiKey}}, {@code {#if
+     * x}}. Masked before the free-text pass so the redaction rules judge the
+     * literal text around it, never the expression (a templated {@code "token":
+     * "{properties.t}"} is a pointer, not a credential). A JSON object
+     * ({@code {"…}) does not match: no double quote may appear inside.
+     */
+    private static final Pattern TEMPLATE_EXPRESSION = Pattern.compile("\\{[a-zA-Z_#/!][^{}\"]*+\\}");
+
+    /** One {@code name=value} pair of a form-encoded body or query string. */
+    private static final Pattern FORM_PAIR = Pattern.compile("[A-Za-z0-9_.\\-\\[\\]%]++=[^&\\s]*+");
+
+    /**
+     * Field names whose value is request material — what an outbound call sends (a
+     * path, a body, a URL or endpoint). Only these, values inside a header or
+     * query-parameter map, and documents embedded in a string get the full
+     * {@link SecretRedactionFilter} pass with its name-bound rules
+     * ({@code password: ...}, {@code token=...}); any other text — a prompt, a
+     * description, an output — only loses tokens that are credentials by their
+     * shape, so export never rewrites prose.
+     */
+    private static final Set<String> REQUEST_MATERIAL_FIELD_NAMES = Set.of("path", "body", "requestbody", "url", "baseurl", "endpoint",
+            "targetserverurl", "serverurl", "apiurl", "query", "querystring");
+
+    /** Containers whose string values are request material. */
+    private static final Set<String> REQUEST_MATERIAL_CONTAINERS = Set.of("queryparams", "queryparameters", "params", "cookies");
+
+    /**
+     * Credential shapes the export pass recognises in prose on top of
+     * {@link SecretRedactionFilter#redactCredentialShapes}: provider keys and
+     * tokens that are secrets by their form alone. Each is anchored so it does not
+     * start inside a word, and possessive so the scan stays linear.
+     */
+    private static final List<Pattern> EXPORT_CREDENTIAL_SHAPES = List.of(
+            Pattern.compile("(?<![A-Za-z0-9_])AIza[0-9A-Za-z_\\-]{35}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{36,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{22,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])xox[abprs]-[A-Za-z0-9\\-]{10,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])(?:AKIA|ASIA)[0-9A-Z]{16}+(?![0-9A-Z])"),
+            Pattern.compile("(?<![A-Za-z0-9_])gsk_[A-Za-z0-9]{20,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])xai-[A-Za-z0-9]{20,}+"),
+            Pattern.compile("(?<![A-Za-z0-9_])eyJ[A-Za-z0-9_\\-]{8,}+\\.eyJ[A-Za-z0-9_\\-]{8,}+\\.[A-Za-z0-9_\\-]{8,}+"));
+
+    /** The password of a {@code mongodb(+srv)://user:password@} string in prose. */
+    private static final Pattern MONGODB_USERINFO = Pattern.compile("(mongodb(?:\\+srv)?+://[^\\s:/@]++):[^\\s/@]++@");
+
+    /** Brackets a masked template expression in {@link #redactFreeText}. */
+    private static final char MASK_OPEN = (char) 0xE000;
+    private static final char MASK_CLOSE = (char) 0xE001;
 
     private final ObjectMapper objectMapper;
 
@@ -224,6 +295,16 @@ public class SecretScrubber {
     }
 
     private void scrubNode(JsonNode node, String parentFieldName) {
+        scrubNode(node, parentFieldName, false);
+    }
+
+    /**
+     * @param embedded
+     *            whether {@code node} is a document that sat inside a string value
+     *            (an httpcall {@code request.body}, a service-account JSON), where
+     *            a whole template expression is a pointer and stays legible
+     */
+    private void scrubNode(JsonNode node, String parentFieldName, boolean embedded) {
         if (node.isObject()) {
             ObjectNode objectNode = (ObjectNode) node;
             Iterator<Map.Entry<String, JsonNode>> fields = objectNode.properties().iterator();
@@ -233,12 +314,12 @@ public class SecretScrubber {
                 JsonNode fieldValue = field.getValue();
 
                 if (fieldValue.isTextual()) {
-                    String replacement = scrubTextValue(fieldName, parentFieldName, fieldValue.asText());
+                    String replacement = scrubTextValue(fieldName, parentFieldName, fieldValue.asText(), embedded);
                     if (replacement != null) {
                         objectNode.set(fieldName, new TextNode(replacement));
                     }
                 } else {
-                    scrubNode(fieldValue, fieldName);
+                    scrubNode(fieldValue, fieldName, embedded);
                 }
             }
         } else if (node.isArray()) {
@@ -253,12 +334,12 @@ public class SecretScrubber {
                     // was exported verbatim, including one under a field named
                     // "apiKeys". An element is judged by the array's own field name,
                     // which is the only name it has.
-                    String replacement = scrubTextValue(parentFieldName, null, element.asText());
+                    String replacement = scrubTextValue(parentFieldName, null, element.asText(), embedded);
                     if (replacement != null) {
                         arrayNode.set(i, new TextNode(replacement));
                     }
                 } else {
-                    scrubNode(element, parentFieldName);
+                    scrubNode(element, parentFieldName, embedded);
                 }
             }
         }
@@ -266,15 +347,206 @@ public class SecretScrubber {
 
     /**
      * Decides what one string value becomes, or {@code null} to leave it alone.
+     * <p>
+     * Three passes the export path lacked, which the runtime redaction had
+     * (security review 2026-10-17, M8): a value that is itself structured — a
+     * relative {@code request.path} with a query string, a JSON document or a
+     * form-encoded body inside a string — is judged part by part, so
+     * {@code ?api_key=…}, {@code client_secret=…} and an {@code apiKey} inside a
+     * JSON-in-a-string body no longer leave in clear; and every other value finally
+     * gets {@link SecretRedactionFilter}'s shape rules, so a provider key pasted
+     * into a {@code description} or {@code systemPrompt} is caught by the same
+     * patterns the logs use (and any added there later).
      *
-     * @param fieldName
-     *            the name this value sits under
-     * @param parentFieldName
-     *            the name of the enclosing object, used to recognise a header map
-     * @param textValue
-     *            the value as stored
+     * @param embedded
+     *            whether the value sits in a document that was itself a string
      */
-    private String scrubTextValue(String fieldName, String parentFieldName, String textValue) {
+    private String scrubTextValue(String fieldName, String parentFieldName, String textValue, boolean embedded) {
+        if (embedded && WHOLE_POINTER.matcher(textValue).matches()) {
+            return null;
+        }
+        boolean requestMaterial = embedded || isRequestMaterial(fieldName, parentFieldName);
+        // A credential-named field is redacted whole below, whatever its shape. Only
+        // request material, and a field that names itself a JSON document
+        // (serviceAccountJson), is taken apart: a prompt that happens to look like
+        // a query string or a JSON example stays prose.
+        if (!isSecretFieldName(fieldName, parentFieldName) && (requestMaterial || isEmbeddedDocumentName(fieldName))) {
+            String structured = scrubStructuredText(textValue);
+            if (structured != null && !structured.equals(textValue)) {
+                return structured;
+            }
+        }
+        String decided = scrubSingleValue(fieldName, parentFieldName, textValue);
+        if (decided != null || isStructuralFieldName(fieldName) || looksLikeUrl(textValue)) {
+            return decided;
+        }
+        return requestMaterial ? redactFreeText(textValue) : redactCredentialShapes(textValue);
+    }
+
+    /**
+     * Whether the value is something an outbound call sends — see
+     * {@link #REQUEST_MATERIAL_FIELD_NAMES}.
+     */
+    private static boolean isRequestMaterial(String fieldName, String parentFieldName) {
+        if (fieldName != null && REQUEST_MATERIAL_FIELD_NAMES.contains(normalizeFieldName(fieldName))) {
+            return true;
+        }
+        return isHeaderContainer(parentFieldName)
+                || (parentFieldName != null && REQUEST_MATERIAL_CONTAINERS.contains(normalizeFieldName(parentFieldName)));
+    }
+
+    /**
+     * A field that says it holds a JSON document, e.g. {@code serviceAccountJson}.
+     */
+    private static boolean isEmbeddedDocumentName(String fieldName) {
+        return fieldName != null && normalizeFieldName(fieldName).endsWith("json");
+    }
+
+    /**
+     * Only the tokens that are credentials by their shape (see
+     * {@link #EXPORT_CREDENTIAL_SHAPES}); {@code null} when nothing matched.
+     */
+    static String redactCredentialShapes(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        String redacted = SecretRedactionFilter.redactCredentialShapes(text);
+        for (Pattern shape : EXPORT_CREDENTIAL_SHAPES) {
+            redacted = shape.matcher(redacted).replaceAll(Matcher.quoteReplacement(SecretRedactionFilter.REDACTED));
+        }
+        redacted = MONGODB_USERINFO.matcher(redacted).replaceAll("$1:" + Matcher.quoteReplacement(SecretRedactionFilter.REDACTED) + "@");
+        return redacted.equals(text) ? null : redacted;
+    }
+
+    /**
+     * The value scrubbed part by part when it is structured — a relative URI with a
+     * query string, an embedded JSON document, a form-encoded body — or
+     * {@code null} when it is none of those (the caller then judges it whole). An
+     * unchanged structured value comes back unchanged.
+     */
+    private String scrubStructuredText(String textValue) {
+        String trimmed = textValue.trim();
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            String document = scrubEmbeddedJson(trimmed);
+            if (document != null) {
+                // an unchanged document keeps its surrounding whitespace as well
+                return document.equals(trimmed) ? textValue : document;
+            }
+        }
+        if (textValue.startsWith("/") && textValue.indexOf('?') > 0) {
+            int queryStart = textValue.indexOf('?');
+            int fragmentStart = textValue.indexOf('#', queryStart);
+            String query = fragmentStart < 0 ? textValue.substring(queryStart + 1) : textValue.substring(queryStart + 1, fragmentStart);
+            String path = textValue.substring(0, queryStart);
+            String fragment = fragmentStart < 0 ? "" : textValue.substring(fragmentStart);
+            String redactedPath = redactFreeText(path);
+            return (redactedPath != null ? redactedPath : path) + "?" + scrubPairs(query) + fragment;
+        }
+        if (isFormEncoded(textValue)) {
+            return scrubPairs(textValue);
+        }
+        return null;
+    }
+
+    /**
+     * An embedded JSON document scrubbed with the same rules, re-serialised only
+     * when something was redacted — so an unchanged body template keeps its
+     * formatting. {@code null} when the text is not JSON (a body template with an
+     * unquoted placeholder usually is not; it gets the free-text pass instead).
+     */
+    private String scrubEmbeddedJson(String text) {
+        try {
+            JsonNode original = objectMapper.readTree(text);
+            if (original == null || !(original.isObject() || original.isArray())) {
+                return null;
+            }
+            JsonNode scrubbed = original.deepCopy();
+            scrubNode(scrubbed, null, true);
+            return scrubbed.equals(original) ? text : objectMapper.writeValueAsString(scrubbed);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Whether the whole value is {@code name=value} pairs joined by {@code &}. */
+    private static boolean isFormEncoded(String value) {
+        if (value.isEmpty() || value.indexOf('=') < 0) {
+            return false;
+        }
+        for (String pair : value.split("&", -1)) {
+            if (!FORM_PAIR.matcher(pair).matches()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Each {@code name=value} pair judged on its own: a credential-named key, or a
+     * value {@link SecretRedactionFilter} recognises, loses its value; a value that
+     * is a vault reference or a template expression is a pointer and stays.
+     */
+    private static String scrubPairs(String pairs) {
+        var out = new StringBuilder(pairs.length());
+        for (String pair : pairs.split("&", -1)) {
+            if (!out.isEmpty()) {
+                out.append('&');
+            }
+            int eq = pair.indexOf('=');
+            if (eq < 0) {
+                String redacted = redactFreeText(pair);
+                out.append(redacted != null ? REDACTED : pair);
+                continue;
+            }
+            String name = pair.substring(0, eq);
+            String rawValue = pair.substring(eq + 1);
+            String decoded;
+            try {
+                decoded = URLDecoder.decode(rawValue, StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException malformedEscape) {
+                decoded = rawValue;
+            }
+            boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
+            boolean credential = !decoded.isEmpty() && !pointer
+                    && (isSecretFieldName(name, null) || UriRedactor.isSensitiveHeaderName(name) || redactFreeText(decoded) != null);
+            out.append(name).append('=').append(credential ? REDACTED : rawValue);
+        }
+        return out.toString();
+    }
+
+    /**
+     * {@link SecretRedactionFilter#redact} over free text, with template
+     * expressions masked so they are never mistaken for the value of a credential
+     * key; {@code null} when nothing was redacted.
+     */
+    static String redactFreeText(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        List<String> masked = new ArrayList<>();
+        Matcher expressions = TEMPLATE_EXPRESSION.matcher(text);
+        var maskedText = new StringBuilder(text.length());
+        while (expressions.find()) {
+            expressions.appendReplacement(maskedText, Matcher.quoteReplacement(MASK_OPEN + Integer.toString(masked.size()) + MASK_CLOSE));
+            masked.add(expressions.group());
+        }
+        expressions.appendTail(maskedText);
+        String input = maskedText.toString();
+        String redacted = SecretRedactionFilter.redact(input);
+        if (redacted.equals(input)) {
+            return null;
+        }
+        for (int i = 0; i < masked.size(); i++) {
+            redacted = redacted.replace(MASK_OPEN + Integer.toString(i) + MASK_CLOSE, masked.get(i));
+        }
+        return redacted;
+    }
+
+    /**
+     * The original whole-value decision: references, credential names, URLs and the
+     * entropy heuristic.
+     */
+    private String scrubSingleValue(String fieldName, String parentFieldName, String textValue) {
         // A vault reference is a pointer to a secret, not a secret, and is left
         // legible so an operator can still see WHICH key the config used. A
         // connection reference is the same kind of pointer one level up — the
@@ -427,8 +699,9 @@ public class SecretScrubber {
         // rule: a vendor names its credential header Ocp-Apim-Subscription-Key,
         // which no curated word list predicts. The rest of the header decision is
         // the shared one, so a header this scrubber exports and the same header on
-        // an approval card cannot disagree about what is a credential.
-        return name.endsWith("key") || UriRedactor.isSensitiveHeaderName(fieldName);
+        // an approval card cannot disagree about what is a credential. A Cookie
+        // header is a session credential by definition (security review M8).
+        return name.endsWith("key") || name.equals("cookie") || name.equals("setcookie") || UriRedactor.isSensitiveHeaderName(fieldName);
     }
 
     /**

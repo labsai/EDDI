@@ -257,3 +257,40 @@ describe("ChatMessage", () => {
     expect(container.querySelector("img[onerror]")).toBeNull();
   });
 });
+
+describe("ChatMessage — guardrail notices", () => {
+  it("shows one quiet line per guardrail that fired, with phase, type and action", () => {
+    renderWithProviders(
+      <ChatMessage
+        message={{
+          ...agentMessage,
+          guardrails: [
+            { type: "prompt-injection", phase: "input", action: "block" },
+            { type: "pii-redaction", phase: "output", action: "redact" },
+          ],
+        }}
+      />,
+    );
+    const lines = screen.getAllByTestId("guardrail-notice").map((l) => l.textContent);
+    expect(lines).toEqual([
+      "Guardrail (input): prompt-injection blocked",
+      "Guardrail (output): pii-redaction redacted",
+    ]);
+  });
+
+  it("renders nothing extra when no guardrail fired, and never on a user bubble", () => {
+    renderWithProviders(<ChatMessage message={agentMessage} />);
+    expect(screen.queryByTestId("guardrail-notices")).toBeNull();
+    renderWithProviders(
+      <ChatMessage message={{ ...userMessage, guardrails: [{ type: "x", phase: "input", action: "block" }] }} />,
+    );
+    expect(screen.queryByTestId("guardrail-notices")).toBeNull();
+  });
+
+  it("falls back to the raw words for a phase or action it does not know", () => {
+    renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, guardrails: [{ type: "t", phase: "mid", action: "quarantine" }] }} />,
+    );
+    expect(screen.getByTestId("guardrail-notice")).toHaveTextContent("Guardrail (mid): t quarantine");
+  });
+});

@@ -22,6 +22,18 @@
 # (log in there as the KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD pair below).
 
 services:
+  # Every base stack's bind-guard (docker-compose.yml,
+  # docker-compose.postgres-only.yml — ComposeStackTest renders both with this
+  # overlay) refuses a non-loopback EDDI_BIND while
+  # EDDI_SECURITY_ALLOW_UNAUTHENTICATED is "true". It reads the flag from its
+  # OWN environment (compose interpolation of the .env / shell value), so the
+  # override on the eddi service below does not reach it — tell it here that
+  # this overlay turns authentication on, or EDDI_BIND=0.0.0.0 with Keycloak
+  # would be refused although it is exactly the documented way to expose EDDI.
+  bind-guard:
+    environment:
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "false"
+
   eddi:
     environment:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
@@ -52,9 +64,11 @@ services:
       # is the whole reason it prefers token.issuer over the auth-server-url above.
       #
       # This stack serves EDDI over plain http on localhost, so the advertised
-      # resource identifier must not be forced to https as it is by default — a
-      # client would be sent to fetch a URL nothing here is listening on. A
-      # deployment behind TLS should leave the default alone.
+      # resource identifier must not be forced to https — a client would be sent
+      # to fetch a URL nothing here is listening on. The scheme follows the
+      # request by default since 6.6.1; this stays explicit so the stack says
+      # what it needs. A deployment behind a TLS-terminating proxy sets it to
+      # true or turns on forwarded-header handling (docs/mcp-server.md).
       QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: "false"
     depends_on:
       keycloak:

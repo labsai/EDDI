@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 /* ─── Types ─── */
 
@@ -99,7 +100,7 @@ export async function deleteUserData(
   userId: string,
 ): Promise<GdprDeletionResult> {
   const response = await api.deleteWithResponse<GdprDeletionResult>(
-    `${BASE}/${encodeURIComponent(userId)}`,
+    `${BASE}/${nameSeg(userId)}`,
   );
   return normaliseDeletion(response.data, response.status);
 }
@@ -109,7 +110,7 @@ export async function exportUserData(
   userId: string,
 ): Promise<UserDataExport> {
   const response = await api.getWithResponse<UserDataExport>(
-    `${BASE}/${encodeURIComponent(userId)}/export`,
+    `${BASE}/${nameSeg(userId)}/export`,
   );
   return normaliseExport(response.data, response.status);
 }
@@ -155,12 +156,12 @@ function normaliseExport(data: UserDataExport, status: number): UserDataExport {
 
 /** GDPR Art. 18 — Restrict processing for a user. */
 export async function restrictProcessing(userId: string): Promise<void> {
-  return api.post(`${BASE}/${encodeURIComponent(userId)}/restrict`);
+  return api.post(`${BASE}/${nameSeg(userId)}/restrict`);
 }
 
 /** GDPR Art. 18 — Remove processing restriction. */
 export async function unrestrictProcessing(userId: string): Promise<void> {
-  return api.delete(`${BASE}/${encodeURIComponent(userId)}/restrict`);
+  return api.delete(`${BASE}/${nameSeg(userId)}/restrict`);
 }
 
 /** GDPR Art. 18 — Check processing restriction status. */
@@ -168,6 +169,6 @@ export async function isProcessingRestricted(
   userId: string,
 ): Promise<boolean> {
   return api.get<boolean>(
-    `${BASE}/${encodeURIComponent(userId)}/restrict`,
+    `${BASE}/${nameSeg(userId)}/restrict`,
   );
 }

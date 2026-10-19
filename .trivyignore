@@ -13,3 +13,18 @@
 #
 # Review this file periodically to ensure suppressions are still valid.
 # ─────────────────────────────────────────────────────────────────
+
+# CVE-2026-75140 (GHSA-65r4-943x-97jj): quadratic memory in jsoup's XmlTreeBuilder,
+# fixed in jsoup 1.23.2. Trivy finds jsoup 1.15.3 inside
+# com.hubspot.jinjava.jinjava-2.8.4.jar, where it is SHADED (relocated to
+# jinjava.org.jsoup by jinjava's maven-shade-plugin), so no <dependencyManagement>
+# override can reach it, and 2.8.4 is the newest jinjava on Maven Central.
+# Not reachable: jinjava is on the classpath only because jlama-core renders model
+# chat templates with it (PromptSupport); its only jsoup users are the HTML
+# filters closehtml, striptags and truncatehtml, which use the HTML parser, and no
+# jinjava or jlama class references the XML parser. EDDI's own jsoup (WebCrawler,
+# HtmlToMarkdownConverter, sitemap XML parsing) is a separate, direct dependency
+# already at 1.23.2, which this entry would hide only if it were downgraded.
+# The expiry forces a re-check: drop this entry once a jinjava release shades
+# jsoup >= 1.23.2 (check com.hubspot.jinjava:jinjava's pom for org.jsoup).
+CVE-2026-75140 exp:2027-01-15

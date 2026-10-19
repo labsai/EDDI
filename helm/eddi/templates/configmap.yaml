@@ -185,6 +185,14 @@ data:
   EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
   {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
+  {{- /*
+    An ingress with tls serves EDDI's public origin over https, so tell browsers
+    to keep it that way (HstsHeaderFilter). Without tls the origin is plain http
+    and the header would promise something the deployment does not keep.
+  */}}
+  {{- if and .Values.ingress.enabled .Values.ingress.tls }}
+  EDDI_SECURITY_HSTS_ENABLED: "true"
+  {{- end }}
   {{- with .Values.eddi.tracing.otlpEndpoint }}
   QUARKUS_OTEL_SDK_DISABLED: "false"
   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: {{ . | quote }}
@@ -248,6 +256,24 @@ data:
   */}}
   EDDI_MCP_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowMcp) $allowMcp }}{{ $allowMcp | quote }}{{ else }}{{ "false" | quote }}{{ end }}
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: {{ if or (kindIs "bool" $allowSecretStore) $allowSecretStore }}{{ $allowSecretStore | quote }}{{ else }}{{ "false" | quote }}{{ end }}
+  {{- if $oidcOff }}
+  {{- /*
+    With authentication off, UnauthenticatedRequestGuard answers only requests
+    addressed to localhost, an IP address (kubelet probes, Prometheus,
+    port-forward) or a listed host, and refuses cross-site writes — the
+    DNS-rebinding defence (docs/security.md, "Running without authentication").
+    List the Service's in-cluster names and, when an Ingress is acknowledged
+    unauthenticated, its hosts; otherwise every request through them is a 421.
+  */}}
+  {{- $fullname := include "eddi.fullname" . }}
+  {{- $allowedHosts := list $fullname (printf "%s.%s" $fullname .Release.Namespace) (printf "%s.%s.svc" $fullname .Release.Namespace) (printf "%s.%s.svc.cluster.local" $fullname .Release.Namespace) }}
+  {{- if .Values.ingress.enabled }}
+  {{- range .Values.ingress.hosts }}
+  {{- $allowedHosts = append $allowedHosts .host }}
+  {{- end }}
+  {{- end }}
+  EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: {{ join "," $allowedHosts | quote }}
+  {{- end }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"
@@ -322,12 +348,25 @@ data:
   {{- with $metadata.authorizationServer }}
   QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER: {{ . | quote }}
   {{- end }}
-  {{- with $metadata.resource }}
-  QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: {{ . | quote }}
-  {{- end }}
   {{- $forceHttps := $metadata.forceHttpsScheme }}
   {{- if kindIs "invalid" $forceHttps }}
   {{- $forceHttps = not (empty .Values.ingress.tls) }}
+  {{- end }}
+  {{- /*
+    The advertised resource identifier. Unset, EDDI builds it from each
+    request's Host header, so behind a proxy that does not pin Host a crafted
+    Host makes it advertise a resource on another origin. With an Ingress the
+    chart KNOWS the public name — ingress.hosts[0].host — so it pins the
+    identifier to that host rather than leaving it to the request, using the
+    scheme the force-https decision above already settled on. An explicit
+    resourceMetadata.resource still wins.
+  */}}
+  {{- $resource := toString (default "" $metadata.resource) }}
+  {{- if and (not $resource) .Values.ingress.enabled .Values.ingress.hosts }}
+  {{- $resource = printf "%s://%s/mcp" (ternary "https" "http" $forceHttps) (toString (index .Values.ingress.hosts 0).host) }}
+  {{- end }}
+  {{- with $resource }}
+  QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE: {{ . | quote }}
   {{- end }}
   QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME: {{ $forceHttps | quote }}
   {{- end }}

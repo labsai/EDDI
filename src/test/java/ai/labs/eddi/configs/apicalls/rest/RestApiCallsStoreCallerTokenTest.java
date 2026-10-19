@@ -1,0 +1,117 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.configs.apicalls.rest;
+
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.patch.ConfigJsonPatcher;
+import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.ForbiddenException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * An editor cannot write {@code ${caller:token}} into an httpcalls config
+ * through any write path — create, update, patch or duplicate — and the store
+ * is never reached. {@code ${caller:userId}} stays allowed.
+ */
+class RestApiCallsStoreCallerTokenTest {
+
+    private static final String ID = "5f1c0f3a9d8e4b2a7c6d1e0f";
+    private static final String WITH_TOKEN = """
+            {"targetServerUrl":"http://127.0.0.1:7070",
+             "httpCalls":[{"name":"c","request":{"path":"/administration/x","headers":{"Authorization":"Bearer ${caller:token}"}}}]}
+            """;
+    private static final String WITH_USER_ID = """
+            {"targetServerUrl":"https://api.example.invalid",
+             "httpCalls":[{"name":"c","request":{"path":"/a","headers":{"X-User":"${caller:userId}"}}}]}
+            """;
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private IApiCallsStore store;
+    private RestApiCallsStore rest;
+    private SecurityIdentity identity;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        store = mock(IApiCallsStore.class);
+        rest = new RestApiCallsStore(store, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), mock(ResourceAccessGuard.class));
+        rest.jsonPatcher = new ConfigJsonPatcher(mapper, new StrictConfigurationParser(mapper));
+
+        identity = mock(SecurityIdentity.class);
+        when(identity.hasRole("eddi-editor")).thenReturn(true);
+        var serialization = mock(IJsonSerialization.class);
+        when(serialization.serialize(any())).thenAnswer(i -> mapper.writeValueAsString(i.getArgument(0)));
+        rest.callerTokenAuthorPolicy = new CallerTokenAuthorPolicy(identity, serialization, true, List.of("eddi-admin"));
+
+        var current = mock(IResourceStore.IResourceId.class);
+        when(current.getId()).thenReturn(ID);
+        when(current.getVersion()).thenReturn(1);
+        when(store.getCurrentResourceId(ID)).thenReturn(current);
+        when(store.read(ID, 1)).thenReturn(config(WITH_USER_ID));
+        when(store.create(any())).thenReturn(current);
+        when(store.update(eq(ID), eq(1), any())).thenReturn(2);
+    }
+
+    private ApiCallsConfiguration config(String json) throws Exception {
+        return mapper.readValue(json, ApiCallsConfiguration.class);
+    }
+
+    @Test
+    @DisplayName("create and update with ${caller:token} are refused for an editor")
+    void createAndUpdateRefused() throws Exception {
+        var withToken = config(WITH_TOKEN);
+        assertThrows(ForbiddenException.class, () -> rest.createApiCalls(withToken));
+        assertThrows(ForbiddenException.class, () -> rest.updateApiCalls(ID, 1, withToken));
+        verify(store, never()).create(any());
+        verify(store, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("a patch that adds ${caller:token} is refused for an editor")
+    void patchRefused() throws Exception {
+        assertThrows(ForbiddenException.class, () -> rest.patchApiCalls(ID, 1,
+                "[{\"op\":\"replace\",\"path\":\"/httpCalls/0/request/headers/X-User\",\"value\":\"Bearer ${caller:token}\"}]"));
+        verify(store, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("an editor cannot duplicate an admin's ${caller:token} config into a resource of their own")
+    void duplicateRefused() throws Exception {
+        when(store.read(ID, 1)).thenReturn(config(WITH_TOKEN));
+        assertThrows(ForbiddenException.class, () -> rest.duplicateApiCalls(ID, 1));
+        verify(store, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("${caller:userId} stays open to editors, and an admin may write ${caller:token}")
+    void allowedCases() throws Exception {
+        assertDoesNotThrow(() -> rest.createApiCalls(config(WITH_USER_ID)));
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        assertDoesNotThrow(() -> rest.createApiCalls(config(WITH_TOKEN)));
+    }
+}

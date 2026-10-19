@@ -532,7 +532,7 @@ export function ContentEditor({
               "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-muted-foreground",
               "transition-colors hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-              "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              "reveal-on-touch opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
               "motion-safe:transition-opacity"
             )}
             aria-label={t("contentEditor.expand", "Expand editor")}

@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo, memo } from "react";
+import { useState, useRef, useEffect, useMemo, useId, memo } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -19,11 +20,13 @@ import {
   Search,
   Hand,
   NotebookPen,
+  Gauge,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { EditorSection } from "./editor-section";
@@ -323,6 +326,7 @@ function SkillAutocomplete({
   }, []);
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (isImeComposing(e)) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlighted((h) => Math.min(h + 1, suggestions.length - 1));
@@ -430,7 +434,7 @@ function CapabilityAttributesEditor({
           type="text"
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
           placeholder={t("agentDetail.attributeKey", "key")}
           disabled={disabled}
           className="h-6 w-20 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
@@ -440,7 +444,7 @@ function CapabilityAttributesEditor({
           type="text"
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
           placeholder={t("agentDetail.attributeValue", "value")}
           disabled={disabled}
           className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
@@ -474,6 +478,7 @@ function AttrRow({
   onRemove: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5">
       <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
@@ -484,10 +489,12 @@ function AttrRow({
         value={attrValue}
         onChange={(e) => onCommit(e.target.value)}
         disabled={disabled}
+        aria-label={attrKey}
         data-testid={`attribute-value-${attrKey}`}
         className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
+        aria-label={t("common.removeItem", { item: attrKey, defaultValue: "Remove {{item}}" })}
         type="button"
         onClick={onRemove}
         disabled={disabled}
@@ -596,6 +603,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
                     </button>
                   )}
                   <button
+                    aria-label={t("common.remove", "Remove")}
                     type="button"
                     onClick={() => removeCapability(i)}
                     disabled={disabled}
@@ -632,6 +640,7 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
             placeholder={t("agentDetail.capabilityPlaceholder", "Search or type a skill name...")}
           />
           <button
+            aria-label={t("common.add", "Add")}
             type="button"
             onClick={() => addCapability(newSkill)}
             disabled={!newSkill.trim() || disabled}
@@ -706,7 +715,7 @@ export const UserMemorySection = memo(function UserMemorySection({
         {enabled && (
           <div className="space-y-4 rounded-lg border border-teal-500/20 bg-teal-500/5 p-4">
             {/* Core settings */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
               <div>
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.defaultVisibility", "Default Visibility")}
@@ -778,7 +787,7 @@ export const UserMemorySection = memo(function UserMemorySection({
               <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("agentDetail.guardrails", "Write Guardrails")}
               </h4>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
                   <DraftNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -813,7 +822,7 @@ export const UserMemorySection = memo(function UserMemorySection({
 
               {dream.enabled && (
                 <div className="space-y-3 ps-5">
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
                       <DraftInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -827,7 +836,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                       <DraftInput type="text" value={dream.llmModel ?? "claude-sonnet-5-5"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-5-5" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
                       <DraftNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -932,6 +941,126 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
             </div>
           </div>
         )}
+      </div>
+    </EditorSection>
+  );
+});
+
+// ─── Limits ─────────────────────────────────────────────────────────────────
+
+/**
+ * Spend limits for one conversation. A section of its own rather than a field in
+ * an existing one: it bounds the whole agent, whatever the memory, session or
+ * approval settings are.
+ */
+export const LimitsSection = memo(function LimitsSection({
+  agent,
+  onChange,
+  disabled = false,
+  modified = false,
+  onValidityChange,
+}: AgentSectionProps & {
+  /**
+   * Told whether the amount in the box is unusable. An invalid amount is never
+   * written to the draft, so a clear that came just before it would otherwise
+   * stay in the draft and be saved while the field shows an error — the page
+   * refuses to save while this is true.
+   */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const ceiling = agent.maxCostPerConversationUsd;
+
+  // The field edits its own text so an empty box stays empty (= unlimited) and a
+  // half-typed "-" survives; the draft only ever receives a valid value.
+  const [text, setText] = useState(() => (ceiling === undefined ? "" : String(ceiling)));
+  // A number input reports half-typed text ("-", "1e") as "" — which would read
+  // as "unlimited" while the box still shows the "-" — so it is tracked apart.
+  const [badInput, setBadInput] = useState(false);
+  const parsed = badInput ? { ok: false as const } : parseCostCeiling(text);
+  const invalid = !parsed.ok;
+  useEffect(() => {
+    onValidityChange?.(invalid);
+    return () => onValidityChange?.(false);
+  }, [invalid, onValidityChange]);
+  useEffect(() => {
+    // Follow the draft when it changes underneath (Discard, a save, a version switch).
+    setText((prev) => {
+      const p = parseCostCeiling(prev);
+      if (p.ok && p.value === ceiling) return prev;
+      setBadInput(false);
+      return ceiling === undefined ? "" : String(ceiling);
+    });
+  }, [ceiling]);
+
+  function commit(next: string, bad: boolean) {
+    setText(next);
+    setBadInput(bad);
+    const p = bad ? ({ ok: false } as const) : parseCostCeiling(next);
+    if (!p.ok) return;
+    // Only write the field when it is set: an unset ceiling means unlimited, and
+    // a stored `null` or -1 would say something the author never typed.
+    const { maxCostPerConversationUsd: _unset, ...rest } = agent;
+    void _unset;
+    onChange(p.value === undefined ? rest : { ...rest, maxCostPerConversationUsd: p.value });
+  }
+
+  return (
+    <EditorSection
+      label={t("agentDetail.limits", "Limits")}
+      icon={Gauge}
+      accent="text-sky-500"
+      variant="card"
+      modified={modified}
+      defaultOpen={ceiling !== undefined}
+    >
+      <div className="space-y-3" data-testid="limits-section">
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.limitsDesc",
+            "Caps what a single conversation with this agent may spend. Once the cap is reached the agent stops calling its model and serves its fallback answer.",
+          )}
+        </p>
+        <div>
+          <label htmlFor={id} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.maxCostPerConversation", "Max cost per conversation (USD)")}
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground" aria-hidden="true">$</span>
+            <input
+              id={id}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={0.01}
+              value={text}
+              placeholder={t("agentDetail.unlimited", "Unlimited")}
+              disabled={disabled}
+              onChange={(e) => commit(e.target.value, e.target.validity?.badInput === true)}
+              aria-invalid={!parsed.ok || undefined}
+              aria-describedby={hintId}
+              className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 aria-invalid:border-destructive"
+              data-testid="max-cost-per-conversation"
+            />
+          </div>
+          {parsed.ok ? (
+            <p id={hintId} className="mt-1 text-[10px] text-muted-foreground">
+              {t("agentDetail.maxCostHint", "Empty = unlimited. 0 = no priced spend at all.")}
+            </p>
+          ) : (
+            <p id={hintId} className="mt-1 text-[10px] text-destructive" data-testid="max-cost-per-conversation-invalid">
+              {t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited.")}
+            </p>
+          )}
+        </div>
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.maxCostPricedOnly",
+            "Only priced models count toward this cap. A model with no input/output price in its LLM configuration adds $0, but is still stopped once other spend has reached the cap.",
+          )}
+        </p>
       </div>
     </EditorSection>
   );

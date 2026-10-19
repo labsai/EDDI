@@ -11,10 +11,13 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -61,6 +64,47 @@ class AuditClusterSupportTest {
         assertTrue(pool.awaitTermination(30, TimeUnit.SECONDS));
         assertEquals(400, positions.size() + unsequenced.get());
         assertTrue(positions.size() > 300, "contention degrades only rarely to unsequenced: " + positions.size());
+    }
+
+    @Test
+    @DisplayName("after NATS failed, entries are recorded unsequenced for one request timeout without asking again")
+    void anOutagePausesAllocationForOneTimeout() throws Exception {
+        var backing = new InMemorySharedKv("AUDIT_SEQ", Duration.ofDays(7));
+        var down = new AtomicBoolean(true);
+        AtomicInteger calls = new AtomicInteger();
+        ISharedKv kv = new DownSharedKv() {
+            @Override
+            public Optional<Versioned> get(String key) {
+                calls.incrementAndGet();
+                if (down.get()) {
+                    throw new ClusterUnavailableException("timed out");
+                }
+                return backing.get(key);
+            }
+
+            @Override
+            public OptionalLong create(String key, byte[] value) {
+                return backing.create(key, value);
+            }
+
+            @Override
+            public OptionalLong update(String key, byte[] value, long expectedRevision) {
+                return backing.update(key, value, expectedRevision);
+            }
+        };
+        var config = ClusterConfig.defaults().withMessagingType(ClusterConfig.NATS).withRequestTimeout(Duration.ofMillis(300));
+        var support = new AuditClusterSupport(kv, config, new SimpleMeterRegistry());
+
+        assertTrue(support.nextSequence("conv", () -> 0L).isEmpty());
+        assertEquals(1, calls.get());
+        for (int i = 0; i < 5; i++) {
+            assertTrue(support.nextSequence("conv", () -> 0L).isEmpty());
+        }
+        assertEquals(1, calls.get(), "a NATS that hangs must cost one timeout, not one per audit entry");
+
+        down.set(false);
+        Thread.sleep(400);
+        assertEquals(7L, support.nextSequence("conv", () -> 7L).getAsLong(), "allocation resumes once the pause is over");
     }
 
     @Test

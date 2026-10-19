@@ -45,7 +45,7 @@ import java.util.regex.Pattern;
  * and encrypted data it cannot read. Each of those is still counted by the
  * budget if PDFBox decodes it.
  */
-final class PdfStreamBudget {
+public final class PdfStreamBudget {
 
     private static final byte[] STREAM_KEYWORD = {'s', 't', 'r', 'e', 'a', 'm'};
     private static final byte[] ENDSTREAM_KEYWORD = "endstream".getBytes(StandardCharsets.US_ASCII);
@@ -75,7 +75,7 @@ final class PdfStreamBudget {
      *             when a stream expands past {@code maxStreamBytes}, or the scan
      *             outlives {@code deadline}
      */
-    static void requireWithin(byte[] pdf, long maxStreamBytes, Instant deadline) {
+    public static void requireWithin(byte[] pdf, long maxStreamBytes, Instant deadline) {
         int from = 0;
         int keyword;
         while ((keyword = indexOf(pdf, STREAM_KEYWORD, from, pdf.length)) >= 0) {

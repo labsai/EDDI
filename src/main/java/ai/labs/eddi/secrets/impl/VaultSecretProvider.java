@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
+import java.util.concurrent.ConcurrentHashMap;
 
 import java.security.SecureRandom;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -292,7 +293,11 @@ public class VaultSecretProvider implements ISecretProvider {
             // newest generation: a row the last rotation's sweep has not reached yet is
             // still sealed with an older one, and that one still exists.
             byte[] dek = dekFor(reference.tenantId(), secret.getDekId());
-            String plaintext = decryptSecretWithFallback(secret, dek);
+            Opened opened = openSecret(secret, dek);
+            String plaintext = opened.plaintext();
+            if (opened.legacy()) {
+                retireLegacySealing(secret, dek, plaintext);
+            }
 
             // Update last accessed timestamp (best-effort, fire-and-forget)
             updateLastAccessed(secret);
@@ -335,7 +340,8 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     @Override
-    public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) throws SecretProviderException {
+    public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents, List<String> allowedHosts)
+            throws SecretProviderException {
         ensureAvailable();
         storeCounter.increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -344,15 +350,20 @@ public class VaultSecretProvider implements ISecretProvider {
             // Check if this is an update (rotation) or new secret
             var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
             Instant now = Instant.now();
+            if (existingOpt.isEmpty()) {
+                requireExplicitGrant(reference, allowedAgents);
+            }
 
-            // A null grant or description is passed through as null — "not supplied" —
-            // rather than defaulted here. The store keeps what the row already has on an
-            // update and writes the defaults only on an insert. Defaulting here reset a
-            // narrowed grant to ["*"] and wiped the description on every value rotation
-            // that did not restate them, and the whole-row write also reverted any grant
-            // edit that landed between the read above and the write below.
-            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, existingOpt.map(EncryptedSecret::getId).orElse(null),
-                    existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now), existingOpt.isPresent() ? now : null);
+            // A null grant, host list or description is passed through as null — "not
+            // supplied" — rather than defaulted here. The store keeps what the row
+            // already has on an update and writes the defaults only on an insert.
+            // Defaulting here reset a narrowed grant to ["*"] and wiped the description
+            // on every value rotation that did not restate them, and the whole-row write
+            // also reverted any grant edit that landed between the read above and the
+            // write below.
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, allowedHosts,
+                    existingOpt.map(EncryptedSecret::getId).orElse(null), existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now),
+                    existingOpt.isPresent() ? now : null);
 
             persistence.upsertSecret(secret);
             LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
@@ -370,6 +381,13 @@ public class VaultSecretProvider implements ISecretProvider {
     @Override
     public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
             throws SecretProviderException {
+        return storeIfAbsent(reference, plaintext, description, allowedAgents, null);
+    }
+
+    @Override
+    public boolean storeIfAbsent(SecretReference reference, String plaintext, String description, List<String> allowedAgents,
+                                 List<String> allowedHosts)
+            throws SecretProviderException {
         ensureAvailable();
         storeCounter.increment();
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -377,10 +395,10 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             // No findSecret first: the existence check IS the insert. A read here would
             // reopen the window this method exists to close.
-            // An insert, so a missing grant takes the documented default here — the
-            // pass-through in store() exists to protect a row that already has one.
-            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents != null ? allowedAgents : List.of("*"), null,
-                    Instant.now(), null);
+            // Always an insert, so the grant is required outright — the pass-through
+            // in store() exists to protect a row that already has one.
+            requireExplicitGrant(reference, allowedAgents);
+            EncryptedSecret secret = seal(reference, plaintext, description, allowedAgents, allowedHosts, null, Instant.now(), null);
 
             boolean created = persistence.insertSecretIfAbsent(secret);
             if (created) {
@@ -401,11 +419,25 @@ public class VaultSecretProvider implements ISecretProvider {
     }
 
     /**
+     * A new row needs a grant the caller chose. The persistence layer still carries
+     * a {@code ["*"]} default for rows written before grants existed, but no code
+     * path is allowed to reach it: the wildcard is an access-control decision, and
+     * every caller — the REST store, the setup wizard, auto-vaulting — writes it
+     * out ({@code List.of("*")}) where the reason can be read next to it.
+     */
+    private static void requireExplicitGrant(SecretReference reference, List<String> allowedAgents) {
+        if (allowedAgents == null) {
+            throw new IllegalArgumentException("Creating " + describe(reference) + " needs an allowedAgents list: the agent ids that may use "
+                    + "it, or [\"*\"] to say explicitly that every agent may. No default is applied.");
+        }
+    }
+
+    /**
      * Seals {@code plaintext} under the tenant's active DEK into the row both write
      * paths persist.
      */
-    private EncryptedSecret seal(SecretReference reference, String plaintext, String description, List<String> allowedAgents, String existingId,
-                                 Instant createdAt, Instant lastRotatedAt)
+    private EncryptedSecret seal(SecretReference reference, String plaintext, String description, List<String> allowedAgents,
+                                 List<String> allowedHosts, String existingId, Instant createdAt, Instant lastRotatedAt)
             throws SecretProviderException, EnvelopeCrypto.CryptoException {
         ActiveDek dek = activeDek(reference.tenantId());
 
@@ -421,8 +453,33 @@ public class VaultSecretProvider implements ISecretProvider {
         String checksum = VaultChecksum.compute(checksumKey(), reference.tenantId(), plaintext);
 
         return new EncryptedSecret(existingId != null ? existingId : UUID.randomUUID().toString(), reference.tenantId(), reference.keyName(),
-                result.ciphertext(), result.iv(), dek.dekId(), checksum, description, allowedAgents,
+                result.ciphertext(), result.iv(), dek.dekId(), checksum, description, allowedAgents, allowedHosts,
                 createdAt, null, lastRotatedAt);
+    }
+
+    @Override
+    public SecretMetadata updateAllowedHosts(SecretReference reference, List<String> allowedHosts)
+            throws SecretNotFoundException, SecretProviderException {
+        ensureAvailable();
+        try {
+            List<String> hosts = allowedHosts == null ? List.of() : List.copyOf(allowedHosts);
+            // No DEK, no read of the value: the signature cannot touch it, as with
+            // updateGrant. The row is read first only to answer with its other fields.
+            var existingOpt = persistence.findSecret(reference.tenantId(), reference.keyName());
+            if (existingOpt.isEmpty() || !persistence.updateSecretAllowedHosts(reference.tenantId(), reference.keyName(), hosts)) {
+                throw new SecretNotFoundException("Secret not found: " + describe(reference));
+            }
+            EncryptedSecret existing = existingOpt.get();
+            // Hosts are not secrets; both lists are logged so a change in where a key
+            // may be sent can be reconstructed afterwards.
+            LOGGER.infof("Secret allowed hosts updated: %s (%s -> %s)", describe(reference), sanitize(String.valueOf(existing.getAllowedHosts())),
+                    sanitize(String.valueOf(hosts)));
+            return new SecretMetadata(existing.getTenantId(), existing.getKeyName(), existing.getCreatedAt(), existing.getLastAccessedAt(),
+                    existing.getLastRotatedAt(), existing.getChecksum(), existing.getDescription(), existing.getAllowedAgents(), hosts);
+        } catch (PersistenceException e) {
+            errorCounter.increment();
+            throw new SecretProviderException("Persistence failure while updating the allowed hosts of " + describe(reference), e);
+        }
     }
 
     @Override
@@ -491,7 +548,7 @@ public class VaultSecretProvider implements ISecretProvider {
             // are carried through unchanged — visible proof, in the response the
             // operator sees, that a grant edit did not touch the value.
             return new SecretMetadata(existing.getTenantId(), existing.getKeyName(), existing.getCreatedAt(), existing.getLastAccessedAt(),
-                    existing.getLastRotatedAt(), existing.getChecksum(), effectiveDescription, grant);
+                    existing.getLastRotatedAt(), existing.getChecksum(), effectiveDescription, grant, existing.getAllowedHosts());
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while updating the grant of " + describe(reference), e);
@@ -531,7 +588,7 @@ public class VaultSecretProvider implements ISecretProvider {
             }
             EncryptedSecret s = secretOpt.get();
             return new SecretMetadata(s.getTenantId(), s.getKeyName(), s.getCreatedAt(), s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(),
-                    s.getDescription(), s.getAllowedAgents());
+                    s.getDescription(), s.getAllowedAgents(), s.getAllowedHosts());
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while reading metadata for " + describe(reference),
@@ -544,7 +601,8 @@ public class VaultSecretProvider implements ISecretProvider {
         ensureAvailable();
         try {
             return persistence.listSecretsByTenant(tenantId).stream().map(s -> new SecretMetadata(s.getTenantId(), s.getKeyName(), s.getCreatedAt(),
-                    s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(), s.getDescription(), s.getAllowedAgents())).toList();
+                    s.getLastAccessedAt(), s.getLastRotatedAt(), s.getChecksum(), s.getDescription(), s.getAllowedAgents(), s.getAllowedHosts()))
+                    .toList();
         } catch (PersistenceException e) {
             errorCounter.increment();
             throw new SecretProviderException("Persistence failure while listing secrets for tenant " + sanitize(tenantId), e);
@@ -1271,6 +1329,9 @@ public class VaultSecretProvider implements ISecretProvider {
      * A {@code null} context means the caller has none to give, so only the unbound
      * form is tried.
      */
+    /** Tenants already announced as holding unbound sealed data. */
+    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
+
     private String openSealedData(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
         byte[] dek = dekFor(tenantId, sealed.dekId());
         if (context == null) {
@@ -1279,11 +1340,19 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek, sealedDataAad(tenantId, sealed.dekId(), context));
         } catch (EnvelopeCrypto.CryptoException boundFailed) {
+            String opened;
             try {
-                return EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
+                opened = EnvelopeCrypto.decrypt(sealed.ciphertext(), sealed.iv(), dek);
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw boundFailed;
             }
+            // The provider does not own these rows (a participant does), so it cannot
+            // re-seal them here; a DEK rotation does. Said once per tenant.
+            if (legacySealedDataLogged.add(tenantId)) {
+                LOGGER.infof("[VAULT] Tenant '%s' holds sealed data written before context binding (no AAD). It still opens; "
+                        + "POST /secretstore/secrets/%s/rotate-dek re-seals it bound.", sanitize(tenantId), sanitize(tenantId));
+            }
+            return opened;
         }
     }
 
@@ -2019,16 +2088,78 @@ public class VaultSecretProvider implements ISecretProvider {
      * the intended outcome.
      */
     private String decryptSecretWithFallback(EncryptedSecret secret, byte[] dek) {
+        return openSecret(secret, dek).plaintext();
+    }
+
+    /** A decrypted secret and whether it only opened through the legacy path. */
+    private record Opened(String plaintext, boolean legacy) {
+    }
+
+    /** {@link #decryptSecretWithFallback}, saying which path opened the row. */
+    private Opened openSecret(EncryptedSecret secret, byte[] dek) {
         byte[] aad = secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId());
         try {
-            return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad);
+            return new Opened(EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek, aad), false);
         } catch (EnvelopeCrypto.CryptoException withAadFailed) {
             // Legacy row written before AAD binding — retry without AAD. If this also
             // fails, the original (AAD) failure is the more informative one to surface.
             try {
-                return EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
+                return new Opened(EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek), true);
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw withAadFailed;
+            }
+        }
+    }
+
+    /**
+     * Rows already announced as legacy-sealed, as {@code tenant/key}, so each is
+     * logged once per node rather than on every read.
+     */
+    private final Set<String> legacySealingLogged = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Re-seals a row that opened only without AAD, bound to its row identity, so
+     * the legacy fallback retires itself (L10 of the 2026-10-17 security review).
+     * <p>
+     * <b>Why on read.</b> The fallback exists for rows written before AAD binding;
+     * while one exists, the ciphertexts of two such rows can be swapped by anyone
+     * with database write access and each still decrypts. A DEK rotation re-seals
+     * every row bound, but a deployment that never rotates kept the fallback
+     * forever. Re-sealing the first time a row is read closes it for every row in
+     * use without an operator action.
+     * <p>
+     * <b>Concurrency.</b> Same value, same DEK generation, so the plaintext the
+     * caller gets is unaffected either way. The write is guarded on the IV the row
+     * was read with ({@link ISecretPersistence#resealSecretInPlace}): a concurrent
+     * {@code store} draws a fresh IV and wins, a concurrent DEK rotation moves the
+     * row to a new generation and IV and wins, and two nodes re-sealing at once
+     * leave one bound row. A lost guard, an unsupported store or a failure only
+     * leaves the row on the legacy path, where the next read or rotation retries —
+     * resolution never fails because of this.
+     */
+    private void retireLegacySealing(EncryptedSecret secret, byte[] dek, String plaintext) {
+        String id = secret.getTenantId() + "/" + secret.getKeyName();
+        try {
+            EnvelopeCrypto.EncryptionResult bound = EnvelopeCrypto.encrypt(plaintext, dek,
+                    secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId()));
+            boolean written = persistence.resealSecretInPlace(secret.getTenantId(), secret.getKeyName(), secret.getDekId(), secret.getIv(),
+                    bound.ciphertext(), bound.iv());
+            if (legacySealingLogged.add(id)) {
+                if (written) {
+                    LOGGER.infof("[VAULT] Secret '%s' was sealed before row binding (no AAD); re-sealed it bound on read.", sanitize(id));
+                } else {
+                    LOGGER.infof("[VAULT] Secret '%s' was sealed before row binding (no AAD) and was not re-sealed on read (changed "
+                            + "concurrently, or the store does not support it); POST /secretstore/secrets/{tenantId}/rotate-dek "
+                            + "re-seals every such row.", sanitize(id));
+                }
+            }
+        } catch (RuntimeException e) {
+            // PersistenceException, CryptoException, or an unchecked error a store did
+            // not wrap (a driver or pool exception): the write-back is best effort and
+            // the plaintext is already in hand, so none of them may fail the read.
+            if (legacySealingLogged.add(id)) {
+                LOGGER.warnf("[VAULT] Secret '%s' was sealed before row binding (no AAD) and could not be re-sealed on read: %s. "
+                        + "POST /secretstore/secrets/{tenantId}/rotate-dek re-seals every such row.", sanitize(id), sanitize(e.getMessage()));
             }
         }
     }

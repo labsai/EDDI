@@ -16,12 +16,14 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.internal.groups.GroupAttachmentLimits;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -29,6 +31,7 @@ import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -46,6 +49,16 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
 /**
  * REST implementation for group conversation operations.
+ * <p>
+ * The endpoints that run discussion work inline &mdash; {@code discuss},
+ * {@code followUpWithMember}, {@code continueDiscussion},
+ * {@code approveGroupPhase}, {@code submitHumanInput} and
+ * {@code approveGroupPhaseStreaming} &mdash; are {@link RunOnVirtualThread}: on
+ * a worker thread each held one of the pool's ~200 platform threads for an
+ * entire multi-agent discussion, every member turn and LLM call included, which
+ * is the ceiling conversation turns no longer have. The member turns themselves
+ * already run on virtual threads. {@link #identity} is the request-scoped
+ * proxy, which Quarkus keeps resolvable on the request's virtual thread.
  *
  * @author ginccc
  */
@@ -61,6 +74,21 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final HitlAccessGuard hitlAccessGuard;
     private final ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * The limits a 1:1 upload is held to, re-checked for a discussion's inline
+     * attachments before anything is decoded or stored — see
+     * {@link GroupAttachmentLimits}. Field-injected so the constructor the tests
+     * use stays as it is; the initialisers are the shipped defaults.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520")
+    long maxAttachmentBytes = 20_971_520L;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-conversation", defaultValue = "50")
+    int maxAttachmentsPerConversation = 50;
+
+    @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600")
+    long maxAttachmentBytesPerConversation = 104_857_600L;
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
@@ -178,16 +206,36 @@ public class RestGroupConversation implements IRestGroupConversation {
         return null;
     }
 
+    /** {@link GroupAttachmentLimits} with this deployment's limits. */
+    private String attachmentRejectionReason(DiscussRequest request) {
+        return GroupAttachmentLimits.rejectionReason(request.attachments(), maxAttachmentBytes, maxAttachmentsPerConversation,
+                maxAttachmentBytesPerConversation);
+    }
+
+    /**
+     * Client-safe text for a quota refusal at materialization — names the scope,
+     * never the store's message.
+     */
+    private static String quotaRejection(IGroupConversationService.GroupAttachmentRejectedException e) {
+        return "user".equals(e.getScope())
+                ? "Attachment refused: the per-user attachment quota is exhausted."
+                : "Attachment refused: the discussion's attachment quota would be exceeded.";
+    }
+
     private static Response badRequest(String reason) {
         return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN).entity(reason).build();
     }
 
     @Override
+    @RunOnVirtualThread
     public Response discuss(String groupId, DiscussRequest request) {
         if (request == null) {
             return badRequest("A request body is required.");
         }
         String rejection = rejectionReason(request.question(), request.userId());
+        if (rejection == null) {
+            rejection = attachmentRejectionReason(request);
+        }
         if (rejection != null) {
             return badRequest(rejection);
         }
@@ -202,6 +250,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                     : groupConversationService.discuss(groupId, request.question(), userId, 0, null, attachments);
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
+        } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
+            LOGGER.infof("Group discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
+            return badRequest(quotaRejection(e));
         } catch (IGroupConversationService.GroupDepthExceededException e) {
             // Curated bodies throughout this class: the raw exception text is never
             // returned to the caller (CodeQL: information exposure / reflected value —
@@ -233,6 +284,9 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
+        if (rejection == null) {
+            rejection = attachmentRejectionReason(request);
+        }
         if (rejection != null) {
             sendErrorEvent(eventSink, sse, rejection);
             closeQuietly(eventSink);
@@ -255,6 +309,10 @@ public class RestGroupConversation implements IRestGroupConversation {
                 groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener, attachments);
             }
 
+        } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
+            LOGGER.infof("Group streaming discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
+            sendErrorEvent(eventSink, sse, quotaRejection(e));
+            closeQuietly(eventSink);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Curated event text: the SSE body is rendered by the chat UI, so never push
             // the raw message (it used to embed the caller-supplied groupId).
@@ -306,7 +364,10 @@ public class RestGroupConversation implements IRestGroupConversation {
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
             GroupConversation gc = loadInGroup(groupId, groupConversationId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict (L2): an unowned record is an administrator's to read, as it already
+            // is to continue, close or delete — a transcript is not less private than
+            // the right to append to it.
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             return gc;
         } catch (ForbiddenException e) {
             throw e;
@@ -372,6 +433,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response followUpWithMember(String groupId, String gcId, FollowUpRequest request) {
         // Reject an incomplete body up front: without this a missing targetAgentId NPEs
         // during member resolution and surfaces as a 500 rather than a 400.
@@ -388,7 +450,11 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict, as for delete: a follow-up runs a member agent and writes the
+            // transcript, so a legacy record that names no owner is an administrator's
+            // to drive — not every authenticated caller's, as requireOwnerOrAdmin would
+            // have it (L9 of the 2026-10-15 security review).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -429,7 +495,7 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response cancelDiscussion(String groupId, String gcId) {
-        validateGroupConversationOwnership(groupId, gcId, true);
+        validateGroupConversationOwnership(groupId, gcId);
         try {
             boolean cancelled = groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             if (!cancelled) {
@@ -463,6 +529,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             + "(pauseId no longer current) — re-read approval-status and decide again.";
 
     @Override
+    @RunOnVirtualThread
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -475,7 +542,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
-        validateGroupConversationOwnership(groupId, gcId, true);
+        validateGroupConversationOwnership(groupId, gcId);
         requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
         try {
@@ -524,6 +591,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response submitHumanInput(String groupId, String gcId, HumanInputRequest request) {
         if (request == null || request.memberId() == null || request.memberId().isBlank()
                 || request.content() == null || request.content().isBlank()) {
@@ -595,6 +663,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public Response continueDiscussion(String groupId, String gcId, DiscussRequest request) {
         String rejection = request == null ? "'question' is required." : rejectionReason(request.question(), request.userId());
         if (rejection != null) {
@@ -605,7 +674,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict: a continuation is a write (see followUpWithMember).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             // A continuation re-runs every member, exactly like a new discussion: owning
             // the transcript is not the same as still being allowed to run the group.
             requireGroupUseAccess(groupId);
@@ -663,7 +733,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         try {
             GroupConversation gc = loadInGroup(groupId, gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            // Strict: a continuation is a write (see followUpWithMember).
+            ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
             requireGroupUseAccess(groupId);
 
             // Reuse the shared streaming listener so a continuation that pauses or is
@@ -696,6 +767,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
+    @RunOnVirtualThread
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
@@ -710,7 +782,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             return;
         }
         try {
-            validateGroupConversationOwnership(groupId, gcId, true);
+            validateGroupConversationOwnership(groupId, gcId);
         } catch (NotFoundException e) {
             // Streaming endpoint has no Response to return — surface the mismatch as
             // a terminal SSE error instead of letting a WebApplicationException abort
@@ -875,41 +947,22 @@ public class RestGroupConversation implements IRestGroupConversation {
     /**
      * Validates that the caller owns the group conversation (or is admin/approver)
      * and — when {@code groupId} is non-null — that the target conversation belongs
-     * to that group. Mirrors the pattern in
-     * RestAgentEngine.validateConversationOwnership.
+     * to that group: the strict HITL check (group membership, then
+     * owner/admin/approver, fail-closed) shared with the MCP surface via
+     * {@link HitlAccessGuard}.
+     * <p>
+     * Every caller is a HITL operation. The lenient branch this used to have —
+     * {@code requireOwnerOrAdmin}, which admits anyone to an unowned record — had
+     * no caller left, and was removed rather than kept as a trap (L2).
      *
      * @param groupId
      *            when non-null, also verifies the target conversation belongs to
      *            this group — a mismatch (or unknown conversation) yields 404 so
      *            approve/cancel/status cannot act on a conversation under the wrong
      *            group path (CodeQL: unused path param → consistency hole).
-     * @param hitlOperation
-     *            if true, uses strict ownership + approver role check
      */
-    private void validateGroupConversationOwnership(String groupId, String gcId, boolean hitlOperation) {
-        if (hitlOperation) {
-            // Strict HITL ownership (group-membership check + owner/admin/approver,
-            // fail-closed) is shared with the MCP surface via HitlAccessGuard.
-            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
-            return;
-        }
-        GroupConversation gc;
-        try {
-            gc = groupConversationService.readGroupConversation(gcId);
-        } catch (IResourceStore.ResourceNotFoundException e) {
-            // Let the actual operation handle the 404
-            LOGGER.debugf("Group conversation not found for ownership check: %s", gcId);
-            return;
-        } catch (Exception e) {
-            throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
-        }
-        // Membership check first: a wrong-group path must look like "not found" here,
-        // never leak the conversation's existence or owner via an authz error.
-        if (groupId != null && !groupId.equals(gc.getGroupId())) {
-            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
-            throw new NotFoundException("Group conversation not found.");
-        }
-        ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+    private void validateGroupConversationOwnership(String groupId, String gcId) {
+        hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
     }
 
     /**
@@ -1072,6 +1125,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
                 // Not terminal — a stance is recomputed at every phase boundary.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
+            }
+
+            @Override
+            public void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
+                // Not terminal — liveness signal while a member's tool loop runs.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
             }
         };
     }

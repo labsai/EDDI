@@ -4,12 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
-import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.utils.LogSanitizer;
 
 import dev.langchain4j.http.client.HttpClient;
 import dev.langchain4j.http.client.HttpClientBuilder;
-import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.googleai.GeminiHarmBlockThreshold;
@@ -19,6 +18,7 @@ import dev.langchain4j.model.googleai.GeminiThinkingConfig;
 import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -44,6 +44,14 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 
 @ApplicationScoped
 public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
+
+    /**
+     * Applies {@code eddi.security.ssrf-protection.enabled} to the configured
+     * endpoint. Field-injected; null in tests built with {@code new}, which then
+     * validate as with protection off (metadata check only).
+     */
+    @Inject
+    OutboundTargetPolicy targetPolicy;
     private static final String KEY_API_KEY = "apiKey";
     private static final String KEY_MODEL_NAME = "modelName";
     private static final String KEY_TEMPERATURE = "temperature";
@@ -140,10 +148,11 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
      * {@code thinkingLevel}/{@code thinkingBudget} steer how hard the model thinks
      * without ever asking for the thoughts back.
      */
-    private static void applyExtras(GoogleAiGeminiChatModel.GoogleAiGeminiChatModelBuilder b, Map<String, String> p) {
+    private static void applyExtras(GoogleAiGeminiChatModel.GoogleAiGeminiChatModelBuilder b, Map<String, String> p,
+                                    OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(p, KEY_BASE_URL);
         if (baseUrl != null) {
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            targetPolicy.validateUrl(baseUrl);
             b.baseUrl(baseUrl);
         }
         Double topP = doubleValue(p, KEY_TOP_P);
@@ -214,10 +223,10 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     private static void applyExtras(GoogleAiGeminiStreamingChatModel.GoogleAiGeminiStreamingChatModelBuilder b,
-                                    Map<String, String> p) {
+                                    Map<String, String> p, OutboundTargetPolicy targetPolicy) {
         String baseUrl = stringValue(p, KEY_BASE_URL);
         if (baseUrl != null) {
-            UrlValidationUtils.rejectCloudMetadataTarget(baseUrl);
+            targetPolicy.validateUrl(baseUrl);
             b.baseUrl(baseUrl);
         }
         Double topP = doubleValue(p, KEY_TOP_P);
@@ -331,7 +340,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, JdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder());
     }
 
     /**
@@ -361,7 +370,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
         builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
-        applyExtras(builder, parameters);
+        applyExtras(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
 
         // executeWithRetry is the single retry owner; library retries multiply it.
         builder.maxRetries(NO_LIBRARY_RETRIES);
@@ -371,7 +380,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        return buildStreaming(parameters, JdkHttpClient.builder());
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder());
     }
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */
@@ -395,7 +404,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         applyLong(parameters, KEY_TIMEOUT, ms -> builder.timeout(Duration.ofMillis(ms)));
         builder.returnThinking(booleanValue(parameters, KEY_RETURN_THINKING, THINKING_DEFAULT));
         builder.sendThinking(booleanValue(parameters, KEY_SEND_THINKING, THINKING_DEFAULT));
-        applyExtras(builder, parameters);
+        applyExtras(builder, parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
 
         return builder.build();
     }

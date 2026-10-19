@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.JdkClientEngine;
 import ai.labs.eddi.backup.impl.RemoteApiResourceSource.RemoteReadException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,7 +83,7 @@ class RemoteArchiveFetchTest {
     @Test
     @DisplayName("exports the version asked for and returns the archive")
     void fetchesTheArchive() {
-        byte[] body = RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, "Bearer t");
+        byte[] body = RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, "Bearer t");
 
         assertArrayEquals(ARCHIVE, body);
         assertEquals(BASE + "/backup/export/" + AGENT_ID + "?agentVersion=3", sent.get(0).uri().toString());
@@ -96,7 +97,7 @@ class RemoteArchiveFetchTest {
         // where this deployment sends the caller's bearer token.
         location = "http://attacker.example/backup/export/agent-" + AGENT_ID + "-3.zip";
 
-        RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, "Bearer t");
+        RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, "Bearer t");
 
         URI download = sent.get(1).uri();
         assertEquals("staging.internal", download.getHost());
@@ -106,7 +107,7 @@ class RemoteArchiveFetchTest {
     @Test
     @DisplayName("no version means the source's current one, looked up — never the export's default of 1")
     void latestVersionIsResolved() {
-        RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, null, null);
+        RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, null, null);
 
         assertTrue(sent.get(1).uri().toString().endsWith("?agentVersion=7"),
                 "should export the version the source's descriptor names, got " + sent.get(1).uri());
@@ -118,7 +119,7 @@ class RemoteArchiveFetchTest {
         exportStatus = 403;
 
         var ex = assertThrows(RemoteReadException.class,
-                () -> RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, null));
+                () -> RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, null));
         assertTrue(ex.getMessage().contains("403"), ex.getMessage());
     }
 
@@ -128,7 +129,7 @@ class RemoteArchiveFetchTest {
         location = null;
 
         assertThrows(RemoteReadException.class,
-                () -> RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, null));
+                () -> RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, null));
         assertEquals(1, sent.size(), "nothing may be downloaded without a name to download");
     }
 
@@ -138,7 +139,7 @@ class RemoteArchiveFetchTest {
         declaredLength = 257L * 1024 * 1024;
 
         var ex = assertThrows(RemoteReadException.class,
-                () -> RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, null));
+                () -> RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, null));
         assertTrue(ex.getMessage().contains("more than this instance will import"), ex.getMessage());
     }
 
@@ -148,7 +149,7 @@ class RemoteArchiveFetchTest {
         downloadStatus = 404;
 
         var ex = assertThrows(RemoteReadException.class,
-                () -> RemoteApiResourceSource.exportAgentArchive(client, BASE, AGENT_ID, 3, null));
+                () -> RemoteApiResourceSource.exportAgentArchive(JdkClientEngine.facade(client), BASE, AGENT_ID, 3, null));
         assertTrue(ex.getMessage().contains("404"), ex.getMessage());
     }
 

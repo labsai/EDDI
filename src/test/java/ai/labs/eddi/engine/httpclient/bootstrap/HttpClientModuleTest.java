@@ -12,6 +12,7 @@ import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpClientRequest;
 import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.RequestOptions;
+import io.vertx.core.tracing.TracingPolicy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
@@ -26,6 +27,7 @@ import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -128,6 +130,23 @@ class HttpClientModuleTest {
         assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost(host)));
     }
 
+    /**
+     * Security review 2026-10-17, H2: the same URI/URL host differential, on a
+     * redirect hop.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"x_y.example", "169.254.169.254.", "169%2e254%2e169%2e254"})
+    @DisplayName("a redirect hop whose host java.net.URI cannot read is refused")
+    void unreadableHopIsRefused(String host) {
+        assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost(host)));
+    }
+
+    @Test
+    @DisplayName("a redirect hop without a host is refused, not waved through")
+    void hostlessHopIsRefused() {
+        assertThrows(IllegalArgumentException.class, () -> HttpClientModule.requireNotMetadataHop(new RequestOptions().setHost("")));
+    }
+
     @Test
     @DisplayName("an ordinary hop is followed unchanged")
     void ordinaryHopIsFollowed() {
@@ -197,6 +216,43 @@ class HttpClientModuleTest {
         assertNull(next.getHeaders().get("X-Api-Key"), "a custom credential header must not be replayed to another host");
         assertNull(next.getHeaders().get("Cookie"), "Cookie must not be replayed to another host");
         assertTrue(next.getHeaders().contains("Accept"), "a non-credential header stays");
+    }
+
+    @Test
+    @DisplayName("Quarkus' Vert.x client tracer is kept off the httpcalls client, so nothing re-injects a stripped traceparent")
+    void tracerIgnoresTheHttpcallsClient() {
+        // With PROPAGATE (the Vert.x default) Quarkus' tracer writes a traceparent
+        // onto every request the redirect handler issues — after
+        // stripCredentialsIfCrossOrigin removed it from a cross-origin hop.
+        // HttpClientWrapper adds the header itself, so propagation does not depend
+        // on the tracer; the auto client span for httpcalls is what is given up.
+        assertEquals(TracingPolicy.IGNORE, HttpClientModule.clientOptions(5, 5, 0, 5000).getTracingPolicy());
+    }
+
+    @Test
+    @DisplayName("a cross-origin redirect hop is stripped of the W3C trace context too")
+    void crossOriginHopStripsTraceContext() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("evil.example.net", 443, true);
+        next.addHeader("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        next.addHeader("tracestate", "vendor=v1");
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertNull(next.getHeaders().get("traceparent"), "the trace id must not follow a redirect to another origin");
+        assertNull(next.getHeaders().get("tracestate"));
+    }
+
+    @Test
+    @DisplayName("a same-origin redirect hop keeps the W3C trace context")
+    void sameOriginHopKeepsTraceContext() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("api.example.com", 443, true);
+        next.addHeader("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertTrue(next.getHeaders().contains("traceparent"));
     }
 
     @Test

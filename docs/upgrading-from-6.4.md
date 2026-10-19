@@ -276,8 +276,12 @@ Keep authentication on, and change the Keycloak admin password first.
 - **`/mcp` is advertised as an OAuth protected resource** (RFC 9728), so MCP clients can sign
   themselves in. The metadata document is served anonymously at
   `/.well-known/oauth-protected-resource/mcp`.
-  - On plain HTTP with authentication on, set
-    `QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME=false`.
+  - The scheme of the advertised identifier follows the request (since 6.6.1; 6.5 and 6.6.0
+    forced `https`, so plain-HTTP deployments had to set
+    `QUARKUS_OIDC_RESOURCE_METADATA_FORCE_HTTPS_SCHEME=false`, which is now the default).
+    Behind a TLS-terminating proxy, set `QUARKUS_OIDC_RESOURCE_METADATA_RESOURCE` to the
+    absolute public URL of `/mcp` (next bullet but one), or turn on
+    `quarkus.http.proxy.proxy-address-forwarding`.
   - The advertised authorization server is `quarkus.oidc.token.issuer`, falling back to
     `auth-server-url`, which is usually an internal address. Set `QUARKUS_OIDC_TOKEN_ISSUER`
     (or `QUARKUS_OIDC_RESOURCE_METADATA_AUTHORIZATION_SERVER`) to the public issuer.
@@ -485,6 +489,12 @@ No REST path was removed between 6.4.0 and 6.5.
   `pauseId`; if the pause has changed, the answer is `409 PAUSE_CHANGED`. A turn resumed by
   someone other than the conversation owner runs without a caller identity, apart from the
   tool calls that person approved, so a later `${caller:token}` call fails.
+- **Creating a secret needs both lists.** Under `eddi.vault.grant-enforcement=enforce` (the
+  default), `PUT /secretstore/secrets/{tenantId}/{keyName}` and `PUT /spacestore/secrets/{key}`
+  answer `400` to a **create** without `allowedAgents` or without `allowedHosts`; send
+  `["*"]` for either to mean "any", out loud. A rotation of an existing key may omit both. A
+  script that creates secrets has to add them — see
+  [Required on a create](secrets-vault.md#required-on-a-create).
 - **`404` instead of `500`** for unknown ids on undo, redo, `PATCH /agents/{agentId}/state`
   and `/llm/tools/history/{id}`. The managed-agent POST answers `401` instead of `500` for an
   anonymous caller.

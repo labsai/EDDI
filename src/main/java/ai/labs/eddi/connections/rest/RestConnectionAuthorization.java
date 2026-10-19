@@ -597,7 +597,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveRequired(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
+        return credentialReferenceResolver.resolveVaultBacked(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
     }
 
     /**

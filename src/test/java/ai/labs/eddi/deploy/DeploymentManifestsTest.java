@@ -1072,15 +1072,34 @@ class DeploymentManifestsTest {
                                 + "reading when they hit it");
             }
 
-            String bootstrapPassword = read(HELM_KEYCLOAK).lines()
+            // Helm: the env var is a secretKeyRef (the Secret it names is rendered by
+            // the same template, under `required`), never a `value:` in the pod spec —
+            // a pod-spec value shows the master-realm superuser password in every
+            // `kubectl get sts -o yaml`, in the release manifest and in audit logs.
+            List<String> helmEnv = read(HELM_KEYCLOAK).lines()
                     .dropWhile(line -> !line.contains("- name: KC_BOOTSTRAP_ADMIN_PASSWORD"))
-                    .filter(line -> line.contains("value:"))
+                    .skip(1)
+                    .takeWhile(line -> !line.strip().startsWith("- name:"))
+                    .map(String::strip)
+                    .filter(line -> !line.startsWith("#"))
+                    .toList();
+            assertTrue(helmEnv.stream().anyMatch(line -> line.equals("secretKeyRef:")),
+                    HELM_KEYCLOAK + " must read KC_BOOTSTRAP_ADMIN_PASSWORD through a secretKeyRef; it renders: " + helmEnv);
+            assertTrue(helmEnv.stream().noneMatch(line -> line.startsWith("value:")),
+                    HELM_KEYCLOAK + " still renders KC_BOOTSTRAP_ADMIN_PASSWORD as a pod-spec `value:` — the "
+                            + "password then shows in `kubectl get sts -o yaml`, the release manifest and every "
+                            + "audit log. It belongs in a Secret, read through secretKeyRef: " + helmEnv);
+            assertTrue(helmEnv.stream().noneMatch(line -> line.startsWith("optional:")),
+                    HELM_KEYCLOAK + " marks the Keycloak password reference optional, so a missing Secret boots "
+                            + "Keycloak with no bootstrap admin instead of failing closed: " + helmEnv);
+            String helmSecretPassword = read(HELM_KEYCLOAK).lines()
+                    .filter(line -> line.strip().startsWith("password:"))
                     .findFirst()
                     .orElse("");
-            assertTrue(bootstrapPassword.contains("required "),
-                    HELM_KEYCLOAK + " renders KC_BOOTSTRAP_ADMIN_PASSWORD without `required`, so a chart "
+            assertTrue(helmSecretPassword.contains("required "),
+                    HELM_KEYCLOAK + " renders the Keycloak Secret's `password` without `required`, so a chart "
                             + "installed without keycloak.adminPassword templates an empty password rather "
-                            + "than refusing. Rendered as: " + bootstrapPassword.strip());
+                            + "than refusing. Rendered as: " + helmSecretPassword.strip());
             assertEquals("", YAML.readTree(HELM.resolve("values.yaml").toFile())
                     .path("keycloak").path("adminPassword").asText(),
                     HELM.resolve("values.yaml") + " gives keycloak.adminPassword a default, which is what "
@@ -2316,6 +2335,112 @@ class DeploymentManifestsTest {
             assertTrue(security.contains("`eddi-frontend`"),
                     "docs/security.md should name eddi-frontend, the id the Manager SPA requests tokens for");
         }
+
+        /**
+         * Security review 2026-10-17, L7: the realm had no password policy and no event
+         * log, {@code eddi-mcp} — a public client on wildcard loopback redirects —
+         * issued tokens with every realm role and no consent screen, and the seeded
+         * accounts claimed verified placeholder e-mails, which the user directory
+         * resolves shares by.
+         */
+        @Test
+        @DisplayName("the realm enforces a password policy, logs events, scopes the MCP client and verifies no e-mail")
+        void realmIsHardened() throws IOException {
+            for (Path realmFile : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode realm = JSON.readTree(realmFile.toFile());
+                String policy = realm.path("passwordPolicy").asText();
+                assertTrue(policy.matches(".*\\blength\\((1[2-9]|[2-9]\\d)\\).*"),
+                        realmFile + ": passwordPolicy must require at least 12 characters, was `" + policy + "`");
+                assertTrue(policy.contains("notUsername") && policy.contains("notEmail"), realmFile + ": " + policy);
+                assertTrue(realm.path("eventsEnabled").asBoolean(), realmFile + ": login events must be recorded");
+                assertTrue(realm.path("adminEventsEnabled").asBoolean(), realmFile + ": admin events must be recorded");
+
+                JsonNode mcp = client(realm, "eddi-mcp");
+                assertTrue(mcp.path("consentRequired").asBoolean(),
+                        realmFile + ": eddi-mcp redirects to any loopback port, so the user must see which client asks");
+                assertTrue(mcp.has("fullScopeAllowed") && !mcp.path("fullScopeAllowed").asBoolean(),
+                        realmFile + ": eddi-mcp must not carry every realm role into its tokens");
+                Set<String> scoped = new TreeSet<>();
+                for (JsonNode mapping : realm.path("scopeMappings")) {
+                    if ("eddi-mcp".equals(mapping.path("client").asText())) {
+                        scoped.addAll(stringList(mapping.get("roles")));
+                    }
+                }
+                Set<String> eddiRoles = new TreeSet<>();
+                realm.path("roles").path("realm").forEach(role -> {
+                    String name = role.path("name").asText();
+                    if (name.startsWith("eddi-")) {
+                        eddiRoles.add(name);
+                    }
+                });
+                assertFalse(eddiRoles.isEmpty(), realmFile + ": no eddi-* realm roles found — the check would be vacuous");
+                assertEquals(eddiRoles, scoped, realmFile + ": with fullScopeAllowed=false, eddi-mcp's tokens carry only the "
+                        + "roles in its scope mapping — exactly the eddi-* roles, or MCP tools refuse their callers");
+
+                for (JsonNode user : realm.path("users")) {
+                    assertFalse(user.path("emailVerified").asBoolean(), realmFile + ": `" + user.path("username").asText()
+                            + "` claims a verified e-mail (" + user.path("email").asText() + ") nobody verified");
+                }
+            }
+        }
+    }
+
+    /**
+     * Security review 2026-10-17, L7: the MongoDB, PostgreSQL and Keycloak pods had
+     * no container-level securityContext. Each now runs as its image's own user
+     * from the start and drops every capability, with no privilege escalation and
+     * the RuntimeDefault seccomp profile — in the chart, the kustomize overlays and
+     * the quickstart alike.
+     */
+    @Test
+    @DisplayName("database and identity-provider pods drop every capability")
+    void datastoreAndKeycloakPodsAreHardened() throws IOException {
+        List<Path> workloads = List.of(HELM_TEMPLATES.resolve("mongodb.yaml"), HELM_TEMPLATES.resolve("postgres.yaml"),
+                HELM_KEYCLOAK, K8S.resolve("overlays/mongodb/mongodb-statefulset.yaml"),
+                K8S.resolve("overlays/postgres/postgres-statefulset.yaml"), KUSTOMIZE_KEYCLOAK, K8S.resolve("quickstart.yaml"));
+        List<String> required = List.of("allowPrivilegeEscalation: false", "drop: [\"ALL\"]", "type: RuntimeDefault",
+                "runAsNonRoot: true");
+        for (Path workload : workloads) {
+            String text = read(workload).replace("\r\n", "\n");
+            // Checked per workload document, not per file: k8s/quickstart.yaml holds the
+            // EDDI deployment too, and a setting dropped from MongoDB would otherwise
+            // still be "found" in the EDDI block. A Helm template is one workload with
+            // templated image lines, so there the file is the document.
+            List<String> documents = workload.startsWith(HELM_TEMPLATES)
+                    ? List.of(text)
+                    : hardenedWorkloadDocuments(text);
+            assertFalse(documents.isEmpty(), workload + " holds no MongoDB/PostgreSQL/Keycloak workload document to check");
+            for (String document : documents) {
+                for (String setting : required) {
+                    assertTrue(document.contains(setting), workload + " lacks `" + setting + "` in a workload document");
+                }
+            }
+        }
+        String policy = read(K8S.resolve("overlays/production/network-policy.yaml")).replace("\r\n", "\n");
+        assertFalse(policy.contains("- namespaceSelector: {}\n          podSelector:"),
+                "the ingress rule must not admit a controller-labelled pod from ANY namespace — the label is forgeable");
+        assertTrue(policy.contains("kubernetes.io/metadata.name: ingress-nginx"),
+                "the ingress rule must pin the controller's namespace by its API-server-set name");
+        String configMap = read(HELM_TEMPLATES.resolve("configmap.yaml")).replace("\r\n", "\n");
+        assertTrue(configMap.contains("{{- if and .Values.ingress.enabled .Values.ingress.tls }}\n  EDDI_SECURITY_HSTS_ENABLED: \"true\""),
+                "the chart must turn HSTS on when the ingress terminates TLS");
+    }
+
+    /**
+     * The YAML documents of {@code text} that are a Deployment or StatefulSet
+     * running a MongoDB, PostgreSQL or Keycloak image.
+     */
+    private static List<String> hardenedWorkloadDocuments(String text) {
+        List<String> found = new ArrayList<>();
+        for (String document : text.split("(?m)^---[ \t]*$")) {
+            boolean workload = document.contains("kind: StatefulSet") || document.contains("kind: Deployment");
+            boolean datastoreOrIdp = Pattern.compile("(?m)^\\s*image:\\s*\\S*(mongo|postgres|keycloak)", Pattern.CASE_INSENSITIVE)
+                    .matcher(document).find();
+            if (workload && datastoreOrIdp) {
+                found.add(document);
+            }
+        }
+        return found;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -2753,6 +2878,29 @@ class DeploymentManifestsTest {
          * mode, and the HPA template carries its own copy of the gate, because it
          * renders independently of the Deployment.
          */
+        /**
+         * CPU is a weak load signal for a node that mostly waits on LLMs, so the HPA
+         * takes further metrics (in-flight turns through a custom-metrics adapter) and
+         * lets either resource target be dropped — but never renders with no metric,
+         * which the API server would reject only at install time.
+         */
+        @Test
+        @DisplayName("the HPA takes extra metrics and a behavior, and refuses to render without any metric")
+        void hpaTakesCustomMetrics() throws IOException {
+            String hpa = read(HELM_TEMPLATES.resolve("hpa.yaml"));
+            assertTrue(hpa.contains("{{- with $a.extraMetrics }}"), "hpa.yaml must append autoscaling.extraMetrics");
+            assertTrue(hpa.contains("{{- with $a.behavior }}"), "hpa.yaml must render autoscaling.behavior");
+            assertTrue(hpa.contains("{{- if $a.targetCPUUtilizationPercentage }}")
+                    && hpa.contains("{{- if $a.targetMemoryUtilizationPercentage }}"),
+                    "each resource target must be optional, so an operator can scale on in-flight turns alone");
+            assertTrue(hpa.contains("needs at least one metric"), "an HPA with no metric must be refused at render time");
+            JsonNode autoscaling = YAML.readTree(HELM.resolve("values.yaml").toFile()).path("autoscaling");
+            assertTrue(autoscaling.path("extraMetrics").isArray() && autoscaling.path("extraMetrics").isEmpty(),
+                    "autoscaling.extraMetrics defaults to an empty list");
+            assertTrue(autoscaling.path("behavior").isObject() && autoscaling.path("behavior").isEmpty(),
+                    "autoscaling.behavior defaults to an empty map");
+        }
+
         @Test
         @DisplayName("replicas, autoscaling and rolling updates need cluster mode")
         void scalingRequiresClusterMode() throws IOException {
@@ -2962,7 +3110,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.7.0";
+        private static final String EXPECTED_CHART_VERSION = "2.9.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
@@ -4726,6 +4874,12 @@ class DeploymentManifestsTest {
      * Two spellings, because two shells resolve commands differently: PowerShell on
      * Windows runs what PATHEXT says is executable, and an extensionless file is
      * not that.
+     * <p>
+     * The batch stub names Windows' {@code find.exe} by full path. A bare
+     * {@code find} resolves through the inherited PATH, and a Maven started from
+     * Git Bash puts Git's Unix {@code find} ahead of System32: that one rejects the
+     * quoted argument, the {@code errorlevel 1} branch takes it for "not the
+     * probe", and every probe exits 0 — every mode reads as "a Secret is there".
      */
     private static Path kubectlStub(String forShell, boolean batch) throws IOException {
         Path directory = Files.createDirectories(Path.of("target", "kubectl-stub", forShell));
@@ -4733,7 +4887,7 @@ class DeploymentManifestsTest {
             Files.writeString(directory.resolve("kubectl.cmd"), """
                     @echo off
                     >>"%KUBECTL_LOG%" echo %*
-                    echo %*| find "get secret eddi-secrets" >nul
+                    echo %*| "%SystemRoot%\\System32\\find.exe" "get secret eddi-secrets" >nul
                     if errorlevel 1 goto ok
                     if "%KUBECTL_STUB_MODE%"=="exists" goto exists
                     if "%KUBECTL_STUB_MODE%"=="notfound" goto notfound

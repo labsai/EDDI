@@ -205,7 +205,7 @@ public class GuardrailService {
         }
         GuardrailContext inputContext = context.with(GuardrailPhase.INPUT, null, messages);
         UserMessage current = (UserMessage) messages.get(last);
-        String original = textOf(current);
+        String original = currentText(current);
         String text;
         double cost = 0.0;
         if (prescreened != null && !prescreened.isBlocked() && original.equals(prescreened.original())) {
@@ -222,7 +222,7 @@ public class GuardrailService {
         List<ChatMessage> screened = new ArrayList<>(messages);
         boolean changed = false;
         if (!text.equals(original)) {
-            screened.set(last, withText(current, text));
+            screened.set(last, withCurrentText(current, text));
             changed = true;
         }
         HistoryResult history = screenHistory(configs, screened, last, inputContext);
@@ -329,49 +329,67 @@ public class GuardrailService {
     private record HistoryResult(boolean changed, double costUsd) {
     }
 
-    /** Screens (and rewrites in place) every user message before {@code last}. */
+    /**
+     * Screens (and rewrites in place) every earlier text of the window: all text
+     * parts of the user messages before {@code last}, and the text parts of the
+     * last user message before its final one. The history builder merges the
+     * question of a turn answered by a fallback (a guardrail block among them) into
+     * the next user message, so that message can carry an earlier turn's text ahead
+     * of the current one; it is history, not the current turn.
+     */
     private HistoryResult screenHistory(List<GuardrailConfig> configs, List<ChatMessage> messages, int last, GuardrailContext context) {
         boolean changed = false;
         double cost = 0.0;
-        for (int i = 0; i < last; i++) {
-            if (!(messages.get(i) instanceof UserMessage earlier)) {
+        for (int i = 0; i <= last; i++) {
+            if (!(messages.get(i) instanceof UserMessage user)) {
                 continue;
             }
-            String text = textOf(earlier);
-            String screened = text;
-            for (GuardrailConfig config : configs) {
-                GuardrailAction action = GuardrailAction.parse(config.getAction());
-                if (!action.mayChangeText()) {
+            List<Content> contents = new ArrayList<>(user.contents());
+            int lastText = lastTextIndex(contents);
+            boolean messageChanged = false;
+            for (int c = 0; c < contents.size(); c++) {
+                if (!(contents.get(c) instanceof TextContent part) || (i == last && c == lastText)) {
                     continue;
                 }
-                ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
-                if (guardrail == null || !guardrail.screensHistory()) {
-                    continue;
-                }
-                Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
-                GuardrailVerdict verdict = evaluation.verdict();
-                if (evaluation.failed()) {
-                    cost += evaluation.failureCostUsd();
-                    // Fail closed: an earlier message that cannot be checked is withheld.
-                    if (failsClosed(config, action)) {
+                String screened = part.text();
+                for (GuardrailConfig config : configs) {
+                    GuardrailAction action = GuardrailAction.parse(config.getAction());
+                    if (!action.mayChangeText()) {
+                        continue;
+                    }
+                    ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
+                    if (guardrail == null || !guardrail.screensHistory()) {
+                        continue;
+                    }
+                    Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
+                    GuardrailVerdict verdict = evaluation.verdict();
+                    if (evaluation.failed()) {
+                        cost += evaluation.failureCostUsd();
+                        // Fail closed: an earlier message that cannot be checked is withheld.
+                        if (failsClosed(config, action)) {
+                            screened = HISTORY_PLACEHOLDER;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (!verdict.triggered()) {
+                        continue;
+                    }
+                    cost += verdict.costUsd();
+                    if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
+                        screened = verdict.text();
+                    } else {
                         screened = HISTORY_PLACEHOLDER;
                         break;
                     }
-                    continue;
                 }
-                if (!verdict.triggered()) {
-                    continue;
-                }
-                cost += verdict.costUsd();
-                if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
-                    screened = verdict.text();
-                } else {
-                    screened = HISTORY_PLACEHOLDER;
-                    break;
+                if (!screened.equals(part.text())) {
+                    contents.set(c, TextContent.from(screened));
+                    messageChanged = true;
                 }
             }
-            if (!screened.equals(text)) {
-                messages.set(i, withText(earlier, screened));
+            if (messageChanged) {
+                messages.set(i, user.toBuilder().contents(contents).build());
                 changed = true;
             }
         }
@@ -639,45 +657,40 @@ public class GuardrailService {
         return -1;
     }
 
-    /** The text of a user message: its text parts joined by newlines. */
-    static String textOf(UserMessage message) {
+    /**
+     * The current turn's text of a user message: its last text part. Earlier text
+     * parts are earlier turns merged in by the history builder (see
+     * {@link #screenHistory}); other parts are images and documents.
+     */
+    static String currentText(UserMessage message) {
         if (message.hasSingleText()) {
             return message.singleText();
         }
-        StringBuilder text = new StringBuilder();
-        for (Content content : message.contents()) {
-            if (content instanceof TextContent part) {
-                if (!text.isEmpty()) {
-                    text.append('\n');
-                }
-                text.append(part.text());
-            }
-        }
-        return text.toString();
+        int index = lastTextIndex(message.contents());
+        return index >= 0 ? ((TextContent) message.contents().get(index)).text() : "";
     }
 
     /**
-     * The message with its text replaced: the first text part becomes {@code text},
-     * later text parts are dropped (their content is in {@code text}, see
-     * {@link #textOf}), every other part (images, documents) and the name and
-     * attributes are kept.
+     * The message with its current text ({@link #currentText}) replaced; every
+     * other part, the name and the attributes are kept.
      */
-    static UserMessage withText(UserMessage message, String text) {
-        List<Content> contents = new ArrayList<>();
-        boolean placed = false;
-        for (Content content : message.contents()) {
-            if (content instanceof TextContent) {
-                if (!placed) {
-                    contents.add(TextContent.from(text));
-                    placed = true;
-                }
-            } else {
-                contents.add(content);
-            }
-        }
-        if (!placed) {
-            contents.add(0, TextContent.from(text));
+    static UserMessage withCurrentText(UserMessage message, String text) {
+        List<Content> contents = new ArrayList<>(message.contents());
+        int index = lastTextIndex(contents);
+        if (index >= 0) {
+            contents.set(index, TextContent.from(text));
+        } else {
+            contents.add(TextContent.from(text));
         }
         return message.toBuilder().contents(contents).build();
+    }
+
+    private static int lastTextIndex(List<Content> contents) {
+        for (int i = contents.size() - 1; i >= 0; i--) {
+            if (contents.get(i) instanceof TextContent) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

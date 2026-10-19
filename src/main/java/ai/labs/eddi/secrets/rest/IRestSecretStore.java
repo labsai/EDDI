@@ -45,7 +45,12 @@ public interface IRestSecretStore {
     @PUT
     @Path("/{tenantId}/{keyName}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Store or update a secret")
+    @Operation(summary = "Store or update a secret",
+               description = "Creates or rotates a secret. Under eddi.vault.grant-enforcement=enforce (the default) a create must carry "
+                       + "allowedAgents — the agent ids that may use it, or [\"*\"] to grant every agent explicitly; a create without one is a "
+                       + "400. The same create must carry allowedHosts — the exact host or host:port entries the secret may be sent to, "
+                       + "enforced when a ${vault:…} reference is resolved for an outbound request — or [\"*\"] to allow any host "
+                       + "explicitly. A rotation may omit either list and keeps the stored one.")
     Response storeSecret(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName, SecretRequest body);
 
     /**
@@ -260,9 +265,15 @@ public interface IRestSecretStore {
      * be permanently deleted. Use this when the master key has changed and the old
      * key is not available.
      *
+     * Refused without {@code confirm=true}, like {@link #adoptMasterKey}: one
+     * mistyped or replayed request would otherwise destroy every secret of the
+     * tenant with no way back.
+     *
      * @param tenantId
      *            the tenant to reset
-     * @return 200 with details of what was deleted
+     * @param confirm
+     *            must be {@code true}
+     * @return 200 with details of what was deleted, 400 without confirmation
      */
     @POST
     @Path("/{tenantId}/reset")
@@ -271,8 +282,9 @@ public interface IRestSecretStore {
     @Operation(summary = "Reset vault for a tenant",
                description = "Deletes ALL secrets and the Data Encryption Key for the tenant. "
                        + "Use this when the master key has changed and recovery is not possible. "
-                       + "WARNING: This permanently destroys all encrypted secrets for the tenant.")
-    Response resetTenant(@PathParam("tenantId") String tenantId);
+                       + "WARNING: This permanently destroys all encrypted secrets for the tenant. Requires confirm=true.")
+    Response resetTenant(@PathParam("tenantId") String tenantId, @QueryParam("confirm")
+    @DefaultValue("false") boolean confirm);
 
     /**
      * Request body for storing a secret. Includes the plaintext value, an optional
@@ -284,11 +296,29 @@ public interface IRestSecretStore {
      *            human-readable description (nullable — omitted on an update, the
      *            stored description is kept)
      * @param allowedAgents
-     *            list of agent IDs, or ["*"] for all (nullable — omitted on a
-     *            create it defaults to ["*"]; omitted on an update the stored grant
-     *            is kept, so rotating a value never widens a narrowed grant)
+     *            list of agent IDs, or ["*"] for all. On an update it may be
+     *            omitted: the stored grant is kept, so rotating a value never
+     *            widens a narrowed grant. On a create it is <b>required</b> under
+     *            {@code eddi.vault.grant-enforcement=enforce} (the default) — an
+     *            omitted list is a 400, never a silent {@code ["*"]}; under
+     *            {@code warn} and {@code off} an omitted list still defaults to the
+     *            wildcard
+     * @param allowedHosts
+     *            the exact {@code host} or {@code host:port} entries this secret
+     *            may be sent to, enforced where a {@code ${vault:…}} reference is
+     *            resolved for an outbound request, or {@code ["*"]} for any host.
+     *            On a create it is <b>required</b> under
+     *            {@code eddi.vault.grant-enforcement=enforce}, and {@code []} is
+     *            refused there; under {@code warn} and {@code off} an omitted list
+     *            leaves the secret unrestricted. Omitted on an update the stored
+     *            list is kept; {@code []} or {@code ["*"]} removes a restriction
      */
-    record SecretRequest(String value, String description, List<String> allowedAgents) {
+    record SecretRequest(String value, String description, List<String> allowedAgents, List<String> allowedHosts) {
+
+        /** A request without a destination allow-list. */
+        public SecretRequest(String value, String description, List<String> allowedAgents) {
+            this(value, description, allowedAgents, null);
+        }
     }
 
     /**
@@ -315,12 +345,23 @@ public interface IRestSecretStore {
      *            and answered with 409 and the current grant otherwise — so two
      *            operators editing at once cannot silently undo each other.
      *            Omitted, the update is unconditional, as it always was
+     * @param allowedHosts
+     *            optional: the replacement destination allow-list (exact
+     *            {@code host} or {@code host:port} entries). {@code null} leaves it
+     *            as it is; {@code []} or {@code ["*"]} removes the restriction.
+     *            Like the grant, it needs no secret value — which is the point: the
+     *            plaintext is gone by the time a host has to be added
      */
-    record GrantRequest(List<String> allowedAgents, String description, List<String> expectedAllowedAgents) {
+    record GrantRequest(List<String> allowedAgents, String description, List<String> expectedAllowedAgents, List<String> allowedHosts) {
 
         /** An unconditional grant update. */
         public GrantRequest(List<String> allowedAgents, String description) {
-            this(allowedAgents, description, null);
+            this(allowedAgents, description, null, null);
+        }
+
+        /** A grant update without a change to the allowed hosts. */
+        public GrantRequest(List<String> allowedAgents, String description, List<String> expectedAllowedAgents) {
+            this(allowedAgents, description, expectedAllowedAgents, null);
         }
     }
 

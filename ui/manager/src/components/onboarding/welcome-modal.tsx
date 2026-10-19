@@ -128,7 +128,7 @@ export function WelcomeModal() {
     >
       <div
         ref={cardRef}
-        className="welcome-modal-card w-full max-w-xl rounded-2xl shadow-2xl outline-none"
+        className="welcome-modal-card w-full max-w-xl rounded-2xl shadow-2xl outline-none max-h-[calc(100dvh-2rem)] overflow-y-auto"
         tabIndex={-1}
       >
         {/* Panel content */}
@@ -203,7 +203,7 @@ export function WelcomeModal() {
               <div className="relative mb-6">
                 <div className="absolute -inset-4 rounded-full bg-emerald-500/10 blur-xl" />
                 <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-linear-to-br from-emerald-500 to-teal-600 shadow-lg">
-                  <ArrowRight className="h-10 w-10 text-white" />
+                  <ArrowRight className="h-10 w-10 text-white rtl:rotate-180" />
                 </div>
               </div>
               <h2 className="text-2xl font-bold text-white">
@@ -247,7 +247,7 @@ export function WelcomeModal() {
             )}
             aria-label={t("onboarding.tour.back")}
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           </button>
 
           {/* Dots */}
@@ -278,7 +278,7 @@ export function WelcomeModal() {
             )}
             aria-label={t("onboarding.tour.next")}
           >
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 rtl:rotate-180" />
           </button>
         </div>
       </div>
