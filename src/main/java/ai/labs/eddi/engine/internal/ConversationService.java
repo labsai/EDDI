@@ -1338,7 +1338,19 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             // Everything bound to one memory instance lives in the builder, so a queued
             // turn can be rebuilt over the current document when it finally runs (H13a).
+            final String idempotencyKey = idempotencyKeyOf(inputData, rerunOnly);
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                // Rebuilt over a newer document: a turn committed while this one queued. If
+                // that turn carried this request's Idempotency-Key, it WAS this request —
+                // sent again to another node while the first ran there, where the in-flight
+                // registry of the running node cannot see it. Checked here, under the
+                // conversation's lease, so the duplicate never runs a second time; it is
+                // answered as skipped (409 + Retry-After) and its retry is served the
+                // stored answer by the persisted lookup.
+                if (memory != conversationMemory && idempotencyKey != null
+                        && turnIdempotency.isRecordedIn(convertConversationMemory(memory), idempotencyKey)) {
+                    throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
+                }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);

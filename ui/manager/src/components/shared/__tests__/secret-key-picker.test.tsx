@@ -242,21 +242,70 @@ describe("SecretKeyPicker", () => {
     // Fill form
     const dialog = screen.getByRole("dialog");
     const inputs = dialog.querySelectorAll("input");
-    expect(inputs).toHaveLength(3);
+    // Key, value, description, and the allowed-hosts box.
+    expect(inputs).toHaveLength(4);
     await user.type(inputs[0]!, "new-api-key");
     await user.type(inputs[1]!, "superval");
     await user.type(inputs[2]!, "Test API Key");
 
-    // Store
+    // Store is held back until the destination is named.
     const storeBtn = screen.getByRole("button", { name: "Store Secret" });
+    expect(storeBtn).toBeDisabled();
+    expect(screen.getByTestId("create-secret-modal-hosts-missing")).toBeInTheDocument();
+    await user.type(screen.getByTestId("create-secret-modal-hosts-input-input"), "api.example.com");
     await user.click(storeBtn);
 
     await waitFor(() => {
       expect(mutationPayload).not.toBeNull();
       expect(mutationPayload!.value).toBe("superval");
       expect(mutationPayload!.description).toBe("Test API Key");
+      expect(mutationPayload!.allowedHosts).toEqual(["api.example.com"]);
       expect(mockOnChange).toHaveBeenCalledWith("${vault:new-api-key}");
     });
+  });
+
+  it("sends [\"*\"] as allowedHosts when Any host is chosen", async () => {
+    const user = userEvent.setup();
+    let payload: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/default/any-host-key", async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ reference: "${vault:any-host-key}", tenantId: "default", keyName: "any-host-key" });
+      }),
+    );
+    renderWithProviders(<SecretKeyPicker value="" onChange={mockOnChange} />);
+    await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+    await user.click(screen.getByTestId("vault-popup-create"));
+    await user.type(screen.getByTestId("create-secret-modal-key"), "any-host-key");
+    await user.type(screen.getByTestId("create-secret-modal-value"), "v");
+    await user.click(screen.getByTestId("create-secret-modal-hosts-mode-any"));
+    await user.click(screen.getByTestId("create-secret-modal-submit"));
+
+    await waitFor(() => expect(payload).not.toBeNull());
+    expect(payload!.allowedHosts).toEqual(["*"]);
+  });
+
+  it("prefills the destination from destinationUrl", async () => {
+    const user = userEvent.setup();
+    let payload: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/default/mcp-key", async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ reference: "${vault:mcp-key}", tenantId: "default", keyName: "mcp-key" });
+      }),
+    );
+    renderWithProviders(
+      <SecretKeyPicker value="" onChange={mockOnChange} destinationUrl="https://MCP.example.com:8443/mcp" />,
+    );
+    await user.click(await screen.findByTestId("secret-key-picker-vault-btn"));
+    await user.click(screen.getByTestId("vault-popup-create"));
+    expect(screen.getByTestId("create-secret-modal-hosts-input-item-mcp.example.com:8443")).toBeInTheDocument();
+    await user.type(screen.getByTestId("create-secret-modal-key"), "mcp-key");
+    await user.type(screen.getByTestId("create-secret-modal-value"), "v");
+    await user.click(screen.getByTestId("create-secret-modal-submit"));
+
+    await waitFor(() => expect(payload).not.toBeNull());
+    expect(payload!.allowedHosts).toEqual(["mcp.example.com:8443"]);
   });
 
   it("refuses to create a secret under a name that already exists", async () => {
@@ -281,6 +330,7 @@ describe("SecretKeyPicker", () => {
 
     await user.type(screen.getByTestId("create-secret-modal-key"), "openai-key");
     await user.type(screen.getByTestId("create-secret-modal-value"), "sk-replacement");
+    await user.click(screen.getByTestId("create-secret-modal-hosts-mode-any"));
     await user.click(screen.getByTestId("create-secret-modal-submit"));
 
     expect(await screen.findByTestId("create-secret-modal-exists")).toHaveTextContent(

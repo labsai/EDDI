@@ -7,6 +7,7 @@ package ai.labs.eddi.secrets.rest;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.UnrestrictedSecretsCheck;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.VaultGrantRequests;
@@ -72,6 +73,14 @@ public class RestSecretStore implements IRestSecretStore {
     /** The caller, recorded as the actor of a grant append; null in tests. */
     @Inject
     SecurityIdentity identity;
+
+    /**
+     * The startup scan for referenced secrets without a destination allow-list (H1
+     * residual of the 2026-10-17 review); null in tests, which leaves
+     * {@code referencedBy} out of the listing.
+     */
+    @Inject
+    UnrestrictedSecretsCheck unrestrictedSecretsCheck;
 
     @Inject
     public RestSecretStore(ISecretProvider secretProvider, SecretResolver secretResolver, VaultGrantImpactAnalyzer grantImpactAnalyzer,
@@ -151,7 +160,7 @@ public class RestSecretStore implements IRestSecretStore {
             // A list that IS present is held to the grant endpoint's rules whatever the
             // mode: a malformed id or an empty list is wrong in every mode.
             allowedAgents = VaultGrantRequests.validatedGrant(body.allowedAgents());
-            allowedHosts = VaultHostAllowlist.validatedHosts(body.allowedHosts());
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -171,6 +180,7 @@ public class RestSecretStore implements IRestSecretStore {
             if (!exists) {
                 try {
                     VaultGrantRequests.requireGrantOnCreate(grantEnforcement, allowedAgents);
+                    VaultGrantRequests.requireHostsOnCreate(grantEnforcement, body.allowedHosts());
                 } catch (IllegalArgumentException e) {
                     return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
                 }
@@ -220,7 +230,9 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             requested = validatedGrant(body);
             validateExpectedGrant(body.expectedAllowedAgents());
-            allowedHosts = VaultHostAllowlist.validatedHosts(body.allowedHosts());
+            // ["*"] reads as [] here, the clear it already was on this endpoint, so the
+            // spelling a create requires is accepted on an edit too.
+            allowedHosts = VaultHostAllowlist.requestedHosts(body.allowedHosts());
         } catch (IllegalArgumentException e) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
@@ -365,6 +377,18 @@ public class RestSecretStore implements IRestSecretStore {
         }
         return new SecretMetadata(metadata.tenantId(), metadata.keyName(), metadata.createdAt(), metadata.lastAccessedAt(),
                 metadata.lastRotatedAt(), null, metadata.description(), metadata.allowedAgents(), metadata.allowedHosts());
+    }
+
+    /**
+     * One entry of {@code GET /{tenantId}}: the metadata without its checksum, plus
+     * whether the secret may be sent anywhere and which configurations the last
+     * startup scan found referencing it.
+     */
+    private SecretListing listing(SecretMetadata metadata) {
+        List<String> referencedBy = unrestrictedSecretsCheck == null
+                ? null
+                : unrestrictedSecretsCheck.referencedBy(new SecretReference(metadata.tenantId(), metadata.keyName())).orElse(null);
+        return SecretListing.of(withoutChecksum(metadata), referencedBy);
     }
 
     /**
@@ -526,7 +550,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
         }
         try {
-            return Response.ok(secretProvider.listKeys(tenantId).stream().map(RestSecretStore::withoutChecksum).toList()).build();
+            return Response.ok(secretProvider.listKeys(tenantId).stream().map(this::listing).toList()).build();
         } catch (ISecretProvider.SecretProviderException e) {
             LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
@@ -623,7 +647,7 @@ public class RestSecretStore implements IRestSecretStore {
                     "message", "The configured master key is now the vault's master key and new secrets can be stored. "
                             + (adoption.tenantsNeedingReset().isEmpty()
                                     ? "No tenant holds unreadable DEKs."
-                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset — "
+                                    : "Reset each tenant listed in tenantsNeedingReset with POST /secretstore/secrets/{tenantId}/reset?confirm=true — "
                                             + "their secrets were sealed under the lost key.")))
                     .build();
         } catch (ISecretProvider.SecretProviderException e) {
@@ -633,10 +657,19 @@ public class RestSecretStore implements IRestSecretStore {
     }
 
     @Override
-    public Response resetTenant(String tenantId) {
+    public Response resetTenant(String tenantId, boolean confirm) {
         var unavailable = vaultUnavailableResponse();
         if (unavailable.isPresent())
             return unavailable.get();
+
+        if (!confirm) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "confirm=true is required",
+                            "action", "Resetting a tenant permanently deletes every secret and DEK it holds. Only do this when its "
+                                    + "secrets were sealed under a master key that is lost for good, then repeat the request with "
+                                    + "?confirm=true."))
+                    .build();
+        }
 
         try {
             validateId(tenantId, "tenantId");

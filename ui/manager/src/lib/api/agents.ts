@@ -75,6 +75,13 @@ export interface Agent {
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**
+   * Ceiling, in USD, on the PRICED spend of one conversation. Absent = unlimited;
+   * 0 allows no priced spend at all. Unpriced models add nothing to the total,
+   * but are stopped like any other once it is reached. Only written when set —
+   * see `parseCostCeiling`.
+   */
+  maxCostPerConversationUsd?: number;
+  /**
    * The version's compatibility generation — SERVER-OWNED. Two versions of an
    * agent with the same generation are compatible: a running conversation moves
    * between them on its next turn once the newer one is deployed. `null` or

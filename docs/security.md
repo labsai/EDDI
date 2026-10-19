@@ -200,12 +200,35 @@ a nameless caller with `403` as a second line of defence. Background work
 (schedule fires, group members, sub-agents) never authenticates a request and is
 unaffected.
 
+The principal is also the id a share is stored under and the `subject` the
+[user directory](workspaces.md#finding-people-the-user-directory) returns beside a
+person's name, so whatever claim it comes from is visible to anyone who can share
+with that person. Where `preferred_username` is an email address, set
+`quarkus.oidc.token.principal-claim` to a stable, non-address claim such as `sub`
+if colleagues' addresses are not everyone's business; the directory hides
+addresses it holds as *email* or *username*, but cannot hide the principal itself.
+
 If you see that WARN, either add one of those claims to the access token — for the
 shipped realm, [Identity claims, and realms imported from EDDI
 6.1.0–6.4.0](#identity-claims-and-realms-imported-from-eddi-610640) below is the
 repair — or set `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` to a claim your provider does
 emit. Pick a claim that is stable and unique per user: ownership is keyed on its
 value, so a changed name orphans everything filed under the old one.
+
+**Some names are EDDI's own.** EDDI also files work under principals it makes up
+for callers that bring no token: `slack:<team>:<user>` for a Slack user,
+`openwebui:…` for a header-named Open WebUI user, `group:<id>` for a group's
+shared memory, `system:…` for the scheduler and other engine work, `a2a:…`,
+`mcp:…`, `webhook:…`, `agent-test:…`, `anonymous-…` and `anonymous`, and the
+`gdpr-erased:…` pseudonym. Because ownership is a string comparison, a token
+whose principal were `slack:T1:U2` would own that Slack user's conversations.
+EDDI therefore **rejects a token whose principal starts with any of these
+prefixes (case-insensitively) with `401`**, and logs a `[SECURITY]` WARN naming
+the prefix and the issuer, throttled like the one above. Only an identity
+provider that allows `:` in usernames can issue such a name; if you see the WARN,
+rename the account or point `QUARKUS_OIDC_TOKEN_PRINCIPAL_CLAIM` at a claim that
+cannot take that value. The list lives in `ReservedPrincipals`, and a unit test
+fails when the code starts minting a new prefix without adding it there.
 
 > **Roles are deployment-wide.** `eddi-editor` grants authoring rights over
 > *every* configuration in the deployment. To scope agents, workflows and the
@@ -264,6 +287,19 @@ Conversation descriptors share the `descriptors` collection with configuration d
 - `GET /descriptorstore/descriptors` requires `type` to name a configuration type (one of the types the configuration stores declare, e.g. `ai.labs.agent`); anything else — `ai.labs.conversation`, a blank type, a prefix — is a `400`.
 - `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
 - **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
+
+### Editors never read a plaintext credential back
+
+Vault values belong to the administrator, so a configuration store does not hand a literal credential to anyone else. `GET` on an LLM, MCP-calls, httpcalls, RAG or channel configuration — including `?version=` reads of old versions, and MCP `read_resource` / `read_channel_integration`, which go through the same REST stores — returns the document as stored to `eddi-admin` and a redacted copy to every other caller (`ConfigSecretRedactor`):
+
+- a string under a credential-named field (`apiKey`, `botToken`, `signingSecret`, `password`, `clientSecret`, `connectionString`, …) anywhere in the document — LLM task parameters, `a2aAgents[].apiKey`, `mcpServers[].apiKey`, `modelCascade` step and judge parameters, `platformConfig`, `embeddingParameters`, `storeParameters` — is replaced by a `<redacted: …>` marker;
+- an httpcall's credential headers (`Authorization`, `X-Api-Key`, `*-Key`, `Cookie`) are replaced whole; credential-named query values in `request.path`, a userinfo password in any URL, and credential-shaped values in `request.body` are replaced in place with `<redacted: credential>`.
+
+A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`.
+
+**A document carrying the marker is never stored.** Every write to these five stores — create, update, JSON Patch, duplicate — and every import or upgrade that creates one directly answers `400` with `{"error": "bad_request", "message": …, "fields": [<paths>]}` when any string in the document contains `<redacted: ` (the whole-value marker and the in-string `<redacted: credential>` both begin with it), for administrators too. Re-enter the credential or replace it with a `${vault:…}` reference. Without this, an editor who opened a configuration in the Manager and saved it would silently replace the stored key with the marker. The store deliberately does not merge the stored literal back in either, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault.
+
+Server-side work started by an editor reads the unredacted document, with the same access check: RAG ingestion (so a knowledge base whose key is a literal still ingests) and agent upgrade and sync (`StructuralMatcher` compares against, and `UpgradeExecutor` writes back, the target's stored values — an export's `${vault:REDACTED}` placeholder is replaced by the target's own key, never by the marker). A sync **source** read from a peer through a non-admin credential does carry the marker, so its affected resources are refused rather than stored. The upgrade and sync **previews** those reads feed are redacted again at the REST boundary for anyone who is not `eddi-admin` (`PreviewRedaction`), so an editor's preview shows the marker where the stored document holds a literal.
 
 ### RestAgentManagement Gate
 
@@ -515,7 +551,14 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
 > `fe80::/10`) — including a hostname that resolves there
 > (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
-> the instance's cloud credentials; nobody configures it as an API. With protection
+> the instance's cloud credentials; nobody configures it as an API. A URL whose
+> host the check cannot read is refused too: an `http(s)` URL with an underscore
+> in its host (`x_y.example`), a percent-encoded host, or an IP literal with a
+> trailing dot (`169.254.169.254.`) has no host to `java.net.URI`, while the
+> httpCalls client parses it with `java.net.URL`, resolves it and connects — so a
+> registry-style name pointed at `169.254.169.254` used to pass unchecked
+> (security review 2026-10-17, H2). Use a standard host name; a Docker service
+> name with an underscore needs a hyphenated alias. With protection
 > off redirects are still followed, so the httpCalls client checks every redirect
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
 > instead of being followed. The MCP client and the A2A client never follow a

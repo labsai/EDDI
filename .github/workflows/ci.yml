@@ -898,6 +898,10 @@ jobs:
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.replicas=3
           expect_failure "autoscaling with in-memory messaging" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set autoscaling.enabled=true
+          expect_failure "an HPA with no metric (both resource targets null, no extraMetrics)" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.externalUrl=nats://nats.example.com:4222 --set autoscaling.enabled=true \
+            --set autoscaling.targetCPUUtilizationPercentage=null --set autoscaling.targetMemoryUtilizationPercentage=null
           expect_failure "a RollingUpdate with in-memory messaging" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.updateStrategy=RollingUpdate
           expect_failure "in-chart NATS without a password" \

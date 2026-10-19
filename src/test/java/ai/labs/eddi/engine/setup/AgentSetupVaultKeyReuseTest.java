@@ -56,6 +56,13 @@ import static org.mockito.MockitoAnnotations.openMocks;
 class AgentSetupVaultKeyReuseTest {
 
     /**
+     * These tests are about reuse and naming, not destinations: an explicit
+     * {@code ["*"]} keeps the stored entries unrestricted, as every fixture below
+     * is. {@code AgentSetupAllowedHostsTest} covers the host list itself.
+     */
+    private static final AgentSetupService.HostRule ANY_HOST = new AgentSetupService.HostRule(List.of("*"), null, "apiKey");
+
+    /**
      * Deliberately shaped so it cannot be mistaken for a live credential: a
      * realistic-looking "sk-live-..." fixture is exactly the pattern a real leaked
      * key takes, and it tripped the gitleaks generic-api-key rule in CI. Nothing
@@ -93,10 +100,11 @@ class AgentSetupVaultKeyReuseTest {
     }
 
     private String vaultApiKey(String apiKey, String vaultKeyName) throws Exception {
-        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class);
+        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class,
+                AgentSetupService.HostRule.class);
         method.setAccessible(true);
         try {
-            return (String) method.invoke(service, apiKey, "My Agent", vaultKeyName, createdResources);
+            return (String) method.invoke(service, apiKey, "My Agent", vaultKeyName, createdResources, ANY_HOST);
         } catch (InvocationTargetException e) {
             if (e.getCause() instanceof Exception cause) {
                 throw cause;
@@ -128,7 +136,7 @@ class AgentSetupVaultKeyReuseTest {
             String result = vaultApiKey("  ${vault:openai-prod}\n", null);
 
             assertEquals("${vault:openai-prod}", result);
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
             assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
         }
 
@@ -146,7 +154,7 @@ class AgentSetupVaultKeyReuseTest {
             assertEquals("${vault:typo-key}", vaultApiKey("${vault:typo-key}", null));
 
             verify(secretProvider).getMetadata(new SecretReference(SecretReference.DEFAULT_TENANT, "typo-key"));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
             // A log line does not reach the caller. Both this and the restricted-grant
             // case end in an agent that was created and cannot use its credential.
             assertTrue(String.valueOf(createdResources.get(AgentSetupService.VAULT_WARNING)).contains("does not exist"),
@@ -186,7 +194,7 @@ class AgentSetupVaultKeyReuseTest {
             String result = vaultApiKey("Bearer ${vault:openai-prod}", null);
 
             assertTrue(result.startsWith("${vault:setup.my-agent."), "Expected a freshly vaulted key, got: " + result);
-            verify(secretProvider).store(any(), eq("Bearer ${vault:openai-prod}"), anyString(), any());
+            verify(secretProvider).store(any(), eq("Bearer ${vault:openai-prod}"), anyString(), any(), any());
         }
     }
 
@@ -203,7 +211,7 @@ class AgentSetupVaultKeyReuseTest {
                     .thenReturn(List.of(entry("setup.first-agent.1.apiKey", KEY, Instant.EPOCH, List.of("*"))));
 
             assertEquals("${vault:setup.first-agent.1.apiKey}", vaultApiKey(KEY, null));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         /**
@@ -235,7 +243,7 @@ class AgentSetupVaultKeyReuseTest {
                     .thenReturn(List.of(entry("scoped.key", KEY, Instant.EPOCH, List.of("agent-42"))));
 
             assertTrue(vaultApiKey(KEY, null).startsWith("${vault:setup.my-agent."));
-            verify(secretProvider).store(any(), eq(KEY), anyString(), any());
+            verify(secretProvider).store(any(), eq(KEY), anyString(), any(), any());
         }
 
         @Test
@@ -269,7 +277,7 @@ class AgentSetupVaultKeyReuseTest {
                     .thenReturn(List.of(entry("shared.key", KEY, Instant.EPOCH, List.of("*"))));
 
             assertTrue(vaultApiKey(KEY, null).startsWith("${vault:setup.my-agent."));
-            verify(secretProvider).store(any(), eq(KEY), anyString(), any());
+            verify(secretProvider).store(any(), eq(KEY), anyString(), any(), any());
         }
 
         /** A listing failure must not fail the setup — reuse is an optimisation. */
@@ -295,7 +303,7 @@ class AgentSetupVaultKeyReuseTest {
         void freshEntryNotRollbackFodderUnderChecksum() throws Exception {
             vaultApiKey(KEY, null);
 
-            verify(secretProvider).store(any(), eq(KEY), anyString(), any());
+            verify(secretProvider).store(any(), eq(KEY), anyString(), any(), any());
             assertFalse(createdResources.containsKey(AgentSetupService.VAULTED_SECRET_KEY));
         }
 
@@ -352,7 +360,7 @@ class AgentSetupVaultKeyReuseTest {
         void storesTheTrimmedKey() throws Exception {
             vaultApiKey("  " + KEY + "\n", null);
 
-            verify(secretProvider).store(any(), eq(KEY), anyString(), any());
+            verify(secretProvider).store(any(), eq(KEY), anyString(), any(), any());
         }
 
         /**
@@ -364,7 +372,7 @@ class AgentSetupVaultKeyReuseTest {
         void failedStoreRecordsNothing() throws Exception {
             service.vaultKeyReuse = AgentSetupService.VAULT_KEY_REUSE_NEVER; // the mode that DOES record on success
             doThrow(new ISecretProvider.SecretProviderException("disk full")).when(secretProvider).store(any(), anyString(), anyString(),
-                    any());
+                    any(), any());
 
             // Fails closed (M-S1) — it used to fall back to the plaintext key.
             assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
@@ -385,7 +393,7 @@ class AgentSetupVaultKeyReuseTest {
                     .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
 
             assertEquals("${vault:openai-prod}", vaultApiKey(null, "openai-prod"));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -413,7 +421,7 @@ class AgentSetupVaultKeyReuseTest {
             when(secretProvider.getMetadata(any())).thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         /**
@@ -428,7 +436,7 @@ class AgentSetupVaultKeyReuseTest {
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
             assertTrue(e.getMessage().contains("does not match"), e.getMessage());
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -442,7 +450,7 @@ class AgentSetupVaultKeyReuseTest {
             assertTrue(e.getMessage().contains("Could not verify"), e.getMessage());
             assertFalse(e.getMessage().contains("does not match"), e.getMessage());
             assertTrue(e.getCause() instanceof IllegalStateException);
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         /**
@@ -455,7 +463,7 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a newly created NAMED entry is left alone by rollback")
         void namedEntryIsNotRollbackFodder() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any())).thenReturn(true);
 
             vaultApiKey(KEY, "openai-prod");
 
@@ -513,12 +521,12 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a tenant-qualified name is created in that tenant")
         void tenantQualifiedNameStaysInItsTenant() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any())).thenReturn(true);
 
             assertEquals("${vault:acme/openai-prod}", vaultApiKey(KEY, "${vault:acme/openai-prod}"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any(), any());
             assertEquals("acme", ref.getValue().tenantId());
             assertEquals("openai-prod", ref.getValue().keyName());
         }
@@ -534,13 +542,13 @@ class AgentSetupVaultKeyReuseTest {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
                     .thenReturn(entry("openai-prod", "the-other-callers-key", Instant.EPOCH, List.of("*")));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any())).thenReturn(false);
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
 
             assertTrue(e.getMessage().contains("created concurrently"), e.getMessage());
             // The unconditional upsert is what made the old read-back a best effort.
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -549,11 +557,11 @@ class AgentSetupVaultKeyReuseTest {
             when(secretProvider.getMetadata(any()))
                     .thenThrow(new ISecretProvider.SecretNotFoundException("absent"))
                     .thenReturn(entry("openai-prod", KEY, Instant.EPOCH, List.of("*")));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(false);
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any())).thenReturn(false);
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
 
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
             // Not ours: nothing was created, so the resolver cache is left alone.
             verify(secretResolver, never()).invalidateCache(any(SecretReference.class));
         }
@@ -562,7 +570,7 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a store failure while creating a named key is reported, not swallowed")
         void namedCreateFailureIsReported() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("absent"));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any()))
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any()))
                     .thenThrow(new ISecretProvider.SecretProviderException("disk full"));
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, "openai-prod"));
@@ -574,14 +582,14 @@ class AgentSetupVaultKeyReuseTest {
         @DisplayName("a missing entry is created under exactly that name")
         void createsUnderTheGivenName() throws Exception {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("nope"));
-            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any())).thenReturn(true);
+            when(secretProvider.storeIfAbsent(any(), anyString(), anyString(), any(), any())).thenReturn(true);
 
             assertEquals("${vault:openai-prod}", vaultApiKey(KEY, "openai-prod"));
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any());
+            verify(secretProvider).storeIfAbsent(ref.capture(), eq(KEY), anyString(), any(), any());
             assertEquals("openai-prod", ref.getValue().keyName());
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -705,10 +713,11 @@ class AgentSetupVaultKeyReuseTest {
     }
 
     private String vaultApiAuth(String apiAuth) throws Exception {
-        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiAuth", String.class, String.class, Map.class);
+        Method method = AgentSetupService.class.getDeclaredMethod("vaultApiAuth", String.class, String.class, Map.class,
+                AgentSetupService.HostRule.class);
         method.setAccessible(true);
         try {
-            return (String) method.invoke(service, apiAuth, "My Agent", createdResources);
+            return (String) method.invoke(service, apiAuth, "My Agent", createdResources, ANY_HOST);
         } catch (InvocationTargetException e) {
             if (e.getCause() instanceof Exception cause) {
                 throw cause;
@@ -726,7 +735,8 @@ class AgentSetupVaultKeyReuseTest {
         @Test
         @DisplayName("apiKey: a failed vault write fails the setup instead of returning the plaintext")
         void apiKeyStoreFailureFails() throws Exception {
-            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any(),
+                    any());
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiKey(KEY, null));
 
@@ -743,7 +753,7 @@ class AgentSetupVaultKeyReuseTest {
             String result = vaultApiAuth("Bearer " + KEY);
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq("Bearer " + KEY), anyString(), any());
+            verify(secretProvider).store(ref.capture(), eq("Bearer " + KEY), anyString(), any(), any());
             assertTrue(ref.getValue().keyName().startsWith("setup.my-agent."), ref.getValue().keyName());
             assertTrue(ref.getValue().keyName().endsWith(".apiAuth"), ref.getValue().keyName());
             assertEquals(ref.getValue().toReferenceString(), result);
@@ -756,7 +766,7 @@ class AgentSetupVaultKeyReuseTest {
         void apiAuthReferencePassesThrough() throws Exception {
             assertEquals("${connection:crm}", vaultApiAuth("${connection:crm}"));
             assertEquals("Bearer ${vault:crm-token}", vaultApiAuth("Bearer ${vault:crm-token}"));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -766,7 +776,7 @@ class AgentSetupVaultKeyReuseTest {
                     "Basic ${vault:tenant-a/crm-basic}")) {
                 assertEquals(reference, vaultApiAuth(reference));
             }
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -777,7 +787,7 @@ class AgentSetupVaultKeyReuseTest {
             String result = vaultApiAuth(literal);
 
             var ref = ArgumentCaptor.forClass(SecretReference.class);
-            verify(secretProvider).store(ref.capture(), eq(literal), anyString(), any());
+            verify(secretProvider).store(ref.capture(), eq(literal), anyString(), any(), any());
             assertEquals(ref.getValue().toReferenceString(), result);
             assertFalse(result.contains("test-token"), result);
         }
@@ -788,7 +798,7 @@ class AgentSetupVaultKeyReuseTest {
             String literal = "Bearer ${unknown:thing}";
 
             assertNotEquals(literal, vaultApiAuth(literal));
-            verify(secretProvider).store(any(), eq(literal), anyString(), any());
+            verify(secretProvider).store(any(), eq(literal), anyString(), any(), any());
         }
 
         @Test
@@ -797,7 +807,7 @@ class AgentSetupVaultKeyReuseTest {
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer plain-" + KEY + "${vault:crm-token}"));
 
             assertFalse(e.getMessage().contains(KEY), e.getMessage());
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
@@ -806,13 +816,14 @@ class AgentSetupVaultKeyReuseTest {
             when(secretProvider.isAvailable()).thenReturn(false);
 
             assertEquals("Bearer " + KEY, vaultApiAuth("Bearer " + KEY));
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
         }
 
         @Test
         @DisplayName("apiAuth: a failed vault write fails the setup")
         void apiAuthStoreFailureFails() throws Exception {
-            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any());
+            doThrow(new ISecretProvider.SecretProviderException("mongo down")).when(secretProvider).store(any(), anyString(), anyString(), any(),
+                    any());
 
             var e = assertThrows(AgentSetupService.AgentSetupException.class, () -> vaultApiAuth("Bearer " + KEY));
 
@@ -834,6 +845,6 @@ class AgentSetupVaultKeyReuseTest {
         var e = assertThrows(Exception.class, () -> vaultApiKey("sk-live-value", reserved));
 
         assertTrue(e.getMessage().contains("reserved"), e.getMessage());
-        verify(secretProvider, never()).store(any(), anyString(), anyString(), any());
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), any(), any());
     }
 }

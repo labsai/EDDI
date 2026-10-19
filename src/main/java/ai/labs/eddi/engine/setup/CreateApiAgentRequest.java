@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.setup;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.util.List;
+
 /**
  * Request object for creating an API Agent from an OpenAPI spec. Maps to the
  * MCP {@code create_api_agent} tool parameters and the REST
@@ -119,7 +121,20 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          * callers (McpSetupTools, CreateSubAgentTool) use the overload below, which
          * passes null.
          */
-        Boolean grantReferencedSecrets) {
+        Boolean grantReferencedSecrets,
+        /*
+         * Where a secret this request vaults (apiKey and apiAuth; for apiAuth the
+         * derived host is the API's target server) may be sent — stored as the secret's
+         * allowedHosts. Null derives the list: the host of the base URL the request
+         * names, or the provider's own endpoint. ["*"] stores the secret with no
+         * destination restriction, which under eddi.vault.grant-enforcement=enforce is
+         * the only way to get one. Without a list any editor who can read the generated
+         * configuration could repoint it and receive the key (security review
+         * 2026-10-17, H1).
+         *
+         * Admin input like grantReferencedSecrets: not exposed on any MCP tool.
+         */
+        List<String> allowedHosts) {
 
     /** Every field but {@link #grantReferencedSecrets}, which stays off. */
     public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
@@ -128,6 +143,16 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
             String vaultKeyName, String apiAuthHeader) {
         this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
                 enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
-                null);
+                null, null);
+    }
+
+    /** Every field but {@link #allowedHosts}, which is derived. */
+    public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
+            String apiBaseUrl, String apiAuth, String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy,
+            String environment, String llmBaseUrl, AgentConfiguration.HitlConfig hitlConfig, String mcpServerUrls, Integer maxToolIterations,
+            String vaultKeyName, String apiAuthHeader, Boolean grantReferencedSecrets) {
+        this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
+                enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
+                grantReferencedSecrets, null);
     }
 }

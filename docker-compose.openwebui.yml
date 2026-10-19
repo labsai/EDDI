@@ -106,6 +106,8 @@ services:
       - "EDDI_DEMO_LLM_API_KEY=${EDDI_DEMO_LLM_API_KEY:-}"
       - "EDDI_DEMO_LLM_TYPE=${EDDI_DEMO_LLM_TYPE:-openai}"
       - "EDDI_DEMO_LLM_MODEL=${EDDI_DEMO_LLM_MODEL:-gpt-4o-mini}"
+      # Where the vaulted key may be sent; derived from the type when empty.
+      - "EDDI_DEMO_LLM_ALLOWED_HOST=${EDDI_DEMO_LLM_ALLOWED_HOST:-}"
     volumes:
       - ./src/main/docker/seed-demo-agent.sh:/seed.sh:ro
     entrypoint: ["/bin/sh", "/seed.sh"]
