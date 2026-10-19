@@ -187,6 +187,35 @@ public class SharedArtifactStore implements ISharedArtifactStore {
     }
 
     @Override
+    public List<SharedArtifact> listAllForUser(String userId, int limit) throws IResourceStore.ResourceStoreException {
+        List<SharedArtifact> artifacts = new ArrayList<>();
+        if (userId == null || userId.isBlank()) {
+            return artifacts;
+        }
+        try {
+            var filter = new IResourceFilter.QueryFilters(
+                    List.of(new IResourceFilter.QueryFilter("ownerUserId", "^" + escapeRegex(userId) + "$")));
+            // Over-matches by the regex are dropped below, so read one page and keep the
+            // exact matches; a page of MAX_RESULT_LIMIT is far beyond any export cap.
+            var resourceIds = storage.findResources(new IResourceFilter.QueryFilters[]{filter}, "createdAt", 0, limit);
+            for (var resourceId : resourceIds) {
+                var resource = storage.read(resourceId.getId(), SINGLE_VERSION);
+                if (resource == null || !userId.equals(resource.getData().getOwnerUserId())) {
+                    continue;
+                }
+                SharedArtifact artifact = resource.getData();
+                artifact.setId(resourceId.getId());
+                artifacts.add(artifact);
+            }
+            return artifacts;
+        } catch (Exception e) {
+            // Unlike the per-discussion listing, an unreadable row fails the call: an
+            // access request answered without it would be silently incomplete.
+            throw new IResourceStore.ResourceStoreException("Failed to list shared artifacts for user: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public long deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         if (userId == null || userId.isBlank()) {
             return 0;

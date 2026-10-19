@@ -551,6 +551,49 @@ describe("auto-scroll", () => {
     await screen.findByText(/one\s+two/);
     expect(transcript.scrollTop).toBe(0);
   });
+
+  it("keeps following after Scroll to bottom while the smooth scroll is still on its way", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const enc = new TextEncoder();
+    install({
+      send: () =>
+        new Response(
+          new ReadableStream({
+            start(c) {
+              controller = c;
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+    });
+    renderAt("/chat/production/agent-1");
+    await screen.findByText("Hello there");
+    const transcript = screen.getByTestId("chat-transcript");
+    scrollMetrics(transcript);
+    // A smooth scroll: starts, but has not arrived yet.
+    const scrollTo = vi.fn();
+    Object.defineProperty(transcript, "scrollTo", { value: scrollTo, configurable: true });
+
+    await typeAndSend("go");
+    await waitFor(() => expect(controller).toBeDefined());
+    await act(async () => controller.enqueue(enc.encode("event: token\ndata: one \n\n")));
+    // The reply is visibly streaming: one agent indicator, not dots as well.
+    expect(screen.queryByTestId("typing-indicator")).not.toBeInTheDocument();
+
+    transcript.scrollTop = 0;
+    fireEvent.scroll(transcript);
+    fireEvent.click(screen.getByTestId("scroll-to-bottom"));
+    expect(scrollTo).toHaveBeenCalled();
+
+    // Mid-animation scroll events, moving DOWN, are not the reader leaving.
+    transcript.scrollTop = 500;
+    fireEvent.scroll(transcript);
+    expect(screen.queryByTestId("scroll-to-bottom")).not.toBeInTheDocument();
+
+    await act(async () => controller.enqueue(enc.encode("event: token\ndata: two\n\n")));
+    await screen.findByText(/one\s+two/);
+    expect(transcript.scrollTop).toBe(1000);
+  });
 });
 
 describe("undo", () => {

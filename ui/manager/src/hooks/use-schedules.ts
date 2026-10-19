@@ -12,6 +12,8 @@ import {
   getFireLogs,
   getFailedFires,
 } from "@/lib/api/schedules";
+import type { ScheduleConfiguration } from "@/lib/api/schedules";
+import { patchQueries } from "@/lib/optimistic";
 
 // ==================== Query Keys ====================
 
@@ -83,13 +85,31 @@ export function useDeleteSchedule() {
   });
 }
 
+/** Key of the toggle mutation, so a page can see every toggle still in flight. */
+export const TOGGLE_SCHEDULE_KEY = ["schedules", "toggle"] as const;
+
 export function useToggleSchedule() {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey: TOGGLE_SCHEDULE_KEY,
     mutationFn: ({ id, enable }: { id: string; enable: boolean }) =>
       enable ? enableSchedule(id) : disableSchedule(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: KEYS.all });
+    // Flip the row at once; the request and the refetch follow behind it.
+    onMutate: async ({ id, enable }) => {
+      await patchQueries<ScheduleConfiguration[]>(qc, ["schedules", "list"], (list) =>
+        list.map((s) => (s.id === id ? { ...s, enabled: enable } : s)),
+      );
+    },
+    // Undo only this row, and only if it still shows this toggle. Restoring the
+    // whole list snapshot would also undo another row's toggle that started
+    // after this one.
+    onError: (_err, { id, enable }) => {
+      qc.setQueriesData<ScheduleConfiguration[]>({ queryKey: ["schedules", "list"] }, (list) =>
+        list?.map((s) => (s.id === id && s.enabled === enable ? { ...s, enabled: !enable } : s)),
+      );
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: KEYS.all });
     },
   });
 }

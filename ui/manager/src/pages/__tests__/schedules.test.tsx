@@ -762,5 +762,35 @@ describe("SchedulesPage — nextFire encodings", () => {
     );
     expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
   });
-});
 
+  it("keeps an edit made through a preset button when Escape is pressed", async () => {
+    // Presets, trigger tabs and the agent picker change the form without an
+    // input event, so they must mark it edited themselves.
+    renderSchedules();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("create-schedule-btn"));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByTestId("cron-preset-hourly"));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("keeps every row with a toggle in flight disabled, not just the latest one", async () => {
+    const hang = () => new Promise<Response>(() => {});
+    server.use(
+      http.post("*/schedulestore/schedules/:id/enable", hang),
+      http.post("*/schedulestore/schedules/:id/disable", hang)
+    );
+    renderSchedules();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("toggle-sched-1"));
+    await user.click(await screen.findByTestId("toggle-sched-2"));
+
+    // A second click on row 1 would race its first request.
+    expect(screen.getByTestId("toggle-sched-1")).toBeDisabled();
+    expect(screen.getByTestId("toggle-sched-2")).toBeDisabled();
+    expect(screen.getByTestId("toggle-sched-3")).toBeEnabled();
+  });
+});

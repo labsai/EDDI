@@ -43,6 +43,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -193,6 +194,27 @@ public class MemberTurnExecutor {
         }
         listener.onCostUpdated(new GroupConversationEventSink.CostUpdatedEvent(
                 attributionKey, displayName, attributed, gc.getTotalCost()));
+    }
+
+    /**
+     * Fires {@code member_tool_call} for one tool a member's loop is about to run.
+     * Name only — the arguments never reach the group stream.
+     * <p>
+     * Runs on a COORDINATOR thread (the member's own turn), so it can fire after
+     * the orchestrator cancelled this speaker; a cancelled turn's event is dropped,
+     * as is one with no listener or no name. A listener that throws must not break
+     * the member's tool loop, so failures are swallowed here.
+     */
+    static void announceToolCall(GroupMember member, String toolName, GroupDiscussionEventListener listener,
+                                 GroupConversationService.MemberTurnCancellation cancellation) {
+        if (listener == null || toolName == null || (cancellation != null && cancellation.isCancelled())) {
+            return;
+        }
+        try {
+            listener.onMemberToolCall(new GroupConversationEventSink.MemberToolCallEvent(member.agentId(), member.displayName(), toolName));
+        } catch (RuntimeException e) {
+            LOGGER.debug("member_tool_call listener failed; ignoring", e);
+        }
     }
 
     /**
@@ -403,7 +425,8 @@ public class MemberTurnExecutor {
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
-                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
+                Consumer<String> toolObserver = listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
+                ConversationResponseHandler memberHandler = snapshot -> {
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                         memberPaused[0] = true;
                         pausedSnapshot[0] = snapshot;
@@ -442,8 +465,10 @@ public class MemberTurnExecutor {
 
                     // Wave 0, F5: harvest this member's tracked cost so far.
                     // Attributed under the CONVERSATION key, not the agent id: costs
-                    // are per-conversation (AUDIT_COST is that conversation's running
-                    // total), and GroupCostLedger replaces rather than adds. A turn in
+                    // are per-conversation (the snapshot's conversationCost is that
+                    // conversation's running total, the sum of the per-STEP
+                    // AUDIT_COST over every step), and GroupCostLedger replaces
+                    // rather than adds. A turn in
                     // a separate conversation attributed to the agent's own key would
                     // overwrite that agent's real accumulated cost with this
                     // conversation's smaller one — silently shrinking totalCost and
@@ -453,7 +478,9 @@ public class MemberTurnExecutor {
                     announceCost(gc, convKey, member.displayName(), listener);
 
                     responseFuture.complete(response);
-                });
+                };
+                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false,
+                        toolObserver == null ? memberHandler : IConversationService.observing(toolObserver, memberHandler));
 
                 // The only await point of a member turn — and therefore the lever for
                 // cancelling it. Registering the future means an aborting orchestrator
@@ -567,6 +594,9 @@ public class MemberTurnExecutor {
                     replacedEndedConversation = true;
                     try {
                         String endedConvId = privateConvId;
+                        // Before the fresh conversation's first harvest replaces the
+                        // ended one's total under the same key.
+                        GroupCostLedger.retireConversation(gc, convKey, endedConvId);
                         privateConvId = startMemberConversation(gc, member, convKey);
                         groupConversationService.grantAndInjectAttachments(gc, privateConvId, context);
                         LOGGER.infof("Member %s's conversation %s had ended; continuing in %s", LogSanitizer.sanitize(member.agentId()),
@@ -804,8 +834,10 @@ public class MemberTurnExecutor {
             Double remainingBudget = protocol.maxCostPerDiscussion() == null
                     ? null
                     : Math.max(0.0, protocol.maxCostPerDiscussion() - gc.getTotalCost());
+            // gc.getId() names where the shared attachments' storageRefs came from: the
+            // child accepts a reference only if this discussion can read it.
             GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget);
+                    gc.getAttachments(), remainingBudget, gc.getId());
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets

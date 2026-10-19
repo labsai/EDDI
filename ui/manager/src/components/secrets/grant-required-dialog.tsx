@@ -173,13 +173,16 @@ function GrantRequiredBody({
         return;
       }
       if (losingAccess === null) {
-        const losing: AffectedAgent[] = [];
-        for (const issue of grantable) {
-          for (const id of agentIdsFor(issue)) {
-            const dry = await grantAgentToSecret(issue.tenantId!, issue.keyName!, id, { dryRun: true });
-            losing.push(...(dry.agentsLosingAccess ?? []));
-          }
-        }
+        // Dry runs write nothing, so they go out together rather than one
+        // round trip after another.
+        const dryRuns = await Promise.all(
+          grantable.flatMap((issue) =>
+            agentIdsFor(issue).map((id) =>
+              grantAgentToSecret(issue.tenantId!, issue.keyName!, id, { dryRun: true }),
+            ),
+          ),
+        );
+        const losing: AffectedAgent[] = dryRuns.flatMap((dry) => dry.agentsLosingAccess ?? []);
         // An append never removes anyone, so this is empty by construction. If
         // the backend ever says otherwise, the admin sees it before anything is
         // written rather than after.

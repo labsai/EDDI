@@ -232,7 +232,7 @@ function TriggerCard({
           <Zap className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
           <span className="flex-1 font-semibold text-sm text-foreground font-mono">{trigger.intent}</span>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-            {trigger.agentDeployments.length} {t("triggers.agents", "agents")}
+            {t("agents.count", { count: trigger.agentDeployments.length })}
           </span>
         </button>
         <button type="button" onClick={() => onEdit()} className="rounded p-1.5 text-muted-foreground hover:text-foreground transition-colors" title={t("common.edit")} aria-label={t("common.edit")}>
@@ -313,7 +313,7 @@ function TriggerDialog({
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
             readOnly={!!initial}
-            placeholder="e.g. booking_request"
+            placeholder={t("triggers.intentPlaceholder", "e.g. booking_request")}
             className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             data-testid="trigger-intent-input"
             autoFocus

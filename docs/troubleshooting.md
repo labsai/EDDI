@@ -303,7 +303,7 @@ See [GDPR Compliance](gdpr-compliance.md) and [Audit Ledger](audit-ledger.md).
 
 ### Export always answers 207
 
-- **Response:** `GET /admin/gdpr/{userId}/export` answers `207` with `"complete": false` and an `omittedCategories` list. This is expected today: group transcripts, shared artifacts, schedules and HITL journal entries are not yet exported, although erasure deletes them.
+- **Response:** `GET /admin/gdpr/{userId}/export` answers `207` with `"complete": false` and an `omittedCategories` list. This is expected today: schedules and HITL journal entries are not yet exported, although erasure deletes them.
 
 ### Conversations refused with 403 for one user
 

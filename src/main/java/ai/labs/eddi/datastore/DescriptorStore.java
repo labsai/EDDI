@@ -283,6 +283,20 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         descriptorResourceStore.set(resourceId, version, documentDescriptor);
     }
 
+    /**
+     * Stamps {@code lastModifiedOn} on the live descriptor with one update, without
+     * reading it first or rewriting any other field (see
+     * {@link IResourceStorage#setNumberField}).
+     *
+     * @return {@code false} when there is no live descriptor (deleted, or never
+     *         written)
+     * @throws UnsupportedOperationException
+     *             when the storage backend cannot update a single field
+     */
+    public boolean touchLastModified(String resourceId, long epochMillis) {
+        return resourceStorage.setNumberField(resourceId, FIELD_LAST_MODIFIED, epochMillis);
+    }
+
     @Override
     public void createDescriptor(String resourceId, Integer version, T documentDescriptor) throws IResourceStore.ResourceStoreException {
         descriptorResourceStore.createNew(resourceId, version, documentDescriptor);

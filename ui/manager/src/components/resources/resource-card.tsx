@@ -50,10 +50,21 @@ export function ResourceCard({
         {/* Context menu. Hidden outright when the caller may do neither of the
             things in it — an empty menu is worse than no menu. */}
         {(access.canView || access.canOwn) && (
-          <div className="relative">
+          <div
+            className="relative"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && menuOpen) {
+                e.preventDefault();
+                setMenuOpen(false);
+              }
+            }}
+          >
             <button
+              type="button"
               onClick={() => setMenuOpen(!menuOpen)}
-              className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+              aria-label={t("common.moreActions", "More actions")}
+              aria-expanded={menuOpen}
+              className="reveal-on-touch rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:p-2"
               data-testid={`resource-menu-${item.id}`}
             >
               <MoreVertical className="h-4 w-4" />

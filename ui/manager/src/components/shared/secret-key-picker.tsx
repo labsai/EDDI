@@ -279,14 +279,20 @@ function CreateSecretModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={handleClose}
       onKeyDown={(e) => {
-        if (e.key === "Escape") handleClose();
+        // preventDefault marks it handled: this modal is portalled, but React
+        // still bubbles the key to the dialog that hosts the picker, which
+        // must not close as well.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          handleClose();
+        }
       }}
     >
       <div
-        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-card p-6 shadow-2xl"
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -296,7 +302,9 @@ function CreateSecretModal({
             {t("secrets.createTitle", "Add Secret")}
           </h2>
           <button
+            type="button"
             onClick={handleClose}
+            aria-label={t("common.close", "Close")}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted transition-colors"
           >
             <X className="h-4 w-4" />

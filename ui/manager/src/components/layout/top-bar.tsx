@@ -62,8 +62,9 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
 
   return (
     <header className="flex h-16 items-center justify-between border-b border-border bg-card px-4">
-      {/* Left: Mobile menu + Breadcrumbs */}
-      <div className="flex items-center gap-3">
+      {/* Left: Mobile menu + Breadcrumbs. min-w-0 + flex-1 let the current
+          crumb truncate instead of pushing the controls off the bar. */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         {/* Mobile menu button */}
         <button
           onClick={onMenuClick}
@@ -96,7 +97,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               )}
             >
               {idx > 0 && (
-                <ChevronRight className="hidden h-3.5 w-3.5 text-muted-foreground/60 md:block" aria-hidden="true" />
+                <ChevronRight className="hidden h-3.5 w-3.5 text-muted-foreground/60 md:block rtl:rotate-180" aria-hidden="true" />
               )}
               {idx === breadcrumbs.length - 1 ? (
                 <span className="truncate font-medium text-foreground" aria-current="page">
@@ -118,17 +119,17 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
       {/* Center: Platform Status. On phones only the dot stays (the full pill
           pushed the bar into horizontal overflow); its label still names the
           state for assistive tech. */}
-      <div className="hidden md:block">
+      <div className="hidden shrink-0 md:block">
         <PlatformStatus />
       </div>
-      <div className="md:hidden">
+      <div className="shrink-0 md:hidden">
         <PlatformStatus compact />
       </div>
 
       {/* Right: Operator launcher, then the personalization controls. The
           operator sits outside the tour target — the tour step is about theme
           and language, not about the operator. */}
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <NotificationBell />
         <OperatorDrawer />
 
@@ -164,7 +165,7 @@ export function TopBar({ onMenuClick, sidebarVisible }: TopBarProps) {
               aria-label={option.label}
               aria-pressed={theme === option.value}
               className={cn(
-                "rounded-md p-1.5 transition-colors",
+                "flex h-8 w-8 items-center justify-center rounded-md transition-colors",
                 theme === option.value
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"

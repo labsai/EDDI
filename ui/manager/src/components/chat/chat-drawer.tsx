@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore, type ChatDrawerStep } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation, useSendMessage } from "@/hooks/use-chat";
@@ -83,6 +83,21 @@ export function ChatDrawer() {
   const errorMessage = useChatDrawerStore((s) => s.errorMessage);
   const close = useChatDrawerStore((s) => s.close);
 
+  // Escape closes the drawer — on a phone it covers the whole screen, so it
+  // needs the same dismissal a dialog has. A key another dialog already
+  // handled, or one pressed inside a dialog or the operator panel (which has
+  // its own Escape and is role="complementary", not a dialog), is left alone.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], #operator-drawer-panel')) return;
+      close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, close]);
+
   // The chat store is shared with the main chat panel, so it can hold ANOTHER
   // agent's conversation when the drawer opens (the agent page's Chat button
   // on an agent that is not live opens the drawer without starting anything).
@@ -165,8 +180,12 @@ export function ChatDrawer() {
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-col bg-background overflow-hidden transition-[width,opacity] duration-300 ease-in-out",
-        isOpen ? "w-[420px] opacity-100 border-s border-border" : "w-0 opacity-0"
+        // Phones: a full-screen overlay (an in-flow 420px column left no room
+        // for the page). From md up it is an in-flow column beside <main>.
+        "fixed inset-0 z-50 flex shrink-0 flex-col bg-background overflow-hidden transition-[width,opacity] duration-300 ease-in-out md:static md:inset-auto md:z-auto",
+        isOpen
+          ? "w-full opacity-100 md:w-[min(420px,45vw)] md:border-s md:border-border"
+          : "pointer-events-none w-0 opacity-0"
       )}
       data-testid="chat-drawer"
       role="complementary"

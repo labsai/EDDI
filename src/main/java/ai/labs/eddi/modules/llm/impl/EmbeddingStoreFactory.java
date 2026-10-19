@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -692,7 +693,7 @@ public class EmbeddingStoreFactory {
     private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
-        String host = params.getOrDefault("host", "localhost");
+        String host = requirePlainHost(params.getOrDefault("host", "localhost"), "pgvector");
         int port = parseIntParam(params, "port", 5432);
         guardStoreHost(host + ":" + port, "pgvector");
         String database = params.getOrDefault("database", "eddi");
@@ -813,7 +814,7 @@ public class EmbeddingStoreFactory {
     private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId) {
         Map<String, String> params = resolveParams(config);
 
-        String host = params.getOrDefault("host", "localhost");
+        String host = requirePlainHost(params.getOrDefault("host", "localhost"), "qdrant");
         int port = parseIntParam(params, "port", 6334);
         guardStoreHost(host + ":" + port, "qdrant");
         String collectionName = physicalName(params, "collectionName", ragConfigId, config);
@@ -1031,6 +1032,40 @@ public class EmbeddingStoreFactory {
                     + "qualified with a schema; it is put into SQL as it is");
         }
         return name;
+    }
+
+    /**
+     * A DNS name: dot-separated labels of letters, digits, hyphens and (for Docker
+     * service names) underscores, no label starting or ending with a hyphen. An
+     * IPv4 literal matches this too.
+     */
+    private static final Pattern PLAIN_HOSTNAME = Pattern
+            .compile("(?=.{1,253}$)[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?(?:\\.[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*\\.?");
+
+    /**
+     * An IPv6 literal, bare or bracketed (hex digits, colons, embedded IPv4 dots).
+     */
+    private static final Pattern IPV6_LITERAL = Pattern.compile("\\[?[0-9A-Fa-f]*:[0-9A-Fa-f:.]*\\]?");
+
+    /**
+     * Refuses a store {@code host} that is anything but one hostname or IP literal.
+     * pgjdbc's {@code PGSimpleDataSource} splices server names into its JDBC URL
+     * unencoded, so a host such as {@code db.example.com/eddi?sslfactory=...&x=}
+     * injected driver properties ({@code socketFactory}, {@code sslfactory},
+     * {@code authenticationPluginClassName}, ...) and {@code a.com,10.0.0.5}
+     * dialled a second host that {@link #guardStoreHost} never saw. The port has
+     * its own parameter and is not accepted here. Security review M9.2.
+     */
+    static String requirePlainHost(String host, String storeType) {
+        String candidate = host == null ? "" : host.trim();
+        boolean bracketed = candidate.startsWith("[") || candidate.endsWith("]");
+        boolean ipv6 = IPV6_LITERAL.matcher(candidate).matches()
+                && (!bracketed || (candidate.startsWith("[") && candidate.endsWith("]")));
+        if (candidate.isEmpty() || !(PLAIN_HOSTNAME.matcher(candidate).matches() || ipv6)) {
+            throw new IllegalArgumentException(storeType + " storeParameters.host must be a single hostname or IP address "
+                    + "(no scheme, path, query, port or comma-separated list; set the port in storeParameters.port)");
+        }
+        return candidate;
     }
 
     /**

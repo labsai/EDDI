@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { isImeComposing } from "@/lib/ime";
 import { useTranslation } from "react-i18next";
 import { agentKeys, agentWriteInvalidations } from "@/lib/query-keys";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -287,9 +288,10 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
       setSaving(false);
       // Always re-sync to pick up version bumps, even on partial failures
       // One list, shared with every other agent writer — see query-keys.ts.
-      for (const queryKey of agentWriteInvalidations(agentId)) {
-        await queryClient.invalidateQueries({ queryKey });
-      }
+      // In parallel: the prompt re-sync below needs them all in, not in order.
+      await Promise.all(
+        agentWriteInvalidations(agentId).map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      );
       setPromptSynced(false);
     }
   }, [
@@ -550,6 +552,7 @@ function AgentEditorSheet({ agentId, onClose }: AgentEditorSheetProps) {
                         value={newSkill}
                         onChange={(e) => setNewSkill(e.target.value)}
                         onKeyDown={(e) => {
+                          if (isImeComposing(e)) return;
                           if (e.key === "Enter") handleAddCapability();
                           if (e.key === "Escape") setAddingCapability(false);
                         }}

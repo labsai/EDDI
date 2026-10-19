@@ -346,7 +346,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
-          className="w-full max-w-2xl rounded-xl border bg-card p-6 shadow-2xl max-h-[85vh] flex flex-col"
+          className="w-full max-w-2xl rounded-xl border bg-card p-6 shadow-2xl max-h-[85dvh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
           data-testid="import-agent-dialog"
         >
@@ -356,6 +356,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               {t("importDialog.title", "Import Agent")}
             </h2>
             <button
+              aria-label={t("common.close", "Close")}
               onClick={handleClose}
               disabled={isLoading}
               className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground disabled:opacity-50"
@@ -592,7 +593,7 @@ function TargetStep({
 
       <div className="flex justify-between pt-2">
         <Button variant="ghost" onClick={onBack} disabled={isLoading}>
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("common.back", "Back")}
         </Button>
         <Button
@@ -603,7 +604,7 @@ function TargetStep({
           {isPreviewing
             ? t("common.loading", "Loading...")
             : t("importDialog.previewChanges", "Preview Changes")}
-          <ArrowRight className="h-4 w-4" />
+          <ArrowRight className="h-4 w-4 rtl:rotate-180" />
         </Button>
       </div>
     </div>

@@ -4737,6 +4737,7 @@ export const scheduleHandlers = [
       }),
       sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
       sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("member_tool_call", { agentId: "agent1", displayName: "Support Agent", tool: "search_knowledge_base" }),
       sseEvent("speaker_complete", {
         agentId: "agent1",
         displayName: "Support Agent",
@@ -4777,6 +4778,8 @@ export const scheduleHandlers = [
         for (const event of events) {
           await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
           controller.enqueue(encoder.encode(event));
+          // Hold after a tool call so the member card's "using <tool>…" is visible.
+          if (event.startsWith("event: member_tool_call")) await new Promise((r) => setTimeout(r, 4000));
         }
         controller.close();
       },

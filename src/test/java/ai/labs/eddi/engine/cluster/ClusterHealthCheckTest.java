@@ -39,7 +39,7 @@ class ClusterHealthCheckTest {
     @DisplayName("in-memory: UP, and no NATS bean is touched")
     void inMemoryIsUp() {
         Instance<NatsConnectionManager> connections = instance(null);
-        var check = new ClusterHealthCheck(ClusterConfig.defaults(), connections, instance(null), instance(null));
+        var check = new ClusterHealthCheck(ClusterConfig.defaults(), connections, instance(null), instance(null), true);
         HealthCheckResponse response = check.call();
         assertEquals(HealthCheckResponse.Status.UP, response.getStatus());
         verify(connections, never()).get();
@@ -53,7 +53,7 @@ class ClusterHealthCheckTest {
         when(manager.isConnected()).thenReturn(false);
         when(manager.node()).thenReturn(new NodeIdentity("n1", "b1"));
         var check = new ClusterHealthCheck(ClusterConfig.defaults().withMessagingType("nats"), instance(manager), instance(null),
-                instance(null));
+                instance(null), true);
         HealthCheckResponse response = check.call();
         assertEquals(HealthCheckResponse.Status.UP, response.getStatus());
         assertEquals(Boolean.TRUE, response.getData().orElseThrow().get("degraded"));
@@ -66,7 +66,7 @@ class ClusterHealthCheckTest {
         when(manager.isDegraded()).thenReturn(true);
         when(manager.node()).thenReturn(new NodeIdentity("n1", "b1"));
         var check = new ClusterHealthCheck(requireNats(ClusterConfig.defaults().withMessagingType("nats")), instance(manager),
-                instance(null), instance(null));
+                instance(null), instance(null), true);
         assertEquals(HealthCheckResponse.Status.DOWN, check.call().getStatus());
     }
 
@@ -79,7 +79,7 @@ class ClusterHealthCheckTest {
         ClusterPresence presence = mock(ClusterPresence.class);
         when(presence.members()).thenReturn(List.of(Map.of("node", "n1"), Map.of("node", "n2")));
         var check = new ClusterHealthCheck(ClusterConfig.defaults().withMessagingType("nats"), instance(manager), instance(presence),
-                instance(null));
+                instance(null), true);
         HealthCheckResponse response = check.call();
         assertEquals(HealthCheckResponse.Status.UP, response.getStatus());
         assertEquals(2L, ((Number) response.getData().orElseThrow().get("members")).longValue());
@@ -98,7 +98,7 @@ class ClusterHealthCheckTest {
         Instance<NatsLeaseManager> leaseInstance = instance(leases);
         when(leaseInstance.isResolvable()).thenReturn(true);
         var check = new ClusterHealthCheck(ClusterConfig.defaults().withMessagingType("nats"), instance(manager), instance(presence),
-                leaseInstance);
+                leaseInstance, true);
         HealthCheckResponse response = check.call();
         assertEquals(HealthCheckResponse.Status.DOWN, response.getStatus());
         assertEquals(Boolean.TRUE, response.getData().orElseThrow().get("draining"));
@@ -119,5 +119,25 @@ class ClusterHealthCheckTest {
         assertThrows(ClusterUnavailableException.class, presence::currentMembers,
                 "a decision such as 'is this the last node?' must see the read error, not a stale or empty list");
         assertEquals(2, presence.members().size(), "the status views keep the last known list");
+    }
+
+    @Test
+    @DisplayName("without eddi.health.verbose the public check reports the status and nothing else")
+    void terseByDefault() throws Exception {
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.isDegraded()).thenReturn(true);
+        when(manager.isConnected()).thenReturn(false);
+        when(manager.unavailableSinceMillis()).thenReturn(1234L);
+        when(manager.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        var check = new ClusterHealthCheck(requireNats(ClusterConfig.defaults().withMessagingType("nats")), instance(manager),
+                instance(null), instance(null), false);
+        HealthCheckResponse response = check.call();
+        assertEquals(HealthCheckResponse.Status.DOWN, response.getStatus(), "the status still follows the cluster");
+        assertTrue(response.getData().map(Map::isEmpty).orElse(true), "no node id, mode or NATS state on a public endpoint");
+
+        var inMemory = new ClusterHealthCheck(ClusterConfig.defaults(), instance(null), instance(null), instance(null), false);
+        HealthCheckResponse up = inMemory.call();
+        assertEquals(HealthCheckResponse.Status.UP, up.getStatus());
+        assertTrue(up.getData().map(Map::isEmpty).orElse(true));
     }
 }

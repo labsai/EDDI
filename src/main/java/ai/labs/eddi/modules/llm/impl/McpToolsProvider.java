@@ -135,7 +135,7 @@ class McpToolsProvider implements ToolSourceProvider {
         List<McpToolProviderManager.McpServerFailure> failures = new ArrayList<>();
 
         try {
-            LOGGER.infof("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
+            LOGGER.debugf("Discovering mcpcalls tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
             var stepConfigs = WorkflowTraversal.discoverConfigs(memory, MCPCALLS_TYPE, McpCallsConfiguration.class, agentStore, workflowStore,
                     resourceClientLibrary);
@@ -225,7 +225,7 @@ class McpToolsProvider implements ToolSourceProvider {
                 }
             }
 
-            LOGGER.info("Discovered " + toolSpecs.size() + " mcpcalls tools from workflow");
+            LOGGER.debugf("Discovered %d mcpcalls tools from workflow", toolSpecs.size());
         } catch (Exception e) {
             LOGGER.warn("Failed to discover mcpcalls tools from workflow", e);
         }
