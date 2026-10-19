@@ -227,6 +227,43 @@ public class McpAdminTools {
         }
     }
 
+    @Tool(name = "upgrade_conversations", description = "Move an agent's running conversations that sit on an older compatibility generation "
+            + "(or none) onto the generation of its CURRENT version, so they continue on it from their next turn instead of being ended. "
+            + "Use after a ZIP import or agent sync, which always write a breaking version and so pin every running conversation to the "
+            + "old one. DRY RUN BY DEFAULT: it only reports per source version how many conversations match, would move, or are skipped "
+            + "(ended, awaitingHuman, inProgress); call again with dryRun=false after checking the numbers. Requires a version of the "
+            + "current generation to be READY in the environment. Never lowers a generation; idempotent.")
+    public String upgradeConversations(@ToolArg(description = "Agent ID (required)") String agentId,
+                                       @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
+                                                defaultValue = "production") String environment,
+                                       @ToolArg(description = "true (default): only report what would happen. false: move the conversations.",
+                                                required = false, defaultValue = "true") Boolean dryRun,
+                                       @ToolArg(description = "Only conversations stored on these agent versions, comma separated (optional; "
+                                               + "default: every version on an older generation)", required = false) String fromVersions,
+                                       @ToolArg(description = "Most conversations to look at in this call (default 50000)",
+                                                required = false) Integer limit) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        try {
+            var env = parseEnvironment(environment);
+            List<Integer> versions = new ArrayList<>();
+            if (fromVersions != null && !fromVersions.isBlank()) {
+                for (String version : fromVersions.split(",")) {
+                    versions.add(Integer.valueOf(version.trim()));
+                }
+            }
+            Response response = agentAdmin.upgradeConversations(env, agentId, dryRun, versions, limit);
+            if (response.getStatus() != 200) {
+                return errorJson(String.valueOf(response.getEntity()));
+            }
+            return jsonSerialization.serialize(response.getEntity());
+        } catch (NumberFormatException e) {
+            return errorJson("fromVersions must be a comma separated list of version numbers");
+        } catch (Exception e) {
+            LOGGER.error("MCP upgrade_conversations failed for Agent " + agentId, e);
+            return errorJson("Failed to upgrade conversations", e);
+        }
+    }
+
     @Tool(name = "get_deployment_status", description = "Get the deployment status of a specific Agent version in an environment.")
     public String getDeploymentStatus(@ToolArg(description = "Agent ID (required)") String agentId,
                                       @ToolArg(description = "Version number (required)") Integer version,

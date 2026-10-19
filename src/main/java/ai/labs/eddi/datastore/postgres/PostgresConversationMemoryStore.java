@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
+import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
+import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -32,6 +34,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -39,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
 import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
@@ -640,6 +644,100 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * The generation is absent (or JSON null — {@code ->>} reads both as SQL NULL)
+     * or lower than the bound parameter.
+     */
+    private static final String GENERATION_BELOW = "(data->>'compatibilityGeneration' IS NULL OR (data->>'compatibilityGeneration')::int < ?)";
+
+    @Override
+    public List<ConversationGenerationCandidate> loadGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions,
+                                                                                 int belowGeneration, String afterConversationId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        boolean versionFilter = agentVersions != null && !agentVersions.isEmpty();
+        var sql = new StringBuilder(
+                "SELECT id, conversation_state, AGENT_VERSION, data->>'compatibilityGeneration' AS generation FROM conversation_memories "
+                        + "WHERE AGENT_ID = ? AND " + GENERATION_BELOW);
+        if (versionFilter) {
+            sql.append(" AND AGENT_VERSION IN (").append(String.join(",", Collections.nCopies(agentVersions.size(), "?"))).append(")");
+        }
+        if (afterConversationId != null) {
+            sql.append(" AND id > ?::uuid");
+        }
+        sql.append(" ORDER BY id LIMIT ?");
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            int index = 1;
+            ps.setString(index++, agentId);
+            ps.setInt(index++, belowGeneration);
+            if (versionFilter) {
+                for (Integer version : agentVersions) {
+                    ps.setInt(index++, version);
+                }
+            }
+            if (afterConversationId != null) {
+                ps.setString(index++, afterConversationId);
+            }
+            ps.setInt(index, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<ConversationGenerationCandidate> batch = new ArrayList<>();
+                while (rs.next()) {
+                    String generation = rs.getString("generation");
+                    batch.add(new ConversationGenerationCandidate(rs.getString("id"), stateOrNull(rs.getString("conversation_state")),
+                            rs.getObject("AGENT_VERSION", Integer.class), generation == null ? null : Integer.valueOf(generation)));
+                }
+                return batch;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public GenerationUpgradeOutcome upgradeCompatibilityGeneration(String conversationId, String agentId, int targetGeneration)
+            throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return GenerationUpgradeOutcome.NOT_FOUND;
+        }
+        ensureSchema();
+        String states = GenerationUpgradeOutcome.UPGRADABLE_STATES.stream().map(state -> "'" + state.name() + "'")
+                .collect(Collectors.joining(", "));
+        // Every reference to `data` on the right-hand side is the OLD row, so the new
+        // revision and history revision are both old + 1 — the history revision is what
+        // makes an append that loaded the old row refuse (see the interface Javadoc).
+        String sql = "UPDATE conversation_memories SET data = jsonb_set(jsonb_set(jsonb_set(data, '{compatibilityGeneration}', to_jsonb(?::int)), "
+                + "'{_rev}', to_jsonb(COALESCE((data->>'_rev')::bigint, 0) + 1)), "
+                + "'{_histRev}', to_jsonb(COALESCE((data->>'_rev')::bigint, 0) + 1)) "
+                + "WHERE id = ?::uuid AND AGENT_ID = ? AND conversation_state IN (" + states + ") AND " + GENERATION_BELOW;
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setInt(1, targetGeneration);
+                ps.setString(2, conversationId);
+                ps.setString(3, agentId);
+                ps.setInt(4, targetGeneration);
+                if (ps.executeUpdate() > 0) {
+                    return GenerationUpgradeOutcome.UPGRADED;
+                }
+            }
+            try (PreparedStatement probe = conn
+                    .prepareStatement("SELECT AGENT_ID, conversation_state, data->>'compatibilityGeneration' AS generation "
+                            + "FROM conversation_memories WHERE id = ?::uuid")) {
+                probe.setString(1, conversationId);
+                try (ResultSet rs = probe.executeQuery()) {
+                    if (!rs.next()) {
+                        return GenerationUpgradeOutcome.NOT_FOUND;
+                    }
+                    String generation = rs.getString("generation");
+                    return GenerationUpgradeOutcome.whyNotUpgraded(true, agentId != null && agentId.equals(rs.getString("AGENT_ID")),
+                            generation == null ? null : Integer.valueOf(generation), targetGeneration,
+                            stateOrNull(rs.getString("conversation_state")));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to upgrade the compatibility generation of conversation " + conversationId, e);
         }
     }
 

@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
+import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -1045,6 +1048,243 @@ class MongoConversationMemoryStoreTest {
 
             assertEquals(12, store.endIdleConversations(Instant.now().minus(30, ChronoUnit.DAYS), SWEEP_AGENT, "idle", false));
             assertEquals(0, store.loadOpenConversationActivity(SWEEP_AGENT, null, null, 100).size());
+        }
+    }
+
+    // ─── Compatibility generation upgrade ───────────────────────
+
+    @Nested
+    @DisplayName("compatibility generation upgrade")
+    class GenerationUpgrade {
+
+        private static final String UPGRADE_AGENT = "upgradeAgent";
+        private static final String MISSING_ID = "000000000000000000000000";
+
+        private String put(String agentId, int version, ConversationState state, Integer generation) throws Exception {
+            var snapshot = createSnapshot(null, agentId, version, "u", state);
+            snapshot.setCompatibilityGeneration(generation);
+            return store.storeConversationMemorySnapshot(snapshot);
+        }
+
+        private ConversationMemorySnapshot loadForTurn(String id) {
+            var loaded = store.loadConversationMemorySnapshot(id);
+            loaded.setPersistedStepCount(loaded.getConversationSteps().size());
+            return loaded;
+        }
+
+        private void addTurn(ConversationMemorySnapshot snapshot) {
+            snapshot.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+            snapshot.getConversationOutputs().add(new ConversationOutput());
+        }
+
+        private List<String> ids(List<ConversationGenerationCandidate> candidates) {
+            return candidates.stream().map(ConversationGenerationCandidate::conversationId).toList();
+        }
+
+        private void removeRevisionMarkers(String id) {
+            database.getCollection("conversationmemories").updateOne(new Document("_id", new ObjectId(id)),
+                    new Document("$unset", new Document("_rev", "").append("_histRev", "")));
+        }
+
+        @Test
+        @DisplayName("candidates are this agent's conversations with no generation or a lower one — ended ones included, current and higher ones not")
+        void candidatesAreLowerOrAbsent() throws Exception {
+            String none = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            String low = put(UPGRADE_AGENT, 2, ConversationState.ENDED, 1);
+            put(UPGRADE_AGENT, 3, ConversationState.READY, 3);
+            put(UPGRADE_AGENT, 3, ConversationState.READY, 4);
+            put("otherAgent", 1, ConversationState.READY, null);
+
+            var candidates = store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, null, 3, null, 100);
+
+            assertEquals(new TreeSet<>(List.of(none, low)), new TreeSet<>(ids(candidates)));
+            var ended = candidates.stream().filter(c -> c.conversationId().equals(low)).findFirst().orElseThrow();
+            assertEquals(ConversationState.ENDED, ended.conversationState());
+            assertEquals(2, ended.agentVersion());
+            assertEquals(1, ended.compatibilityGeneration());
+            var ungenerated = candidates.stream().filter(c -> c.conversationId().equals(none)).findFirst().orElseThrow();
+            assertNull(ungenerated.compatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("fromVersions narrows the candidates to those stored versions")
+        void candidatesCanBeNarrowedToVersions() throws Exception {
+            put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            String two = put(UPGRADE_AGENT, 2, ConversationState.READY, 1);
+            String three = put(UPGRADE_AGENT, 3, ConversationState.READY, 2);
+
+            assertEquals(List.of(two), ids(store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, List.of(2), 4, null, 100)));
+            assertEquals(new TreeSet<>(List.of(two, three)),
+                    new TreeSet<>(ids(store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, List.of(2, 3), 4, null, 100))));
+        }
+
+        @Test
+        @DisplayName("candidates are keyset-paged in ascending id order — every one once")
+        void candidatesPageByKeyset() throws Exception {
+            var expected = new ArrayList<String>();
+            for (int i = 0; i < 7; i++) {
+                expected.add(put(UPGRADE_AGENT, 1, ConversationState.READY, i % 2 == 0 ? null : 1));
+            }
+            expected.sort(String::compareTo);
+
+            var seen = new ArrayList<String>();
+            String after = null;
+            while (true) {
+                var page = ids(store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, null, 3, after, 3));
+                if (page.isEmpty()) {
+                    break;
+                }
+                assertTrue(page.size() <= 3);
+                seen.addAll(page);
+                after = page.getLast();
+            }
+
+            assertEquals(expected, seen);
+        }
+
+        @Test
+        @DisplayName("upgrading writes the generation and moves the revision and history revision — nothing else changes")
+        void upgradeWritesOnlyTheGeneration() throws Exception {
+            String id = put(UPGRADE_AGENT, 4, ConversationState.READY, null);
+            var turn = loadForTurn(id);
+            addTurn(turn);
+            store.storeConversationMemorySnapshot(turn);
+            var before = store.loadConversationMemorySnapshot(id);
+
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            var after = store.loadConversationMemorySnapshot(id);
+            assertEquals(3, after.getCompatibilityGeneration());
+            assertEquals(before.getRevision() + 1, after.getRevision());
+            assertEquals(before.getRevision() + 1, after.getHistoryRevision());
+            assertEquals(before.getRevision() + 1, store.getRevision(id));
+            assertEquals(4, after.getAgentVersion(), "the version is the next turn's to move");
+            assertEquals(ConversationState.READY, after.getConversationState());
+            assertEquals("u", after.getUserId());
+            assertEquals(before.getConversationSteps().size(), after.getConversationSteps().size());
+            assertEquals(before.getConversationOutputs().size(), after.getConversationOutputs().size());
+        }
+
+        @Test
+        @DisplayName("a generation is never lowered, and one already at the target is left alone")
+        void neverLowers() throws Exception {
+            String id = put(UPGRADE_AGENT, 4, ConversationState.READY, 5);
+            long revision = store.getRevision(id);
+
+            assertEquals(GenerationUpgradeOutcome.ALREADY_CURRENT, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+            assertEquals(GenerationUpgradeOutcome.ALREADY_CURRENT, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 5));
+
+            assertEquals(5, store.loadConversationMemorySnapshot(id).getCompatibilityGeneration());
+            assertEquals(revision, store.getRevision(id), "nothing was written, so the revision did not move");
+        }
+
+        @Test
+        @DisplayName("only states a turn can run from are written; ended, paused and in-progress conversations are left untouched and named")
+        void onlyUpgradableStatesAreWritten() throws Exception {
+            var refused = Map.of(ConversationState.ENDED, GenerationUpgradeOutcome.ENDED, ConversationState.AWAITING_HUMAN,
+                    GenerationUpgradeOutcome.AWAITING_HUMAN, ConversationState.IN_PROGRESS, GenerationUpgradeOutcome.IN_PROGRESS);
+            for (var entry : refused.entrySet()) {
+                String id = put(UPGRADE_AGENT, 1, entry.getKey(), null);
+                long revision = store.getRevision(id);
+
+                assertEquals(entry.getValue(), store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3), entry.getKey().name());
+
+                assertNull(store.loadConversationMemorySnapshot(id).getCompatibilityGeneration(), entry.getKey().name());
+                assertEquals(revision, store.getRevision(id), entry.getKey().name());
+            }
+            for (var state : List.of(ConversationState.READY, ConversationState.ERROR, ConversationState.EXECUTION_INTERRUPTED)) {
+                String id = put(UPGRADE_AGENT, 1, state, null);
+
+                assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3), state.name());
+
+                var after = store.loadConversationMemorySnapshot(id);
+                assertEquals(3, after.getCompatibilityGeneration(), state.name());
+                assertEquals(state, after.getConversationState(), "the state is not touched");
+            }
+        }
+
+        @Test
+        @DisplayName("another agent's conversation, a missing one and a malformed id are reported and not written")
+        void wrongAgentMissingAndMalformed() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+
+            assertEquals(GenerationUpgradeOutcome.WRONG_AGENT, store.upgradeCompatibilityGeneration(id, "otherAgent", 3));
+            assertNull(store.loadConversationMemorySnapshot(id).getCompatibilityGeneration());
+            assertEquals(GenerationUpgradeOutcome.NOT_FOUND, store.upgradeCompatibilityGeneration(MISSING_ID, UPGRADE_AGENT, 3));
+            assertEquals(GenerationUpgradeOutcome.NOT_FOUND, store.upgradeCompatibilityGeneration("not-an-id", UPGRADE_AGENT, 3));
+        }
+
+        @Test
+        @DisplayName("a conversation written before revisions existed is upgraded too")
+        void documentWithoutRevisionMarkers() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            removeRevisionMarkers(id);
+
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            var after = store.loadConversationMemorySnapshot(id);
+            assertEquals(3, after.getCompatibilityGeneration());
+            assertEquals(1, after.getRevision());
+        }
+
+        // ── the interleavings: a turn that loaded the conversation BEFORE the upgrade
+        // ──
+
+        @Test
+        @DisplayName("a turn that loaded before the upgrade cannot append over it — refused, and the generation stays")
+        void staleAppendDoesNotRevertTheGeneration() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            var staleTurn = loadForTurn(id);
+            addTurn(staleTurn);
+
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            assertThrows(ConcurrentConversationModificationException.class, () -> store.storeConversationMemorySnapshot(staleTurn));
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(3, stored.getCompatibilityGeneration(), "the stale turn's old generation must not be written back");
+            assertEquals(0, stored.getConversationSteps().size(), "and its step was not half-applied");
+        }
+
+        @Test
+        @DisplayName("a full-document write from before the upgrade is refused on the revision — the generation stays")
+        void staleFullWriteDoesNotRevertTheGeneration() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            var staleDocument = store.loadConversationMemorySnapshot(id); // append baseline unknown: takes the full-replace path
+
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            assertThrows(ConcurrentConversationModificationException.class, () -> store.storeConversationMemorySnapshot(staleDocument));
+            assertEquals(3, store.loadConversationMemorySnapshot(id).getCompatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("a turn that loaded after the upgrade appends normally and carries the new generation forward")
+        void freshTurnKeepsTheGeneration() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            var turn = loadForTurn(id);
+            addTurn(turn);
+            store.storeConversationMemorySnapshot(turn);
+
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(3, stored.getCompatibilityGeneration());
+            assertEquals(1, stored.getConversationSteps().size());
+        }
+
+        @Test
+        @DisplayName("an upgrade after a committed turn keeps that turn's step")
+        void upgradeAfterACommittedTurn() throws Exception {
+            String id = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+            var first = loadForTurn(id);
+            addTurn(first);
+            store.storeConversationMemorySnapshot(first);
+
+            assertEquals(GenerationUpgradeOutcome.UPGRADED, store.upgradeCompatibilityGeneration(id, UPGRADE_AGENT, 3));
+
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(3, stored.getCompatibilityGeneration());
+            assertEquals(1, stored.getConversationSteps().size(), "the committed turn survives the upgrade");
         }
     }
 

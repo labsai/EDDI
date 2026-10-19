@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
+import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
+import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -669,6 +671,84 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
             Document document = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
                     .projection(ACTIVITY_PROJECTION).first();
             return document == null ? null : toActivitySummary(document);
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    private static final String KEY_COMPATIBILITY_GENERATION = "compatibilityGeneration";
+
+    /**
+     * No generation (absent or null — {@code eq(key, null)} matches both) or one
+     * lower than {@code target}. {@code lt} alone would skip the very conversations
+     * that started before generations existed.
+     */
+    private static Bson generationBelow(int target) {
+        return Filters.or(Filters.eq(KEY_COMPATIBILITY_GENERATION, null), Filters.lt(KEY_COMPATIBILITY_GENERATION, target));
+    }
+
+    @Override
+    public List<ConversationGenerationCandidate> loadGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions,
+                                                                                 int belowGeneration, String afterConversationId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            var filters = new ArrayList<Bson>();
+            filters.add(Filters.eq(KEY_AGENT_ID, agentId));
+            if (agentVersions != null && !agentVersions.isEmpty()) {
+                filters.add(Filters.in(KEY_AGENT_VERSION, agentVersions));
+            }
+            filters.add(generationBelow(belowGeneration));
+            if (afterConversationId != null) {
+                filters.add(Filters.gt(OBJECT_ID, new ObjectId(afterConversationId)));
+            }
+            var batch = new ArrayList<ConversationGenerationCandidate>();
+            conversationCollectionDocument.find(Filters.and(filters))
+                    .projection(Projections.include(KEY_CONVERSATION_STATE, KEY_AGENT_VERSION, KEY_COMPATIBILITY_GENERATION))
+                    .sort(Sorts.ascending(OBJECT_ID)).limit(limit).forEach(document -> {
+                        Object version = document.get(KEY_AGENT_VERSION);
+                        Object generation = document.get(KEY_COMPATIBILITY_GENERATION);
+                        batch.add(new ConversationGenerationCandidate(document.get(OBJECT_ID).toString(),
+                                conversationStateOrNull(document.get(KEY_CONVERSATION_STATE)),
+                                version instanceof Number number ? number.intValue() : null,
+                                generation instanceof Number number ? number.intValue() : null));
+                    });
+            return batch;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public GenerationUpgradeOutcome upgradeCompatibilityGeneration(String conversationId, String agentId, int targetGeneration)
+            throws IResourceStore.ResourceStoreException {
+        if (!isStorableId(conversationId)) {
+            return GenerationUpgradeOutcome.NOT_FOUND;
+        }
+        try {
+            var id = new ObjectId(conversationId);
+            var upgradableStates = GenerationUpgradeOutcome.UPGRADABLE_STATES.stream().map(ConversationState::name).toList();
+            Bson filter = Filters.and(Filters.eq(OBJECT_ID, id), Filters.eq(KEY_AGENT_ID, agentId),
+                    Filters.in(KEY_CONVERSATION_STATE, upgradableStates), generationBelow(targetGeneration));
+            // An aggregation-pipeline update, because the history revision must become the
+            // revision this write creates and an update document cannot read the old value.
+            // _histRev is what makes an append that loaded the old document refuse instead
+            // of re-applying its stale $set of the generation on top of this write.
+            Document newRevision = new Document("$add", Arrays.asList(new Document("$ifNull", Arrays.asList("$" + KEY_REVISION, 0L)), 1L));
+            var set = new Document(KEY_COMPATIBILITY_GENERATION, targetGeneration).append(KEY_REVISION, newRevision)
+                    .append(KEY_HISTORY_REVISION, newRevision);
+            var result = conversationCollectionDocument.updateOne(filter, List.of(new Document("$set", set)));
+            if (result.getMatchedCount() > 0) {
+                return GenerationUpgradeOutcome.UPGRADED;
+            }
+            Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, id))
+                    .projection(new Document(KEY_AGENT_ID, 1).append(KEY_CONVERSATION_STATE, 1).append(KEY_COMPATIBILITY_GENERATION, 1)).first();
+            if (stored == null) {
+                return GenerationUpgradeOutcome.NOT_FOUND;
+            }
+            Object generation = stored.get(KEY_COMPATIBILITY_GENERATION);
+            return GenerationUpgradeOutcome.whyNotUpgraded(true, agentId != null && agentId.equals(stored.getString(KEY_AGENT_ID)),
+                    generation instanceof Number number ? number.intValue() : null, targetGeneration,
+                    conversationStateOrNull(stored.get(KEY_CONVERSATION_STATE)));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }

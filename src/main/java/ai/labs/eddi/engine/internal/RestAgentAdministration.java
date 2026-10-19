@@ -91,6 +91,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     @Inject
     VaultGrantGate vaultGrantGate;
 
+    /**
+     * Field-injected for the same reason; null in the unit tests that build this
+     * class by hand.
+     */
+    @Inject
+    ConversationUpgradeService conversationUpgradeService;
+
     @Inject
     public RestAgentAdministration(IRuntime runtime, IAgentFactory agentFactory, IAgentStore agentStore, IDeploymentStore deploymentStore,
             IConversationMemoryStore conversationMemoryStore, IRestConversationStore restConversationStore,
@@ -628,6 +635,37 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | RuntimeException e) {
             log.debugf("No compatibility generation for Agent %s v%s: %s", sanitize(agentId), version, sanitize(e.getMessage()));
             return null;
+        }
+    }
+
+    @Override
+    public Response upgradeConversations(Deployment.Environment environment, String agentId, Boolean dryRun, List<Integer> fromVersions,
+                                         Integer limit) {
+        RuntimeUtilities.checkNotNull(environment, "environment");
+        RuntimeUtilities.checkNotNull(agentId, "agentId");
+        // Moving other people's running conversations onto a version is the counterpart
+        // of ending them on undeploy, which takes EDIT. The dry run needs it too: its
+        // counts describe the agent's conversations.
+        resourceAccessGuard.requireAccess(agentId, AccessLevel.EDIT, "agent");
+        if (conversationUpgradeService == null) {
+            throw new InternalServerErrorException("The conversation upgrade service is not available");
+        }
+        try {
+            // dryRun defaults to TRUE at the endpoint; a caller passing an explicit null
+            // (the MCP tool, a test) gets the same safe default.
+            var report = conversationUpgradeService.upgrade(environment, agentId, fromVersions, dryRun == null || dryRun, limit);
+            return Response.ok(report, MediaType.APPLICATION_JSON).build();
+        } catch (ConversationUpgradeService.UpgradeRefusedException e) {
+            var status = switch (e.kind()) {
+                case INVALID -> Response.Status.BAD_REQUEST;
+                case NOT_FOUND -> Response.Status.NOT_FOUND;
+                case CONFLICT -> Response.Status.CONFLICT;
+            };
+            return Response.status(status).entity(e.getMessage()).type(MediaType.TEXT_PLAIN).build();
+        } catch (RuntimeException e) {
+            log.error(e.getLocalizedMessage(), e);
+            throw new InternalServerErrorException("Could not upgrade the conversations of agent " + sanitize(agentId)
+                    + ". Check the server log for details.", e);
         }
     }
 
