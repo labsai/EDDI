@@ -149,10 +149,12 @@ public final class SecretRedactionFilter {
             // are already matched by the name-bound rules below).
             new RedactionRule(Pattern.compile("(?i)(subscription-key[\"']?+\\s*+[:=]\\s*+[\"']?+)[^\\s,;\"'\\\\{}\\[\\]]{8,}+"),
                     "$1" + REDACTED),
-            // The password in a database connection string's userinfo.
+            // The password in a database connection string's userinfo. No ceiling on
+            // either run: a 257-character password is still a password, and a
+            // possessive class is linear whatever its length.
             new RedactionRule(Pattern.compile(
-                    "(?i)((?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]{1,256}+:)"
-                            + "[^@/\\s\"'\\\\,{}\\[\\]]{1,256}+@"),
+                    "(?i)((?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:)"
+                            + "[^@/\\s\"'\\\\,{}\\[\\]]++@"),
                     "$1" + REDACTED + "@"));
 
     /**

@@ -1477,9 +1477,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      */
     private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri, ImportTransaction transaction) {
         // The direct create bypasses the REST stores, so it repeats their refusal of a
-        // document carrying the read-redaction marker. Outside the try, like the
-        // caller-token check: a refusal must fail (and roll back) the import.
-        RedactionMarkerGuard.requireNone(document);
+        // document carrying the read-redaction marker — for the five types whose
+        // reads produce it; in a workflow or an output set the same text is content.
+        // Outside the try, like the caller-token check: a refusal must fail (and roll
+        // back) the import.
+        RedactionMarkerGuard.requireNoneIfRedactedType(document);
         if (callerTokenAuthorPolicy != null) {
             // Outside the try: a 403 must fail the import (and roll it back), not be
             // reported as a store failure.

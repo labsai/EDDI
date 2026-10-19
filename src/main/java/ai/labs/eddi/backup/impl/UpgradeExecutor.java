@@ -857,10 +857,11 @@ public class UpgradeExecutor {
             }
             Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
             // The REST stores refuse a document carrying the read-redaction marker; this
-            // direct create must too. A sync source read through a non-admin peer
-            // credential carries it, and storing it would replace a credential with the
-            // marker. Recorded as this resource failing, like the check above.
-            RedactionMarkerGuard.requireNone(content);
+            // direct create must too, for the five types whose reads produce it. A sync
+            // source read through a non-admin peer credential carries it, and storing
+            // it would replace a credential with the marker. Recorded as this resource
+            // failing, like the check above.
+            RedactionMarkerGuard.requireNoneIfRedactedType(content);
             IResourceId created = store.create(content);
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);

@@ -999,7 +999,7 @@ at startup, because nothing can be stranded.
 
 #### Resetting a tenant
 
-`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+`POST /{tenantId}/reset?confirm=true` deletes every secret and every DEK generation of the tenant,
 and — before the DEKs go — everything else sealed with them, such as the tenant's
 [OAuth connection grants](connections.md); their users reconnect. Left in place those
 values were not merely unreadable: the tenant's next DEK is generation 1 again, with

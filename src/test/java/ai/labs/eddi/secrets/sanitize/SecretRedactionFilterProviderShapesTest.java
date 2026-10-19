@@ -52,7 +52,8 @@ class SecretRedactionFilterProviderShapesTest {
                 Arguments.of("Azure OpenAI api-key header", "api-key: fixturefixturefixturefixture", "fixturefixturefixturefixture"),
                 Arguments.of("APIM subscription key header", "Ocp-Apim-Subscription-Key: fixturefixturefixture", "fixturefixturefixture"),
                 Arguments.of("MongoDB userinfo password", "mongodb+srv://eddi:hunter2pw@cluster0.example.net/eddi", "hunter2pw"),
-                Arguments.of("Postgres userinfo password", "postgresql://eddi:s3cr3t@db:5432/eddi", "s3cr3t"));
+                Arguments.of("Postgres userinfo password", "postgresql://eddi:s3cr3t@db:5432/eddi", "s3cr3t"),
+                Arguments.of("a password longer than any ceiling", "postgresql://eddi:" + "p".repeat(300) + "@db:5432/eddi", "p".repeat(300)));
     }
 
     @ParameterizedTest(name = "{0}")

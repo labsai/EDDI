@@ -123,7 +123,9 @@ admits no quote, backslash or brace, so a match cannot cross a JSON string or ea
 so a lookbehind admits a start only where a token run begins — without it `eyJ` repeated
 60,000 times is quadratic (the mutation check timed out at 30 s).
 
-Two gaps found in review: a `Digest` header lost only `username=` — the scheme rule
+The connection-string rule had a 256-character ceiling on the user and on the password;
+a longer password went through unredacted. Both runs are now unbounded (possessive, so
+still linear). Two gaps found in review: a `Digest` header lost only `username=` — the scheme rule
 took one unquoted token and left `response=`, the credential proper, legible — and now
 loses its whole directive list, walked by hand rather than by a pattern, since a
 quantified group recurses once per directive; and a bare `Basic <base64>` with no
@@ -178,7 +180,10 @@ Follow-up to the M1 read-redaction above, so it can never turn into stored corru
   update, JSON Patch and duplicate of the LLM, MCP-calls, channel, RAG and httpcalls
   stores, `RestImportService.createResourceDirect` and `UpgradeExecutor.createExtension`
   answer `400 {"error": "bad_request", "message": …, "fields": […]}` when any string in the
-  document contains `<redacted: `, for administrators too. Before this, an editor who
+  document contains `<redacted: `, for administrators too. The import and upgrade paths
+  create every resource type through one method, so there the check is scoped to those
+  five document types (`requireNoneIfRedactedType`): a workflow or output set that merely
+  mentions the marker text is content and imports. Before this, an editor who
   opened a configuration in the Manager and saved it replaced the stored key with the
   marker, and the agent broke at its next deploy.
 - **One recognisable marker.** The in-string marker `ConfigSecretRedactor` writes into

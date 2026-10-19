@@ -4,7 +4,12 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.MediaType;
@@ -13,6 +18,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Refuses to store a configuration that carries {@link ConfigSecretRedactor}'s
@@ -37,6 +43,35 @@ import java.util.Map;
 public final class RedactionMarkerGuard {
 
     private RedactionMarkerGuard() {
+    }
+
+    /**
+     * The document types whose REST reads replace a credential with the marker.
+     * Only a document of one of these types can carry the marker because it came
+     * back through the redacted view; in any other type — a workflow, a prompt, an
+     * output set — the same text is content, and refusing it would fail an import
+     * over a sentence that merely mentions the marker.
+     */
+    private static final Set<Class<?>> REDACTED_DOCUMENT_TYPES = Set.of(LlmConfiguration.class, McpCallsConfiguration.class,
+            ChannelIntegrationConfiguration.class, RagConfiguration.class, ApiCallsConfiguration.class);
+
+    /**
+     * Whether {@code document} is of a type whose REST reads produce the marker.
+     */
+    public static boolean isRedactedDocumentType(Object document) {
+        return document != null && REDACTED_DOCUMENT_TYPES.contains(document.getClass());
+    }
+
+    /**
+     * {@link #requireNone} for the import and upgrade paths, which create every
+     * resource type through one method: only a document of a
+     * {@linkplain #isRedactedDocumentType redacted type} is checked. The stores
+     * themselves call {@link #requireNone}, since each one knows its type.
+     */
+    public static void requireNoneIfRedactedType(Object document) {
+        if (isRedactedDocumentType(document)) {
+            requireNone(document);
+        }
     }
 
     /**
