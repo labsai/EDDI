@@ -154,6 +154,18 @@ export interface LlmTask {
    * (EDDI 6.6+, default 100). Same refusal and same `-1`/`0` rule as above.
    */
   maxToolCallsPerTurn?: number;
+  /**
+   * Refuses a tool call that already failed identically with nothing succeeding
+   * since (EDDI 6.6+). Absent means enabled with defaults; `{ enabled: false }`
+   * turns it off. No editor control yet: edit it in the JSON view.
+   */
+  toolRepeatGuard?: {
+    enabled?: boolean;
+    maxIdenticalFailures?: number;
+    maxIdenticalCalls?: number;
+    maxRefusalsPerTurn?: number;
+    exemptTools?: string[];
+  };
   modelCascade?: ModelCascadeConfig;
 
   // Conversation Summary (Rolling Summary Strategy)
@@ -236,8 +248,10 @@ export type GuardrailActionName = "block" | "redact" | "reprompt" | "warn";
 /**
  * One input or output guardrail of an LLM task. Mirrors the backend
  * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
- * (input), `pii-redaction`, `regex-filter`, `max-length` (both), `json-object`
- * (output); an unknown type is skipped by the engine with a WARN.
+ * (input), `pii-redaction`, `regex-filter`, `max-length`, `classifier` (both),
+ * `json-object` (output); an unknown type is skipped by the engine with a WARN.
+ * `classifier` calls an author-configured safety-classifier model; its
+ * `parameters` take `provider` plus that provider's own model parameters.
  */
 export interface GuardrailConfig {
   type: string;

@@ -5,6 +5,7 @@
    ────────────────────────────────────────────── */
 
 import { Brain, Wrench } from "lucide-react";
+import { t } from "@/i18n";
 
 /** Three bouncing dots shown while the agent is composing a response. */
 export function TypingIndicator() {
@@ -55,8 +56,8 @@ export function TypingIndicator() {
  * status region outside the transcript instead.
  */
 export function indicatorStatusText(escalating: boolean, tool: string | null): string {
-  if (tool) return `Using ${tool}…`;
-  return escalating ? "Taking a closer look…" : "Thinking…";
+  if (tool) return t("indicator.tool", { tool });
+  return escalating ? t("indicator.escalating") : t("indicator.thinking");
 }
 
 export function ThinkingIndicator({

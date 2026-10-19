@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
 import ai.labs.eddi.modules.rag.RagIngestionService;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -67,7 +69,7 @@ class RestRagIngestionSourcesTest {
         accessGuard = mock(ResourceAccessGuard.class);
         ingestedFileService = mock(IngestedFileService.class);
         rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class), sourceIngestionService,
-                ingestedFileService, accessGuard);
+                ingestedFileService, mock(KnowledgeBaseInspector.class), accessGuard);
 
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBaseWithSource());
         when(sourceIngestionService.runAsync(anyString(), any(), any())).thenReturn(Optional.of("run-key"));
@@ -115,6 +117,9 @@ class RestRagIngestionSourcesTest {
         Response response = rest.runSource(KB_ID, SOURCE_ID, 1);
 
         assertEquals(Response.Status.ACCEPTED.getStatusCode(), response.getStatus());
+        // The caller follows this run by id rather than guessing which RUNNING row is
+        // theirs.
+        assertEquals("run-key", ((Map<?, ?>) response.getEntity()).get("runId"));
     }
 
     @Test

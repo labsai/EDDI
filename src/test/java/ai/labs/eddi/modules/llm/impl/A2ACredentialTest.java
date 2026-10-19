@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
@@ -14,7 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -67,8 +69,16 @@ class A2ACredentialTest {
         return config;
     }
 
-    private static HttpRequest.Builder request() {
-        return HttpRequest.newBuilder().uri(URI.create(AGENT_URL)).GET();
+    private static OutboundRequest.Builder request() {
+        return OutboundRequest.get(Profile.DEFAULT, URI.create(AGENT_URL));
+    }
+
+    /**
+     * The first value of header {@code name} on what {@code builder} would send.
+     */
+    private static String header(OutboundRequest.Builder builder, String name) {
+        List<String> values = builder.build().headers().get(name);
+        return values == null || values.isEmpty() ? null : values.getFirst();
     }
 
     @Test
@@ -80,7 +90,7 @@ class A2ACredentialTest {
 
         manager().applyCredential(builder, config("${connection:salesforce}"), AGENT_URL);
 
-        assertEquals("Bearer sf-access-token", builder.build().headers().firstValue("Authorization").orElseThrow());
+        assertEquals("Bearer sf-access-token", header(builder, "Authorization"));
     }
 
     @Test
@@ -91,9 +101,8 @@ class A2ACredentialTest {
 
         manager().applyCredential(builder, config("${connection:widget}"), AGENT_URL);
 
-        var headers = builder.build().headers();
-        assertEquals("abc123", headers.firstValue("X-Api-Key").orElseThrow());
-        assertTrue(headers.firstValue("Authorization").isEmpty(), "a connection owns the header name; adding a second one sends two credentials");
+        assertEquals("abc123", header(builder, "X-Api-Key"));
+        assertTrue(header(builder, "Authorization") == null, "a connection owns the header name; adding a second one sends two credentials");
     }
 
     @Test
@@ -104,7 +113,7 @@ class A2ACredentialTest {
 
         manager().applyCredential(builder, config("${vault:peer-key}"), AGENT_URL);
 
-        assertEquals("Bearer static-token", builder.build().headers().firstValue("Authorization").orElseThrow());
+        assertEquals("Bearer static-token", header(builder, "Authorization"));
     }
 
     @Test
@@ -114,7 +123,7 @@ class A2ACredentialTest {
 
         manager().applyCredential(builder, config(null), AGENT_URL);
 
-        assertTrue(builder.build().headers().firstValue("Authorization").isEmpty());
+        assertTrue(header(builder, "Authorization") == null);
     }
 
     @Test
@@ -132,7 +141,7 @@ class A2ACredentialTest {
         assertTrue(error.getMessage().contains(AGENT_URL), "the refusal has to say WHICH peer is misconfigured: " + error.getMessage());
         assertTrue(error.getMessage().contains("Bearer"), "and which text is in the way: " + error.getMessage());
         assertTrue(error.getMessage().contains("valueTemplate"), "and where that text belongs instead: " + error.getMessage());
-        assertTrue(builder.build().headers().firstValue("Authorization").isEmpty(), "nothing may go out on a refused credential");
+        assertTrue(header(builder, "Authorization") == null, "nothing may go out on a refused credential");
     }
 
     @Test
@@ -145,7 +154,7 @@ class A2ACredentialTest {
 
         assertTrue(error.getMessage().contains("a second ${connection:…} reference"),
                 "only the first reference is ever parsed, so the second one vanishing has to be said out loud: " + error.getMessage());
-        assertTrue(builder.build().headers().firstValue("Authorization").isEmpty());
+        assertTrue(header(builder, "Authorization") == null);
     }
 
     @Test

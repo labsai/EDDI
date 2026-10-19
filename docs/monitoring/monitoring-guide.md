@@ -336,12 +336,26 @@ configuration (template, HTTP call target) or an unreachable dependency.
 
 ### EddiExecutorSaturated
 
-At least one conversation turn has been waiting for a worker thread for 5 minutes:
-every thread of the pool is busy. Find what holds them — long LLM calls, slow tools,
-a blocking HTTP call — on the **Turn executor load** panel and in a thread dump
-(`jcmd <pid> Thread.print`). Raise `quarkus.thread-pool.max-threads` only once the
-holders are understood; more threads also mean more concurrent load on the LLM
-provider and the datastore.
+Work submitted to the worker pool has been waiting for a thread for 5 minutes: every
+thread of the pool is busy. Conversation turns are no longer part of it: they run
+on virtual threads (`pool="turn"` on the **Turn executor load** panel) and are bounded
+by `eddi.conversation.max-in-flight-turns` instead, see
+[EddiTurnCapacityReached](#edditurncapacityreached). What still uses the pool:
+deploys and undeploys, retention sweeps, the semantic parser endpoint and blocking
+REST endpoints. Find what holds the threads in a thread dump
+(`jcmd <pid> Thread.print`) before raising `quarkus.thread-pool.max-threads`.
+
+### EddiTurnCapacityReached
+
+For 5 minutes the node refused conversation turns with **503** `capacity_exceeded`
+because it was already running `eddi.conversation.max-in-flight-turns` turns
+(`eddi_turn_rejected_total{reason="in_flight_limit"}`). Clients that retry on 503
+recover on their own. Check how long turns take
+(`eddi_conversation_processing_duration`, the LLM latency panels): a slow provider
+keeps turns in flight longer and fills the limit at the same arrival rate. Then add
+capacity: another node, or more heap with a higher limit. Raise the limit only
+together with the heap, because every in-flight turn holds its conversation memory,
+and keep the database pool in step (MongoDB `maxPoolSize`).
 
 ### EddiApprovalWaitingLong
 

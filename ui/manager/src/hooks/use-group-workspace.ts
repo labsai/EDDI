@@ -26,7 +26,7 @@ export function useAddWorkspaceBacklogTask(groupId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: AddBacklogTaskRequest) => addWorkspaceBacklogTask(groupId!, request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
   });
 }
 
@@ -34,7 +34,7 @@ export function useAddWorkspaceCadence(groupId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (request: AddCadenceRequest) => addWorkspaceCadence(groupId!, request),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
   });
 }
 
@@ -42,6 +42,6 @@ export function useDeleteWorkspaceCadence(groupId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (cadenceId: string) => deleteWorkspaceCadence(groupId!, cadenceId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...WORKSPACE_KEY, groupId] }),
   });
 }

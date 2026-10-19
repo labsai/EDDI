@@ -21,6 +21,8 @@
 package ai.labs.eddi.datastore.mongo.codec;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import org.bson.BsonReader;
 import org.bson.BsonWriter;
 import org.bson.RawBsonDocument;
@@ -33,12 +35,16 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 public class JacksonCodec<T> implements Codec<T> {
-    private final ObjectMapper bsonObjectMapper;
+    // Bound once per codec — the driver caches a codec per class — instead of the
+    // mapper resolving the type and its root (de)serializer on every document.
+    private final ObjectReader jsonReader;
+    private final ObjectWriter jsonWriter;
     private final Codec<RawBsonDocument> rawBsonDocumentCodec;
     private final Class<T> type;
 
     public JacksonCodec(ObjectMapper bsonObjectMapper, CodecRegistry codecRegistry, Class<T> type) {
-        this.bsonObjectMapper = bsonObjectMapper;
+        this.jsonReader = bsonObjectMapper.readerFor(type);
+        this.jsonWriter = bsonObjectMapper.writer();
         this.rawBsonDocumentCodec = codecRegistry.get(RawBsonDocument.class);
         this.type = type;
     }
@@ -47,7 +53,7 @@ public class JacksonCodec<T> implements Codec<T> {
     public T decode(BsonReader reader, DecoderContext decoderContext) {
         try {
             RawBsonDocument document = rawBsonDocumentCodec.decode(reader, decoderContext);
-            return bsonObjectMapper.readValue(document.getByteBuffer().array(), type);
+            return jsonReader.readValue(document.getByteBuffer().array());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -56,7 +62,7 @@ public class JacksonCodec<T> implements Codec<T> {
     @Override
     public void encode(BsonWriter writer, Object value, EncoderContext encoderContext) {
         try {
-            byte[] data = bsonObjectMapper.writeValueAsBytes(value);
+            byte[] data = jsonWriter.writeValueAsBytes(value);
             rawBsonDocumentCodec.encode(writer, new RawBsonDocument(data, 0, data.length), encoderContext);
         } catch (IOException e) {
             throw new UncheckedIOException(e);

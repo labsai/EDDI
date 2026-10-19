@@ -558,7 +558,7 @@ That is fail-closed on purpose: an unconfigured allowlist is far more likely tha
 an operator who meant "anywhere".
 
 **A listed origin may be on a private network.** The token request still goes
-through `SafeHttpClient`, but the SSRF address check — which refuses loopback,
+through `OutboundHttp`, but the SSRF address check — which refuses loopback,
 RFC 1918, link-local and cloud-metadata addresses — is not applied to the token
 endpoint. The allowlist is a stricter rule than that check: an exact origin an
 operator wrote down, not "anything public", and the operator who listed
@@ -980,11 +980,9 @@ treated as an administrator, exactly as `@RolesAllowed` is.
   whose credentials the approved call may spend; reading the request identity there
   ran approved calls against the approver's SaaS account, and the approval did not
   mean what the approver was shown.
-* **The token client goes through `SafeHttpClient`, and follows no redirect.**
-  This is the one new outbound path, so it starts compliant — and it uses the
-  client's no-redirect send deliberately. The ordinary `sendValidated` follows
-  redirects itself on top of `Redirect.NEVER`, preserving method and body on a
-  307/308, and checks the target only against the SSRF rules, never against the
+* **The token client goes through `OutboundHttp`, and follows no redirect.**
+  It sends with `RedirectPolicy.NEVER` deliberately. Ordinary redirect following
+  preserves method and body on a 307/308, and checks the target only against the SSRF rules, never against the
   credential-endpoint allowlist. A token request carries the client secret in an
   `Authorization` header or the form body, and always a refresh token or a code
   plus verifier in the body, so a followed redirect would hand all of that to

@@ -198,6 +198,8 @@ class ConversationWatchdogAbandonTest {
             return null;
         }).when(conversation).say(anyString(), anyMap());
 
+        // One permit: the zombie must keep it for as long as it really runs.
+        conversationService.maxInFlightTurns = 1;
         conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
                 new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
         @SuppressWarnings("unchecked")
@@ -218,6 +220,12 @@ class ConversationWatchdogAbandonTest {
         // ...and for a coordinator that lost the turn, through the public seam.
         assertTrue(conversationService.abandonInFlightTurn(CONVERSATION_ID));
         assertEquals(1.0, abandonedRunning(), "the zombie is visible on the gauge while it runs");
+        // The dispatcher gave up, but the body is still doing work: it keeps the
+        // in-flight
+        // permit, so repeated timeouts cannot stack new turns on top of zombies.
+        assertThrows(TurnCapacityExceededException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false,
+                List.of(), new InputData("again", Map.of()), false, mock(ConversationResponseHandler.class)),
+                "a zombie that still runs must keep its in-flight permit");
 
         // The hung call returns at last.
         releaseFirstTask.countDown();
@@ -236,6 +244,10 @@ class ConversationWatchdogAbandonTest {
         assertEquals(0, conversationService.stopInFlightWork(USER_ID), "the finished zombie must be unregistered");
         assertFalse(conversationService.abandonInFlightTurn(CONVERSATION_ID));
         assertEquals(0.0, abandonedRunning(), "the gauge returns to 0 once the zombie ended");
+        // ...and so does its permit.
+        assertDoesNotThrow(() -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("after", Map.of()), false, mock(ConversationResponseHandler.class)),
+                "the zombie's permit must come back once its body ended");
     }
 
     @Test

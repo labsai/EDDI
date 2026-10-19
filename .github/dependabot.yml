@@ -218,9 +218,11 @@ updates:
       - dependency-name: "react-router*"
         update-types: ["version-update:semver-major"]
 
-  # The Manager's design-sync tooling (ui/manager/.ds-sync) is its own npm project with
-  # its own lockfile, and Dependency Review and Trivy scan it like any other: a stale
-  # advisory there fails every PR. Not shipped, so version updates are rare and small.
+  # The Manager's design-sync tooling (ui/manager/.ds-sync) is its own npm project. Its
+  # lockfile is deliberately not committed: the tooling never ships, and a committed lock
+  # made Scorecard, Dependency Review and Trivy report its transitive advisories (braces,
+  # which has no fixed release) against the project. This entry keeps the manifest's
+  # direct dependencies current; npm resolves the rest at install time.
   - package-ecosystem: npm
     directory: /ui/manager/.ds-sync
     schedule:

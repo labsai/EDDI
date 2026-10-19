@@ -263,7 +263,8 @@ public class ResourceSharingService {
         // nobody is known and flagging every grant would be noise.
         boolean known = person != null || !directory.isActive();
         return new GrantView(subject, grant.getLevel(), grant.getGrantedBy(), grant.getGrantedOn(), "user",
-                person == null ? principal : person.label(), directory.detailFor(person), known);
+                person == null ? principal : person.label(), directory.detailFor(person, accessGuard.callerSpaces(), accessGuard.isAdmin()),
+                known);
     }
 
     /**

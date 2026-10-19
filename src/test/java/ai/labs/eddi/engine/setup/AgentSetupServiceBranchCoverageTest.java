@@ -814,9 +814,10 @@ class AgentSetupServiceBranchCoverageTest {
     class VaultApiKey {
 
         private String invokeVaultApiKey(String apiKey, String agentName) throws Exception {
-            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class);
+            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class, String.class, Map.class,
+                    AgentSetupService.HostRule.class);
             method.setAccessible(true);
-            return (String) method.invoke(service, apiKey, agentName, null, null);
+            return (String) method.invoke(service, apiKey, agentName, null, null, null);
         }
 
         @Test
@@ -828,7 +829,7 @@ class AgentSetupServiceBranchCoverageTest {
 
             assertEquals(vaultRef, result, "Already-vaulted reference should be returned unchanged");
             // Looked up (so a dangling reference is logged) but never re-vaulted
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList(), any());
         }
 
         @Test
@@ -858,7 +859,7 @@ class AgentSetupServiceBranchCoverageTest {
 
             assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
             // Looked up (so a dangling reference is logged) but never re-vaulted
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList(), any());
         }
 
         @Test
@@ -870,7 +871,7 @@ class AgentSetupServiceBranchCoverageTest {
 
             assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
             // Looked up (so a dangling reference is logged) but never re-vaulted
-            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+            verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList(), any());
         }
     }
 }

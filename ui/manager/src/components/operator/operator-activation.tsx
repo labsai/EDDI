@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { ModelCombobox } from "@/components/shared/model-combobox";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
 import { getProviderRegions } from "@/lib/llm-provider-catalog";
 import { ProviderRegionSelect, ProviderSelect } from "@/components/shared/provider-select";
@@ -181,6 +182,23 @@ export function OperatorActivation({
       : defaultOperatorPromptBody(scope),
   );
   const promptBodyDiffersFromDefault = promptBody !== defaultOperatorPromptBody(scope);
+  /**
+   * The stored instructions are about to be installed on a NEW agent, exactly as
+   * they were saved. They live in `platform.operator`, which an editor can write,
+   * so the admin has to say they have read them: the textarea above is on screen,
+   * but a form can be submitted without looking at it. Editing the text, or
+   * resetting it to the default, is a deliberate act on it and lifts the
+   * requirement.
+   */
+  const [storedPromptReviewed, setStoredPromptReviewed] = useState(false);
+  const carriesStoredPrompt = Boolean(
+    initial.agentId &&
+      initial.promptBody &&
+      initial.promptBodyIsDefault !== true &&
+      promptBody === initial.promptBody &&
+      promptBodyDiffersFromDefault,
+  );
+  const storedPromptUnconfirmed = carriesStoredPrompt && !storedPromptReviewed;
 
   /**
    * Swaps the editable body to the new scope's default when the admin flips
@@ -236,7 +254,7 @@ export function OperatorActivation({
     (!needsKey || Boolean(apiKey.trim())) &&
     (!baseUrlRequired || Boolean(baseUrl.trim()));
 
-  const canActivate = modelStepValid && !authModeUnusable && !busy;
+  const canActivate = modelStepValid && !authModeUnusable && !busy && !storedPromptUnconfirmed;
 
   function handleProviderChange(next: string) {
     setProvider(next);
@@ -331,19 +349,15 @@ export function OperatorActivation({
             )}
 
             <Field label={t("operator.activation.model", "Model")} htmlFor="operator-model">
-              <input
+              <ModelCombobox
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
-                list="operator-model-suggestions"
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                onChange={setModel}
+                suggestions={suggestions}
+                defaultModel={providerConfig?.defaultModel}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
                 id="operator-model"
-                data-testid="operator-model"
+                testId="operator-model"
               />
-              <datalist id="operator-model-suggestions">
-                {suggestions.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
             </Field>
 
             {baseUrlRequired && (
@@ -565,6 +579,25 @@ export function OperatorActivation({
                     {t("operator.activation.promptBodyReset", "Reset to default")}
                   </Button>
                 </div>
+              )}
+              {carriesStoredPrompt && (
+                <label
+                  className="mt-2 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs"
+                  data-testid="operator-stored-prompt-confirm"
+                >
+                  <input
+                    type="checkbox"
+                    checked={storedPromptReviewed}
+                    onChange={(e) => setStoredPromptReviewed(e.target.checked)}
+                    data-testid="operator-stored-prompt-confirm-checkbox"
+                  />
+                  <span>
+                    {t(
+                      "operator.activation.storedPromptConfirm",
+                      "These instructions were carried over from the saved configuration, which anyone who can edit platform settings may have changed. I have read them above and want to install them.",
+                    )}
+                  </span>
+                </label>
               )}
             </Field>
 

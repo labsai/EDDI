@@ -65,6 +65,27 @@ describe("SchedulesPage — system-managed schedules", () => {
       ).not.toBeInTheDocument();
     }
   );
+
+  it("links an ingestion schedule to the knowledge base it is changed on", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({
+            id: "rag-1",
+            name: "rag-ingestion:kb1:s1",
+            metadata: { ragIngestion: true, ragConfigId: "kb1", ragConfigVersion: 3, sourceId: "s1" },
+          }),
+          scheduleRow({ id: "dream-1", name: "Dream", metadata: { dreamType: "dream_consolidation" } }),
+        ])
+      )
+    );
+
+    renderSchedules();
+    const link = await screen.findByTestId("rag-schedule-link-rag-1");
+    expect(link).toHaveAttribute("href", "/manage/resources/rag/kb1?version=3");
+    // Only ingestion schedules know which knowledge base they belong to.
+    expect(screen.queryByTestId("rag-schedule-link-dream-1")).not.toBeInTheDocument();
+  });
 });
 
 describe("SchedulesPage — edit keeps what the form does not own", () => {

@@ -38,11 +38,11 @@ patches:
         path: /spec/template/spec/containers/0/resources
         value:
           requests:
-            cpu: 500m
-            memory: 512Mi
+            cpu: "2"
+            memory: 4Gi
           limits:
             cpu: "4"
-            memory: 2Gi
+            memory: 4Gi
       # Scale UP, not OUT, with in-memory messaging: its conversation lock is
       # JVM-local. The ../nats component overrides this with 3 replicas in
       # cluster mode when it is listed after this component.

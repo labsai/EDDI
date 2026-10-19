@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.ISecretProvider;
@@ -21,7 +23,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -283,7 +284,7 @@ class VaultAllowedHostsCoverageTest {
         @DisplayName("a task call to an endpoint the agent card moved off the list is refused before the key is resolved")
         void announcedEndpointOffListRefused() {
             String announced = "https://peer.attacker.example/a2a";
-            var builder = HttpRequest.newBuilder(URI.create(announced));
+            var builder = OutboundRequest.get(Profile.DEFAULT, URI.create(announced));
 
             var e = assertThrows(HostNotAllowedException.class, () -> manager.applyCredential(builder, peer(REF), announced, false));
             assertTrue(e.getMessage().contains("peer.attacker.example"), e.getMessage());
@@ -294,11 +295,11 @@ class VaultAllowedHostsCoverageTest {
         @DisplayName("a peer on the list gets the resolved key")
         void peerOnListAllowed() {
             String url = "https://" + ALLOWED + "/a2a";
-            var builder = HttpRequest.newBuilder(URI.create(url));
+            var builder = OutboundRequest.get(Profile.DEFAULT, URI.create(url));
 
             manager.applyCredential(builder, peer(REF), url, true);
 
-            assertEquals(List.of("Bearer live-key"), builder.build().headers().allValues("Authorization"));
+            assertEquals(List.of("Bearer live-key"), builder.build().headers().get("Authorization"));
         }
     }
 }

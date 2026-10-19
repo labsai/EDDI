@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { nameSeg } from "./path-segment";
 
 /**
  * Secrets and variables that belong to a space — a person's own, or a team's.
@@ -25,7 +26,6 @@ export interface SpaceVariable {
 }
 
 const q = (space: string) => `space=${encodeURIComponent(space)}`;
-const seg = (key: string) => encodeURIComponent(key);
 
 export function listSpaceSecrets(space: string): Promise<SpaceSecret[]> {
   return api.get<SpaceSecret[]>(`/spacestore/secrets?${q(space)}`);
@@ -38,11 +38,11 @@ export function storeSpaceSecret(
   value: string,
   description?: string
 ): Promise<SpaceSecret> {
-  return api.put<SpaceSecret>(`/spacestore/secrets/${seg(keyName)}?${q(space)}`, { value, description });
+  return api.put<SpaceSecret>(`/spacestore/secrets/${nameSeg(keyName)}?${q(space)}`, { value, description });
 }
 
 export function deleteSpaceSecret(space: string, keyName: string): Promise<void> {
-  return api.delete<void>(`/spacestore/secrets/${seg(keyName)}?${q(space)}`);
+  return api.delete<void>(`/spacestore/secrets/${nameSeg(keyName)}?${q(space)}`);
 }
 
 export function listSpaceVariables(space: string): Promise<SpaceVariable[]> {
@@ -55,9 +55,9 @@ export function storeSpaceVariable(
   value: string,
   description?: string
 ): Promise<SpaceVariable> {
-  return api.put<SpaceVariable>(`/spacestore/variables/${seg(key)}?${q(space)}`, { value, description });
+  return api.put<SpaceVariable>(`/spacestore/variables/${nameSeg(key)}?${q(space)}`, { value, description });
 }
 
 export function deleteSpaceVariable(space: string, key: string): Promise<void> {
-  return api.delete<void>(`/spacestore/variables/${seg(key)}?${q(space)}`);
+  return api.delete<void>(`/spacestore/variables/${nameSeg(key)}?${q(space)}`);
 }

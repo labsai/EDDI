@@ -109,11 +109,15 @@ describe("SchedulesPage", () => {
 
   it("shows schedule names from mock data", async () => {
     renderSchedules();
-    // Use findByText with extended timeout to wait for async data
-    expect(await screen.findByText("Daily Health Check", {}, { timeout: 3000 })).toBeInTheDocument();
-    // "Heartbeat Monitor" appears both in the table and the Next Fire card (soonest schedule)
-    expect(screen.getAllByText("Heartbeat Monitor").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Failed Report")).toBeInTheDocument();
+    // Query inside the table: the Next Fire card also shows the soonest enabled
+    // schedule's name. Heartbeat Monitor fires 30 minutes from now, Daily Health
+    // Check at the next weekday 09:00 UTC, so between 08:30 and 09:00 UTC on a
+    // weekday the card shows Daily Health Check, and a page-wide single-match
+    // query fails in that window.
+    const table = await screen.findByTestId("schedules-table", {}, { timeout: 3000 });
+    expect(await within(table).findByText("Daily Health Check", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(within(table).getByText("Heartbeat Monitor")).toBeInTheDocument();
+    expect(within(table).getByText("Failed Report")).toBeInTheDocument();
   });
 
   it("shows cron type badge", async () => {
@@ -758,5 +762,35 @@ describe("SchedulesPage — nextFire encodings", () => {
     );
     expect(within(card).queryByText("Later job")).not.toBeInTheDocument();
   });
-});
 
+  it("keeps an edit made through a preset button when Escape is pressed", async () => {
+    // Presets, trigger tabs and the agent picker change the form without an
+    // input event, so they must mark it edited themselves.
+    renderSchedules();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("create-schedule-btn"));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByTestId("cron-preset-hourly"));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("keeps every row with a toggle in flight disabled, not just the latest one", async () => {
+    const hang = () => new Promise<Response>(() => {});
+    server.use(
+      http.post("*/schedulestore/schedules/:id/enable", hang),
+      http.post("*/schedulestore/schedules/:id/disable", hang)
+    );
+    renderSchedules();
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("toggle-sched-1"));
+    await user.click(await screen.findByTestId("toggle-sched-2"));
+
+    // A second click on row 1 would race its first request.
+    expect(screen.getByTestId("toggle-sched-1")).toBeDisabled();
+    expect(screen.getByTestId("toggle-sched-2")).toBeDisabled();
+    expect(screen.getByTestId("toggle-sched-3")).toBeEnabled();
+  });
+});

@@ -42,7 +42,7 @@ describe("TaskToolCallLimits", () => {
 
   it("explains what happens past a cap", () => {
     renderWithProviders(<Harness initial={base} />);
-    expect(screen.getByText(/NOT_EXECUTED/)).toBeInTheDocument();
+    expect(screen.getByText(/Calls past a cap are not run/)).toBeInTheDocument();
   });
 
   it("writes typed caps onto the task", () => {
@@ -79,5 +79,83 @@ describe("TaskToolCallLimits", () => {
   it("is read-only when the editor is", () => {
     renderWithProviders(<TaskToolCallLimits task={base} onChange={() => {}} readOnly />);
     expect(screen.getByTestId("task-max-tool-calls-per-turn")).toHaveAttribute("readonly");
+  });
+
+  describe("repeated failing tool calls", () => {
+    it("shows the defaults as placeholders and the guard as on, without writing anything", () => {
+      renderWithProviders(<Harness initial={base} />);
+      expect(screen.getByTestId("task-repeat-guard-enabled")).toBeChecked();
+      expect(screen.getByTestId("task-repeat-guard-max-failures")).toHaveAttribute("placeholder", "2");
+      expect(screen.getByTestId("task-repeat-guard-max-refusals")).toHaveAttribute("placeholder", "3");
+      expect(screen.getByTestId("task-repeat-guard-max-identical")).toHaveAttribute("placeholder", "-1");
+    });
+
+    it("writes only what the author changed", () => {
+      const spy = vi.fn();
+      renderWithProviders(<Harness initial={base} onChangeSpy={spy} />);
+      fireEvent.change(screen.getByTestId("task-repeat-guard-max-failures"), {
+        target: { value: "4" },
+      });
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          toolRepeatGuard: { maxIdenticalFailures: 4 },
+        }),
+      );
+      fireEvent.change(screen.getByTestId("task-repeat-guard-max-refusals"), {
+        target: { value: "5" },
+      });
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          toolRepeatGuard: { maxIdenticalFailures: 4, maxRefusalsPerTurn: 5 },
+        }),
+      );
+    });
+
+    it("unticking writes enabled:false; ticking again removes the whole field", () => {
+      const spy = vi.fn();
+      renderWithProviders(<Harness initial={base} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("task-repeat-guard-enabled"));
+      expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ toolRepeatGuard: { enabled: false } }));
+      fireEvent.click(screen.getByTestId("task-repeat-guard-enabled"));
+      expect(spy.mock.lastCall?.[0].toolRepeatGuard).toBeUndefined();
+    });
+
+    it("parses exempt tools from a comma-separated list and drops the list when cleared", () => {
+      const spy = vi.fn();
+      renderWithProviders(<Harness initial={base} onChangeSpy={spy} />);
+      fireEvent.change(screen.getByTestId("task-repeat-guard-exempt"), {
+        target: { value: "get_job, poll_status ," },
+      });
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          toolRepeatGuard: { exemptTools: ["get_job", "poll_status"] },
+        }),
+      );
+      fireEvent.change(screen.getByTestId("task-repeat-guard-exempt"), {
+        target: { value: "" },
+      });
+      expect(spy.mock.lastCall?.[0].toolRepeatGuard).toBeUndefined();
+    });
+
+    it("shows a stored configuration and is read-only when the editor is", () => {
+      renderWithProviders(
+        <TaskToolCallLimits
+          task={{
+            ...base,
+            toolRepeatGuard: {
+              enabled: false,
+              maxIdenticalFailures: 7,
+              exemptTools: ["a", "b"],
+            },
+          }}
+          onChange={() => {}}
+          readOnly
+        />,
+      );
+      expect(screen.getByTestId("task-repeat-guard-enabled")).not.toBeChecked();
+      expect(screen.getByTestId("task-repeat-guard-enabled")).toBeDisabled();
+      expect(screen.getByTestId("task-repeat-guard-max-failures")).toHaveValue(7);
+      expect(screen.getByTestId("task-repeat-guard-exempt")).toHaveValue("a, b");
+    });
   });
 });

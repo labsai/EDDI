@@ -24,6 +24,7 @@ import {
   useDisconnectConnection,
 } from "@/hooks/use-connections";
 import { navigateAway } from "@/lib/navigate-away";
+import { isSafeAuthorizationUrl } from "@/lib/authorization-url";
 import {
   CONNECTIONS_DISABLED,
   CONNECTIONS_FORBIDDEN,
@@ -155,6 +156,14 @@ export function LinkedAccountsPanel({
         // the user their place on the page but never the link itself.
         returnTo: location.pathname,
       });
+      // The URL is data from the backend; only a real https (or loopback http)
+      // provider address may take the whole page. Anything else is a failed
+      // start, not a navigation.
+      if (!isSafeAuthorizationUrl(authorizationUrl)) {
+        setLeavingFor(null);
+        toast.error(t("connections.linkStartFailed", "Could not start linking."));
+        return;
+      }
       navigateAway(authorizationUrl);
     } catch (err) {
       setLeavingFor(null);

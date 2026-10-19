@@ -460,6 +460,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Integer maxToolCallsPerTurn;
 
         /**
+         * What the tool loop does when the model re-sends a tool call that already
+         * failed identically. Null means the guard is <strong>enabled with its
+         * defaults</strong>; see {@link ToolRepeatGuardConfig}. Set {@code {"enabled":
+         * false}} to turn it off.
+         *
+         * @since 6.5.0
+         */
+        private ToolRepeatGuardConfig toolRepeatGuard;
+
+        /**
          * Aggregate token ceiling for the <em>in-turn tool-call context</em>: every
          * {@code AiMessage} that carries tool-execution requests together with its
          * {@code ToolExecutionResultMessage}s, accumulated across all iterations of the
@@ -1050,6 +1060,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolCallsPerTurn(Integer maxToolCallsPerTurn) {
             this.maxToolCallsPerTurn = maxToolCallsPerTurn;
+        }
+
+        public ToolRepeatGuardConfig getToolRepeatGuard() {
+            return toolRepeatGuard;
+        }
+
+        public void setToolRepeatGuard(ToolRepeatGuardConfig toolRepeatGuard) {
+            this.toolRepeatGuard = toolRepeatGuard;
         }
 
         public Integer getMaxToolContextTokens() {

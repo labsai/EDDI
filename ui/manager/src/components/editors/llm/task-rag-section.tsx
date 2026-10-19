@@ -67,6 +67,7 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
                 />
                 {!readOnly && (
                   <button
+                    aria-label={t("common.remove", "Remove")}
                     type="button"
                     onClick={() => {
                       const updated = (task.knowledgeBases ?? []).filter((_, i) => i !== kbIdx);
@@ -78,7 +79,7 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.ragMaxResults", "Max Results")}
@@ -149,7 +150,7 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {t("llmEditor.ragDefaults", "Default Retrieval Parameters")}
               </span>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">
                     {t("llmEditor.ragMaxResults", "Max Results")}

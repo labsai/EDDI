@@ -319,8 +319,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | New outbound HTTP code. Callers are migrating onto it (`planning/http-client-consolidation-plan.md`); until then `SafeHttpClient` is a deprecated adapter over it with unchanged behaviour. |
-| **`SafeHttpClient`** | Deprecated JDK-typed adapter over `OutboundHttp` (`DEFAULT` profile), behaviour unchanged | Existing callers only, until they migrate. New code — tools included — injects `OutboundHttp`. Never create `HttpClient.newBuilder()` in tool code. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients until later phases of `planning/http-client-consolidation-plan.md`. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -452,7 +451,7 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 
 #### Tool Security
 
-- **Use `OutboundHttp`** (`@Inject OutboundHttp`) for new outbound HTTP — never create `HttpClient.newBuilder()` directly. `SafeHttpClient` is a deprecated adapter kept for existing callers only
+- **Use `OutboundHttp`** (`@Inject OutboundHttp`) for ALL outbound HTTP — never create `HttpClient.newBuilder()` directly
 - **Validate user-controlled URLs** — `SsrfPolicy.STRICT` (the `DEFAULT` profile's default) checks the initial URL and every redirect hop; never weaken it for a URL a user or model chose
 - **Only allow `http`/`https`** — never `file://`, `ftp://`, etc.
 - **Block private/internal addresses** — handled by the SSRF policy in `OutboundHttp`; cap every body with a `BodyMode`
@@ -535,7 +534,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |
-| `src/main/java/.../engine/httpclient/outbound/OutboundHttp.java` | The outbound HTTP facade — SSRF, redirects, header stripping, deadlines, body caps (`SafeHttpClient` is its deprecated adapter) |
+| `src/main/java/.../engine/httpclient/outbound/OutboundHttp.java` | The outbound HTTP facade — SSRF, redirects, header stripping, deadlines, body caps |
 | `src/main/java/.../engine/security/AuthStartupGuard.java` | Production auth enforcement guard |
 | `.env.example` | Docker Compose env var reference (copy to `.env`; optional for basic local dev) |
 

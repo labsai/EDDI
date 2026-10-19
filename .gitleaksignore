@@ -154,3 +154,21 @@ a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 # replaced it with a low-entropy value under another name; this entry covers the
 # commit that introduced it, which stays in the scan range.
 8f0cf257a751dbfad5e5795dce125a8eef2d521e:src/test/java/ai/labs/eddi/backup/impl/RestExportServiceTest.java:generic-api-key:546
+
+# PR #956 (feat/nats-cluster, squash-merged as 775edae28): three rows of the MSW
+# cluster mock's lease table in ui/manager/src/test/mocks/cluster-handlers.ts. The
+# "key" field is a NATS KV lease key -- "c." plus a made-up conversation id in
+# Mongo ObjectId form -- and generic-api-key matches it by field name. Not a
+# credential: it is mock data for the Manager's cluster page, and the same ids
+# appear in the rows' conversationId fields. The push scan of main checks the
+# squash commit, so the entries name it (not quoted here -- the rule would match).
+775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:83
+775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:84
+775edae28719023b3f745c909f4d93d4d8cd3a65:ui/manager/src/test/mocks/cluster-handlers.ts:generic-api-key:85
+
+# docs/security-review.md, PR #1088 (fix/security-review-runtime): the generic-api-key rule
+# matched prose in a table row of the published review summary ("caller-token confused
+# deputy, A2A/ownership gaps" -- the word token followed by a comma-separated phrase of
+# high enough entropy). It is a sentence, not a credential; the row is reworded in the
+# next commit, and this names the commit that carried the original wording.
+298c30e59f7a13776add72f273071f1530692e1b:docs/security-review.md:generic-api-key:82

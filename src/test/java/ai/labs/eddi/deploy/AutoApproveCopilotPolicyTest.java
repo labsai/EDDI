@@ -168,7 +168,7 @@ class AutoApproveCopilotPolicyTest {
                 "src/main/java/ai/labs/eddi/engine/security/AuthStartupGuard.java",
                 "src/main/java/ai/labs/eddi/engine/security/CallerIdentityResolver.java",
                 "src/main/java/ai/labs/eddi/secrets/VaultSecretProvider.java",
-                "src/main/java/ai/labs/eddi/engine/httpclient/SafeHttpClient.java",
+                "src/main/java/ai/labs/eddi/engine/httpclient/outbound/OutboundHttp.java",
                 "src/main/java/ai/labs/eddi/connections/ConnectionParameterGuard.java",
                 "src/main/resources/application.properties",
                 "src/main/java/ai/labs/eddi/engine/hitl/HitlAccessGuard.java",

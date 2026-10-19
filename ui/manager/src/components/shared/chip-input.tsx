@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { isImeComposing } from "@/lib/ime";
 import { Plus, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -139,6 +140,8 @@ export function ChipInput({
               onInvalid?.(null);
             }}
             onKeyDown={(e) => {
+              // The Enter that confirms a CJK composition is not "add".
+              if (isImeComposing(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 add();

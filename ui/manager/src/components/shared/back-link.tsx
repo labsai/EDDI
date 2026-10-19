@@ -32,7 +32,7 @@ export function BackLink({ to, label, onNavigate }: BackLinkProps) {
       className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
       data-testid="back-to-list"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {label}
     </Link>
   );

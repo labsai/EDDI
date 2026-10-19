@@ -157,6 +157,15 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("readScheduleByName — finds the schedule a system writer named, and nothing for an unknown name")
+        void readByName() throws Exception {
+            String id = store.createSchedule(createCronSchedule("rag-ingestion:kb-1:src-1", "a", "t"));
+
+            assertEquals(id, store.readScheduleByName("rag-ingestion:kb-1:src-1").orElseThrow().getId());
+            assertTrue(store.readScheduleByName("rag-ingestion:kb-1:src-2").isEmpty());
+        }
+
+        @Test
         @DisplayName("deleteSchedule — removes schedule")
         void deleteSchedule() throws Exception {
             String id = store.createSchedule(createCronSchedule("Temp", "a", "t"));
