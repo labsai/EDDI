@@ -223,6 +223,28 @@ class RestImportServiceCompatibleTest {
             verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
         }
 
+        @Test
+        @DisplayName("a merge that creates the agent reports no compatibility headers")
+        void mergeCreatingTheAgentReportsNoDeclaration() throws Exception {
+            stubArchive(false);
+            var created = mock(IAgentStore.class);
+            when(created.create(any())).thenReturn(resourceId(TARGET_AGENT_ID, 1));
+            var newAgent = new AgentConfiguration();
+            newAgent.setCompatibilityGeneration(1);
+            when(created.read(TARGET_AGENT_ID, 1)).thenReturn(newAgent);
+            when(documentDescriptorStore.getCurrentResourceId(TARGET_AGENT_ID)).thenReturn(resourceId(TARGET_AGENT_ID, 1));
+            when(documentDescriptorStore.readDescriptor(TARGET_AGENT_ID, 1)).thenReturn(new DocumentDescriptor());
+            agentStore = created;
+
+            Response response = merge(true);
+
+            assertEquals(201, response.getStatus());
+            // compatible has no effect on a creation, so the answer must not claim one
+            assertNull(response.getHeaderString(RestImportService.HEADER_AGENT_COMPATIBLE));
+            assertNull(response.getHeaderString(RestImportService.HEADER_AGENT_COMPATIBILITY_GENERATION));
+            verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
+        }
+
         private Response merge(Boolean compatible) {
             try (var ignored = stubCdi()) {
                 return importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null, compatible);

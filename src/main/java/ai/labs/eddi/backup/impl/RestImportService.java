@@ -873,8 +873,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 URI newAgentUri;
                 if (isMerge && isSelected(selectedSet, agentOriginId)) {
+                    // Looked up before the write: afterwards a newly created agent could match.
+                    URI matched = findLocalUriByOriginId(agentOriginId);
                     newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, compatible, transaction);
-                    writtenGeneration = generationOf(newAgentUri);
+                    // Only an update of the matched agent wrote a version the declaration
+                    // applies to; a creation (no match, or the update was refused) did not.
+                    if (sameAgent(matched, newAgentUri)) {
+                        writtenGeneration = generationOf(newAgentUri);
+                    }
                 } else {
                     newAgentUri = createNewAgent(agentConfig, transaction);
                 }
@@ -932,6 +938,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * null when it cannot be read — reporting it is best effort and never fails the
      * import.
      */
+    private static boolean sameAgent(URI a, URI b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        IResourceId left = RestUtilities.extractResourceId(a);
+        IResourceId right = RestUtilities.extractResourceId(b);
+        return left != null && right != null && left.getId() != null && left.getId().equals(right.getId());
+    }
+
     private Integer generationOf(URI agentUri) {
         try {
             IResourceId id = RestUtilities.extractResourceId(agentUri);
