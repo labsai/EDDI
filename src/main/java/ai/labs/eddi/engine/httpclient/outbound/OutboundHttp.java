@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.httpclient.outbound;
 
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
@@ -63,6 +64,10 @@ import java.util.function.UnaryOperator;
  * {@link MethodRule} says.</li>
  * <li><b>Credentials</b> — on a cross-origin hop, {@link #SENSITIVE_HEADERS}
  * and every header the request marked as caller-derived are dropped.</li>
+ * <li><b>Trace context</b> — the W3C {@code traceparent}/{@code tracestate} of
+ * the calling thread's span (a tool call's {@code execute_tool} span) is added
+ * to the first hop unless the request already carries one, kept on same-origin
+ * hops and dropped on a cross-origin one; see {@link #withTraceContext}.</li>
  * <li><b>Time</b> — one wall-clock deadline covers every hop, including
  * discarding redirect bodies; see {@link #totalBudget}. A body read has its own
  * budget, a multiple of the per-hop timeout.</li>
@@ -133,6 +138,14 @@ public class OutboundHttp {
         thread.setDaemon(true);
         return thread;
     });
+
+    /**
+     * Outbound W3C trace propagation. Field-injected and null-tolerant: a
+     * {@link #standalone} facade (tests, code outside CDI) has none, which means no
+     * trace headers are added.
+     */
+    @Inject
+    TracePropagation tracePropagation;
 
     @Inject
     public OutboundHttp(Config config, Instance<TlsConfigurationRegistry> tlsRegistry, Instance<SecretResolver> secretResolver,
@@ -271,7 +284,8 @@ public class OutboundHttp {
         String method = request.method();
         URI uri = request.uri();
         byte[] body = request.body().toBytes();
-        Map<String, List<String>> headers = withImpliedContentType(request.headers(), request.body());
+        Map<String, List<String>> headers = withTraceContext(withImpliedContentType(request.headers(), request.body()),
+                tracePropagation);
         List<URI> chain = new ArrayList<>();
         int hops = 0;
 
@@ -371,9 +385,34 @@ public class OutboundHttp {
     }
 
     /**
+     * {@code headers} plus the W3C trace context of the calling thread's current
+     * span, or {@code headers} itself when there is nothing to add — propagation
+     * off or absent, no valid span (the OTel SDK disabled), or the caller already
+     * set a trace header, which is never overwritten.
+     * <p>
+     * Applied to the first hop only, on the calling thread, where the tool's
+     * {@code execute_tool} span is current. A same-origin redirect hop inherits the
+     * headers through {@link #redirectHeaders}; a cross-origin hop has them
+     * stripped there, as credentials are, and gets none back.
+     */
+    static Map<String, List<String>> withTraceContext(Map<String, List<String>> headers, TracePropagation propagation) {
+        if (propagation == null) {
+            return headers;
+        }
+        TreeMap<String, List<String>> traced = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        traced.putAll(headers);
+        Map<String, String> traceHeaders = propagation.headersMissingFrom(traced::containsKey);
+        if (traceHeaders.isEmpty()) {
+            return headers;
+        }
+        traceHeaders.forEach((name, value) -> traced.put(name, List.of(value)));
+        return traced;
+    }
+
+    /**
      * The headers of a redirect hop. Same origin: everything but the engine-managed
-     * headers. Cross-origin: also no {@link #SENSITIVE_HEADERS} and no
-     * caller-derived header. A method downgraded to GET/HEAD loses
+     * headers. Cross-origin: also no {@link #SENSITIVE_HEADERS}, no W3C trace
+     * context and no caller-derived header. A method downgraded to GET/HEAD loses
      * {@code Content-Type} with its body.
      */
     static Map<String, List<String>> redirectHeaders(Map<String, List<String>> previous, boolean sameOrigin,
@@ -387,7 +426,7 @@ public class OutboundHttp {
             if (!methodPreserved && "content-type".equals(lower)) {
                 return;
             }
-            if (!sameOrigin && (SENSITIVE_HEADERS.contains(lower) || callerDerived.contains(lower))) {
+            if (!sameOrigin && (SENSITIVE_HEADERS.contains(lower) || callerDerived.contains(lower) || TracePropagation.isTraceHeader(lower))) {
                 return;
             }
             next.put(name, values);
