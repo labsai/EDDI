@@ -19,6 +19,8 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
@@ -698,6 +700,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 filters.add(Filters.in(KEY_AGENT_VERSION, agentVersions));
             }
             filters.add(generationBelow(belowGeneration));
+            // Ended conversations are never written, so left in they would stay candidates
+            // forever and crowd out the ones that can move (they are counted separately).
+            filters.add(Filters.ne(KEY_CONVERSATION_STATE, ENDED.name()));
             if (afterConversationId != null) {
                 filters.add(Filters.gt(OBJECT_ID, new ObjectId(afterConversationId)));
             }
@@ -713,6 +718,32 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                                 generation instanceof Number number ? number.intValue() : null));
                     });
             return batch;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public Map<Integer, Long> countEndedGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            var filters = new ArrayList<Bson>();
+            filters.add(Filters.eq(KEY_AGENT_ID, agentId));
+            if (agentVersions != null && !agentVersions.isEmpty()) {
+                filters.add(Filters.in(KEY_AGENT_VERSION, agentVersions));
+            }
+            filters.add(generationBelow(belowGeneration));
+            filters.add(Filters.eq(KEY_CONVERSATION_STATE, ENDED.name()));
+            Map<Integer, Long> counts = new HashMap<>();
+            conversationCollectionDocument
+                    .aggregate(List.of(Aggregates.match(Filters.and(filters)),
+                            Aggregates.group("$" + KEY_AGENT_VERSION, Accumulators.sum("n", 1L))))
+                    .forEach(document -> {
+                        if (document.get(OBJECT_ID) instanceof Number version && document.get("n") instanceof Number n) {
+                            counts.put(version.intValue(), n.longValue());
+                        }
+                    });
+            return counts;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }

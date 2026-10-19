@@ -661,7 +661,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         boolean versionFilter = agentVersions != null && !agentVersions.isEmpty();
         var sql = new StringBuilder(
                 "SELECT id, conversation_state, AGENT_VERSION, data->>'compatibilityGeneration' AS generation FROM conversation_memories "
-                        + "WHERE AGENT_ID = ? AND " + GENERATION_BELOW);
+                        + "WHERE AGENT_ID = ? AND conversation_state <> 'ENDED' AND " + GENERATION_BELOW);
         if (versionFilter) {
             sql.append(" AND AGENT_VERSION IN (").append(String.join(",", Collections.nCopies(agentVersions.size(), "?"))).append(")");
         }
@@ -690,6 +690,38 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                             rs.getObject("AGENT_VERSION", Integer.class), generation == null ? null : Integer.valueOf(generation)));
                 }
                 return batch;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public Map<Integer, Long> countEndedGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        boolean versionFilter = agentVersions != null && !agentVersions.isEmpty();
+        var sql = new StringBuilder("SELECT AGENT_VERSION, count(*) AS n FROM conversation_memories "
+                + "WHERE AGENT_ID = ? AND conversation_state = 'ENDED' AND " + GENERATION_BELOW);
+        if (versionFilter) {
+            sql.append(" AND AGENT_VERSION IN (").append(String.join(",", Collections.nCopies(agentVersions.size(), "?"))).append(")");
+        }
+        sql.append(" GROUP BY AGENT_VERSION");
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            int index = 1;
+            ps.setString(index++, agentId);
+            ps.setInt(index++, belowGeneration);
+            if (versionFilter) {
+                for (Integer version : agentVersions) {
+                    ps.setInt(index++, version);
+                }
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                Map<Integer, Long> counts = new HashMap<>();
+                while (rs.next()) {
+                    counts.put(rs.getInt("AGENT_VERSION"), rs.getLong("n"));
+                }
+                return counts;
             }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);

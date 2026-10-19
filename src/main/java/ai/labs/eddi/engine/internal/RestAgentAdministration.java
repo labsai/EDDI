@@ -640,7 +640,7 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
 
     @Override
     public Response upgradeConversations(Deployment.Environment environment, String agentId, Boolean dryRun, List<Integer> fromVersions,
-                                         Integer limit) {
+                                         Integer limit, String after) {
         RuntimeUtilities.checkNotNull(environment, "environment");
         RuntimeUtilities.checkNotNull(agentId, "agentId");
         // Moving other people's running conversations onto a version is the counterpart
@@ -653,7 +653,7 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         try {
             // dryRun defaults to TRUE at the endpoint; a caller passing an explicit null
             // (the MCP tool, a test) gets the same safe default.
-            var report = conversationUpgradeService.upgrade(environment, agentId, fromVersions, dryRun == null || dryRun, limit);
+            var report = conversationUpgradeService.upgrade(environment, agentId, fromVersions, dryRun == null || dryRun, limit, after);
             return Response.ok(report, MediaType.APPLICATION_JSON).build();
         } catch (ConversationUpgradeService.UpgradeRefusedException e) {
             var status = switch (e.kind()) {

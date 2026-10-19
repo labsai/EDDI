@@ -158,7 +158,7 @@ class ConversationUpgradeServiceTest {
         candidates(candidate("c1", 5, READY), candidate("c2", 5, READY), candidate("c3", 5, ENDED), candidate("c4", 5, AWAITING_HUMAN),
                 candidate("c5", 6, ERROR), candidate("c6", 6, IN_PROGRESS), candidate("c7", 6, EXECUTION_INTERRUPTED));
 
-        var report = service().upgrade(Environment.production, AGENT, null, true, null);
+        var report = service().upgrade(Environment.production, AGENT, null, true, null, null);
 
         verify(store, never()).upgradeCompatibilityGeneration(anyString(), anyString(), anyInt());
         assertTrue(queued.isEmpty(), "a dry run must not touch the coordinator");
@@ -187,7 +187,7 @@ class ConversationUpgradeServiceTest {
         candidates(candidate("c1", 5, READY), candidate("c2", 5, ENDED), candidate("c3", 5, AWAITING_HUMAN), candidate("c4", 6, ERROR),
                 candidate("c5", 6, IN_PROGRESS), candidate("c6", 6, EXECUTION_INTERRUPTED));
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, null);
+        var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
 
         assertFalse(report.dryRun());
         assertEquals(List.of("c1", "c4", "c6"), queuedConversations, "each write goes through the conversation's own queue");
@@ -210,7 +210,7 @@ class ConversationUpgradeServiceTest {
         candidates(candidate("c1", 5, READY), candidate("c2", 5, READY));
         when(store.upgradeCompatibilityGeneration(eq("c2"), eq(AGENT), anyInt())).thenReturn(GenerationUpgradeOutcome.ALREADY_CURRENT);
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, null);
+        var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
 
         var generation = ArgumentCaptor.forClass(Integer.class);
         verify(store, times(2)).upgradeCompatibilityGeneration(anyString(), eq(AGENT), generation.capture());
@@ -233,7 +233,7 @@ class ConversationUpgradeServiceTest {
         when(store.upgradeCompatibilityGeneration(eq("c4"), eq(AGENT), anyInt())).thenReturn(GenerationUpgradeOutcome.CHANGED_CONCURRENTLY);
         when(store.upgradeCompatibilityGeneration(eq("c5"), eq(AGENT), anyInt())).thenThrow(new IResourceStore.ResourceStoreException("down"));
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, null);
+        var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
 
         assertEquals(0, report.totals().upgraded());
         assertEquals(Map.of("ended", 1L, "awaitingHuman", 1L, "notFound", 1L, "changedConcurrently", 1L, "failed", 1L),
@@ -246,7 +246,7 @@ class ConversationUpgradeServiceTest {
         when(store.loadGenerationUpgradeCandidates(eq(AGENT), eq(Set.of(4, 5)), eq(TARGET_GENERATION), any(), anyInt()))
                 .thenReturn(List.of(candidate("c1", 5, READY))).thenReturn(List.of());
 
-        var report = service().upgrade(Environment.production, AGENT, List.of(5, 4), true, null);
+        var report = service().upgrade(Environment.production, AGENT, List.of(5, 4), true, null, null);
 
         assertEquals(List.of(4, 5), report.versions().stream().map(ConversationUpgradeReport.VersionCounts::fromVersion).toList());
         assertEquals(0, version(report, 4).matched());
@@ -265,7 +265,7 @@ class ConversationUpgradeServiceTest {
                 anyInt())).thenReturn(List.of(candidate("b0", 5, READY)));
         when(store.loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), eq("b0"), anyInt())).thenReturn(List.of());
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, null);
+        var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
 
         assertEquals(ConversationUpgradeService.PAGE_SIZE + 1, report.totals().upgraded());
         assertFalse(report.truncated());
@@ -283,18 +283,70 @@ class ConversationUpgradeServiceTest {
         when(store.loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), eq("c2"), eq(1)))
                 .thenReturn(List.of(candidate("c3", 5, READY)));
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, 2);
+        var report = service().upgrade(Environment.production, AGENT, null, false, 2, null);
 
         assertEquals(2, report.totals().upgraded());
         assertTrue(report.truncated());
+        assertEquals("c2", report.nextAfter(), "the cursor to continue from");
         verify(store, never()).upgradeCompatibilityGeneration(eq("c3"), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("ended conversations are counted per version by one query, not scanned")
+    void endedAreCountedNotScanned() throws Exception {
+        candidates(candidate("c1", 5, READY));
+        when(store.countEndedGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION))).thenReturn(Map.of(5, 3L, 6, 2L));
+
+        var report = service().upgrade(Environment.production, AGENT, null, true, null, null);
+
+        var five = version(report, 5);
+        assertEquals(4, five.matched());
+        assertEquals(1, five.eligible());
+        assertEquals(Map.of("ended", 3L), five.skipped());
+        assertEquals(Map.of("ended", 2L), version(report, 6).skipped());
+        assertEquals(5, report.totals().skipped().get("ended"));
+        assertEquals(6, report.totals().matched());
+    }
+
+    @Test
+    @DisplayName("progress across calls: permanently skipped candidates beyond the limit do not stop a call with the cursor from moving the rest")
+    void cursorMakesProgressPastSkippedCandidates() throws Exception {
+        // Five paused conversations ahead in id order, then two that can move; limit 3.
+        var all = new ArrayList<ConversationGenerationCandidate>();
+        for (int i = 1; i <= 5; i++) {
+            all.add(candidate("p" + i, 5, AWAITING_HUMAN));
+        }
+        all.add(candidate("r1", 5, READY));
+        all.add(candidate("r2", 5, READY));
+        when(store.loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), any(), anyInt())).thenAnswer(invocation -> {
+            String after = invocation.getArgument(3);
+            int max = invocation.getArgument(4);
+            return all.stream().filter(c -> after == null || c.conversationId().compareTo(after) > 0).limit(max).toList();
+        });
+
+        var first = service().upgrade(Environment.production, AGENT, null, false, 3, null);
+        assertTrue(first.truncated());
+        assertEquals("p3", first.nextAfter());
+        assertEquals(0, first.totals().upgraded());
+
+        var second = service().upgrade(Environment.production, AGENT, null, false, 3, first.nextAfter());
+        assertTrue(second.truncated());
+        assertEquals("r1", second.nextAfter());
+        assertEquals(1, second.totals().upgraded());
+
+        var third = service().upgrade(Environment.production, AGENT, null, false, 3, second.nextAfter());
+        assertFalse(third.truncated());
+        assertEquals(null, third.nextAfter());
+        assertEquals(1, third.totals().upgraded());
+        verify(store).upgradeCompatibilityGeneration("r1", AGENT, TARGET_GENERATION);
+        verify(store).upgradeCompatibilityGeneration("r2", AGENT, TARGET_GENERATION);
     }
 
     @Test
     @DisplayName("a limit outside 1..MAX is refused")
     void limitIsBounded() {
         for (int bad : new int[]{0, -1, ConversationUpgradeService.MAX_LIMIT + 1}) {
-            var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, true, bad));
+            var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, true, bad, null));
             assertEquals(UpgradeRefusedException.Kind.INVALID, e.kind());
         }
     }
@@ -306,7 +358,7 @@ class ConversationUpgradeServiceTest {
     void refusesWhenTargetNotReady() throws Exception {
         when(agentFactory.getLatestReadyAgentOfGeneration(Environment.production, AGENT, TARGET_GENERATION)).thenReturn(null);
 
-        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, false, null));
+        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, false, null, null));
 
         assertEquals(UpgradeRefusedException.Kind.CONFLICT, e.kind());
         assertTrue(e.getMessage().contains("READY") && e.getMessage().contains("generation " + TARGET_GENERATION), e.getMessage());
@@ -319,7 +371,7 @@ class ConversationUpgradeServiceTest {
     void refusesWhenCurrentVersionHasNoGeneration() throws Exception {
         when(agentStore.read(AGENT, CURRENT_VERSION)).thenReturn(configWithGeneration(null));
 
-        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, true, null));
+        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, null, true, null, null));
 
         assertEquals(UpgradeRefusedException.Kind.CONFLICT, e.kind());
         verify(store, never()).loadGenerationUpgradeCandidates(anyString(), any(), anyInt(), any(), anyInt());
@@ -330,7 +382,7 @@ class ConversationUpgradeServiceTest {
     void unknownAgent() throws Exception {
         when(agentStore.getCurrentResourceId("nope")).thenThrow(new IResourceStore.ResourceNotFoundException("nope"));
 
-        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, "nope", null, true, null));
+        var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, "nope", null, true, null, null));
 
         assertEquals(UpgradeRefusedException.Kind.NOT_FOUND, e.kind());
     }
@@ -339,7 +391,8 @@ class ConversationUpgradeServiceTest {
     @DisplayName("a fromVersion that is not a version of the agent is a bad request")
     void invalidFromVersion() {
         for (int bad : new int[]{0, -3, CURRENT_VERSION + 1}) {
-            var e = assertThrows(UpgradeRefusedException.class, () -> service().upgrade(Environment.production, AGENT, List.of(bad), true, null));
+            var e = assertThrows(UpgradeRefusedException.class,
+                    () -> service().upgrade(Environment.production, AGENT, List.of(bad), true, null, null));
             assertEquals(UpgradeRefusedException.Kind.INVALID, e.kind());
         }
     }
@@ -353,7 +406,7 @@ class ConversationUpgradeServiceTest {
         runInline = false;
         candidates(candidate("c1", 5, READY));
 
-        var report = service(50).upgrade(Environment.production, AGENT, null, false, null);
+        var report = service(50).upgrade(Environment.production, AGENT, null, false, null, null);
 
         assertEquals(0, report.totals().upgraded());
         assertEquals(Map.of("busy", 1L), report.totals().skipped());
@@ -373,7 +426,7 @@ class ConversationUpgradeServiceTest {
         var report = new AtomicReference<ConversationUpgradeReport>();
         var done = new CountDownLatch(1);
         Thread runner = Thread.ofVirtual().start(() -> {
-            report.set(service(60_000).upgrade(Environment.production, AGENT, null, false, null));
+            report.set(service(60_000).upgrade(Environment.production, AGENT, null, false, null, null));
             done.countDown();
         });
 
@@ -395,7 +448,7 @@ class ConversationUpgradeServiceTest {
         submitFailure = new RejectedExecutionException("Coordinator capacity exceeded");
         candidates(candidate("c1", 5, READY));
 
-        var report = service().upgrade(Environment.production, AGENT, null, false, null);
+        var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
 
         assertEquals(Map.of("busy", 1L), report.totals().skipped());
         verify(store, never()).upgradeCompatibilityGeneration(anyString(), anyString(), anyInt());
@@ -438,7 +491,7 @@ class ConversationUpgradeServiceTest {
 
             var service = new ConversationUpgradeService(store, realCoordinator, agentStore, agentFactory, meters, 20_000);
             var report = new AtomicReference<ConversationUpgradeReport>();
-            var upgrading = pool.submit(() -> report.set(service.upgrade(Environment.production, AGENT, null, false, null)));
+            var upgrading = pool.submit(() -> report.set(service.upgrade(Environment.production, AGENT, null, false, null, null)));
 
             Thread.sleep(300);
             verify(store, never()).upgradeCompatibilityGeneration(anyString(), anyString(), anyInt());

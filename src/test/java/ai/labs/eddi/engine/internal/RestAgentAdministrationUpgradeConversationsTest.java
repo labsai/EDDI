@@ -63,16 +63,16 @@ class RestAgentAdministrationUpgradeConversationsTest {
 
     private static ConversationUpgradeReport report(boolean dryRun) {
         var totals = new ConversationUpgradeReport.VersionCounts(null, 3, 2, 0, Map.of("ended", 1L));
-        return new ConversationUpgradeReport(AGENT, "production", dryRun, 7, 3, 7, false, List.of(), totals);
+        return new ConversationUpgradeReport(AGENT, "production", dryRun, 7, 3, 7, false, null, List.of(), totals);
     }
 
     @Test
     @DisplayName("answers 200 with the report, passing the parameters through")
     void delegatesAndReturnsTheReport() {
         var report = report(false);
-        when(service.upgrade(ENV, AGENT, List.of(5), false, 10)).thenReturn(report);
+        when(service.upgrade(ENV, AGENT, List.of(5), false, 10, "abc")).thenReturn(report);
 
-        Response response = admin.upgradeConversations(ENV, AGENT, false, List.of(5), 10);
+        Response response = admin.upgradeConversations(ENV, AGENT, false, List.of(5), 10, "abc");
 
         assertEquals(200, response.getStatus());
         assertSame(report, response.getEntity());
@@ -82,12 +82,12 @@ class RestAgentAdministrationUpgradeConversationsTest {
     @Test
     @DisplayName("a missing dryRun is a dry run — the safe default holds even when the caller passes nothing")
     void nullDryRunIsADryRun() {
-        when(service.upgrade(ENV, AGENT, null, true, null)).thenReturn(report(true));
+        when(service.upgrade(ENV, AGENT, null, true, null, null)).thenReturn(report(true));
 
-        admin.upgradeConversations(ENV, AGENT, null, null, null);
+        admin.upgradeConversations(ENV, AGENT, null, null, null, null);
 
-        verify(service).upgrade(ENV, AGENT, null, true, null);
-        verify(service, never()).upgrade(any(), any(), any(), eq(false), any());
+        verify(service).upgrade(ENV, AGENT, null, true, null, null);
+        verify(service, never()).upgrade(any(), any(), any(), eq(false), any(), any());
     }
 
     @Test
@@ -95,9 +95,9 @@ class RestAgentAdministrationUpgradeConversationsTest {
     void requiresEditAccess() {
         doThrow(new ForbiddenException("no")).when(guard).requireAccess(AGENT, AccessLevel.EDIT, "agent");
 
-        assertThrows(ForbiddenException.class, () -> admin.upgradeConversations(ENV, AGENT, true, null, null));
+        assertThrows(ForbiddenException.class, () -> admin.upgradeConversations(ENV, AGENT, true, null, null, null));
 
-        verify(service, never()).upgrade(any(), any(), any(), any(Boolean.class), any());
+        verify(service, never()).upgrade(any(), any(), any(), any(Boolean.class), any(), any());
     }
 
     @Test
@@ -106,10 +106,10 @@ class RestAgentAdministrationUpgradeConversationsTest {
         var cases = Map.of(UpgradeRefusedException.Kind.INVALID, 400, UpgradeRefusedException.Kind.NOT_FOUND, 404,
                 UpgradeRefusedException.Kind.CONFLICT, 409);
         cases.forEach((kind, status) -> {
-            when(service.upgrade(eq(ENV), eq(AGENT), any(), any(Boolean.class), isNull()))
+            when(service.upgrade(eq(ENV), eq(AGENT), any(), any(Boolean.class), isNull(), isNull()))
                     .thenThrow(new UpgradeRefusedException(kind, "why " + kind));
 
-            Response response = admin.upgradeConversations(ENV, AGENT, true, null, null);
+            Response response = admin.upgradeConversations(ENV, AGENT, true, null, null, null);
 
             assertEquals(status, response.getStatus());
             assertEquals("why " + kind, response.getEntity());
@@ -120,10 +120,10 @@ class RestAgentAdministrationUpgradeConversationsTest {
     @Test
     @DisplayName("an unexpected failure is a 500 that does not echo the internals")
     void unexpectedFailureIsA500() {
-        when(service.upgrade(eq(ENV), eq(AGENT), any(), any(Boolean.class), isNull()))
+        when(service.upgrade(eq(ENV), eq(AGENT), any(), any(Boolean.class), isNull(), isNull()))
                 .thenThrow(new IllegalStateException("mongodb://secret-host down"));
 
-        var e = assertThrows(InternalServerErrorException.class, () -> admin.upgradeConversations(ENV, AGENT, true, null, null));
+        var e = assertThrows(InternalServerErrorException.class, () -> admin.upgradeConversations(ENV, AGENT, true, null, null, null));
 
         assertEquals(false, e.getMessage().contains("secret-host"));
     }

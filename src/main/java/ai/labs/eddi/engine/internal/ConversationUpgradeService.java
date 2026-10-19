@@ -90,7 +90,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * that paused it); {@code IN_PROGRESS} (a resume is running; {@code say} skips
  * such a conversation too).
  *
- * @since 6.5.0
+ * @since 6.6.0
  */
 @ApplicationScoped
 public class ConversationUpgradeService {
@@ -103,7 +103,7 @@ public class ConversationUpgradeService {
     /**
      * The most candidates a single call looks at unless the caller asks for more.
      */
-    public static final int DEFAULT_LIMIT = 50_000;
+    public static final int DEFAULT_LIMIT = 5_000;
 
     /** The largest {@code limit} a caller may ask for. */
     public static final int MAX_LIMIT = 1_000_000;
@@ -177,9 +177,12 @@ public class ConversationUpgradeService {
      * @param limit
      *            the most candidates to look at, {@link #DEFAULT_LIMIT} when
      *            {@code null}
+     * @param after
+     *            continue after this conversation id (the previous report's
+     *            {@code nextAfter}), or {@code null} to start at the beginning
      */
     public ConversationUpgradeReport upgrade(Deployment.Environment environment, String agentId, Collection<Integer> fromVersions, boolean dryRun,
-                                             Integer limit) {
+                                             Integer limit, String after) {
         int maxCandidates = limit == null ? DEFAULT_LIMIT : limit;
         if (maxCandidates < 1 || maxCandidates > MAX_LIMIT) {
             throw new UpgradeRefusedException(UpgradeRefusedException.Kind.INVALID, "limit must be between 1 and " + MAX_LIMIT);
@@ -231,7 +234,9 @@ public class ConversationUpgradeService {
         for (Integer version : requested) {
             tallies.put(version, new Tally());
         }
-        boolean truncated = scan(environment, agentId, requested, targetGeneration, dryRun, maxCandidates, tallies);
+        String nextAfter = scan(agentId, requested, targetGeneration, dryRun, maxCandidates, after, tallies);
+        boolean truncated = nextAfter != null;
+        countEnded(agentId, requested, targetGeneration, tallies);
 
         List<ConversationUpgradeReport.VersionCounts> versions = new ArrayList<>();
         Tally totals = new Tally();
@@ -240,7 +245,7 @@ public class ConversationUpgradeService {
             totals.add(tally);
         });
         var report = new ConversationUpgradeReport(agentId, environment.name(), dryRun, currentVersion, targetGeneration, serving.getAgentVersion(),
-                truncated, versions, totals.toCounts(null));
+                truncated, nextAfter, versions, totals.toCounts(null));
 
         if (!dryRun) {
             counterUpgraded.increment(totals.upgraded);
@@ -258,9 +263,9 @@ public class ConversationUpgradeService {
      *
      * @return whether the limit stopped the scan with candidates left
      */
-    private boolean scan(Deployment.Environment environment, String agentId, TreeSet<Integer> requested, int targetGeneration, boolean dryRun,
-                         int maxCandidates, Map<Integer, Tally> tallies) {
-        String after = null;
+    private String scan(String agentId, TreeSet<Integer> requested, int targetGeneration, boolean dryRun, int maxCandidates, String startAfter,
+                        Map<Integer, Tally> tallies) {
+        String after = startAfter;
         int seen = 0;
         while (seen < maxCandidates) {
             List<ConversationGenerationCandidate> page;
@@ -271,18 +276,45 @@ public class ConversationUpgradeService {
                 throw new IllegalStateException("Could not list the conversations of agent " + sanitize(agentId) + ": " + e.getMessage(), e);
             }
             if (page.isEmpty()) {
-                return false;
+                return null;
             }
             seen += page.size();
             after = page.getLast().conversationId();
             processPage(agentId, targetGeneration, dryRun, page, tallies);
         }
-        // The limit was reached: is there anything left?
+        // The limit was reached: is there anything left? If so, the cursor to continue
+        // from.
         try {
-            return !conversationMemoryStore.loadGenerationUpgradeCandidates(agentId, requested, targetGeneration, after, 1).isEmpty();
+            return conversationMemoryStore.loadGenerationUpgradeCandidates(agentId, requested, targetGeneration, after, 1).isEmpty()
+                    ? null
+                    : after;
         } catch (IResourceStore.ResourceStoreException e) {
-            return true;
+            return after;
         }
+    }
+
+    /**
+     * Ended conversations are not candidates (they are never written and would
+     * crowd the scan); they are counted per version in one query so the preview
+     * still shows them. Reported on every call, whatever the cursor.
+     */
+    private void countEnded(String agentId, TreeSet<Integer> requested, int targetGeneration, Map<Integer, Tally> tallies) {
+        Map<Integer, Long> ended;
+        try {
+            ended = conversationMemoryStore.countEndedGenerationUpgradeCandidates(agentId, requested, targetGeneration);
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException("Could not count the ended conversations of agent " + sanitize(agentId) + ": " + e.getMessage(), e);
+        }
+        if (ended == null) {
+            return;
+        }
+        ended.forEach((version, count) -> {
+            if (count != null && count > 0) {
+                Tally tally = tallies.computeIfAbsent(version, v -> new Tally());
+                tally.matched += count;
+                tally.skipped.merge(SkipReason.ENDED.key(), count, Long::sum);
+            }
+        });
     }
 
     private void processPage(String agentId, int targetGeneration, boolean dryRun, List<ConversationGenerationCandidate> page,

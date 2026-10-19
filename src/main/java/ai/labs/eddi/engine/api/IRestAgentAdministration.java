@@ -80,7 +80,8 @@ public interface IRestAgentAdministration {
                        + "generation. Moved: READY, ERROR and EXECUTION_INTERRUPTED conversations. Skipped and counted: ENDED, "
                        + "AWAITING_HUMAN (a resume must finish on the version that paused it) and IN_PROGRESS. Each write waits its "
                        + "turn in the conversation's own queue, so it never overlaps a running turn. DRY RUN BY DEFAULT: pass "
-                       + "dryRun=false to write. Idempotent: run it again to pick up what was skipped or what limit left over.")
+                       + "dryRun=false to write. Idempotent. Ended conversations are only counted. Each call looks at a bounded number of conversations "
+                       + "(limit); when the response is truncated, continue with after=<nextAfter>.")
     @APIResponse(responseCode = "200", description = "The per-version counts: matched, eligible, upgraded and skipped by reason. "
             + "For a dry run, eligible is what a real run would upgrade.")
     @APIResponse(responseCode = "400", description = "fromVersion is not a version of the agent, or limit is out of range.")
@@ -93,9 +94,13 @@ public interface IRestAgentAdministration {
             @Parameter(description = "Only conversations stored on this agent version; repeat the parameter for several. "
                     + "Default: every version whose conversations are on an older generation than the target.")
             @QueryParam("fromVersion") List<Integer> fromVersions,
-            @Parameter(description = "The most conversations one call looks at (default 50000, max 1000000). "
-                    + "The response says when it stopped there; run it again for the rest.")
-            @QueryParam("limit") Integer limit);
+            @Parameter(description = "The most conversations one call looks at (default 5000, max 1000000). A call is synchronous, "
+                    + "so a large limit can outlast a proxy or load-balancer timeout (the client sees a 504 while the server carries on). "
+                    + "The response says when it stopped there: call again with after=<nextAfter>.")
+            @QueryParam("limit") Integer limit,
+            @Parameter(description = "Continue after this conversation id: the nextAfter of the previous response when it was truncated. "
+                    + "Default: from the beginning.")
+            @QueryParam("after") String after);
     // @formatter:on
 
     @GET

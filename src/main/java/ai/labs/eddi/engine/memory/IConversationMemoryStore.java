@@ -169,10 +169,12 @@ public interface IConversationMemoryStore {
      * One keyset-paged batch of the conversations of an agent whose compatibility
      * generation is absent or lower than {@code belowGeneration} — the candidates
      * of a generation upgrade — as a projection (id, state, version, generation),
-     * never the steps. <strong>Ended conversations are included</strong> so an
-     * upgrade can count them; the generation filter runs in the database, so only
-     * candidates are read. Ascending id order, so a sweep neither skips nor repeats
-     * a conversation while it pages.
+     * never the steps. <strong>Ended conversations are excluded</strong>: they are
+     * never written, so they would stay candidates forever and crowd out the ones
+     * that can move; count them with
+     * {@link #countEndedGenerationUpgradeCandidates}. The generation filter runs in
+     * the database, so only candidates are read. Ascending id order, so a sweep
+     * neither skips nor repeats a conversation while it pages.
      *
      * @param agentId
      *            the agent
@@ -189,6 +191,16 @@ public interface IConversationMemoryStore {
      */
     List<ConversationGenerationCandidate> loadGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration,
                                                                           String afterConversationId, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
+     * How many ended conversations of the agent would be candidates but for being
+     * ended — same filters as {@link #loadGenerationUpgradeCandidates}, grouped by
+     * stored agent version, in one count query.
+     *
+     * @return count per stored version; versions with none are absent
+     */
+    Map<Integer, Long> countEndedGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration)
             throws IResourceStore.ResourceStoreException;
 
     /**

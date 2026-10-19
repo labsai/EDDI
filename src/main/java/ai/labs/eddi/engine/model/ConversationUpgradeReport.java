@@ -28,17 +28,21 @@ import java.util.Map;
  *            conversations run on from their next turn
  * @param truncated
  *            {@code true} when the run stopped at its {@code limit} with more
- *            candidates left: run it again (it picks up where the writes left
- *            off)
+ *            candidates left: call again with {@code after=<nextAfter>}
+ * @param nextAfter
+ *            the cursor to continue from when {@code truncated}, else
+ *            {@code null}. Needed because conversations that are skipped
+ *            without being changed (paused, in progress, busy) stay candidates,
+ *            so a call that restarted from the beginning would meet them again
  * @param versions
  *            per source version (ascending; a version asked for with
  *            {@code fromVersion} appears even with nothing to move)
  * @param totals
  *            the same counts over all source versions
- * @since 6.5.0
+ * @since 6.6.0
  */
 public record ConversationUpgradeReport(String agentId, String environment, boolean dryRun, int currentVersion, int targetGeneration,
-        int servingVersion, boolean truncated, List<VersionCounts> versions, VersionCounts totals) {
+        int servingVersion, boolean truncated, String nextAfter, List<VersionCounts> versions, VersionCounts totals) {
 
     /**
      * @param fromVersion

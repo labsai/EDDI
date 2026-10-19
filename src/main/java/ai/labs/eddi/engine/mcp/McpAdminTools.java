@@ -47,6 +47,7 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -232,7 +233,10 @@ public class McpAdminTools {
             + "Use after a ZIP import or agent sync, which always write a breaking version and so pin every running conversation to the "
             + "old one. DRY RUN BY DEFAULT: it only reports per source version how many conversations match, would move, or are skipped "
             + "(ended, awaitingHuman, inProgress); call again with dryRun=false after checking the numbers. Requires a version of the "
-            + "current generation to be READY in the environment. Never lowers a generation; idempotent.")
+            + "current generation to be READY in the environment. Never lowers a generation; idempotent. Each call looks at a bounded "
+            + "number of conversations: when the report says truncated, call again with after=<nextAfter>. After a real run, dry-run "
+            + "again before undeploying an old version, and undeploy it only when it reports eligible 0; conversations skipped as busy, "
+            + "awaitingHuman or inProgress still run on the old version.")
     public String upgradeConversations(@ToolArg(description = "Agent ID (required)") String agentId,
                                        @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                                 defaultValue = "production") String environment,
@@ -240,8 +244,10 @@ public class McpAdminTools {
                                                 required = false, defaultValue = "true") Boolean dryRun,
                                        @ToolArg(description = "Only conversations stored on these agent versions, comma separated (optional; "
                                                + "default: every version on an older generation)", required = false) String fromVersions,
-                                       @ToolArg(description = "Most conversations to look at in this call (default 50000)",
-                                                required = false) Integer limit) {
+                                       @ToolArg(description = "Most conversations to look at in this call (default 5000, so a call stays "
+                                               + "well inside a proxy timeout)", required = false) Integer limit,
+                                       @ToolArg(description = "Continue after this conversation id: the 'nextAfter' of the previous "
+                                               + "report when it said truncated (optional)", required = false) String after) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
             var env = parseEnvironment(environment);
@@ -251,7 +257,7 @@ public class McpAdminTools {
                     versions.add(Integer.valueOf(version.trim()));
                 }
             }
-            Response response = agentAdmin.upgradeConversations(env, agentId, dryRun, versions, limit);
+            Response response = agentAdmin.upgradeConversations(env, agentId, dryRun, versions, limit, after);
             if (response.getStatus() != 200) {
                 return errorJson(String.valueOf(response.getEntity()));
             }
@@ -259,7 +265,7 @@ public class McpAdminTools {
         } catch (NumberFormatException e) {
             return errorJson("fromVersions must be a comma separated list of version numbers");
         } catch (Exception e) {
-            LOGGER.error("MCP upgrade_conversations failed for Agent " + agentId, e);
+            LOGGER.error("MCP upgrade_conversations failed for Agent " + LogSanitizer.sanitize(agentId), e);
             return errorJson("Failed to upgrade conversations", e);
         }
     }

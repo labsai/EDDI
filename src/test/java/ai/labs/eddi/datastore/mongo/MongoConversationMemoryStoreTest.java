@@ -1087,23 +1087,51 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
-        @DisplayName("candidates are this agent's conversations with no generation or a lower one — ended ones included, current and higher ones not")
+        @DisplayName("candidates are this agent's live conversations with no generation or a lower one — ended, current and higher ones are not")
         void candidatesAreLowerOrAbsent() throws Exception {
             String none = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
-            String low = put(UPGRADE_AGENT, 2, ConversationState.ENDED, 1);
+            String low = put(UPGRADE_AGENT, 2, ConversationState.AWAITING_HUMAN, 1);
+            put(UPGRADE_AGENT, 2, ConversationState.ENDED, 1);
             put(UPGRADE_AGENT, 3, ConversationState.READY, 3);
             put(UPGRADE_AGENT, 3, ConversationState.READY, 4);
             put("otherAgent", 1, ConversationState.READY, null);
 
             var candidates = store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, null, 3, null, 100);
 
-            assertEquals(new TreeSet<>(List.of(none, low)), new TreeSet<>(ids(candidates)));
-            var ended = candidates.stream().filter(c -> c.conversationId().equals(low)).findFirst().orElseThrow();
-            assertEquals(ConversationState.ENDED, ended.conversationState());
-            assertEquals(2, ended.agentVersion());
-            assertEquals(1, ended.compatibilityGeneration());
+            assertEquals(new TreeSet<>(List.of(none, low)), new TreeSet<>(ids(candidates)),
+                    "an ended conversation is never written, so it must not be scanned");
+            var paused = candidates.stream().filter(c -> c.conversationId().equals(low)).findFirst().orElseThrow();
+            assertEquals(ConversationState.AWAITING_HUMAN, paused.conversationState());
+            assertEquals(2, paused.agentVersion());
+            assertEquals(1, paused.compatibilityGeneration());
             var ungenerated = candidates.stream().filter(c -> c.conversationId().equals(none)).findFirst().orElseThrow();
             assertNull(ungenerated.compatibilityGeneration());
+        }
+
+        @Test
+        @DisplayName("ended candidates are counted per stored version, with the same filters")
+        void endedCandidatesAreCountedPerVersion() throws Exception {
+            put(UPGRADE_AGENT, 1, ConversationState.ENDED, null);
+            put(UPGRADE_AGENT, 1, ConversationState.ENDED, 2);
+            put(UPGRADE_AGENT, 2, ConversationState.ENDED, 1);
+            put(UPGRADE_AGENT, 2, ConversationState.ENDED, 3); // already current
+            put(UPGRADE_AGENT, 2, ConversationState.READY, 1); // not ended
+            put("otherAgent", 1, ConversationState.ENDED, null);
+
+            assertEquals(Map.of(1, 2L, 2, 1L), store.countEndedGenerationUpgradeCandidates(UPGRADE_AGENT, null, 3));
+            assertEquals(Map.of(2, 1L), store.countEndedGenerationUpgradeCandidates(UPGRADE_AGENT, List.of(2), 3));
+            assertEquals(Map.of(), store.countEndedGenerationUpgradeCandidates("nobody", null, 3));
+        }
+
+        @Test
+        @DisplayName("a page of live candidates is not crowded out by ended conversations ahead of it")
+        void endedDoNotCrowdTheScan() throws Exception {
+            for (int i = 0; i < 5; i++) {
+                put(UPGRADE_AGENT, 1, ConversationState.ENDED, null);
+            }
+            String live = put(UPGRADE_AGENT, 1, ConversationState.READY, null);
+
+            assertEquals(List.of(live), ids(store.loadGenerationUpgradeCandidates(UPGRADE_AGENT, null, 3, null, 2)));
         }
 
         @Test
