@@ -5915,6 +5915,8 @@
   "agentVersioning": {
     "compatibleLabel": "与上一版本兼容 — 进行中的会话可以切换到此版本",
     "compatibleHint": "仅适用于不会破坏进行中会话的更改，例如提示词措辞或更换模型。如果重命名或删除了属性、动作或工作流步骤，请不要勾选。",
+    "promotionImpactCompatible": "下一轮将继续使用新版本的进行中对话：{{following}} / {{total}}。其余对话保持在开始时的版本上。",
+    "promotionImpactBreaking": "将保持在开始时版本上的进行中对话：{{total}}。勾选上方复选框可让它们继续使用新版本。",
     "compatibleLegacyNote": "当前版本早于版本跟随功能，因此已在其上运行的会话会保留在该版本。下一次兼容保存将连接起版本链。",
     "compatibleUnknownNote": "运行在早于版本跟随功能的版本上的会话会保留在该版本。",
     "generationBadge": "第 {{generation}} 代",

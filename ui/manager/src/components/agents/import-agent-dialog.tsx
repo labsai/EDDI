@@ -57,6 +57,12 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
   const [dragging, setDragging] = useState(false);
   const [outcome, setOutcome] = useState<SyncExecution | null>(null);
   const [schedulesSkipped, setSchedulesSkipped] = useState<number | null>(null);
+  /**
+   * The operator declared the agent version this writes compatible with the one it
+   * replaces, so running conversations follow it. Unticked by default, always, and
+   * cleared with everything else when the dialog closes.
+   */
+  const [compatible, setCompatible] = useState(false);
 
   // Target state for upgrade
   const [targetAgentId, setTargetAgentId] = useState<string | null>(null);
@@ -95,6 +101,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
     setDragging(false);
     setOutcome(null);
     setSchedulesSkipped(null);
+    setCompatible(false);
     setTargetAgentId(null);
     setSyncUrl("");
     setSyncAuth("");
@@ -241,7 +248,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
 
     if (strategy === "merge" && file) {
       mergeMutation.mutate(
-        { file, selectedSourceIds: selectedIds },
+        { file, selectedSourceIds: selectedIds, compatible },
         {
           onSuccess: (result) => {
             onSuccess();
@@ -260,7 +267,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
       );
     } else if (strategy === "upgrade" && file && targetAgentId) {
       importUpgradeMutation.mutate(
-        { file, targetAgentId, selectedSourceIds: selectedIds, workflowOrder },
+        { file, targetAgentId, selectedSourceIds: selectedIds, workflowOrder, compatible },
         {
           onSuccess: settle,
           onError: (err) => { setError(err.message); setStep("preview"); },
@@ -277,6 +284,7 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
           workflowOrder: workflowOrder.length > 0 ? workflowOrder : null,
           sourceAuth: syncAuth,
           createNew: syncCreateNew,
+          compatible,
         },
         {
           onSuccess: settle,
@@ -423,6 +431,8 @@ export function ImportAgentDialog({ open, onClose, onSuccess }: ImportAgentDialo
               workflowOrder={workflowOrder}
               isLoading={isLoading}
               error={error}
+              compatible={compatible}
+              onCompatibleChange={setCompatible}
               onToggleResource={toggleResource}
               onToggleAll={toggleAll}
               onExpandDiff={setExpandedDiff}

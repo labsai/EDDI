@@ -44,6 +44,38 @@ export interface ResourceDiff {
   workflowIndex: number;
 }
 
+/**
+ * One version of the agent that is deployed somewhere, with the open
+ * conversations on it (counted, never loaded).
+ */
+export interface PromotionDeployedVersion {
+  version: number;
+  compatibilityGeneration: number | null;
+  activeConversations: number;
+  /** Whether those conversations would follow the new version if it is declared compatible. */
+  followsIfCompatible: boolean;
+}
+
+/**
+ * What writing the next version of the target agent does to the conversations
+ * running on it. It answers for BOTH declarations, because the operator makes
+ * the compatible/breaking choice after reading it: a breaking version pins every
+ * running conversation, a compatible one lets those on the same generation
+ * follow.
+ */
+export interface PromotionImpact {
+  currentVersion: number | null;
+  /** `null` when the current version predates compatibility generations. */
+  currentGeneration: number | null;
+  generationIfCompatible: number;
+  generationIfBreaking: number;
+  /** True when `currentGeneration` is null: even a compatible save starts a new chain. */
+  startsNewChain: boolean;
+  activeConversations: number;
+  followingIfCompatible: number;
+  deployedVersions: PromotionDeployedVersion[];
+}
+
 export interface ImportPreview {
   sourceAgentId: string | null;
   sourceAgentName: string | null;
@@ -65,6 +97,12 @@ export interface ImportPreview {
    * two source snippets sharing a name, of which only one travels.
    */
   warnings?: string[];
+  /**
+   * What the write would do to the target's running conversations. Absent when
+   * there is no existing target, nothing would be written, or the caller may not
+   * see conversation counts.
+   */
+  conversationImpact?: PromotionImpact | null;
 }
 
 // ==================== Sync Types ====================
@@ -90,6 +128,12 @@ export interface SyncRequest {
   selectedResources: string[] | null;
   workflowOrder: string[] | null;
   createNew?: boolean;
+  /**
+   * Declare the agent version this writes compatible with the one it replaces, so
+   * running conversations follow it. Unset means breaking — the safe default. No
+   * effect when a new agent is created.
+   */
+  compatible?: boolean;
 }
 
 export interface DocumentDescriptor {
@@ -406,9 +450,11 @@ export interface MergeImportResult {
 
 export async function importAgentMerge(
   file: File,
-  selectedSourceIds?: string[]
+  selectedSourceIds?: string[],
+  compatible = false
 ): Promise<MergeImportResult> {
   const params = new URLSearchParams({ strategy: "merge" });
+  if (compatible) params.set("compatible", "true");
   if (selectedSourceIds && selectedSourceIds.length > 0) {
     params.set("selectedResources", selectedSourceIds.join(","));
   }
@@ -526,9 +572,12 @@ export async function importAgentUpgrade(
   file: File,
   targetAgentId: string,
   selectedSourceIds?: string[],
-  workflowOrder?: string[]
+  workflowOrder?: string[],
+  compatible = false
 ): Promise<SyncExecution> {
   const params = new URLSearchParams({ strategy: "upgrade", targetAgentId });
+  // Sent only when ticked: breaking is the default, on the server as well.
+  if (compatible) params.set("compatible", "true");
   if (selectedSourceIds?.length) {
     params.set("selectedResources", selectedSourceIds.join(","));
   }
@@ -627,12 +676,14 @@ export async function executeSync(
   selectedResources: string[] | null,
   workflowOrder: string[] | null,
   sourceAuth: string,
-  createNew = false
+  createNew = false,
+  compatible = false
 ): Promise<SyncExecution> {
   const params = new URLSearchParams({ sourceUrl, sourceAgentId });
   if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
   if (targetAgentId) params.set("targetAgentId", targetAgentId);
   if (createNew) params.set("createNew", "true");
+  if (compatible) params.set("compatible", "true");
   // Sent even when empty. Dropping an empty selection made "nothing ticked" read
   // as "no selection", i.e. everything — the backend now refuses it with a 400
   // instead of overwriting what the operator had deliberately left out.

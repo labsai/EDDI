@@ -5915,6 +5915,8 @@
   "agentVersioning": {
     "compatibleLabel": "Kompatibel mit der vorherigen Version — laufende Unterhaltungen dürfen zu ihr wechseln",
     "compatibleHint": "Nur für Änderungen, die eine laufende Unterhaltung nicht beschädigen können, z. B. andere Prompt-Formulierungen oder ein anderes Modell. Nicht ankreuzen, wenn Properties, Actions oder Workflow-Schritte umbenannt oder entfernt wurden.",
+    "promotionImpactCompatible": "Laufende Unterhaltungen, die beim nächsten Beitrag auf der neuen Version weiterlaufen: {{following}} von {{total}}. Die übrigen bleiben auf der Version, mit der sie begonnen haben.",
+    "promotionImpactBreaking": "Laufende Unterhaltungen, die auf der Version bleiben, mit der sie begonnen haben: {{total}}. Setzen Sie oben den Haken, damit sie auf der neuen Version weiterlaufen.",
     "compatibleLegacyNote": "Die aktuelle Version stammt aus der Zeit vor der Versionsfolge, daher bleiben bereits laufende Unterhaltungen auf ihr. Ab dem nächsten kompatiblen Speichern ist die Kette verbunden.",
     "compatibleUnknownNote": "Unterhaltungen auf einer Version aus der Zeit vor der Versionsfolge bleiben auf ihr.",
     "generationBadge": "Generation {{generation}}",

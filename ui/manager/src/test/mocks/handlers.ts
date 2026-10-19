@@ -5212,11 +5212,31 @@ const MOCK_UPGRADE_RESULT = {
   }>,
 };
 
+/**
+ * What `RestAgentAdministration.previewNextVersion` answers: the impact of the
+ * next version under BOTH declarations. 12 conversations are open; 9 would follow
+ * a compatible version, none a breaking one.
+ */
+const MOCK_CONVERSATION_IMPACT = {
+  currentVersion: 4,
+  currentGeneration: 2,
+  generationIfCompatible: 2,
+  generationIfBreaking: 3,
+  startsNewChain: false,
+  activeConversations: 12,
+  followingIfCompatible: 9,
+  deployedVersions: [
+    { version: 4, compatibilityGeneration: 2, activeConversations: 9, followsIfCompatible: true },
+    { version: 2, compatibilityGeneration: 1, activeConversations: 3, followsIfCompatible: false },
+  ],
+};
+
 const MOCK_IMPORT_PREVIEW = {
   sourceAgentId: "agent1",
   sourceAgentName: "Support Agent",
   targetAgentId: "agent1",
   targetAgentName: "Support Agent",
+  conversationImpact: MOCK_CONVERSATION_IMPACT as typeof MOCK_CONVERSATION_IMPACT | null,
   resources: [
     { sourceId: "beh1", resourceType: "behavior", name: "Support Rules", action: "UPDATE", targetId: "beh1-local", targetVersion: 1, matchStrategy: "type", sourceContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["greet"]}]}]}', targetContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["hello"]}]}]}', workflowIndex: 0 },
     { sourceId: "llm1", resourceType: "langchain", name: "GPT-4 Task", action: "SKIP", targetId: "llm1-local", targetVersion: 1, matchStrategy: "type", sourceContent: null, targetContent: null, workflowIndex: 1 },
@@ -5267,6 +5287,7 @@ export const backupSyncHandlers = [
       ...MOCK_IMPORT_PREVIEW,
       targetAgentId: null,
       targetAgentName: null,
+      conversationImpact: null,
     });
   }),
 

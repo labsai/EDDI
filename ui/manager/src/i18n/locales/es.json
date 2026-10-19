@@ -5983,6 +5983,8 @@
   "agentVersioning": {
     "compatibleLabel": "Compatible con la versión anterior — las conversaciones en curso pueden cambiar a ella",
     "compatibleHint": "Solo para cambios que no pueden romper una conversación en curso, p. ej. la redacción del prompt o un modelo distinto. Déjalo sin marcar si se renombraron o eliminaron propiedades, acciones o pasos del workflow.",
+    "promotionImpactCompatible": "Conversaciones en curso que continuarán en la nueva versión en su próximo turno: {{following}} de {{total}}. El resto permanece en la versión con la que empezó.",
+    "promotionImpactBreaking": "Conversaciones en curso que permanecerán en la versión con la que empezaron: {{total}}. Marque la casilla de arriba para que continúen en la nueva versión.",
     "compatibleLegacyNote": "La versión actual es anterior al seguimiento de versiones, así que las conversaciones que ya la usan se quedan en ella. El próximo guardado compatible enlaza la cadena.",
     "compatibleUnknownNote": "Las conversaciones en una versión anterior al seguimiento de versiones se quedan en ella.",
     "generationBadge": "Generación {{generation}}",

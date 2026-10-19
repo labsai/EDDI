@@ -220,7 +220,11 @@ describe("ImportAgentDialog", () => {
     const user = userEvent.setup();
     await navigateToPreview(user);
 
-    const checkboxes = screen.getAllByRole("checkbox");
+    // The compatible-version choice is a checkbox too, and unticked by default:
+    // it is not part of the selection.
+    const compatible = screen.getByTestId("import-compatibility-checkbox");
+    expect(compatible).not.toBeChecked();
+    const checkboxes = screen.getAllByRole("checkbox").filter((cb) => cb !== compatible);
     expect(checkboxes.length).toBe(4); // 3 resources + 1 select-all
     checkboxes.forEach((cb) => expect(cb).toBeChecked());
   });
@@ -255,6 +259,29 @@ describe("ImportAgentDialog", () => {
     expect(args.file).toBeInstanceOf(File);
     expect(args.selectedSourceIds).toEqual(expect.arrayContaining(["o1", "o2", "o3"]));
     expect(onSuccess).toHaveBeenCalled();
+  });
+
+  // --- Declaring the promotion compatible ---
+
+  it("a merge is breaking unless the operator ticks compatible", async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    await user.click(screen.getByTestId("import-confirm-merge"));
+
+    expect(mockMergeMutate.mock.calls[0]![0].compatible).toBe(false);
+  });
+
+  it("a ticked compatible reaches the merge", async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    await user.click(screen.getByTestId("import-compatibility-checkbox"));
+    await user.click(screen.getByTestId("import-confirm-merge"));
+
+    expect(mockMergeMutate.mock.calls[0]![0].compatible).toBe(true);
   });
 
   // --- Partial outcomes ---
