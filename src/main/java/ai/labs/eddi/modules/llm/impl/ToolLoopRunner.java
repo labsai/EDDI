@@ -395,6 +395,14 @@ class ToolLoopRunner {
                 if (Thread.interrupted()) {
                     throw new LifecycleException("Agent execution cancelled (interrupted)");
                 }
+                // The turn's own cancel flag, which nothing below can clear: raised by a
+                // caller's cancel, a GDPR stop, the watchdog and a lost cluster lease (whose
+                // conversation another node now runs). Without this check a tool loop ran
+                // all its remaining rounds after any of those — more model calls and more
+                // side-effectful tools for a turn whose result is discarded.
+                if (memory.isCancelled()) {
+                    throw new LifecycleException("Agent execution cancelled");
+                }
 
                 // Keep the accumulated tool traffic inside its aggregate ceiling BEFORE
                 // the request is built — this is the only point at which the loop knows
@@ -577,6 +585,9 @@ class ToolLoopRunner {
                         // Thread.interrupted() clears the flag so it cannot leak to later work.
                         if (Thread.interrupted()) {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
+                        }
+                        if (memory.isCancelled()) {
+                            throw new LifecycleException("Agent execution cancelled before tool: " + toolRequest.name());
                         }
 
                         // "An agent may not send a request to its own conversation" is
