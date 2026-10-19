@@ -403,6 +403,7 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use.
 - **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's.
 - **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+- **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
 
 ### Required on a create
 
@@ -443,8 +444,11 @@ generations existed carries no generation and reads as generation 1.
 data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
 with write access to the database fails authentication instead of decrypting as that
 row's value. Rows written before this keep decrypting through a no-AAD fallback, so
-nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
-form. System values (such as the pinned audit key) are bound to their name and have
+nothing has to be migrated, and the fallback retires itself: the first time such a row
+is resolved it is re-sealed in the bound form in place (same value, same DEK
+generation, not counted as a rotation), guarded on the IV it was read with so a
+concurrent store or DEK rotation always wins, and logged once per key. A DEK rotation
+still re-seals every remaining row, including those never read. System values (such as the pinned audit key) are bound to their name and have
 no unbound form. Wrapped DEKs are not bound.
 
 **Sealed runtime data is bound too.** OAuth connection grants are sealed through the
@@ -545,7 +549,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset?confirm=true` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -752,7 +756,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
-| `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
@@ -805,7 +809,7 @@ It returns the vault reference:
 }
 ```
 
-**`POST /{tenantId}/reset`** — deletes every secret and the DEK for the tenant:
+**`POST /{tenantId}/reset?confirm=true`** — deletes every secret and the DEK for the tenant (without `confirm=true`: `400`, `{"error": "confirm=true is required", …}`):
 
 ```json
 {
@@ -995,7 +999,7 @@ When the previous master key is **gone for good**:
      keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
      created on the next store);
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
-3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+3. `POST /secretstore/secrets/{tenantId}/reset?confirm=true` for each of them, then store the
    secrets again.
 
 Never call it while a KEK rotation is merely unfinished, or because one replica was
@@ -1009,7 +1013,7 @@ at startup, because nothing can be stranded.
 
 #### Resetting a tenant
 
-`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+`POST /{tenantId}/reset?confirm=true` deletes every secret and every DEK generation of the tenant,
 and — before the DEKs go — everything else sealed with them, such as the tenant's
 [OAuth connection grants](connections.md); their users reconnect. Left in place those
 values were not merely unreadable: the tenant's next DEK is generation 1 again, with
@@ -1096,12 +1100,21 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
+| Google (`AIza…`), xAI (`xai-…`), Groq (`gsk_…`), GitHub (`ghp_…`, `github_pat_…`), Slack (`xoxb-…` and siblings), AWS access key ids (`AKIA…`/`ASIA…`), bare JWTs (`eyJ….eyJ….…`) | `<REDACTED>` | `xoxb-1234-…` → `<REDACTED>` |
+| `Authorization: Basic\|Token\|Digest …` | `Authorization: Basic <REDACTED>` | the credential after the scheme word, which the name rule (stopping at the space) used to leave. A `Digest` header loses its whole directive list (`username`, `nonce`, `response`, …), not only the first token |
+| `Basic <base64>` with no header name in front | `Basic <REDACTED>` | only when the token decodes to `user:password` (printable text around a colon), so `Basic configuration` stays prose |
+| `Ocp-Apim-Subscription-Key: …` (`api-key:` / `x-api-key:` are matched by the API key rule) | `Ocp-Apim-Subscription-Key: <REDACTED>` | |
+| Database connection-string password (`mongodb(+srv)://`, `postgres(ql)://`, `mysql://`, `redis(s)://`, `amqp(s)://`) | `mongodb://user:<REDACTED>@host` | the host stays legible |
 
 > A bare `${vault:...}` reference is deliberately **not** redacted — it is a pointer, not a secret, and hiding it removes exactly the information an approver needs to judge a request. A reference followed by extra value material (`${vault:k}SECRET-TAIL`) **is** redacted as a whole.
 
 ### Export Sanitization
 
 `SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
+
+### Configuration Read Redaction
+
+`ConfigSecretRedactor` is applied by the LLM, MCP-calls, httpcalls, RAG and channel stores whenever a caller who is not `eddi-admin` reads a document (including `?version=` reads and MCP `read_resource`). A plaintext credential — by field name anywhere in the document, by header name in a header map, as a userinfo password or credential-named query value in a URL, or by shape in an httpcall body — is replaced; a `${vault:…}`, `${vars:…}`, `${connection:…}` or `${caller:…}` reference is returned as it is. A write that carries the marker back is refused with a `400` naming the fields. Details in [Security → Editors never read a plaintext credential back](security.md#editors-never-read-a-plaintext-credential-back).
 
 ### Memory Protection
 
