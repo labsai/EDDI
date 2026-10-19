@@ -158,6 +158,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         final String safeConversationId = sanitize(conversationId);
 
+        // A node at capacity answers a plain 503 before the sink is touched and
+        // before the ownership check reads the database for a turn it will refuse.
+        conversationService.refuseIfAtCapacity(conversationId);
+
         // Same owner-or-admin gate the non-streaming twin applies (RestAgentEngine)
         // — without it, anyone who learns a conversationId could drive a turn under
         // its owner's identity. Runs BEFORE the sink is touched so the denial

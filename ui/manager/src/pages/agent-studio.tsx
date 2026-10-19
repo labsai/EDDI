@@ -411,7 +411,7 @@ export function AgentStudioPage() {
     // descendant (Tailwind's `sr-only`, for one) resolves against the initial
     // containing block, slips past the `overflow-hidden` body row below, and
     // scrolls the whole studio.
-    <div className="relative flex h-screen flex-col bg-background" data-testid="agent-studio">
+    <div className="relative flex h-dvh flex-col bg-background" data-testid="agent-studio">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 shrink-0">
         <Link
@@ -420,7 +420,7 @@ export function AgentStudioPage() {
           data-testid="studio-back"
           aria-label={t("studio.backToAgent", "Back to agent detail")}
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         </Link>
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0">
@@ -438,14 +438,15 @@ export function AgentStudioPage() {
 
         <button
           onClick={() => setRightPanelOpen(!rightPanelOpen)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+          // Below lg the chat is a tab of the bottom bar, not a side panel.
+          className="hidden lg:flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
           title={rightPanelOpen ? t("studio.hideChat", "Hide chat") : t("studio.showChat", "Show chat")}
           data-testid="toggle-right-panel"
         >
           {rightPanelOpen ? (
-            <PanelRightClose className="h-4 w-4" />
+            <PanelRightClose className="h-4 w-4 rtl:-scale-x-100" />
           ) : (
-            <PanelRight className="h-4 w-4" />
+            <PanelRight className="h-4 w-4 rtl:-scale-x-100" />
           )}
         </button>
       </div>
@@ -570,10 +571,10 @@ export function AgentStudioPage() {
               value={chatWidth}
               min={CHAT_MIN}
               max={CHAT_MAX}
-              className="hidden md:block"
+              className="hidden lg:block"
             />
             <div
-              className="shrink-0 border-s border-border overflow-hidden hidden md:flex md:flex-col min-h-0 min-w-0"
+              className="shrink-0 border-s border-border overflow-hidden hidden lg:flex lg:flex-col min-h-0 min-w-0"
               style={{ width: chatWidth }}
             >
               <ChatPanel embedded />

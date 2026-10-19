@@ -245,7 +245,7 @@ function CopyMessageButton({ content }: { content: string }) {
       type="button"
       onClick={handleCopy}
       className={cn(
-        "inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 transition-opacity duration-150",
+        "reveal-on-touch inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] opacity-0 group-hover/msg:opacity-100 focus-visible:opacity-100 transition-opacity duration-150",
         copied
           ? "text-emerald-500 font-medium"
           : "text-muted-foreground/60 hover:text-foreground hover:bg-muted/50",

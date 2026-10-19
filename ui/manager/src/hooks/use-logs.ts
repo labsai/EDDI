@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRecentLogs,
@@ -49,6 +49,8 @@ export function useHistoryLogs(filters: HistoryFilters = {}) {
     initialPageParam: startSkip,
     queryFn: ({ pageParam }) =>
       getHistoryLogs({ ...filters, skip: pageParam, limit: pageSize }),
+    // Keep the table on screen while a changed filter loads.
+    placeholderData: keepPreviousData,
     // A short page is the last page.
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length < pageSize

@@ -9,7 +9,13 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactValidat
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ValidatorKind;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.net.ServerSocket;
+import java.net.SocketTimeoutException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -185,5 +191,80 @@ class ArtifactValidatorsTest {
                 List.of(new ArtifactValidator(ValidatorKind.MAX_LENGTH, "many")), "anything"));
         assertNotNull(ArtifactValidators.firstRejection(
                 List.of(new ArtifactValidator(null, null)), "anything"));
+    }
+
+    // =================================================================
+    // $ref loading (security review M9.1): inline and bundled only
+    // =================================================================
+
+    @Test
+    @DisplayName("an http $ref is refused at save time and never connects")
+    void httpRef_refusedWithoutConnecting() throws Exception {
+        try (ServerSocket listener = new ServerSocket(0)) {
+            listener.setSoTimeout(300);
+            String spec = "{\"$ref\":\"http://127.0.0.1:" + listener.getLocalPort() + "/x.json\"}";
+
+            var e = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> assertThrows(IllegalArgumentException.class,
+                    () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec)))));
+            assertTrue(e.getMessage().contains("not loaded"), e.getMessage());
+
+            String rejection = assertTimeoutPreemptively(Duration.ofSeconds(10),
+                    () -> ArtifactValidators.firstRejection(List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec)), "{}"));
+            assertNotNull(rejection, "a refused $ref must refuse the write, not admit it");
+            assertTrue(rejection.contains("misconfigured"), rejection);
+
+            assertThrows(SocketTimeoutException.class, listener::accept, "the validator must not have connected to the $ref host");
+        }
+    }
+
+    @Test
+    @DisplayName("an http $ref to a closed port is refused by the loader, not by a connect error")
+    void httpRefClosedPort_refused() {
+        String spec = "{\"$ref\":\"http://127.0.0.1:1/x.json\"}";
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("not allowed to be loaded"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("a file: $ref is never read — the local schema would otherwise reject the content")
+    void fileRef_notRead(@TempDir Path dir) throws Exception {
+        Path local = dir.resolve("loc.json");
+        Files.writeString(local, "{\"type\":\"integer\"}");
+        String spec = "{\"$ref\":\"" + local.toUri() + "\"}";
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("not loaded"), e.getMessage());
+
+        String rejection = ArtifactValidators.firstRejection(List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec)), "\"text\"");
+        assertNotNull(rejection);
+        assertTrue(rejection.contains("misconfigured"), "the file schema must not have been applied: " + rejection);
+    }
+
+    @Test
+    @DisplayName("internal $defs references and the bundled meta-schema still work")
+    void internalRefs_stillWork() {
+        String spec = """
+                {"$defs":{"t":{"type":"string"}},"type":"object","required":["title"],
+                 "properties":{"title":{"$ref":"#/$defs/t"}}}""";
+        assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertNull(ArtifactValidators.firstRejection(List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec)), "{\"title\":\"x\"}"));
+        assertNotNull(ArtifactValidators.firstRejection(List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec)), "{\"title\":1}"));
+
+        String metaRef = "{\"$ref\":\"https://json-schema.org/draft/2020-12/schema\"}";
+        assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, metaRef))));
+    }
+
+    @Test
+    @DisplayName("only the bundled meta-schema classpath prefixes are loadable")
+    void loadableIris() {
+        assertTrue(ArtifactValidators.isLoadableSchemaIri("classpath:draft/2020-12/schema"));
+        assertTrue(ArtifactValidators.isLoadableSchemaIri("classpath:draft-07/schema"));
+        assertFalse(ArtifactValidators.isLoadableSchemaIri("classpath:application.properties"));
+        assertFalse(ArtifactValidators.isLoadableSchemaIri("classpath:draft/../application.properties"));
+        assertFalse(ArtifactValidators.isLoadableSchemaIri("file:/etc/passwd"));
+        assertFalse(ArtifactValidators.isLoadableSchemaIri("https://example.com/s.json"));
+        assertFalse(ArtifactValidators.isLoadableSchemaIri(null));
     }
 }

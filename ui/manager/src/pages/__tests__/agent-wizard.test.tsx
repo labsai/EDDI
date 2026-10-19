@@ -1076,11 +1076,10 @@ describe("AgentWizardPage", () => {
 
     await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
 
-    const datalist = document.getElementById("model-suggestions-jlama");
-    expect(datalist).not.toBeNull();
-    const offered = Array.from(datalist!.querySelectorAll("option")).map(
-      (option) => option.getAttribute("value") ?? "",
-    );
+    await user.click(screen.getByTestId("wizard-model-toggle"));
+    const offered = screen
+      .getAllByTestId("wizard-model-option")
+      .map((option) => option.querySelector("span")?.textContent ?? "");
     expect(offered.length).toBeGreaterThan(0);
     for (const model of offered) {
       expect(

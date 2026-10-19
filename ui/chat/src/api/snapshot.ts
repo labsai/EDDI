@@ -24,10 +24,15 @@ export const SECRET_INPUT_PLACEHOLDER = "<secret input>";
 /** Same mask the composer shows when a secret turn is sent. */
 export const SECRET_MASK = "●●●●●●●●";
 
-let seq = 0;
-function makeMessage(role: "user" | "agent", content: string): ChatMessage {
-  seq += 1;
-  return { id: `snap-${seq}-${role}`, role, content, timestamp: Date.now() };
+/**
+ * Ids are derived from the message's position in the conversation, not from a
+ * global counter, so rebuilding the transcript after undo/redo keeps the keys
+ * of every unchanged message: React updates those bubbles in place instead of
+ * remounting them, replaying their entrance animation and re-parsing their
+ * markdown.
+ */
+function makeMessage(id: string, role: "user" | "agent", content: string): ChatMessage {
+  return { id: `snap-${id}-${role}`, role, content, timestamp: Date.now() };
 }
 
 /**
@@ -56,6 +61,8 @@ export function stepsToMessages(
     // backend's read-time masking pairs them under the same condition.
     const paired = Array.isArray(outputs) && outputs.length === steps.length;
     const secretTurn = paired && outputs[index]?.input === SECRET_INPUT_PLACEHOLDER;
+    let part = 0;
+    const nextId = () => `${index}-${part++}`;
 
     for (const entry of data) {
       const key = entry?.key;
@@ -72,6 +79,7 @@ export function stepsToMessages(
         // The session's own record covers a backend that sends neither.
         messages.push(
           makeMessage(
+            nextId(),
             "user",
             secretTurn || text === SECRET_INPUT_PLACEHOLDER || secretTexts.has(text)
               ? SECRET_MASK
@@ -86,11 +94,11 @@ export function stepsToMessages(
         // strings, and a single string is possible too.
         const items = Array.isArray(entry.value) ? entry.value : [entry.value];
         for (const text of extractOutputTexts(items)) {
-          messages.push(makeMessage("agent", text));
+          messages.push(makeMessage(nextId(), "agent", text));
         }
         const images = extractOutputImages(items);
         if (images.length) {
-          messages.push({ ...makeMessage("agent", ""), images });
+          messages.push({ ...makeMessage(nextId(), "agent", ""), images });
         }
       }
       // actions / quickReplies are control data, not transcript content.

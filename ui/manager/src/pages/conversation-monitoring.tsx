@@ -419,7 +419,7 @@ export function ConversationMonitoringPage() {
 
       {ready && !isLoading && !isError && rows.length > 0 && (
         <div
-          className="overflow-hidden rounded-xl border bg-card shadow-sm"
+          className="overflow-x-auto rounded-xl border bg-card shadow-sm"
           data-testid="active-conversation-list"
         >
           <table className="w-full">

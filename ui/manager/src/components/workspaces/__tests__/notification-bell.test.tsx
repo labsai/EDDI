@@ -63,6 +63,41 @@ describe("NotificationBell", () => {
     return { read, shared };
   }
 
+  it("a failed dismiss gives back only its own notification, not one dismissed after it", async () => {
+    vi.spyOn(workspacesApi, "getWorkspaceInfo").mockResolvedValue(info());
+    const list = [notification({ id: "n1" }), notification({ id: "n2" })];
+    let failFirst!: () => void;
+    const firstFails = new Promise<void>((r) => (failFirst = r));
+    let gets = 0;
+    const hang = () => new Promise<Response>(() => {});
+    server.use(
+      // Serve the first read of each, then hang: the rollback is what is under
+      // test, not the refetch that would later repair the cache anyway.
+      http.get("*/workspaces/notifications/count", () => (gets++ < 1 ? HttpResponse.json({ unread: 2 }) : hang())),
+      http.get("*/workspaces/notifications", () => (gets++ < 2 ? HttpResponse.json(list) : hang())),
+      http.post("*/workspaces/notifications/read", async ({ request }) => {
+        const body = (await request.json()) as string[] | { ids?: string[] };
+        const ids = Array.isArray(body) ? body : (body.ids ?? []);
+        if (!ids.includes("n1")) return hang();
+        await firstFails;
+        return HttpResponse.json({ message: "nope" }, { status: 500 });
+      })
+    );
+    renderWithProviders(<NotificationBell />);
+    expect(await screen.findByTestId("notification-count")).toHaveTextContent("2");
+    await userEvent.click(screen.getByTestId("notification-bell"));
+
+    await userEvent.click(await screen.findByTestId("notification-dismiss-n1"));
+    await userEvent.click(await screen.findByTestId("notification-dismiss-n2"));
+    await waitFor(() => expect(screen.queryByTestId("notification-count")).toBeNull());
+
+    failFirst();
+    // n1 is unread again and counted; n2 stays dismissed.
+    expect(await screen.findByTestId("notification-dismiss-n1")).toBeInTheDocument();
+    expect(screen.queryByTestId("notification-dismiss-n2")).toBeNull();
+    expect(screen.getByTestId("notification-count")).toHaveTextContent("1");
+  });
+
   it("shows the unread count, and says what was shared by whom", async () => {
     render([notification()]);
 
