@@ -284,6 +284,21 @@ describe("ImportAgentDialog", () => {
     expect(mockMergeMutate.mock.calls[0]![0].compatible).toBe(true);
   });
 
+  it("a new preview needs a new compatible declaration", async () => {
+    renderDialog();
+    const user = userEvent.setup();
+    await navigateToPreview(user);
+
+    await user.click(screen.getByTestId("import-compatibility-checkbox"));
+    expect(screen.getByTestId("import-compatibility-checkbox")).toBeChecked();
+
+    // Back and preview again: the tick was a judgement about the previous change.
+    await user.click(screen.getByText("Back"));
+    await user.click(screen.getByTestId("import-confirm-strategy"));
+
+    expect(screen.getByTestId("import-compatibility-checkbox")).not.toBeChecked();
+  });
+
   // --- Partial outcomes ---
   //
   // Upgrade and sync answer 201 wrote-something, 200 already-identical and 207
