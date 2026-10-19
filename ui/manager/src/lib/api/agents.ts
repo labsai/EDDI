@@ -75,8 +75,9 @@ export interface Agent {
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**
    * Ceiling, in USD, on the PRICED spend of one conversation. Absent = unlimited;
-   * 0 allows no priced spend at all. Unpriced models add nothing, so they are
-   * never bounded by it. Only written when set — see `parseCostCeiling`.
+   * 0 allows no priced spend at all. Unpriced models add nothing to the total,
+   * but are stopped like any other once it is reached. Only written when set —
+   * see `parseCostCeiling`.
    */
   maxCostPerConversationUsd?: number;
   /**

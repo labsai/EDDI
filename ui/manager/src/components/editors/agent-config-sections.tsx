@@ -1058,7 +1058,7 @@ export const LimitsSection = memo(function LimitsSection({
         <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
           {t(
             "agentDetail.maxCostPricedOnly",
-            "Only priced models count. A model with no input/output price in its LLM configuration adds $0, so it is never bounded by this cap.",
+            "Only priced models count toward this cap. A model with no input/output price in its LLM configuration adds $0, but is still stopped once other spend has reached the cap.",
           )}
         </p>
       </div>

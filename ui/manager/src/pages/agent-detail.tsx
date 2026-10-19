@@ -1009,7 +1009,7 @@ export function AgentDetailPage() {
       />
 
       {/* Spend limits */}
-      <LimitsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
+      <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />

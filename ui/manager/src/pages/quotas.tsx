@@ -259,7 +259,7 @@ export function QuotasPage() {
                     dimmed={!form.enabled}
                     note={t(
                       "quotas.costPricedOnly",
-                      "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration meters $0 and is never bounded by this budget.",
+                      "Counts priced spend only: a model without inputPricePer1M / outputPricePer1M in its LLM configuration adds $0 to the total, but is refused like any other once the budget is spent.",
                     )}
                   />
                 </div>
