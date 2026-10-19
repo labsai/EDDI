@@ -233,7 +233,7 @@ class AuditLedgerServiceBranchTest {
     @DisplayName("applyAgentSignature signs using hmac when available")
     void applyAgentSignatureWithHmac() throws Exception {
         AgentSigningService signingService = mock(AgentSigningService.class);
-        doReturn("sig123").when(signingService).sign(anyString(), anyString(), anyString());
+        doReturn("sig123").when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
 
         IAuditClusterSupport natsInstance = null;
 
@@ -254,7 +254,7 @@ class AuditLedgerServiceBranchTest {
             return true;
         }));
         // Verify sign was called with hmac (not entry id)
-        verify(signingService).sign(eq("default"), eq("agent1"), argThat(payload -> payload != null && !payload.equals("id1")));
+        verify(signingService).signIfKeyPresent(eq("default"), eq("agent1"), argThat(payload -> payload != null && !payload.equals("id1")));
 
         service.shutdown();
     }
@@ -268,7 +268,7 @@ class AuditLedgerServiceBranchTest {
     void applyAgentSignatureException() throws Exception {
         AgentSigningService signingService = mock(AgentSigningService.class);
         doThrow(new AgentSigningService.AgentSigningException("no key", new RuntimeException("missing")))
-                .when(signingService).sign(anyString(), anyString(), anyString());
+                .when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
 
         IAuditClusterSupport natsInstance = null;
 
@@ -291,6 +291,32 @@ class AuditLedgerServiceBranchTest {
         service.shutdown();
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("applyAgentSignature leaves the entry unsigned when the agent has no key")
+    void applyAgentSignatureNoKey() throws Exception {
+        AgentSigningService signingService = mock(AgentSigningService.class);
+        doReturn(null).when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
+
+        IAuditClusterSupport natsInstance = null;
+
+        var service = new AuditLedgerService(auditStore, true, 60,
+                Optional.empty(), "deadletter.jsonl", true, "default", AuditLedgerService.DEFAULT_MAX_QUEUE_SIZE,
+                true, 500, meterRegistry, natsInstance, signingService, new ObjectMapper());
+        service.init();
+
+        service.submit(entry("id1", "conv1", "agent1"));
+        service.flush();
+
+        verify(auditStore).appendBatch(argThat(batch -> {
+            assertNull(batch.getFirst().agentSignature());
+            return true;
+        }));
+        verify(signingService, never()).sign(anyString(), anyString(), anyString());
+
+        service.shutdown();
+    }
+
     // ==================== applyAgentSignature — null hmac uses entry.id()
     // ====================
 
@@ -299,7 +325,7 @@ class AuditLedgerServiceBranchTest {
     @DisplayName("applyAgentSignature signs using entry.id() when hmac is null")
     void applyAgentSignatureNullHmac() throws Exception {
         AgentSigningService signingService = mock(AgentSigningService.class);
-        doReturn("sig-from-id").when(signingService).sign(anyString(), anyString(), anyString());
+        doReturn("sig-from-id").when(signingService).signIfKeyPresent(anyString(), anyString(), anyString());
 
         IAuditClusterSupport natsInstance = null;
 
@@ -314,7 +340,7 @@ class AuditLedgerServiceBranchTest {
         service.flush();
 
         // Should sign with entry.id() since hmac is null
-        verify(signingService).sign(eq("default"), eq("agent1"), eq("my-id"));
+        verify(signingService).signIfKeyPresent(eq("default"), eq("agent1"), eq("my-id"));
 
         service.shutdown();
     }

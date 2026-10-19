@@ -352,7 +352,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign agent configurations for provenance |
+| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds one under `agent-signing-key:{agentId}`. An agent without a key is not looked up again for 60 s, so a key written into the vault by hand is used within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
