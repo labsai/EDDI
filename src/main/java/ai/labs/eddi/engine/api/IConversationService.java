@@ -241,6 +241,17 @@ public interface IConversationService {
     ConversationState getConversationState(String conversationId);
 
     /**
+     * Refuses a turn up front when this node is already at its effective turn
+     * limit, before anything is read for it. Throws a
+     * {@code RejectedExecutionException} (answered 503 {@code capacity_exceeded}
+     * with {@code Retry-After}). Not atomic: the turn is still admitted against the
+     * limit when it starts — this only spares a turn that is going to be refused
+     * the database reads of loading its conversation. A no-op by default.
+     */
+    default void refuseIfAtCapacity(String conversationId) {
+    }
+
+    /**
      * Process user input — resolves agentId + environment from the stored record.
      */
     void say(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData,
