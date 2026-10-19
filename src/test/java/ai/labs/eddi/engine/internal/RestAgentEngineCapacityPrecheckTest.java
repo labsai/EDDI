@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -22,8 +23,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -43,6 +46,7 @@ class RestAgentEngineCapacityPrecheckTest {
     private IConversationDescriptorStore descriptorStore;
     private RestAgentEngine restAgentEngine;
     private RestAgentEngineStreaming streaming;
+    private ResourceAccessGuard resourceAccessGuard;
 
     @BeforeEach
     void setUp() {
@@ -50,11 +54,12 @@ class RestAgentEngineCapacityPrecheckTest {
         descriptorStore = mock(IConversationDescriptorStore.class);
         var identity = mock(SecurityIdentity.class);
         var ownershipValidator = mock(OwnershipValidator.class);
+        resourceAccessGuard = mock(ResourceAccessGuard.class);
         var conversationAccessGuard = new ConversationAccessGuard(identity, ownershipValidator, descriptorStore);
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
                 mock(IGroupConversationService.class));
         restAgentEngine = new RestAgentEngine(conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator,
-                conversationAccessGuard, mock(ResourceAccessGuard.class), hitlAccessGuard, mock(IHitlToolJournalStore.class),
+                conversationAccessGuard, resourceAccessGuard, hitlAccessGuard, mock(IHitlToolJournalStore.class),
                 mock(AgentDisplayNameResolver.class), 30);
         streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard);
         doThrow(new TurnCapacityExceededException("full")).when(conversationService).refuseIfAtCapacity(CONVERSATION_ID);
@@ -67,6 +72,29 @@ class RestAgentEngineCapacityPrecheckTest {
                 new InputData("hello", new HashMap<>()), mock(AsyncResponse.class)));
         verifyNoInteractions(descriptorStore);
         verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    @DisplayName("start: refused before the access check, the GDPR read or the agent lookup")
+    void startConversation() throws Exception {
+        doThrow(new TurnCapacityExceededException("full")).when(conversationService).refuseIfAtCapacity(contains("agent-1"));
+
+        assertThrows(RejectedExecutionException.class,
+                () -> restAgentEngine.startConversationWithContext("agent-1", Environment.production, "user-1", Map.of()));
+        verifyNoInteractions(resourceAccessGuard);
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("start: goes ahead when there is capacity")
+    void startConversationWithCapacity() throws Exception {
+        when(conversationService.startConversation(any(), anyString(), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("c1", URI.create("eddi://conversation/c1")));
+
+        restAgentEngine.startConversationWithContext("agent-1", Environment.production, "user-1", Map.of());
+
+        verify(conversationService).refuseIfAtCapacity(contains("agent-1"));
+        verify(conversationService).startConversation(any(), eq("agent-1"), any(), any());
     }
 
     @Test

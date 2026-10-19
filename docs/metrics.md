@@ -426,8 +426,10 @@ that gauge drops as soon as the client has its answer.
 
 A refusal at the limit happens before the turn reads anything: the REST and SSE
 entry points check capacity before the ownership check and the conversation
-load, so a node at its limit spends no database round trips on turns it turns
-away. A conversation with more than
+load, and a new conversation's start is checked before the access check, the
+GDPR restriction read and the agent lookup. A node at its limit spends no
+database round trips on turns it turns away, which matters most in a burst,
+when every refused client comes back after `Retry-After`. A conversation with more than
 `eddi.conversation.max-queued-turns-per-conversation` turns waiting refuses the
 next one with `reason="conversation_queue"`. Under load the MongoDB pool is
 where a turn's time goes; `eddi_datastore_pool_wait_seconds` shows how long
