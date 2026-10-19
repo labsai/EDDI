@@ -800,23 +800,38 @@ jobs:
             if [ "$sv" -gt 0 ] && [ "$ev" -gt 0 ]; then view_delta=$(signed $(( ev - sv ))); fi
             if [ "$sc" -gt 0 ] && [ "$ec" -gt 0 ]; then clone_delta=$(signed $(( ec - sc ))); fi
 
-            # The run log's estimate for the same days. Rows are first-run-of-
-            # the-day snapshots, so the window is [from 00:00, to 00:00) in run
-            # time. A log younger than the window gives a partial figure,
-            # labelled with when it starts; none at all gives no line.
-            local real="" sweeps="" real_since="" versions="" summary
+            # The run log's estimate for the same span as the delta above.
+            # Rows are first-run-of-the-day snapshots, so that span runs from
+            # the first run on the `from` day to the first run on the `to` day.
+            # Each log line covers (previous run, its run], so the window is
+            # every line after the first one dated `from`, up to and including
+            # the first one dated `to`. Consecutive windows therefore share no
+            # line and miss none — an interval crossing midnight lands in
+            # exactly one, as the row delta does. A log that starts inside the
+            # window gives a partial figure labelled with when it starts; none
+            # at all gives no line.
+            local real="" sweeps="" real_since="" versions="" summary window
+            # Lines that are not timestamped (a damaged line the run log then
+            # restarted after) are skipped: "g…" sorts after any date and
+            # would otherwise close the window early.
+            # shellcheck disable=SC2016  # an awk program: its $1 is awk's
+            window='
+              $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/ { next }
+              first == "" { first = $1 }
+              state == 2 { next }
+              state == 0 { if ($1 >= from) state = 1; next }
+              $1 >= to { state = 2 }'
             if [ -f "$RUNS_CSV" ]; then
-              summary=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" '
-                NR == 2 { first = $1 }
-                NR > 1 && $1 >= from && $1 < to { real += $8; sweeps += $5; n++ }
-                END { if (n) printf "%d,%d,%s", real, sweeps, (first > from ? first : "") }' "$RUNS_CSV")
+              summary=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'
+                { real += $8; sweeps += $5; n++ }
+                END { if (n) printf "%d,%d,%s", real, sweeps, (first >= from ? first : "") }' "$RUNS_CSV")
               if [ -n "$summary" ]; then
                 IFS=, read -r real sweeps real_since <<< "$summary"
                 real=$(signed "$real")
                 # Each tag with the number of intervals it was pulled in —
                 # not a pull count, which Docker Hub does not publish per tag.
-                versions=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" '
-                  NR > 1 && $1 >= from && $1 < to && $12 != "" { n = split($12, t, ";"); for (i = 1; i <= n; i++) print t[i] }' "$RUNS_CSV" \
+                versions=$(awk -F, -v from="${sd}T00:00:00Z" -v to="${ed}T00:00:00Z" "$window"'
+                  $12 != "" { n = split($12, t, ";"); for (i = 1; i <= n; i++) print t[i] }' "$RUNS_CSV" \
                   | sort | uniq -c | sort -k1,1nr -k2,2 | head -n 5 \
                   | awk '{ printf "%s%s ×%d", sep, $2, $1; sep = ", " }')
               fi

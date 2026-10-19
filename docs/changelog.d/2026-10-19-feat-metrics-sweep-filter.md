@@ -40,7 +40,11 @@ How it works, in [`docker-pull-notify.yml`](../../.github/workflows/docker-pull-
   dropping debt too early books a whole sweep (~200) as real pulls, while
   holding it too long hides a few real ones. A malformed last line starts a new
   baseline instead of blocking the log.
-- **Plan digests** sums the log over the digest window. A log younger than the
+- **Plan digests** sums the log over the same span as the raw delta beside it:
+  every line after the first run of the `from` day, up to and including the
+  first run of the `to` day (the daily rows are first-run-of-the-day
+  snapshots). Consecutive windows share no line and miss none, so an interval
+  crossing midnight is counted exactly once. A log younger than the
   window gives a figure labelled "counted since …". With no log, the line is
   left out and the digest is otherwise unchanged.
 
