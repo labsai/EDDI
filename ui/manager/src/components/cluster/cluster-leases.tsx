@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AlertTriangle, KeyRound, Search, Unlock } from "lucide-react";
 import type { ActionResult, LeaseView } from "@/lib/api/cluster";
 import { formatDuration, leaseFlagHelp, leaseFlagLabel } from "@/lib/cluster-labels";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useClusterLeases, useReleaseLease } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,8 @@ export function ClusterLeasesPanel({ canAct }: { canAct: boolean }) {
   const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [flagged, setFlagged] = useState(false);
-  const { data, isLoading, isError, error, refetch } = useClusterLeases(q.trim(), flagged);
+  const debouncedQ = useDebounce(q.trim(), 250);
+  const { data, isLoading, isError, error, refetch } = useClusterLeases(debouncedQ, flagged);
   const [target, setTarget] = useState<{ lease: LeaseView; renewed?: ActionResult } | null>(null);
   const release = useReleaseLease();
 

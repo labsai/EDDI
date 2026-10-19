@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 
 function LocationProbe() {
   return <span data-testid="loc">{useLocation().search}</span>;
@@ -208,6 +208,30 @@ describe("LogsPage", () => {
       // History entry from mock
       expect(screen.getByText("History log entry")).toBeInTheDocument();
     });
+  });
+
+  it("shows an instance filter the URL changed to (back/forward), not the old text", async () => {
+    let navigate!: NavigateFunction;
+    function Nav() {
+      navigate = useNavigate();
+      return null;
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MemoryRouter initialEntries={["/manage/logs?tab=history&instance=inst-a"]}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+            <Nav />
+            <LogsPage />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const box = await screen.findByTestId("history-filter-instance");
+    expect(box).toHaveValue("inst-a");
+
+    await waitFor(() => navigate("/manage/logs?tab=history&instance=inst-b"));
+    await waitFor(() => expect(screen.getByTestId("history-filter-instance")).toHaveValue("inst-b"));
   });
 
   it("shows level stats bar", () => {
