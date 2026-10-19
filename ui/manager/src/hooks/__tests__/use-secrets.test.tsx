@@ -61,6 +61,7 @@ describe("useStoreSecret", () => {
         keyName: "api-key",
         value: "secret123",
         description: "API key",
+        allowedHosts: ["*"],
       });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -76,9 +77,34 @@ describe("useStoreSecret", () => {
         keyName: "restricted-key",
         value: "secret456",
         allowedAgents: ["agent1", "agent2"],
+        allowedHosts: ["api.example.com"],
       });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("passes allowedHosts through to the PUT body", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ reference: "r", tenantId: "default", keyName: "hosted-key" });
+      }),
+    );
+    const { result } = renderHook(() => useStoreSecret(), {
+      wrapper: createWrapper(),
+    });
+    await act(async () => {
+      result.current.mutate({
+        tenantId: "default",
+        keyName: "hosted-key",
+        value: "v",
+        allowedAgents: ["*"],
+        allowedHosts: ["api.openai.com"],
+      });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(body!.allowedHosts).toEqual(["api.openai.com"]);
   });
 });
 
@@ -187,6 +213,7 @@ describe("useStoreSecret createOnly", () => {
         tenantId: "default",
         keyName: "brand-new-key",
         value: "v",
+        allowedHosts: ["*"],
         createOnly: true,
       });
     });

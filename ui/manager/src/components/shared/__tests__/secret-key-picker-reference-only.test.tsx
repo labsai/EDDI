@@ -341,6 +341,7 @@ describe("SecretKeyPicker in reference-only mode", () => {
       const dialog = within(await screen.findByRole("dialog"));
       await user.type(dialog.getByPlaceholderText(/openaiKey/), "brand-new-key");
       await user.type(dialog.getByPlaceholderText(/secret value/i), "s3cret");
+      await user.click(dialog.getByTestId("create-secret-modal-hosts-mode-any"));
       await user.click(dialog.getByRole("button", { name: "Store Secret" }));
 
       await expectNormalisedChip("brand-new-key");

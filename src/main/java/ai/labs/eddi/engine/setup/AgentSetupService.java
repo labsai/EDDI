@@ -632,7 +632,7 @@ public class AgentSetupService {
             // Its destination is the API the generated httpcalls call, not the LLM.
             var apiTargets = buildResult.configsByGroup().values().stream().map(ApiCallsConfiguration::getTargetServerUrl).toList();
             String effectiveApiAuth = vaultApiAuth(request.apiAuth(), request.agentName(), createdResources,
-                    new HostRule(request.allowedHosts(), SetupSecretHosts.forUrls(apiTargets), "apiAuth"));
+                    new HostRule(apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(apiTargets), "apiAuth"));
             if (!Objects.equals(effectiveApiAuth, request.apiAuth())) {
                 buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth,
                         request.apiAuthHeader(), specFetcher());
@@ -1847,6 +1847,20 @@ public class AgentSetupService {
      *            the request field the secret came from, for the message
      */
     record HostRule(List<String> requested, List<String> derived, String field) {
+    }
+
+    /**
+     * The requested list that applies to the {@code apiAuth} secret of
+     * {@code /setup-api}. The request's {@code allowedHosts} names where the LLM
+     * {@code apiKey} may go; the {@code apiAuth} credential goes to the API the
+     * generated httpcalls call, whose hosts are known exactly from their target
+     * servers. Applying an explicit LLM list to it as well locked the credential to
+     * the model provider, and every generated call was then refused. So only an
+     * explicit {@code ["*"]} — "store it open", said out loud — carries over; any
+     * other list leaves {@code apiAuth} to its derived hosts.
+     */
+    static List<String> apiAuthRequestedHosts(List<String> requested) {
+        return SetupSecretHosts.isExplicitlyUnrestricted(requested) ? requested : null;
     }
 
     /**

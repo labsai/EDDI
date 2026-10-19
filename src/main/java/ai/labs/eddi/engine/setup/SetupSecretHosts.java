@@ -38,14 +38,6 @@ import java.util.Map;
 final class SetupSecretHosts {
 
     /**
-     * What a setup request writes in {@code allowedHosts} to store a secret with no
-     * destination restriction. Said out loud, like {@code allowedAgents: ["*"]}:
-     * under {@code eddi.vault.grant-enforcement=enforce} an unrestricted secret is
-     * never the silent default.
-     */
-    static final String ANY_HOST = "*";
-
-    /**
      * The endpoints of the providers whose builder supplies its own when the
      * configuration names none. The named OpenAI-compatible providers come from
      * their catalog instead ({@link #forLlm}). Providers missing here
@@ -131,8 +123,12 @@ final class SetupSecretHosts {
         }
     }
 
-    /** Whether a request's list is exactly {@code ["*"]}. */
+    /**
+     * Whether a request's list is exactly {@code ["*"]} — how a setup request
+     * stores a secret with no destination restriction, said out loud like
+     * {@code allowedAgents: ["*"]}.
+     */
     static boolean isExplicitlyUnrestricted(List<String> requested) {
-        return requested != null && requested.size() == 1 && requested.getFirst() != null && ANY_HOST.equals(requested.getFirst().trim());
+        return VaultHostAllowlist.isExplicitlyUnrestricted(requested);
     }
 }

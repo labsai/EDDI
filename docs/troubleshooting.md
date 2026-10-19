@@ -226,7 +226,7 @@ See [Secrets Vault](secrets-vault.md).
 
 ### How to store a secret
 
-Secrets are written with `PUT /secretstore/secrets/{tenantId}/{keyName}` and a body `{"value": "...", "description": "...", "allowedAgents": ["*"]}`. Single-tenant deployments use the tenant `default`, which the short reference form `${vault:keyName}` resolves to. An empty value is rejected with `Secret value must not be empty`.
+Secrets are written with `PUT /secretstore/secrets/{tenantId}/{keyName}` and a body `{"value": "...", "description": "...", "allowedAgents": ["*"], "allowedHosts": ["api.openai.com"]}` — on a create under `eddi.vault.grant-enforcement=enforce` both lists are required, and `["*"]` is the explicit "any" for either ([Required on a create](secrets-vault.md#required-on-a-create)). Single-tenant deployments use the tenant `default`, which the short reference form `${vault:keyName}` resolves to. An empty value is rejected with `Secret value must not be empty`.
 
 ### A `${vault:...}` reference is not resolved
 

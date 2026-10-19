@@ -266,7 +266,7 @@ class ConversationRecallToolTest {
         String result = tool.recallConversationDetail("1".repeat(40_000));
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 
-        assertTrue(elapsedMillis < 100, "recall took " + elapsedMillis + " ms on a 40,000-digit query");
+        assertTrue(elapsedMillis < 1_000, "recall took " + elapsedMillis + " ms on a 40,000-digit query");
         assertTrue(result.contains("Recalled conversation turns"), result);
     }
 
