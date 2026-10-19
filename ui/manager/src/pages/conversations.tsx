@@ -403,7 +403,7 @@ export function ConversationsPage() {
                       <button
                         type="button"
                         onClick={() => setDeleteTarget(convId)}
-                        className="relative z-10 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100 focus:opacity-100"
+                        className="reveal-on-touch relative z-10 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive hover:bg-destructive/10 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:p-2"
                         aria-label={t("conversations.deleteConversation", "Delete conversation")}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -454,7 +454,7 @@ export function ConversationsPage() {
           ) : (
             /* List table */
             <div
-              className="overflow-hidden rounded-xl border bg-card shadow-sm"
+              className="overflow-x-auto rounded-xl border bg-card shadow-sm"
               data-testid="conversation-list"
             >
               <table className="w-full">
@@ -469,7 +469,7 @@ export function ConversationsPage() {
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.state")}
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    <th className="hidden md:table-cell px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.steps", "Steps")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -524,7 +524,7 @@ export function ConversationsPage() {
                             {stateLabels[state]}
                           </span>
                         </td>
-                        <td className="px-5 py-3">
+                        <td className="hidden md:table-cell px-5 py-3">
                           <StepCountBadge count={conv.conversationStepSize} />
                         </td>
                         <td className="px-5 py-3">
@@ -593,7 +593,7 @@ export function ConversationsPage() {
               data-testid="pagination-prev"
               aria-label={t("common.previous", "Previous")}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
               {t("common.previous", "Previous")}
             </Button>
             <Button
@@ -605,7 +605,7 @@ export function ConversationsPage() {
               aria-label={t("common.next", "Next")}
             >
               {t("common.next", "Next")}
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4 rtl:rotate-180" />
             </Button>
           </div>
         </div>

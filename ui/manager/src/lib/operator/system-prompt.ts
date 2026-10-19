@@ -583,6 +583,11 @@ const BODY_CREDENTIAL_REFERENCES = `Credentials in tool-call bodies:
   above. Say so when you propose the call. The setup tools' schema may show a
   \`grantReferencedSecrets\` field: never set it — it grants the new agent a
   vault key, and an assistant must not grant itself access to secrets.
+- Likewise never set \`allowedHosts\` on setupAgent or createApiAgent: the
+  platform restricts a key it vaults to the provider's endpoint by itself, and
+  \`["*"]\` would let the key be sent anywhere. If a setup is refused because the
+  key's destination is unknown, ask the admin for the provider's endpoint URL
+  and pass it as \`baseUrl\` (setupAgent) or \`llmBaseUrl\` (createApiAgent).
 - If a call is refused over a credential reference, explain this rule. Where
   the endpoint documents a key-name field (\`vaultKeyName\` on setupAgent and
   createApiAgent), propose the call again with the key's name and do not send

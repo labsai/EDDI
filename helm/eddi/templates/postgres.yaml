@@ -52,11 +52,23 @@ spec:
     spec:
       # PostgreSQL never talks to the Kubernetes API.
       automountServiceAccountToken: false
+      # Runs as the image's postgres user from the start, so the entrypoint has
+      # no chown or su-exec step and the container can drop every capability.
+      # PGDATA is a subdirectory of the volume, which initdb creates and owns.
       securityContext:
-        fsGroup: 999
+        runAsNonRoot: true
+        runAsUser: {{ .Values.postgres.runAsUser }}
+        runAsGroup: {{ .Values.postgres.runAsUser }}
+        fsGroup: {{ .Values.postgres.runAsUser }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 5432
               name: postgres

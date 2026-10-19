@@ -67,8 +67,21 @@ export const SAFE_HTML_SANITIZE_OPTIONS: DomPurifyConfig = {
     "source",
     "track",
     "picture",
+    // Embedded SVG / MathML: `<svg><image href>` and `<feImage>` fetch a URL on
+    // render exactly like the `<img>` this module turns into a link, and
+    // `<use href>` pulls in an external document. Agent output has no need to
+    // draw vectors, so the whole foreign-content family is denied rather than
+    // having each URL-bearing element rewritten one by one.
+    "svg",
+    "math",
+    "image",
+    "feimage",
+    "use",
   ],
-  FORBID_ATTR: ["style", "srcset", "background"],
+  // `class` is denied because the Manager ships Tailwind: an agent that may
+  // write `class="fixed inset-0 z-50 bg-background"` can paint a full-viewport
+  // fake prompt (a credential or approval dialog) over the real UI.
+  FORBID_ATTR: ["class", "style", "srcset", "background"],
 };
 
 /**
@@ -79,10 +92,25 @@ export const SAFE_HTML_SANITIZE_OPTIONS: DomPurifyConfig = {
  * Only http(s) sources become links; anything else is reduced to its label.
  */
 export function sanitizeAgentHtml(html: string): string {
-  const fragment = DOMPurify.sanitize(html, {
-    ...SAFE_HTML_SANITIZE_OPTIONS,
-    RETURN_DOM_FRAGMENT: true,
-  });
+  // Every surviving link opens in a new browsing context without a reference
+  // back to the Manager (no `window.opener`). The hook is registered for this
+  // call only: DOMPurify's hook list is global to the module.
+  const linkHook = (node: Element) => {
+    if (node.tagName === "A") {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  };
+  let fragment: DocumentFragment;
+  DOMPurify.addHook("afterSanitizeAttributes", linkHook);
+  try {
+    fragment = DOMPurify.sanitize(html, {
+      ...SAFE_HTML_SANITIZE_OPTIONS,
+      RETURN_DOM_FRAGMENT: true,
+    });
+  } finally {
+    DOMPurify.removeHook("afterSanitizeAttributes", linkHook);
+  }
   fragment.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src") ?? "";
     const label = img.getAttribute("alt")?.trim() || src || "image";

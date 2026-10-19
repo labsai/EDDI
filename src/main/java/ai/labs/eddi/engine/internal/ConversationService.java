@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.KvKeys;
@@ -45,6 +46,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -196,6 +198,24 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     ConversationAccessGuard conversationAccessGuard;
+
+    /**
+     * Lets {@link #isSoftDeleted} reuse the descriptor the ownership check of the
+     * same request read (see {@link ConversationDescriptorMemo}). Field-injected
+     * for the same reason as {@link #attachmentStore}; {@code null} means every
+     * check reads the store.
+     */
+    @Inject
+    Instance<ConversationDescriptorMemo> descriptorMemoInstance;
+
+    /**
+     * Serves the pinned agent configuration {@link ConversationHitlService} reads
+     * on every turn from memory instead of the store. Field-injected for the same
+     * reason as {@link #attachmentStore}; {@code null} means every read goes to the
+     * store.
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
@@ -1029,7 +1049,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
             throws Exception {
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
+        say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler,
+                null);
+    }
+
+    /**
+     * @param preloaded
+     *            the conversation as the caller has just loaded it, so the turn
+     *            does not load it a second time; {@code null} to load it here
+     */
+    private void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler,
+                     ConversationMemorySnapshot preloaded)
+            throws Exception {
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -1039,6 +1072,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                     @Override
                     public void skipped(SimpleConversationMemorySnapshot snapshot) {
                         responseHandler.onSkipped(snapshot);
+                    }
+
+                    @Override
+                    public Consumer<String> toolCallObserver() {
+                        return responseHandler instanceof ToolCallObserving observing ? observing.toolCallObserver() : null;
                     }
                 });
     }
@@ -1052,8 +1090,20 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler)
             throws Exception {
+        sayStreaming(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, streamingHandler,
+                null);
+    }
+
+    /**
+     * As
+     * {@link #say(Environment, String, String, Boolean, Boolean, List, InputData, boolean, ConversationResponseHandler, ConversationMemorySnapshot)}.
+     */
+    private void sayStreaming(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                              List<String> returningFields, InputData inputData, StreamingResponseHandler streamingHandler,
+                              ConversationMemorySnapshot preloaded)
+            throws Exception {
         ConversationEventSink eventSink = eventSinkFor(streamingHandler);
-        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false,
+        admitTurn(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, preloaded,
                 new TurnListener() {
                     @Override
                     public void completed(SimpleConversationMemorySnapshot snapshot) {
@@ -1098,6 +1148,11 @@ public class ConversationService implements IConversationService, UserErasurePar
 
         /** Progress events for a streamed turn; {@code null} for a plain one. */
         default ConversationEventSink eventSink() {
+            return null;
+        }
+
+        /** Name-only tool-call observer for a plain turn; {@code null} for none. */
+        default Consumer<String> toolCallObserver() {
             return null;
         }
 
@@ -1182,7 +1237,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     private void admitTurn(Environment environment, String agentId, String conversationId, Boolean returnDetailed,
                            Boolean returnCurrentStepOnly, List<String> returningFields, InputData inputData, boolean rerunOnly,
-                           TurnListener listener)
+                           ConversationMemorySnapshot preloaded, TurnListener listener)
             throws Exception {
 
         long startTime = System.nanoTime();
@@ -1192,7 +1247,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         // need an effectively-final alias (processingTurn).
         ProcessingTurn admittedTurn = null;
         try {
-            final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
+            // The conversation-id entry points have just loaded the conversation to find
+            // its agent and run the pre-turn checks; loading it again here was a second
+            // full-document read on every turn.
+            final IConversationMemory conversationMemory = preloaded != null
+                    ? convertConversationMemorySnapshot(preloaded)
+                    : loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             // GDPR Art. 18 — processing restriction check
@@ -1287,6 +1347,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 if (listener.eventSink() != null) {
                     memory.setEventSink(listener.eventSink());
                 }
+                // Always assigned: a memory reused across turns must not keep the
+                // previous turn's observer.
+                memory.setToolCallObserver(listener.toolCallObserver());
 
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
@@ -1419,11 +1482,32 @@ public class ConversationService implements IConversationService, UserErasurePar
         try {
             return ProcessingTurn.admit(processingConversationCount, inFlightTurnPermits, limit);
         } catch (TurnCapacityExceededException e) {
-            meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
-            LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
-                    sanitize(conversationId), limit);
+            countRefusal(conversationId, limit);
             throw e;
         }
+    }
+
+    /**
+     * Refuses a turn before anything is read for it when the node is already at
+     * {@code eddi.conversation.max-in-flight-turns}. {@link #admitTurn} stays the
+     * authoritative check (this one is not atomic); this exists so that, at the
+     * limit, a turn that will be refused does not first spend the database round
+     * trips of checking ownership and loading its conversation.
+     */
+    @Override
+    public void refuseIfAtCapacity(String conversationId) {
+        int limit = inFlightTurnLimit();
+        if (limit > 0 && inFlightTurnPermits.get() >= limit) {
+            countRefusal(conversationId, limit);
+            throw new TurnCapacityExceededException("This node is already running " + limit
+                    + " conversation turns (eddi.conversation.max-in-flight-turns) — retry shortly or against another node");
+        }
+    }
+
+    private void countRefusal(String conversationId, int limit) {
+        meterRegistry.counter("eddi.turn.rejected", "reason", "in_flight_limit").increment();
+        LOGGER.debugf("Turn of conversation %s refused: %d turns already in flight (eddi.conversation.max-in-flight-turns)",
+                sanitize(conversationId), limit);
     }
 
     /**
@@ -1691,7 +1775,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    rerunOnly, handler);
+                    rerunOnly, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
@@ -1823,7 +1907,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         try {
             sayStreaming(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
-                    inputData, handler);
+                    inputData, handler, snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
@@ -1938,18 +2022,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * No live descriptor, but an archived one: the conversation was soft-deleted.
      */
     private boolean isSoftDeleted(String conversationId) throws ResourceStoreException {
-        try {
-            if (conversationDescriptorStore.readDescriptor(conversationId, 0) != null) {
-                return false;
-            }
-        } catch (ResourceNotFoundException e) {
-            // no live descriptor — check the archive
-        }
-        try {
-            return conversationDescriptorStore.readDescriptorWithHistory(conversationId, 0) != null;
-        } catch (ResourceNotFoundException e) {
-            return false;
-        }
+        // The ownership check of this request has usually resolved the descriptor
+        // already.
+        return ConversationDescriptorMemo.resolve(conversationDescriptorStore, descriptorMemoInstance, conversationId).archived();
     }
 
     /**

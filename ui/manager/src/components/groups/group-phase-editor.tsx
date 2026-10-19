@@ -322,7 +322,7 @@ export function GroupPhaseEditor({
             </label>
 
             {canConverge && convergence?.enabled && (
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 *:min-w-0">
                 <div>
                   <label
                     htmlFor={`phase-convergence-min-${idx}`}

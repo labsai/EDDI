@@ -51,6 +51,7 @@ import {
   isProvisionableBySetup,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
+import { ModelCombobox } from "@/components/shared/model-combobox";
 import {
   getApiKeyUrl,
   getDefaultBaseUrl,
@@ -515,7 +516,7 @@ export function AgentWizardPage() {
           to="/manage/agents"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("setupWizard.backToAgents", "Back to Agents")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
@@ -641,7 +642,7 @@ export function AgentWizardPage() {
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <button
           onClick={handleBack}
           disabled={currentStep === 0}
@@ -653,7 +654,7 @@ export function AgentWizardPage() {
           )}
           data-testid="wizard-back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("setupWizard.back", "Back")}
         </button>
 
@@ -665,7 +666,7 @@ export function AgentWizardPage() {
             data-testid="wizard-next"
           >
             {t("setupWizard.next", "Next")}
-            <ArrowRight className="h-4 w-4" />
+            <ArrowRight className="h-4 w-4 rtl:rotate-180" />
           </button>
         ) : (
           <div className="flex items-center gap-2">
@@ -902,7 +903,6 @@ function LlmStep({
   const { t } = useTranslation();
   const prov = getProviderConfig(provider);
   const suggestions = useMemo(() => MODEL_SUGGESTIONS[provider] ?? [], [provider]);
-  const datalistId = `model-suggestions-${provider}`;
   const baseUrlRequired = isBaseUrlRequired(provider);
   const baseUrlSupported = supportsBaseUrl(provider);
   const inProcess = !baseUrlSupported;
@@ -960,22 +960,16 @@ function LlmStep({
           >
             {t("setupWizard.model", "Model")} *
           </label>
-          <input
+          <ModelCombobox
             id="wizard-model"
-            type="text"
-            list={datalistId}
             value={model}
-            onChange={(e) => onModelChange(e.target.value)}
+            onChange={onModelChange}
+            suggestions={suggestions}
+            defaultModel={prov?.defaultModel}
             placeholder={t("setupWizard.modelPlaceholder", "e.g. {{model}} (or any model your provider supports)", { model: prov?.defaultModel ?? "" })}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-            data-testid="wizard-model"
-            autoComplete="off"
+            testId="wizard-model"
           />
-          <datalist id={datalistId}>
-            {suggestions.map((m) => (
-              <option key={m} value={m} />
-            ))}
-          </datalist>
           <p className="mt-1 text-xs text-muted-foreground">
             {inProcess
               ? t(
@@ -1815,7 +1809,7 @@ function FeatureToggle({
         <span
           className={cn(
             "absolute h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
-            checked ? "translate-x-4" : "translate-x-0.5",
+            checked ? "translate-x-4 rtl:-translate-x-4" : "translate-x-0.5 rtl:-translate-x-0.5",
           )}
         />
         <input

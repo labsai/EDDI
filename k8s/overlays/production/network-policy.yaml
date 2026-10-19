@@ -36,9 +36,16 @@ spec:
       ports:
         - protocol: TCP
           port: 7070
-    # Allow traffic from Ingress controllers (typically in a different namespace)
+    # Allow traffic from the ingress-nginx controller, in ITS namespace only.
+    # `namespaceSelector: {}` here admitted a pod labelled
+    # app.kubernetes.io/name=ingress-nginx in ANY namespace — a label anyone who
+    # can create a pod anywhere can set. kubernetes.io/metadata.name is set by
+    # the API server and cannot be forged. Change the value if your controller
+    # runs elsewhere (kustomize's namespace transformer does not rewrite it).
     - from:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
           podSelector:
             matchLabels:
               app.kubernetes.io/name: ingress-nginx

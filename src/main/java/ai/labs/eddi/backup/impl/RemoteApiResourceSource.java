@@ -110,6 +110,11 @@ public class RemoteApiResourceSource implements IResourceSource {
     private final String authToken;
     private final IJsonSerialization jsonSerialization;
     private final OutboundHttp http;
+    /**
+     * Applied by the facade to every request — see
+     * {@link SourceUrlValidator#connectPolicy}.
+     */
+    private final SsrfPolicy peerSsrf;
     /** Applied to every configuration document read — see the class comment. */
     private final UnaryOperator<String> secretScrubber;
     /** What the operator should know about this source; see {@link #warnings()}. */
@@ -141,6 +146,20 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     public RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
             String authToken, IJsonSerialization jsonSerialization, UnaryOperator<String> secretScrubber, OutboundHttp http) {
+        this(baseUrl, agentId, agentVersion, authToken, jsonSerialization, secretScrubber, http, SsrfPolicy.NONE);
+    }
+
+    /**
+     * @param peerSsrf
+     *            what {@link SourceUrlValidator#connectPolicy} answered for this
+     *            source; the facade applies it to every request. The constructor
+     *            without it uses {@link SsrfPolicy#NONE} and is for tests against a
+     *            loopback server
+     */
+    public RemoteApiResourceSource(String baseUrl, String agentId, Integer agentVersion,
+            String authToken, IJsonSerialization jsonSerialization, UnaryOperator<String> secretScrubber, OutboundHttp http,
+            SsrfPolicy peerSsrf) {
+        this.peerSsrf = Objects.requireNonNull(peerSsrf, "peerSsrf");
         this.baseUrl = normalizeBaseUrl(baseUrl);
         this.agentId = agentId;
         this.agentVersion = agentVersion;
@@ -217,8 +236,16 @@ public class RemoteApiResourceSource implements IResourceSource {
      * surfaces as a non-200 status and the read fails.
      */
     static OutboundRequest.Builder peerRequest(URI uri, Duration timeout, String authToken) {
+        return peerRequest(uri, timeout, authToken, SsrfPolicy.NONE);
+    }
+
+    /**
+     * As above, with the SSRF policy the facade re-checks the target with right
+     * before sending — see {@link SourceUrlValidator#connectPolicy}.
+     */
+    static OutboundRequest.Builder peerRequest(URI uri, Duration timeout, String authToken, SsrfPolicy ssrf) {
         OutboundRequest.Builder builder = OutboundRequest.builder(Profile.INTERNAL_PEER, uri)
-                .ssrf(SsrfPolicy.NONE)
+                .ssrf(ssrf)
                 .redirects(RedirectPolicy.NEVER)
                 .timeout(timeout);
         if (authToken != null && !authToken.isBlank()) {
@@ -452,6 +479,15 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     public static List<DocumentDescriptor> listRemoteAgentDescriptors(OutboundHttp http,
                                                                       String baseUrl, String authToken, IJsonSerialization jsonSerialization) {
+        return listRemoteAgentDescriptors(http, baseUrl, authToken, jsonSerialization, SsrfPolicy.NONE);
+    }
+
+    /**
+     * As above, with the per-request SSRF policy (see
+     * {@link SourceUrlValidator#connectPolicy}).
+     */
+    public static List<DocumentDescriptor> listRemoteAgentDescriptors(OutboundHttp http, String baseUrl, String authToken,
+                                                                      IJsonSerialization jsonSerialization, SsrfPolicy peerSsrf) {
         String normalized = normalizeBaseUrl(baseUrl);
         if (!normalized.endsWith("/")) {
             normalized += "/";
@@ -460,7 +496,7 @@ public class RemoteApiResourceSource implements IResourceSource {
 
         try {
             OutboundRequest request = peerRequest(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"), REQUEST_TIMEOUT,
-                    authToken).header("Accept", "application/json").build();
+                    authToken, peerSsrf).header("Accept", "application/json").build();
 
             OutboundResponse<String> response = sendJson(http, request);
             if (response.status() != 200) {
@@ -505,6 +541,15 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     public static byte[] exportAgentArchive(OutboundHttp http, String baseUrl, String agentId, Integer agentVersion,
                                             String authToken) {
+        return exportAgentArchive(http, baseUrl, agentId, agentVersion, authToken, SsrfPolicy.NONE);
+    }
+
+    /**
+     * As above, with the per-request SSRF policy (see
+     * {@link SourceUrlValidator#connectPolicy}).
+     */
+    public static byte[] exportAgentArchive(OutboundHttp http, String baseUrl, String agentId, Integer agentVersion,
+                                            String authToken, SsrfPolicy peerSsrf) {
         String normalized = normalizeBaseUrl(baseUrl);
         URI baseUri = URI.create(normalized.endsWith("/") ? normalized : normalized + "/");
 
@@ -516,7 +561,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             // OLDEST configuration while the preview showed its newest.
             int version = agentVersion != null
                     ? agentVersion
-                    : latestAgentVersion(http, baseUri, agentId, authToken);
+                    : latestAgentVersion(http, baseUri, agentId, authToken, peerSsrf);
             String exportPath = "backup/export/" + encodePathSegment(agentId) + "?agentVersion=" + version;
 
             // Not REQUEST_TIMEOUT: that budget is sized for reading one JSON
@@ -524,7 +569,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             // extension, scrub secrets, gather snippets and schedules and zip
             // the lot before it answers. A large agent legitimately takes
             // longer than a config read.
-            OutboundRequest exportRequest = peerRequest(baseUri.resolve(exportPath), ARCHIVE_DOWNLOAD_TIMEOUT, authToken)
+            OutboundRequest exportRequest = peerRequest(baseUri.resolve(exportPath), ARCHIVE_DOWNLOAD_TIMEOUT, authToken, peerSsrf)
                     .method("POST").build();
             // codeql[java/ssrf] False Positive: connecting to the operator-approved
             // remote EDDI instance is the feature
@@ -542,7 +587,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             }
 
             OutboundRequest downloadRequest = peerRequest(baseUri.resolve("backup/export/" + encodePathSegment(archiveName)),
-                    ARCHIVE_DOWNLOAD_TIMEOUT, authToken).build();
+                    ARCHIVE_DOWNLOAD_TIMEOUT, authToken, peerSsrf).build();
             // The archive is capped as it is read: a declared Content-Length over the
             // cap is refused before anything is read, and a body without one, or
             // longer than it claimed, stops one byte past the cap.
@@ -581,10 +626,10 @@ public class RemoteApiResourceSource implements IResourceSource {
      * {@code resolveLatestAgentVersion}, and must not guess: see the call site for
      * what guessing cost.
      */
-    private static int latestAgentVersion(OutboundHttp http, URI baseUri, String agentId, String authToken) {
+    private static int latestAgentVersion(OutboundHttp http, URI baseUri, String agentId, String authToken, SsrfPolicy peerSsrf) {
         try {
             OutboundRequest request = peerRequest(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"), REQUEST_TIMEOUT,
-                    authToken).header("Accept", "application/json").build();
+                    authToken, peerSsrf).header("Accept", "application/json").build();
             OutboundResponse<String> response = sendJson(http, request);
             if (response.status() != 200) {
                 throw new RemoteReadException("Could not list agents on " + baseUri
@@ -833,7 +878,7 @@ public class RemoteApiResourceSource implements IResourceSource {
         }
         URI requestUri = URI.create(normalized).resolve(path.substring(1));
         try {
-            OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken).header("Accept", "application/json").build();
+            OutboundRequest request = peerRequest(requestUri, REQUEST_TIMEOUT, authToken, peerSsrf).header("Accept", "application/json").build();
             OutboundResponse<String> response = sendJson(http, request);
 
             if (response.status() != 200) {

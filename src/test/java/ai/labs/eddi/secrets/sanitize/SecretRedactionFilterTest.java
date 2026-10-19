@@ -82,6 +82,27 @@ class SecretRedactionFilterTest {
     }
 
     /**
+     * The sk- rules start at a word boundary: {@code redactCredentialShapes} runs
+     * over prose (exported prompts, descriptions, instance sync), where an
+     * unanchored rule found {@code sk-} inside "risk-", "task-", "desk-" and
+     * rewrote the text.
+     */
+    @Test
+    void redactCredentialShapes_leavesKebabCaseProseAlone() {
+        String prose = "the risk-assessment-workflow-handler calls task-dispatch-and-reconcile-loop twice";
+
+        assertEquals(prose, SecretRedactionFilter.redactCredentialShapes(prose));
+        assertEquals(prose, SecretRedactionFilter.redact(prose));
+    }
+
+    @Test
+    void redactCredentialShapes_stillRedactsAStandaloneKey() {
+        String result = SecretRedactionFilter.redactCredentialShapes("use sk-proj-Ab_cd-EFGH1234567890abcdefghij and " + ANTHROPIC_KEY);
+
+        assertEquals("use sk-<REDACTED> and sk-ant-<REDACTED>", result);
+    }
+
+    /**
      * Regression: the exact shape of the approval-card leak — a tool call whose
      * {@code requestBody} argument is itself a JSON document, so every quote around
      * {@code apiKey} arrives backslash-escaped. The generic rule's separator never

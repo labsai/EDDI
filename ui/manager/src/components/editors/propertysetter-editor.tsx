@@ -187,22 +187,29 @@ function ValueEditorModal({
   const { t } = useTranslation();
   const [localValue, setLocalValue] = useState(value);
 
-  // Esc key closes the modal
+  // Edited and not applied yet. While it is, the incidental ways out (Escape,
+  // a backdrop click) do nothing — they used to throw the buffer away without
+  // a word. Cancel and the close button still discard, explicitly.
+  const dirty = localValue !== value;
+
+  // Esc key closes the modal — unless Monaco (a suggest widget, find) or
+  // another layer already handled it.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape" || e.defaultPrevented || dirty) return;
+      onClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, dirty]);
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-8">
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={dirty ? undefined : onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
         <div
           className="flex w-full max-w-3xl flex-col rounded-xl border bg-card shadow-2xl"
-          style={{ height: "70vh" }}
+          style={{ height: "min(70dvh, 40rem)" }}
           role="dialog"
           aria-modal="true"
           aria-labelledby="value-editor-title"

@@ -303,10 +303,13 @@ describe("ChannelDetailPage", () => {
     expect(within(targetCard).getByTestId("target-name-0")).toBeInTheDocument();
 
     // Click the header to collapse
-    const header = within(targetCard).getAllByText("default")[0]!.closest("div[class*='cursor-pointer']");
+    // A real button now, so it is reachable from the keyboard and announces its state.
+    const header = within(targetCard).getAllByText("default")[0]!.closest("button");
     expect(header).toBeTruthy();
+    expect(header).toHaveAttribute("aria-expanded", "true");
 
     await user.click(header!);
+    expect(header).toHaveAttribute("aria-expanded", "false");
     // After collapsing, the name input should not be visible
     await waitFor(() => {
       expect(within(targetCard).queryByTestId("target-name-0")).not.toBeInTheDocument();

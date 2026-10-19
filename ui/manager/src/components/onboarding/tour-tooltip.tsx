@@ -204,7 +204,7 @@ export function TourTooltip({
               )}
               data-testid="tour-back"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
+              <ArrowLeft className="h-3.5 w-3.5 rtl:rotate-180" />
               {t("onboarding.tour.back")}
             </button>
 
@@ -232,7 +232,7 @@ export function TourTooltip({
               ) : (
                 <>
                   {t("onboarding.tour.next")}
-                  <ArrowRight className="h-3.5 w-3.5" />
+                  <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />
                 </>
               )}
             </button>

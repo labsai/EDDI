@@ -61,9 +61,15 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.8.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           # --import-realm reads /opt/keycloak/data/import. Without it Keycloak
           # boots with only the built-in `master` realm and every request to
           # .../realms/eddi returns 404. Import is ONE-SHOT: it seeds an empty

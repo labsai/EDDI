@@ -30,6 +30,9 @@ services:
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
       - "EDDI_MCP_ALLOW_UNAUTHENTICATED=true"
       - "EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true"
+      # With authentication off EDDI answers only localhost, IP addresses and the
+      # hosts listed here; Open WebUI and the seeder address it as http://eddi:7070.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=eddi"
 
       # ── The OpenAI-compatible adapter ──
       - "EDDI_OPENAI_COMPAT_ENABLED=true"

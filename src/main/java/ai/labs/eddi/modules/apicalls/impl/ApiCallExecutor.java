@@ -1270,9 +1270,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);
-            int secretsBefore = resolvedSecrets.size();
+            // Judged by the reference, not by the resolved set growing: a secret the
+            // URL or body already resolved is in the set before this header is
+            // reached, so a header reusing it added nothing and went unflagged.
+            boolean headerReferencesVault = headerValue != null && SecretReference.compiledPattern().matcher(headerValue).find();
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
-            if (resolvedSecrets.size() > secretsBefore) {
+            if (headerReferencesVault) {
                 // A vault ${secret} was substituted into this header.
                 headerCarriesCredential = true;
             }

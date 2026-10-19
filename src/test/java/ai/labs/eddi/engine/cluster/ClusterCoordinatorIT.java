@@ -144,6 +144,10 @@ class ClusterCoordinatorIT {
             rpc = new NatsClusterRpc(connections, presence, meters);
             coordinator = new ClusterConversationCoordinator(runtime, meters, leases, deadLetters, connections, presence, 10_000, 1000,
                     Duration.ofSeconds(30));
+            // turnsNeverOverlapAcrossNodes queues 50 turns per node on one conversation to
+            // stress the lease; the per-conversation queue cap (default 20) would refuse
+            // most of them.
+            coordinator.setMaxQueuedTurnsPerConversation(0);
             connections.start();
             presence.start();
             leases.start();

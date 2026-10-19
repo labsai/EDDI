@@ -267,6 +267,8 @@ public interface IGroupConversationService {
         }
         default void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
         }
+        default void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
+        }
     }
 
     // --- Exceptions ---
@@ -297,6 +299,28 @@ public interface IGroupConversationService {
     class GroupDepthExceededException extends GroupDiscussionException {
         public GroupDepthExceededException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * An inline attachment of a new discussion would exceed an attachment quota —
+     * the discussion's own ({@code eddi.attachments.max-per-conversation},
+     * {@code max-total-bytes-per-conversation}) or its user's
+     * ({@code max-per-user}, {@code max-total-bytes-per-user}). A client error:
+     * REST answers 400, as the 1:1 upload does. The discussion is failed and the
+     * blobs the request had stored are removed before this is thrown.
+     */
+    class GroupAttachmentRejectedException extends GroupDiscussionException {
+        private final String scope;
+
+        public GroupAttachmentRejectedException(String scope, String message, Throwable cause) {
+            super(message, cause);
+            this.scope = scope;
+        }
+
+        /** {@code "conversation"} or {@code "user"} — which quota refused it. */
+        public String getScope() {
+            return scope;
         }
     }
 
