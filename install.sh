@@ -1056,6 +1056,11 @@ load_release_checksums() {
     info "Verifying downloads against the SHA256SUMS of release ${EDDI_BRANCH}"
   else
     rm -f "$sums"
+    # Every release from FIRST_SIGNED_RELEASE on publishes the list; without it the
+    # downloads below would go unchecked, so a missing one is refused, not skipped.
+    if release_is_signed "$EDDI_BRANCH"; then
+      fail "Release ${EDDI_BRANCH} should publish SHA256SUMS (every release from ${FIRST_SIGNED_RELEASE} on does), but it could not be fetched.\n     Nothing was downloaded. Retry later; if it persists, report it."
+    fi
     warn "Release ${EDDI_BRANCH} publishes no SHA256SUMS — downloaded files are verified by TLS only."
   fi
 }

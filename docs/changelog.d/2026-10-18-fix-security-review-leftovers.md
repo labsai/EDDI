@@ -142,3 +142,17 @@ there and nothing elsewhere (`dbAdmin` because `MongoResourceStorage` un-hides a
 - **Redacted audit entries carry no signature.** The copy `read_audit_trail` returns with the
   prompt redacted no longer keeps the original `hmac` and `agentSignature`, which covered the
   unredacted payload and would have made an intact entry look tampered.
+- **Second review round.** `keycloak-admin-rotate` passes `-n` to `kcadm update … reset-password`
+  (that endpoint has no GET; re-verified live). From 6.6.0 a missing `SHA256SUMS` stops the
+  install too, with or without cosign, since without it no download is checked; older tags keep
+  the warning. `mongodb-app-user` in `docker-compose.yml` warns when `MONGO_APP_PASSWORD` is unset
+  or equals the root password. Failing in that case would break every existing install and the
+  zero-config quick start. TLS between the compose services stays out of scope, as the review
+  document records ("plaintext intra-service traffic").
+- **No start-up window for an old Keycloak volume.** `keycloak-admin-rotate` now leaves a marker
+  (`.eddi-admin-verified`) in `keycloak-data` once it has seen `admin` refused, and `keycloak-guard`,
+  which mounts the volume read-only, refuses a non-loopback bind for an existing volume (one with
+  an `h2` directory) without it. The default login of an old volume is therefore never published,
+  not even for the seconds before the rotation; such a volume is started once on loopback. Verified
+  live: old volume refused off loopback, rotated on loopback, then accepted; a fresh volume
+  accepted at once. `ComposeStackTest` runs the guard against a volume with and without the marker.

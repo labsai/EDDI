@@ -448,6 +448,14 @@ class InstallerReleaseRefTest {
         assertTrue(unsigned.output().contains("predates signed checksums") && unsigned.output().contains("LOADED=yes"),
                 "a release from before the first signed one is used unsigned, with a warning: " + unsigned.output());
 
+        Run noSums = execute(bash, base + "STUB_FAIL_URL=SHA256SUMS bash driver.sh", dir, null);
+        assertNotEquals(0, noSums.exit(), noSums.output());
+        assertTrue(noSums.output().contains("should publish SHA256SUMS") && !noSums.output().contains("LOADED="),
+                "a signed release without its checksum list must be refused even without cosign: " + noSums.output());
+        Run oldNoSums = execute(bash, base + "STUB_BRANCH=6.5.0 STUB_FAIL_URL=SHA256SUMS bash driver.sh", dir, null);
+        assertEquals(0, oldNoSums.exit(), oldNoSums.output());
+        assertTrue(oldNoSums.output().contains("publishes no SHA256SUMS"), oldNoSums.output());
+
         Run candidate = execute(bash, withCosign + "STUB_BRANCH=6.6.0-RC1 STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh",
                 dir, null);
         assertNotEquals(0, candidate.exit(), "a pre-release of the first signed version is signed too: " + candidate.output());

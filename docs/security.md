@@ -913,9 +913,11 @@ the list before they trust any hash in it and refuse to install from a list that
 verify. The certificate must name `https://github.com/labsai/EDDI/.github/workflows/ci.yml`
 at `refs/tags/<the release tag>`, issued by `https://token.actions.githubusercontent.com`.
 Without `cosign` they print one warning line and go on with the unsigned list. A release
-before 6.6.0, the first one signed, has no bundle and is used unsigned, with a warning; for
-6.6.0 and later (pre-releases included) a bundle that cannot be fetched stops the install,
-since a missing signature on a signed release is indistinguishable from a removed one. To
+before 6.6.0, the first one signed, has no bundle and is used unsigned, with a warning. For
+6.6.0 and later (pre-releases included) a `SHA256SUMS` that cannot be fetched always stops the
+install, and so does a missing bundle **when `cosign` is installed** — a missing signature on a
+signed release is indistinguishable from a removed one. Without `cosign` the bundle is not
+fetched at all, whatever the version. To
 check a release by hand:
 
 ```bash

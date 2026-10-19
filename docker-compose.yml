@@ -162,6 +162,10 @@ services:
       - "MONGO_APP_PASSWORD=${MONGO_APP_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD:-changeme}}"
     command:
       - |
+        if [ "$$MONGO_APP_PASSWORD" = "$$MONGO_ROOT_PASSWORD" ]; then
+          echo "[SECURITY] MONGO_APP_PASSWORD is unset or equals the MongoDB root password: EDDI's credential" >&2
+          echo "  then opens the root account too. Set a distinct one in .env (openssl rand -hex 24)." >&2
+        fi
         exec mongosh --quiet --host mongodb --eval '
           // The root credentials are read here, from the environment, so they never
           // appear on the mongosh command line (/proc/<pid>/cmdline, ps).

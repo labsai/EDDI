@@ -574,6 +574,14 @@ class ComposeStackTest {
                 "the script must try the default login and reset the password from stdin: " + script);
         assertFalse(script.lines().anyMatch(line -> line.contains("kcadm") && line.contains("$$KC_BOOTSTRAP_ADMIN_PASSWORD")),
                 "the configured password must not appear on a kcadm command line: " + script);
+
+        // The marker is how the guard learns that an existing volume was checked.
+        assertEquals("keycloak-data:/opt/keycloak/data", rotate.path("volumes").get(0).asText(),
+                "the rotation must write its marker into the keycloak-data volume");
+        assertTrue(script.contains("touch \"$$marker\"") && script.contains(".eddi-admin-verified"),
+                "the rotation must leave the marker the guard looks for: " + script);
+        assertEquals("keycloak-data:/kc-data:ro", services.get("keycloak-guard").path("volumes").get(0).asText(),
+                "the guard must see the volume, read-only, to tell an existing one from a fresh one");
     }
 
     /**
@@ -594,6 +602,25 @@ class ComposeStackTest {
         assertEquals(1, runGuard(script, "0.0.0.0", "admin"), "0.0.0.0 with admin/admin must be refused");
         assertEquals(1, runGuard(script, "192.0.2.10", ""), "an empty password must be refused off loopback");
         assertEquals(0, runGuard(script, "0.0.0.0", "a-generated-secret"), "a real password may leave loopback");
+
+        // An existing volume keeps the password it was created with: until
+        // keycloak-admin-rotate has seen `admin` refused and left its marker, it stays
+        // on loopback whatever the configured password says.
+        Path volume = Files.createTempDirectory("keycloak-data");
+        try {
+            Files.createDirectory(volume.resolve("h2"));
+            assertEquals(1, runGuard(script, "0.0.0.0", "a-generated-secret", volume),
+                    "an existing volume without the rotation marker must be refused off loopback");
+            assertEquals(0, runGuard(script, "127.0.0.1", "a-generated-secret", volume),
+                    "on loopback it must start, so the rotation can run");
+            Files.createFile(volume.resolve(".eddi-admin-verified"));
+            assertEquals(0, runGuard(script, "0.0.0.0", "a-generated-secret", volume),
+                    "once the rotation has verified the login, the volume may leave loopback");
+        } finally {
+            try (Stream<Path> files = Files.walk(volume)) {
+                files.sorted((a, b) -> b.getNameCount() - a.getNameCount()).forEach(path -> path.toFile().delete());
+            }
+        }
     }
 
     private static boolean shellAvailable() {
@@ -612,6 +639,11 @@ class ComposeStackTest {
      * command-line argument, which mangles the script's own {@code ""} patterns.
      */
     private static int runGuard(String script, String bind, String password) throws Exception {
+        // A data directory that does not exist: a fresh volume.
+        return runGuard(script, bind, password, Path.of("target", "no-such-keycloak-data").toAbsolutePath());
+    }
+
+    private static int runGuard(String script, String bind, String password, Path dataDir) throws Exception {
         Path file = Files.createTempFile("keycloak-guard", ".sh");
         try {
             Files.writeString(file, script, StandardCharsets.UTF_8);
@@ -620,6 +652,7 @@ class ComposeStackTest {
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD);
             builder.environment().put("KEYCLOAK_BIND", bind);
             builder.environment().put("KC_BOOTSTRAP_ADMIN_PASSWORD", password);
+            builder.environment().put("KC_DATA_DIR", dataDir.toString().replace('\\', '/'));
             return builder.start().waitFor();
         } finally {
             Files.deleteIfExists(file);

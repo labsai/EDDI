@@ -918,6 +918,11 @@ function Initialize-ReleaseChecksums {
             return
         }
     }
+    # Every release from FirstSignedRelease on publishes the list; without it the
+    # downloads would go unchecked, so a missing one is refused, not skipped.
+    if ([version]($EddiBranch -replace '-.*$', '') -ge $script:FirstSignedRelease) {
+        Write-Fail "Release $EddiBranch should publish SHA256SUMS (every release from $($script:FirstSignedRelease) on does), but it could not be fetched. Nothing was downloaded. Retry later; if it persists, report it."
+    }
     if ($fetchErrors.Count -gt 0) {
         $reason = $fetchErrors[0].Exception.Message
         Write-Warn "Release $EddiBranch publishes no SHA256SUMS ($reason) -- downloaded files are verified by TLS only."

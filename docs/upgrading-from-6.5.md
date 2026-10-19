@@ -172,3 +172,10 @@ boot, and the guard only needs to see that it is not the default.
 A volume that still has the original `admin`/`admin` login is fixed on the next `up`: the one-shot
 `keycloak-admin-rotate` service logs in with `admin` once Keycloak is healthy and, if that works,
 sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD` before EDDI starts.
+
+**If your Keycloak is published off loopback (`KEYCLOAK_BIND` set) on a volume from before this
+release, start it once on loopback first.** `keycloak-guard` cannot know what an existing volume's
+admin password is, so it refuses a wider bind until `keycloak-admin-rotate` has checked the login
+and left a marker (`.eddi-admin-verified`) in the volume. One `up` with `KEYCLOAK_BIND=127.0.0.1`
+does that; after it, set `KEYCLOAK_BIND` back. A fresh volume is created with your password and
+needs nothing.
