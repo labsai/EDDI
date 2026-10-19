@@ -127,13 +127,16 @@ public class McpGdprTools {
 
     @Tool(name = "export_user_data", description = "Export all data for a user "
             + "(GDPR Art. 15/20 Right of Access / Data Portability). "
-            + "Returns memories, conversations, and managed conversation mappings. "
+            + "Returns memories, conversations, managed conversation mappings, the group "
+            + "discussions the user started and their shared artifacts. "
             + "'complete'=false means the bundle is INCOMPLETE and must NOT be handed to the "
             + "data subject as a complete Art. 15 bundle: 'omittedCategories' names the "
             + "personal-data categories this exporter does not reach (always non-empty today), "
             + "'conversationsTruncated'=true means the per-request conversation cap bit, "
             + "with 'totalConversations' saying how many the user has, and "
-            + "'failedConversationIds' names conversations that could not be loaded at all.")
+            + "'failedConversationIds' names conversations that could not be loaded at all; "
+            + "'groupConversationsTruncated', 'sharedArtifactsTruncated' and 'failedCategories' "
+            + "do the same for the group sections.")
     public String exportUserData(
                                  @ToolArg(description = "User ID to export (required)") String userId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
@@ -172,6 +175,13 @@ public class McpGdprTools {
             // Metadata only — the export entries never carry token material.
             map.put("connectionGrants", export.connectionGrants());
             map.put("additionalData", export.additionalData());
+            // Group discussions and their shared artifacts (L9 of the 2026-10-17
+            // review), with the same truncation and failure signals as the REST body.
+            map.put("groupConversations", export.groupConversations());
+            map.put("groupConversationsTruncated", export.groupConversationsTruncated());
+            map.put("sharedArtifacts", export.sharedArtifacts());
+            map.put("sharedArtifactsTruncated", export.sharedArtifactsTruncated());
+            map.put("failedCategories", export.failedCategories());
             return jsonSerialization.serialize(map);
         } catch (Exception e) {
             LOGGER.errorf(e, "MCP export_user_data failed");

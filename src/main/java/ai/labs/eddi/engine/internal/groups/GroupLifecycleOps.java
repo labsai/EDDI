@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException;
@@ -105,6 +106,8 @@ public class GroupLifecycleOps {
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
     private final ISharedArtifactStore sharedArtifactStore;
+    /** Null where no blob store is configured (and in older test seams). */
+    private final IAttachmentStore attachmentStore;
     private final Set<String> operationsInProgress;
     private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls;
     private final GroupConversationService groupConversationService;
@@ -119,6 +122,18 @@ public class GroupLifecycleOps {
             ConcurrentHashMap<String, DiscussionControlToken> discussionControls,
             GroupConversationService groupConversationService, Counter counterGroupFollowUp,
             Counter counterGroupContinue, Counter counterGroupClose, Counter counterGroupFailure) {
+        this(conversationStore, groupStore, conversationService, agentFactory, agentStore, deploymentStore, sharedArtifactStore, null,
+                operationsInProgress, discussionControls, groupConversationService, counterGroupFollowUp, counterGroupContinue,
+                counterGroupClose, counterGroupFailure);
+    }
+
+    public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IDeploymentStore deploymentStore, ISharedArtifactStore sharedArtifactStore, IAttachmentStore attachmentStore,
+            Set<String> operationsInProgress, ConcurrentHashMap<String, DiscussionControlToken> discussionControls,
+            GroupConversationService groupConversationService, Counter counterGroupFollowUp,
+            Counter counterGroupContinue, Counter counterGroupClose, Counter counterGroupFailure) {
+        this.attachmentStore = attachmentStore;
         this.conversationStore = conversationStore;
         this.groupStore = groupStore;
         this.conversationService = conversationService;
@@ -201,6 +216,12 @@ public class GroupLifecycleOps {
             // operations. Delete is terminal, so reclaim any dynamically-created agents
             // here; otherwise deleting a COMPLETED conversation would orphan them.
             cleanupEphemeralAgentsForGroup(gc);
+            // The discussion's shared attachments are blobs owned by THIS conversation
+            // id. Left behind they were unreachable: no document points at them any
+            // more, and the 1:1 attachment endpoints do not accept a group id. Unlike
+            // the artifacts below, a failure here keeps the document, so the delete can
+            // be retried — and a GDPR erasure can still find the blobs through it.
+            deleteAttachmentsForGroupConversation(groupConversationId);
             // I17: artifacts live in their own collection keyed by this conversation
             // — remove them with their discussion, before the document goes (while
             // the id is still provably a discussion the caller could delete).
@@ -567,6 +588,22 @@ public class GroupLifecycleOps {
      * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
      * guarantee, this is the tidy path.
      */
+    private void deleteAttachmentsForGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
+        if (attachmentStore == null) {
+            return;
+        }
+        try {
+            long removed = attachmentStore.deleteByConversation(groupConversationId);
+            if (removed > 0) {
+                LOGGER.infof("Removed %d shared attachment(s) of group conversation %s", removed,
+                        LogSanitizer.sanitize(groupConversationId));
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Could not delete the group conversation's attachments; the conversation was kept — retry the delete", e);
+        }
+    }
+
     private void deleteArtifactsForGroupConversation(String groupConversationId) {
         if (sharedArtifactStore == null) {
             return;

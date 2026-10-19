@@ -279,4 +279,20 @@ class LifecycleManagerErrorClassificationTest {
             assertEquals(exactMessage, result);
         }
     }
+
+    // ==================== long provider messages (security review L14)
+    // ====================
+
+    @Test
+    @DisplayName("a 200 kB message in a provider's JSON error body is summarised, not a StackOverflowError")
+    void longProviderMessageDoesNotOverflow() {
+        String echoed = "a\\\"b ".repeat(40_000);
+        String body = "{\"error\":{\"message\":\"" + echoed + "\"}}";
+        var e = new RuntimeException("Chat failed", new RuntimeException(body));
+
+        String described = assertDoesNotThrow(() -> LifecycleManager.describeFailure(e));
+        assertTrue(described.startsWith("Chat failed: a\"b a\"b"), described.substring(0, 40));
+        String summary = assertDoesNotThrow(() -> LifecycleManager.summarizeException(e));
+        assertFalse(summary.isEmpty());
+    }
 }

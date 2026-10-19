@@ -36,6 +36,16 @@ public class ConversationRecallTool {
     private static final Pattern TURN_RANGE_PATTERN = Pattern.compile("(?:turns?\\s+)?(\\d+)\\s*[-–—to]+\\s*(?:turns?\\s+)?(\\d+)",
             Pattern.CASE_INSENSITIVE);
 
+    /**
+     * How much of {@code query} the turn patterns read. The model writes it, so its
+     * length is whatever a prompt injection asks for, and the range pattern
+     * backtracks quadratically over a long run of digits and separators: 10.9 s of
+     * turn thread at 40,000 characters (security review 2026-10-17, H3). A turn
+     * spec is a few characters at the start of the query; nothing past this point
+     * can be one.
+     */
+    static final int MAX_QUERY_LENGTH = 500;
+
     /** Matches single turn patterns like "turn 5", "5" */
     private static final Pattern SINGLE_TURN_PATTERN = Pattern.compile("(?:turns?\\s+)?(\\d+)\\b", Pattern.CASE_INSENSITIVE);
 
@@ -82,6 +92,12 @@ public class ConversationRecallTool {
 
         if (summaryThroughStep <= 0) {
             return "No conversation summary is active — all turns are already in context.";
+        }
+
+        if (query == null) {
+            query = "";
+        } else if (query.length() > MAX_QUERY_LENGTH) {
+            query = query.substring(0, MAX_QUERY_LENGTH);
         }
 
         LOGGER.debugf("[RECALL] Recalling conversation detail: query='%s', summaryThroughStep=%d", query, summaryThroughStep);

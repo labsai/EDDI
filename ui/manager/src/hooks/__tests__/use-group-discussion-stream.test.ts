@@ -931,6 +931,58 @@ describe("useGroupDiscussionStream", () => {
  * the discussion so far, and continuation rounds open with `round_start`, not
  * `group_start`.
  */
+describe("useGroupDiscussionStream — member_tool_call", () => {
+  beforeEach(() => {
+    mockStreamGroupDiscussion.mockReset();
+  });
+  afterEach(() => {
+    useGroupStreamStore.setState({ streams: {} });
+  });
+
+  const start = { type: "group_start", data: { groupConversationId: "gc-tools", question: "Q?" } };
+  const speaker = {
+    type: "speaker_start",
+    data: { agentId: "a1", displayName: "Alice", phaseIndex: 0, phaseName: "Opinions" },
+  };
+  const toolCall = { type: "member_tool_call", data: { agentId: "a1", displayName: "Alice", tool: "web_search" } };
+
+  async function run(...evts: { type: string; data: object }[]) {
+    mockStreamGroupDiscussion.mockReturnValue(
+      (async function* () {
+        for (const e of evts) yield { type: e.type, data: JSON.stringify(e.data) };
+      })(),
+    );
+    const { result } = renderHook(() => useGroupDiscussionStream("group-1"));
+    await act(async () => {
+      await result.current.startStream("group-1", "Q?");
+    });
+    return result.current.streamState;
+  }
+
+  it("records the tool a speaking member is using", async () => {
+    const s = await run(start, speaker, toolCall);
+    expect(s.memberToolCalls.get("a1")).toBe("web_search");
+  });
+
+  it("clears the indicator when the member's turn completes", async () => {
+    const s = await run(start, speaker, toolCall, {
+      type: "speaker_complete",
+      data: { agentId: "a1", displayName: "Alice", phaseIndex: 0, response: "Done." },
+    });
+    expect(s.memberToolCalls.has("a1")).toBe(false);
+  });
+
+  it("ignores a tool call from a member who is not speaking", async () => {
+    const s = await run(start, toolCall);
+    expect(s.memberToolCalls.size).toBe(0);
+  });
+
+  it("ignores a malformed payload", async () => {
+    const s = await run(start, speaker, { type: "member_tool_call", data: { agentId: "a1" } });
+    expect(s.memberToolCalls.size).toBe(0);
+  });
+});
+
 describe("useGroupDiscussionStream — resuming and continuing", () => {
   beforeEach(() => {
     mockStreamGroupDiscussion.mockReset();

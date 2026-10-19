@@ -112,7 +112,12 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_run_id VARCHAR(64)",
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_generation BIGINT",
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0",
-            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stale_after TIMESTAMP"};
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stale_after TIMESTAMP",
+            // Run detail the Manager shows; added the same way so an existing table
+            // gains it.
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS documents_skipped INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stop_reason VARCHAR(32)",
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS run_trigger VARCHAR(16)"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -470,7 +475,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 UPDATE rag_ingestion_runs
                    SET status = ?, finished_at = ?, documents_seen = ?, documents_ingested = ?,
                        documents_unchanged = ?, documents_failed = ?, documents_tombstoned = ?,
-                       segments_stored = ?, cost_usd = ?, error = ?
+                       segments_stored = ?, cost_usd = ?, error = ?, documents_skipped = ?,
+                       stop_reason = COALESCE(?, stop_reason), run_trigger = COALESCE(?, run_trigger)
                  WHERE run_id = ? AND status = 'RUNNING'
                 """;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -484,7 +490,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setInt(8, run.segmentsStored());
             statement.setDouble(9, run.costUsd());
             statement.setString(10, run.error());
-            statement.setString(11, run.runId());
+            statement.setInt(11, run.documentsSkipped());
+            statement.setString(12, run.stopReason());
+            statement.setString(13, run.trigger() == null ? null : run.trigger().name());
+            statement.setString(14, run.runId());
             if (statement.executeUpdate() == 0) {
                 // Reaped while it was still working: the reaper already declared it
                 // dead and another run may have started since, so this result is
@@ -496,6 +505,34 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // Losing this leaves the run RUNNING, which blocks the source until it
             // is reaped.
             throw new IngestionStateStoreException("Failed to finish an ingestion run", e);
+        }
+    }
+
+    @Override
+    public void reportProgress(IngestionRun progress) {
+        // Fenced on RUNNING like finishRun, so a late progress write cannot reopen a
+        // finished or reaped run, nor overwrite the counters finishRun wrote.
+        String sql = """
+                UPDATE rag_ingestion_runs
+                   SET documents_seen = ?, documents_ingested = ?, documents_unchanged = ?,
+                       documents_failed = ?, documents_tombstoned = ?, documents_skipped = ?,
+                       segments_stored = ?, cost_usd = ?, run_trigger = COALESCE(?, run_trigger)
+                 WHERE run_id = ? AND status = 'RUNNING'
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, progress.documentsSeen());
+            statement.setInt(2, progress.documentsIngested());
+            statement.setInt(3, progress.documentsUnchanged());
+            statement.setInt(4, progress.documentsFailed());
+            statement.setInt(5, progress.documentsTombstoned());
+            statement.setInt(6, progress.documentsSkipped());
+            statement.setInt(7, progress.segmentsStored());
+            statement.setDouble(8, progress.costUsd());
+            statement.setString(9, progress.trigger() == null ? null : progress.trigger().name());
+            statement.setString(10, progress.runId());
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to report an ingestion run's progress", e);
         }
     }
 
@@ -654,7 +691,10 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 resultSet.getInt("documents_tombstoned"),
                 resultSet.getInt("segments_stored"),
                 resultSet.getDouble("cost_usd"),
-                resultSet.getString("error"));
+                resultSet.getString("error"),
+                resultSet.getInt("documents_skipped"),
+                resultSet.getString("stop_reason"),
+                IngestionRun.Trigger.parse(resultSet.getString("run_trigger")));
     }
 
     private static Instant toInstant(Timestamp timestamp) {

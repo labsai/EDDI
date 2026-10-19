@@ -213,7 +213,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         Map<String, ToolRequestResolver> resolvers = new HashMap<>();
 
         try {
-            LOGGER.infof("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
+            LOGGER.debugf("Discovering httpcall tools for agent: %s v%s", memory.getAgentId(), memory.getAgentVersion());
 
             var stepConfigs = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS_TYPE, ApiCallsConfiguration.class, agentStore,
                     workflowStore, resourceClientLibrary);
@@ -270,7 +270,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                             Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
 
                             String serialized = jsonSerialization.serialize(result);
-                            LOGGER.info("Httpcall tool '" + apiCall.getName() + "' result: keys=" + result.keySet() + " size=" + serialized.length());
+                            LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
                             return serialized;
                         } catch (Exception e) {
                             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
@@ -280,7 +280,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                 }
             }
 
-            LOGGER.info("Discovered " + toolSpecs.size() + " httpcall tools from workflow");
+            LOGGER.debugf("Discovered %d httpcall tools from workflow", toolSpecs.size());
         } catch (Exception e) {
             LOGGER.warn("Failed to discover httpcall tools from workflow", e);
         }

@@ -433,6 +433,18 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            Document doc = scheduleCollection.find(eq(NAME, name)).first();
+            return doc == null ? Optional.empty() : Optional.of(fromDocument(doc));
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedule by name: " + name, e);
+        }
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         // Fix #12: bounded result set
         return readSchedulesWithFilter(new Document(), limit);

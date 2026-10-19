@@ -132,7 +132,7 @@ export const ChatMessage = memo(function ChatMessage({
       </div>
 
       {/* Content column */}
-      <div className={cn("flex flex-col gap-1 max-w-[75%] overflow-hidden", isUser && "items-end")}>
+      <div className={cn("flex flex-col gap-1 max-w-[min(75%,48rem)] overflow-hidden", isUser && "items-end")}>
         {/* Bubble */}
         <div
           className={cn(
@@ -178,7 +178,7 @@ export const ChatMessage = memo(function ChatMessage({
               ) : message.isStreaming ? (
                 <TypingIndicator />
               ) : (
-                <p className="text-muted-foreground italic">No response</p>
+                <p className="text-muted-foreground italic">{t("groups.noResponse", "No response")}</p>
               )}
             </div>
           )}

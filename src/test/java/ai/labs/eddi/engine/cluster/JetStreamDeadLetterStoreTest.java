@@ -11,6 +11,8 @@ import io.nats.client.JetStreamManagement;
 import io.nats.client.KeyValue;
 import io.nats.client.PublishOptions;
 import io.nats.client.api.ApiResponse;
+import io.nats.client.api.DiscardPolicy;
+import io.nats.client.api.StreamConfiguration;
 import io.nats.client.api.MessageInfo;
 import io.nats.client.api.PublishAck;
 import java.util.ArrayList;
@@ -42,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -164,6 +167,7 @@ class JetStreamDeadLetterStoreTest {
         when(connections.config()).thenReturn(ClusterConfig.defaults());
         when(connections.jetStreamManagement()).thenReturn(jsm);
         when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        when(connections.isConnected()).thenReturn(true);
         JetStream js = mock(JetStream.class);
         when(connections.jetStream()).thenReturn(js);
         PublishAck ack = mock(PublishAck.class);
@@ -196,6 +200,82 @@ class JetStreamDeadLetterStoreTest {
         assertEquals(ids.get(0), later.get(0));
         assertNotEquals(ids.get(0), later.get(1));
     }
+    private static NatsConnectionManager publishingConnections(JetStreamManagement jsm, JetStream js, boolean connected) {
+        NatsConnectionManager connections = mock(NatsConnectionManager.class);
+        when(connections.config()).thenReturn(ClusterConfig.defaults());
+        when(connections.jetStreamManagement()).thenReturn(jsm);
+        when(connections.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        when(connections.jetStream()).thenReturn(js);
+        when(connections.isConnected()).thenReturn(connected);
+        return connections;
+    }
+
+    @Test
+    void aNatsThatHangsHoldsTheFailingTurnForAboutTwoSecondsNotTwenty() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        // Connected, but every publish runs into its request timeout (scaled down
+        // here).
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenAnswer(invocation -> {
+            Thread.sleep(500);
+            throw new IOException("Timeout or no response waiting for NATS JetStream server");
+        });
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, js, true));
+
+        long start = System.nanoTime();
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+
+        // Ten attempts of 500 ms plus backoff would take about 7 s.
+        assertTrue(elapsedMillis < 4_000, "the dead letter retried for " + elapsedMillis + " ms on the turn's thread");
+        ArgumentCaptor<PublishOptions> options = ArgumentCaptor.forClass(PublishOptions.class);
+        verify(js, atMost(5)).publish(anyString(), any(byte[].class), options.capture());
+    }
+
+    @Test
+    void aDisconnectedNodeKeepsTheDeadLetterLocalWithoutRetrying() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenThrow(new IOException("disconnected"));
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, js, false));
+
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+
+        verify(js, times(1)).publish(anyString(), any(byte[].class), any(PublishOptions.class));
+        verify(jsm, never()).addStream(any());
+    }
+
+    @Test
+    void aFullStreamKeepsTheDeadLetterLocalWithoutReprovisioning() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        JetStream js = mock(JetStream.class);
+        // 10077: the stream is at max-bytes and refuses new messages
+        // (DiscardPolicy.New).
+        when(js.publish(anyString(), any(byte[].class), any(PublishOptions.class))).thenThrow(error(10077));
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, js, true));
+
+        assertThrows(ClusterUnavailableException.class, () -> store.append("conv1", "boom", 1L, Map.of("input", "hi")));
+
+        verify(js, times(1)).publish(anyString(), any(byte[].class), any(PublishOptions.class));
+        verify(jsm, never()).getStreamInfo(anyString());
+        verify(jsm, never()).updateStream(any());
+    }
+
+    @Test
+    void theStreamIsCappedBySizeAndRefusesNewEntriesWhenFull() throws Exception {
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(jsm.getStreamInfo("EDDI_DEAD_LETTERS")).thenThrow(error(10059));
+        var store = new JetStreamDeadLetterStore(publishingConnections(jsm, mock(JetStream.class), true));
+
+        store.provision();
+
+        ArgumentCaptor<StreamConfiguration> created = ArgumentCaptor.forClass(StreamConfiguration.class);
+        verify(jsm).addStream(created.capture());
+        assertEquals(1L << 30, created.getValue().getMaxBytes());
+        assertEquals(DiscardPolicy.New, created.getValue().getDiscardPolicy(),
+                "a full stream must refuse new dead letters, not silently drop the oldest an operator may still replay");
+    }
+
     // NatsSharedKv shares this class's NATS API error fixture: the codes a KV write
     // can be refused with.
 

@@ -36,7 +36,7 @@ public class NatsLeaseManager extends KvLeaseManager {
     public NatsLeaseManager(NatsConnectionManager connections, NatsSharedStateFactory sharedState, ClusterPresence presence,
             MeterRegistry meterRegistry) {
         super(sharedState.bucket(SharedBucket.LEASES.withTtl(connections.config().leaseTtl())), connections.node(),
-                connections.config(), connections.scheduler(), Executors.newVirtualThreadPerTaskExecutor(),
+                connections.config(), connections.leaseScheduler(), Executors.newVirtualThreadPerTaskExecutor(),
                 new NatsNotifier(connections), new ClusterView() {
                     @Override
                     public boolean isConnected() {

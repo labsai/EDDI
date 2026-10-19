@@ -200,6 +200,59 @@ class ConversationServiceIdempotencyTest {
     }
 
     @Test
+    @DisplayName("cluster: a duplicate admitted on another node while the turn ran there does not run again once it holds the lease")
+    void duplicateQueuedOnAnotherNodeDoesNotRunTwice() throws Exception {
+        // Node A runs the turn under key k-7 and commits it.
+        say("k-7", mock(ConversationResponseHandler.class));
+        runQueuedTurns(1);
+        ConversationMemorySnapshot committed = persistedSnapshot();
+        committed.setRevision(2L);
+
+        // Node B: no in-flight registry entry, and it loaded the document BEFORE A
+        // committed — so admission makes the duplicate an owner and queues it.
+        conversationService.turnIdempotency = service(600);
+        doReturn(snapshot(1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        ConversationResponseHandler duplicate = mock(ConversationResponseHandler.class);
+        say("k-7", duplicate);
+
+        // When B finally holds the lease, the document has moved on to A's commit.
+        doReturn(committed).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator, times(2)).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getAllValues().getLast().call();
+
+        verify(conversation, times(1)).say(anyString(), any());
+        verify(duplicate, timeout(2000)).onSkipped(any());
+        verify(duplicate, never()).onComplete(any());
+    }
+
+    @Test
+    @DisplayName("cluster: a queued turn with a DIFFERENT key still runs over the newer document")
+    void queuedTurnWithAnotherKeyStillRuns() throws Exception {
+        say("k-8", mock(ConversationResponseHandler.class));
+        runQueuedTurns(1);
+        ConversationMemorySnapshot committed = persistedSnapshot();
+        committed.setRevision(2L);
+
+        conversationService.turnIdempotency = service(600);
+        doReturn(snapshot(1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        ConversationResponseHandler other = mock(ConversationResponseHandler.class);
+        say("k-9", other);
+
+        doReturn(committed).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(2L).when(conversationMemoryStore).getRevision(CONVERSATION_ID);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator, times(2)).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getAllValues().getLast().call();
+
+        verify(conversation, times(2)).say(anyString(), any());
+        verify(other, timeout(2000)).onComplete(any());
+    }
+
+    @Test
     @DisplayName("a duplicate right after completion on the same node is served before the persist is visible")
     void duplicateInTheGraceWindow() throws Exception {
         say("k-3", mock(ConversationResponseHandler.class));

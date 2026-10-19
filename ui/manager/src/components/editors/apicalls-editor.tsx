@@ -37,7 +37,8 @@ import { ConnectionReferenceWarning } from "@/components/shared/connection-refer
 import { isValidUrl } from "@/lib/utils";
 import { EditorSection } from "./editor-section";
 import { PropertyValueField } from "./property-value-field";
-import { parseHttpCodeList } from "./editor-value-utils";
+import { hasOwnKey, nextFreeKey, parseHttpCodeList, renameKey } from "./editor-value-utils";
+import { RenamableKeyInput } from "./renamable-key-input";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
@@ -184,16 +185,11 @@ function KvEditor({
   headerNameFor?: (key: string, value: string) => string | null;
   testIdPrefix?: string;
 }) {
+  const { t } = useTranslation();
   const pairs = Object.entries(entries ?? {});
 
-  const update = (oldKey: string, newKey: string, val: string) => {
-    const next: Record<string, string> = {};
-    for (const [k, v] of pairs) {
-      if (k === oldKey) next[newKey] = val;
-      else next[k] = v;
-    }
-    onChange(next);
-  };
+  /** Sets one value in place; renames go through RenamableKeyInput instead. */
+  const update = (key: string, val: string) => onChange({ ...entries, [key]: val });
 
   const remove = (key: string) => {
     const next = { ...entries };
@@ -202,7 +198,9 @@ function KvEditor({
   };
 
   const add = () => {
-    const nextKey = `key${pairs.length}`;
+    // `key${pairs.length}` collided with a surviving key after a delete and
+    // silently overwrote its value.
+    const nextKey = nextFreeKey(Object.keys(entries ?? {}), "key");
     onChange({ ...entries, [nextKey]: "" });
   };
 
@@ -211,12 +209,15 @@ function KvEditor({
       {pairs.map(([k, v], i) => (
         <div key={i}>
           <div className="flex items-center gap-1.5">
-            <input
-              type="text"
+            {/* Committed on blur/Enter: renaming per keystroke merged a
+                half-typed name into a matching row and lost its value. */}
+            <RenamableKeyInput
               value={k}
-              onChange={(e) => update(k, e.target.value, v)}
+              onRename={(next) => onChange(renameKey(entries ?? {}, k, next))}
+              isAvailable={(next) => !hasOwnKey(entries ?? {}, next)}
               readOnly={readOnly}
               placeholder={keyPlaceholder}
+              aria-label={keyPlaceholder}
               className="h-7 w-36 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <span className="text-xs text-muted-foreground">:</span>
@@ -224,9 +225,10 @@ function KvEditor({
               <input
                 type="text"
                 value={v}
-                onChange={(e) => update(k, k, e.target.value)}
+                onChange={(e) => update(k, e.target.value)}
                 readOnly={readOnly}
                 placeholder={valuePlaceholder}
+                aria-label={k ? `${k}: ${valuePlaceholder}` : valuePlaceholder}
                 className={`h-7 w-full border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${
                   connections && !readOnly ? "rounded-s rounded-e-none" : "rounded"
                 }`}
@@ -234,7 +236,7 @@ function KvEditor({
               />
               {connections && !readOnly && (
                 <ConnectionReferenceButton
-                  onInsert={(reference) => update(k, k, reference)}
+                  onInsert={(reference) => update(k, reference)}
                   testId={`${testIdPrefix}-connection-${i}`}
                 />
               )}
@@ -243,6 +245,7 @@ function KvEditor({
               <button
                 type="button"
                 onClick={() => remove(k)}
+                aria-label={t("common.removeItem", { item: k || keyPlaceholder, defaultValue: "Remove {{item}}" })}
                 className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
               >
                 <X className="h-3 w-3" />
@@ -341,6 +344,7 @@ function HttpCodeValidatorEditor({
         </span>
         {!readOnly && (
           <button
+            aria-label={t("common.remove", "Remove")}
             type="button"
             onClick={() => { setShowValidator(false); onChange(undefined); }}
             className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
@@ -521,6 +525,7 @@ function PropertyInstructionRow({
         </label>
         {!readOnly && (
           <button
+            aria-label={t("common.remove", "Remove")}
             type="button"
             onClick={onRemove}
             className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
@@ -680,7 +685,7 @@ function OutputBuildInstructionRow({
   return (
     <div className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2" data-testid="output-build-instruction-row">
       <div className="flex items-center gap-1.5">
-        <div className="flex-1 grid grid-cols-3 gap-1.5">
+        <div className="flex-1 grid grid-cols-1 gap-1.5 sm:grid-cols-3 *:min-w-0">
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
@@ -723,6 +728,7 @@ function OutputBuildInstructionRow({
         </div>
         {!readOnly && (
           <button
+            aria-label={t("common.remove", "Remove")}
             type="button"
             onClick={onRemove}
             className="mt-3 rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
@@ -731,7 +737,7 @@ function OutputBuildInstructionRow({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3 *:min-w-0">
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
             {t("apiCallsEditor.outputType", "Output Type")}
@@ -835,7 +841,7 @@ function QrBuildInstructionRow({
   return (
     <div className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2" data-testid="qr-build-instruction-row">
       <div className="flex items-center gap-1.5">
-        <div className="flex-1 grid grid-cols-3 gap-1.5">
+        <div className="flex-1 grid grid-cols-1 gap-1.5 sm:grid-cols-3 *:min-w-0">
           <div>
             <label className="mb-0.5 block text-[10px] text-muted-foreground">
               {t("apiCallsEditor.pathToTargetArray", "Path to Target Array")}
@@ -878,6 +884,7 @@ function QrBuildInstructionRow({
         </div>
         {!readOnly && (
           <button
+            aria-label={t("common.remove", "Remove")}
             type="button"
             onClick={onRemove}
             className="mt-3 rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
@@ -1109,6 +1116,7 @@ export function RetryApiCallEditor({
               />
               {!readOnly && (
                 <button
+                  aria-label={t("common.remove", "Remove")}
                   type="button"
                   onClick={() =>
                     onChange({

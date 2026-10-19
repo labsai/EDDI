@@ -98,11 +98,11 @@ public final class BodyMode<T> {
         return kind;
     }
 
-    long maxBytes() {
+    public long maxBytes() {
         return maxBytes;
     }
 
-    OnOverflow onOverflow() {
+    public OnOverflow onOverflow() {
         return onOverflow;
     }
 

@@ -4,7 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,13 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 
 import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -40,18 +41,18 @@ class WebSearchToolTest {
     private WebSearchTool webSearchTool;
 
     /** Stubs the bounded fetch every provider goes through. */
-    private static void answer(SafeHttpClient client, int status, String body) throws Exception {
+    private static void answer(OutboundHttp client, int status, String body) throws Exception {
         answer(client, status, body, false);
     }
 
-    private static void answer(SafeHttpClient client, int status, String body, boolean truncated) throws Exception {
-        doReturn(new SafeHttpClient.BoundedResponse(status, body.getBytes(StandardCharsets.UTF_8), truncated)).when(client)
-                .sendBounded(any(HttpRequest.class), anyLong());
+    private static void answer(OutboundHttp client, int status, String body, boolean truncated) throws Exception {
+        doReturn(TestOutbound.response(status, body.getBytes(StandardCharsets.UTF_8), truncated)).when(client)
+                .send(any(OutboundRequest.class), any());
     }
 
     @BeforeEach
     void setUp() {
-        webSearchTool = new WebSearchTool(new SafeHttpClient(10000), new ObjectMapper());
+        webSearchTool = new WebSearchTool(TestOutbound.standalone(), new ObjectMapper());
     }
 
     // ==================== Google Results Parsing ====================
@@ -482,11 +483,11 @@ class WebSearchToolTest {
     class SearchWebTests {
 
         private WebSearchTool mockedTool;
-        private SafeHttpClient mockedClient;
+        private OutboundHttp mockedClient;
 
         @BeforeEach
         void setUpMocked() throws Exception {
-            mockedClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            mockedClient = org.mockito.Mockito.mock(OutboundHttp.class);
             mockedTool = new WebSearchTool(mockedClient, new ObjectMapper());
             // Use reflection to set the searchProvider field (since it's @ConfigProperty)
             var searchProviderField = WebSearchTool.class.getDeclaredField("searchProvider");
@@ -556,7 +557,9 @@ class WebSearchToolTest {
 
             assertTrue(result.contains("Error:"), result);
             assertTrue(result.contains("exceeded " + WebSearchTool.MAX_RESPONSE_BYTES + " bytes"), result);
-            verify(mockedClient).sendBounded(any(HttpRequest.class), eq(WebSearchTool.MAX_RESPONSE_BYTES));
+            ArgumentCaptor<BodyMode> mode = ArgumentCaptor.forClass(BodyMode.class);
+            verify(mockedClient).send(any(OutboundRequest.class), mode.capture());
+            assertEquals(WebSearchTool.MAX_RESPONSE_BYTES, mode.getValue().maxBytes());
         }
 
         @Test
@@ -593,7 +596,7 @@ class WebSearchToolTest {
         void searchNews_delegatesToSearchWeb() {
             // searchNews appends " news" to the query and delegates
             // With no mocked HTTP, will return error
-            WebSearchTool tool = new WebSearchTool(org.mockito.Mockito.mock(SafeHttpClient.class), new ObjectMapper());
+            WebSearchTool tool = new WebSearchTool(org.mockito.Mockito.mock(OutboundHttp.class), new ObjectMapper());
             try {
                 var providerField = WebSearchTool.class.getDeclaredField("searchProvider");
                 providerField.setAccessible(true);
@@ -610,7 +613,7 @@ class WebSearchToolTest {
 
         @Test
         void searchNews_nullMaxResults_handledGracefully() {
-            WebSearchTool tool = new WebSearchTool(org.mockito.Mockito.mock(SafeHttpClient.class), new ObjectMapper());
+            WebSearchTool tool = new WebSearchTool(org.mockito.Mockito.mock(OutboundHttp.class), new ObjectMapper());
             try {
                 var providerField = WebSearchTool.class.getDeclaredField("searchProvider");
                 providerField.setAccessible(true);
@@ -628,11 +631,11 @@ class WebSearchToolTest {
     class SearchWikipediaHttpTests {
 
         private WebSearchTool mockedTool;
-        private SafeHttpClient mockedClient;
+        private OutboundHttp mockedClient;
 
         @BeforeEach
         void setUpMocked() {
-            mockedClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            mockedClient = org.mockito.Mockito.mock(OutboundHttp.class);
             mockedTool = new WebSearchTool(mockedClient, new ObjectMapper());
         }
 
@@ -658,9 +661,8 @@ class WebSearchToolTest {
 
         @Test
         void searchWikipedia_ioException_returnsError() throws Exception {
-            org.mockito.Mockito.when(mockedClient.sendBounded(
-                    org.mockito.ArgumentMatchers.any(java.net.http.HttpRequest.class),
-                    org.mockito.ArgumentMatchers.anyLong())).thenThrow(new IOException("Network error"));
+            org.mockito.Mockito.when(mockedClient.send(org.mockito.ArgumentMatchers.any(OutboundRequest.class), org.mockito.ArgumentMatchers.any()))
+                    .thenThrow(new IOException("Network error"));
 
             String result = textOf(() -> mockedTool.searchWikipedia("test"));
 
@@ -675,11 +677,11 @@ class WebSearchToolTest {
     class GoogleCredentials {
 
         private WebSearchTool googleTool;
-        private SafeHttpClient mockedClient;
+        private OutboundHttp mockedClient;
 
         @BeforeEach
         void setUpGoogle() throws Exception {
-            mockedClient = org.mockito.Mockito.mock(SafeHttpClient.class);
+            mockedClient = org.mockito.Mockito.mock(OutboundHttp.class);
             googleTool = new WebSearchTool(mockedClient, new ObjectMapper());
             set("searchProvider", "google");
             set("googleApiKey", Optional.of("SECRET&key 1"));
@@ -696,8 +698,8 @@ class WebSearchToolTest {
         void keyAndCxAreEncodedIntoTheRequest() throws Exception {
             answer(mockedClient, 200, "{\"items\":[]}");
             textOf(() -> googleTool.searchWeb("q", 3));
-            var request = ArgumentCaptor.forClass(HttpRequest.class);
-            verify(mockedClient).sendBounded(request.capture(), anyLong());
+            var request = ArgumentCaptor.forClass(OutboundRequest.class);
+            verify(mockedClient).send(request.capture(), any());
             String uri = request.getValue().uri().toString();
             assertTrue(uri.contains("key=SECRET%26key+1&"), uri);
             assertTrue(uri.contains("cx=cx+id&"), uri);
@@ -707,7 +709,7 @@ class WebSearchToolTest {
         void aFailureNamingTheUriDoesNotLeakTheKey() throws Exception {
             doThrow(new IOException(
                     "Too many redirects for URL: https://www.googleapis.com/customsearch/v1?key=SECRETKEY&cx=abc&q=q"))
-                    .when(mockedClient).sendBounded(any(HttpRequest.class), anyLong());
+                    .when(mockedClient).send(any(OutboundRequest.class), any());
             String result = textOf(() -> googleTool.searchWeb("q", 3));
             assertFalse(result.contains("SECRETKEY"), result);
             assertTrue(result.contains("key=[REDACTED]"), result);

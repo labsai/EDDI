@@ -42,6 +42,45 @@ Ports move with `LOADTEST_EDDI_PORT`, `LOADTEST_WIREMOCK_PORT`, `LOADTEST_MONGO_
 
 Streaming is not covered: k6 has no built-in SSE client.
 
+## Cluster mode (N replicas)
+
+`docker-compose.cluster.yml` is the topology of the repository's `docker-compose.cluster.yml` and
+the [cluster demo](../cluster-demo/README.md) — N EDDI replicas with `eddi.messaging.type=nats`, a
+three-node NATS JetStream cluster (R3), one MongoDB, an nginx round-robin balancer with no affinity —
+plus the same WireMock LLM and k6. Its own ports (balancer `7570`, replicas `7581–7599` (one port each; spares in case another stack takes one), MongoDB
+`27570`, WireMock `18570`; moved with `LOADTEST_CLUSTER_PORT`, `LOADTEST_CLUSTER_NODE_PORTS`,
+`LOADTEST_CLUSTER_MONGO_PORT`, `LOADTEST_CLUSTER_WIREMOCK_PORT`), so it can run next to the single-node stack.
+
+```bash
+./mvnw package -DskipTests -DskipUi=true
+python scripts/loadtest/loadtest.py cluster-matrix --baseline --nodes 1,2,4,8 --vus-per-node 300 --turns 20 --delay-ms 3000
+```
+
+Each point gets a fresh stack (empty database), a discarded warm-up run, then one `steady` run with
+`--vus-per-node` × N conversations, so the offered load grows with the cluster. `--baseline` adds a
+single node with `eddi.messaging.type=in-memory` first, which is the cluster-mode overhead at N=1.
+`cluster-up --nodes N` / `cluster-run` / `cluster-down` run one point by hand, and
+`cluster-report results/*.json` rebuilds the report from earlier runs.
+
+What decides whether two points are comparable is set explicitly, per node, never derived from the
+heap: `--max-in-flight` (`eddi.conversation.max-in-flight-turns`, default 400), `--mongo-pool`
+(`maxPoolSize`, default 100), `--java-opts` (`-Xmx1536m`), `--eddi-memory` (2g) and `--eddi-cpus`
+(2); MongoDB gets `--mongo-cpus` (4), each NATS node `--nats-cpus` (1, the sizing
+[docs/clustering.md](../../docs/clustering.md#sizing) calls ample).
+
+The balancer adds `X-Loadtest-Upstream` to every response, k6 tags each turn with it, and the driver
+reads per-node turns/s, p50/p95/p99, 409 and 503 from the k6 summary. From every replica's
+`/q/metrics` it takes `eddi_cluster_lease_acquire_seconds` by outcome, `eddi_cluster_fence_rejected_total`,
+peak in-flight turns and leases held; from MongoDB the opcounters (per turn and per second on the
+primary); from NATS `/varz` the messages per turn; and from `docker stats` the CPU of every container
+on the host — other stacks' too, because on one machine a parallel load test is part of why the host
+saturates. The report is `results/cluster-scaling-<date>.md`, with a scaling-efficiency column
+`turns/s(N) / (N × turns/s(1))`.
+
+One Docker host is not N machines: every replica, MongoDB, NATS, nginx and k6 share its CPUs, so a
+falling efficiency can be the host as easily as the database. Read the CPU columns before the
+efficiency one.
+
 ## What a run records
 
 `run` writes `results/<label>-<scenario>-<vus>vu-<delay>ms.json`; `matrix` adds the Markdown report

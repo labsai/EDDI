@@ -1,4 +1,5 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
+import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
 import { useState, useEffect, useCallback, useMemo, useId } from "react";
@@ -86,6 +87,7 @@ import {
   UserMemorySection,
   MemoryPolicySection,
   SessionManagementSection,
+  LimitsSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -264,9 +266,18 @@ export function AgentDetailPage() {
     [agent, editable, configPending],
   );
 
+  /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
+  const [ceilingInvalid, setCeilingInvalid] = useState(false);
+
   /** Writes the draft as one new version. Resolves whether it landed. */
   const saveDraft = useCallback(async (): Promise<boolean> => {
     if (!draft || !isDirty) return true;
+    // Every save path comes through here — the buttons, the shortcut and the
+    // leave-page guard — so this is the one place that can refuse them all.
+    if (ceilingInvalid) {
+      toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
+      return false;
+    }
     const sent = draft;
     try {
       const result = await updateAgentMutation.mutateAsync({ id: id!, version: resolvedVersion, agent: sent });
@@ -299,7 +310,7 @@ export function AgentDetailPage() {
       }
       return false;
     }
-  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t]);
+  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t, ceilingInvalid]);
 
   useEffect(() => {
     if (!rebaseFrom || !agent || agent === rebaseFrom) return;
@@ -494,6 +505,7 @@ export function AgentDetailPage() {
     touched("enableMemoryTools", "userMemoryConfig"),
     touched("memoryPolicy"),
     touched("sessionManagement"),
+    touched("maxCostPerConversationUsd"),
     touched("conversationReview"),
     touched("hitlConfig"),
     touched("channels"),
@@ -995,6 +1007,9 @@ export function AgentDetailPage() {
         disabled={isSaving}
         modified={touched("conversationReview")}
       />
+
+      {/* Spend limits */}
+      <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
@@ -1613,10 +1628,18 @@ function A2ASection({
   }
 
   function copyToClipboard(text: string, label: string) {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(label);
-      setTimeout(() => setCopied(null), 2000);
-    });
+    // `navigator.clipboard` is absent outside a secure context (plain-http
+    // deployments), and a denied write rejects — both used to fail silently.
+    // Wrapped so the synchronous TypeError lands in the same catch.
+    Promise.resolve()
+      .then(() => navigator.clipboard.writeText(text))
+      .then(() => {
+        setCopied(label);
+        setTimeout(() => setCopied(null), 2000);
+      })
+      .catch(() => {
+        toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+      });
   }
 
   const baseUrl = window.location.origin;
@@ -1756,6 +1779,7 @@ function A2ASection({
                   value={skillInput}
                   onChange={(e) => setSkillInput(e.target.value)}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === "Enter") {
                       e.preventDefault();
                       handleAddSkill();

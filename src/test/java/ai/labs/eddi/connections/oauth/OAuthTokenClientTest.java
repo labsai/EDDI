@@ -9,7 +9,11 @@ import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.connections.ConnectionException;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,8 +21,6 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.URLDecoder;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -70,12 +73,12 @@ class OAuthTokenClientTest {
             }
             """;
 
-    private SafeHttpClient httpClient;
+    private OutboundHttp httpClient;
     private OAuthTokenClient client;
 
     @BeforeEach
     void setUp() {
-        httpClient = mock(SafeHttpClient.class);
+        httpClient = mock(OutboundHttp.class);
         client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(TOKEN_ORIGIN)));
     }
 
@@ -94,62 +97,28 @@ class OAuthTokenClientTest {
         return connection;
     }
 
-    @SuppressWarnings("unchecked")
     private void respondWith(int statusCode, String body) throws Exception {
-        HttpResponse<String> response = mock(HttpResponse.class);
-        doReturn(statusCode).when(response).statusCode();
-        doReturn(body).when(response).body();
-        // doReturn rather than when(...): sendValidatedNoRedirect is generic and
-        // stubbing it
-        // through when() would need the call to type-check against a concrete T.
-        doReturn(response).when(httpClient).sendNoRedirect(any(), any());
+        // doReturn rather than when(...): send is generic, and stubbing it through
+        // when() would need the call to type-check against a concrete body type.
+        doReturn(TestOutbound.response(statusCode, body, false)).when(httpClient).send(any(), any());
     }
 
-    private HttpRequest sentRequest() throws Exception {
-        var captor = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(httpClient).sendNoRedirect(captor.capture(), any());
+    private OutboundRequest sentRequest() throws Exception {
+        var captor = ArgumentCaptor.forClass(OutboundRequest.class);
+        verify(httpClient).send(captor.capture(), any());
         return captor.getValue();
     }
 
-    /**
-     * Drains the request's body publisher, which is the only way to read it back.
-     */
-    private static String rawBody(HttpRequest request) {
-        var publisher = request.bodyPublisher().orElseThrow(() -> new AssertionError("a token request must carry a form body"));
-        var collected = new StringBuilder();
-        var completed = new CountDownLatch(1);
-        publisher.subscribe(new Flow.Subscriber<ByteBuffer>() {
-
-            @Override
-            public void onSubscribe(Flow.Subscription subscription) {
-                subscription.request(Long.MAX_VALUE);
-            }
-
-            @Override
-            public void onNext(ByteBuffer item) {
-                collected.append(StandardCharsets.UTF_8.decode(item));
-            }
-
-            @Override
-            public void onError(Throwable throwable) {
-                completed.countDown();
-            }
-
-            @Override
-            public void onComplete() {
-                completed.countDown();
-            }
-        });
-        try {
-            assertTrue(completed.await(5, TimeUnit.SECONDS), "the form body publisher never completed");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError(e);
-        }
-        return collected.toString();
+    private static String header(OutboundRequest request, String name) {
+        List<String> values = request.headers().get(name);
+        return values == null || values.isEmpty() ? null : values.getFirst();
     }
 
-    private static Map<String, String> form(HttpRequest request) {
+    private static String rawBody(OutboundRequest request) {
+        return new String(request.body().toBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static Map<String, String> form(OutboundRequest request) {
         Map<String, String> parsed = new LinkedHashMap<>();
         String body = rawBody(request);
         if (body.isEmpty()) {
@@ -172,12 +141,12 @@ class OAuthTokenClientTest {
 
         client.clientCredentials(connection, CLIENT_SECRET);
 
-        HttpRequest request = sentRequest();
+        OutboundRequest request = sentRequest();
         assertEquals("POST", request.method());
         assertEquals(TOKEN_URL, request.uri().toString());
-        assertEquals("application/x-www-form-urlencoded", request.headers().firstValue("Content-Type").orElseThrow());
-        assertEquals("application/json", request.headers().firstValue("Accept").orElseThrow());
-        assertEquals(OAuthTokenClient.DEFAULT_TIMEOUT, request.timeout().orElseThrow());
+        assertEquals("application/x-www-form-urlencoded", header(request, "Content-Type"));
+        assertEquals("application/json", header(request, "Accept"));
+        assertEquals(OAuthTokenClient.DEFAULT_TIMEOUT, request.timeoutOverride());
 
         Map<String, String> sentForm = form(request);
         assertEquals("client_credentials", sentForm.get("grant_type"));
@@ -244,8 +213,8 @@ class OAuthTokenClientTest {
 
         client.clientCredentials(connection, "se/cr+et");
 
-        HttpRequest request = sentRequest();
-        String header = request.headers().firstValue("Authorization").orElseThrow();
+        OutboundRequest request = sentRequest();
+        String header = header(request, "Authorization");
         assertTrue(header.startsWith("Basic "), header);
         String decoded = new String(Base64.getDecoder().decode(header.substring("Basic ".length())), StandardCharsets.UTF_8);
         assertEquals("cli+ent%3Aid:se%2Fcr%2Bet", decoded,
@@ -262,7 +231,7 @@ class OAuthTokenClientTest {
 
         client.clientCredentials(connection, CLIENT_SECRET);
 
-        assertTrue(sentRequest().headers().firstValue("Authorization").isPresent());
+        assertTrue(header(sentRequest(), "Authorization") != null);
     }
 
     @Test
@@ -274,8 +243,8 @@ class OAuthTokenClientTest {
 
         client.clientCredentials(connection, CLIENT_SECRET);
 
-        HttpRequest request = sentRequest();
-        assertTrue(request.headers().firstValue("Authorization").isEmpty(),
+        OutboundRequest request = sentRequest();
+        assertTrue(header(request, "Authorization") == null,
                 "sending both is how a provider that checks only one silently ignores the other");
         Map<String, String> sentForm = form(request);
         assertEquals("client-id", sentForm.get("client_id"));
@@ -291,7 +260,7 @@ class OAuthTokenClientTest {
         var error = assertThrows(ConnectionException.class, () -> client.clientCredentials(connection, CLIENT_SECRET));
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
-        verify(httpClient, never()).sendNoRedirect(any(), any());
+        verify(httpClient, never()).send(any(), any());
     }
 
     @Test
@@ -307,14 +276,14 @@ class OAuthTokenClientTest {
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
         assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
-        verify(httpClient, never()).sendNoRedirect(any(), any());
+        verify(httpClient, never()).send(any(), any());
     }
 
     @Test
     @DisplayName("a plain-http token URL on a loopback host is contacted — nothing crosses the network")
     void contactsALoopbackHttpTokenUrl() throws Exception {
         for (String origin : List.of("http://localhost:9999", "http://127.0.0.1:9999", "http://[::1]:9999")) {
-            httpClient = mock(SafeHttpClient.class);
+            httpClient = mock(OutboundHttp.class);
             client = new OAuthTokenClient(httpClient, new CredentialEndpointAllowlist(Set.of(origin)));
             var connection = connection();
             connection.getOauth().setTokenUrl(origin + "/oauth/token");
@@ -343,10 +312,11 @@ class OAuthTokenClientTest {
             assertTrue(error.getMessage().contains("must not redirect"), error.getMessage());
             assertTrue(error.getMessage().contains("unchanged"), "the grant must be reported untouched: " + error.getMessage());
         }
-        // The no-redirect send is the whole guarantee: the ordinary send would have
-        // followed the hop with the body intact before this client ever saw a 3xx.
-        verify(httpClient, never()).sendValidated(any(), any());
-        verify(httpClient, never()).send(any(), any());
+        // The no-redirect policy is the whole guarantee: a following send would have
+        // re-sent the hop with the body intact before this client ever saw a 3xx.
+        var sent = ArgumentCaptor.forClass(OutboundRequest.class);
+        verify(httpClient, times(5)).send(sent.capture(), any());
+        sent.getAllValues().forEach(request -> assertEquals(RedirectPolicy.NEVER, request.redirectOverride()));
     }
 
     @Test
@@ -363,9 +333,11 @@ class OAuthTokenClientTest {
 
         assertEquals("at-live", client.clientCredentials(connection, CLIENT_SECRET).accessToken());
 
-        assertEquals(privateOrigin + "/oauth/token", sentRequest().uri().toString());
-        verify(httpClient, never()).sendValidatedNoRedirect(any(), any());
-        verify(httpClient, never()).sendValidated(any(), any());
+        OutboundRequest request = sentRequest();
+        assertEquals(privateOrigin + "/oauth/token", request.uri().toString());
+        // The allowlist is the gate: the facade must not add the SSRF address check.
+        assertEquals(SsrfPolicy.NONE, request.ssrfOverride());
+        assertEquals(RedirectPolicy.NEVER, request.redirectOverride());
     }
 
     @Test
@@ -394,13 +366,13 @@ class OAuthTokenClientTest {
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason(), error.getMessage());
         assertTrue(error.getMessage().contains("oauth.tokenUrl"), "the message must name the field to fix: " + error.getMessage());
-        verify(httpClient, never()).sendNoRedirect(any(), any());
+        verify(httpClient, never()).send(any(), any());
     }
 
     @Test
     @DisplayName("a transport failure is transient — the grant is left alone and the next call retries")
     void transportFailureIsTransient() throws Exception {
-        doThrow(new IOException("connection reset")).when(httpClient).sendNoRedirect(any(), any());
+        doThrow(new IOException("connection reset")).when(httpClient).send(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -412,7 +384,7 @@ class OAuthTokenClientTest {
     @Test
     @DisplayName("an interrupted exchange is transient and hands the interrupt back to the caller")
     void interruptionIsTransientAndRestoresTheInterruptFlag() throws Exception {
-        doThrow(new InterruptedException("shutting down")).when(httpClient).sendNoRedirect(any(), any());
+        doThrow(new InterruptedException("shutting down")).when(httpClient).send(any(), any());
 
         var error = assertThrows(ConnectionException.class, () -> client.refresh(connection(), CLIENT_SECRET, "rt-stored"));
 
@@ -627,6 +599,6 @@ class OAuthTokenClientTest {
 
         client.clientCredentials(connection, CLIENT_SECRET);
 
-        assertEquals(Duration.ofSeconds(7), sentRequest().timeout().orElseThrow());
+        assertEquals(Duration.ofSeconds(7), sentRequest().timeoutOverride());
     }
 }

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import ai.labs.eddi.modules.llm.tools.ToolFailureException;
 import org.junit.jupiter.api.AfterEach;
@@ -13,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -26,7 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,7 +42,7 @@ class WebScraperToolContainmentTest {
 
     private static final String PAGE = "<html><head><title>T</title></head><body><p>alpha</p><p>beta</p></body></html>";
 
-    private final SafeHttpClient httpClient = mock(SafeHttpClient.class);
+    private final OutboundHttp httpClient = mock(OutboundHttp.class);
     private final CountDownLatch release = new CountDownLatch(1);
 
     @AfterEach
@@ -51,8 +51,8 @@ class WebScraperToolContainmentTest {
     }
 
     private void servePage() throws Exception {
-        when(httpClient.sendBounded(any(HttpRequest.class), anyLong()))
-                .thenReturn(new SafeHttpClient.BoundedResponse(200, PAGE.getBytes(StandardCharsets.UTF_8), false));
+        when(httpClient.send(any(OutboundRequest.class), any()))
+                .thenReturn(TestOutbound.response(200, PAGE.getBytes(StandardCharsets.UTF_8), false));
     }
 
     @ParameterizedTest
@@ -65,7 +65,7 @@ class WebScraperToolContainmentTest {
         String result = tool.extractWithSelector("https://example.com", selector);
 
         assertTrue(result.startsWith("Error: regular-expression selectors"), result);
-        verify(httpClient, never()).sendBounded(any(HttpRequest.class), anyLong());
+        verify(httpClient, never()).send(any(OutboundRequest.class), any());
     }
 
     @Test

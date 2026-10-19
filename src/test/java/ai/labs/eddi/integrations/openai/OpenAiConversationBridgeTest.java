@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.engine.internal.TurnCapacityExceededException;
+import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
@@ -33,6 +35,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import java.io.ByteArrayOutputStream;
+import java.util.concurrent.RejectedExecutionException;
 import static ai.labs.eddi.integrations.openai.OpenAiTestFixtures.AGENT_ID_SUPPORT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -713,6 +716,55 @@ class OpenAiConversationBridgeTest {
 
         var wrapped = bridge.asApiException(new RuntimeException("turn failed", new IConversationService.InputTooLargeException(5_000, 100)));
         assertEquals(400, wrapped.getStatus());
+    }
+
+    /**
+     * A turn refused for capacity (the in-flight limit, coordinator saturation, a
+     * shutdown drain) is the retryable 503 {@code capacity_exceeded} with
+     * Retry-After that every other surface answers, not a 500. The streaming path
+     * maps through the same method, so its in-band error carries the same code.
+     */
+    @Test
+    void capacityRefusal_is503CapacityExceededWithRetryAfter() {
+        var direct = bridge.asApiException(new TurnCapacityExceededException("This node is already running 1000 conversation turns"));
+        assertEquals(503, direct.getStatus());
+        assertEquals("capacity_exceeded", direct.getCode());
+        assertEquals(5, direct.getRetryAfterSeconds());
+
+        var wrapped = bridge.asApiException(new RuntimeException("turn failed", new RejectedExecutionException("draining")));
+        assertEquals(503, wrapped.getStatus());
+        assertEquals("capacity_exceeded", wrapped.getCode());
+    }
+
+    @Test
+    void quotaStoreOutage_is503QuotaAccountingUnavailable() {
+        var e = bridge.asApiException(new QuotaAccountingUnavailableException("quota store unreachable"));
+        assertEquals(503, e.getStatus());
+        assertEquals("quota_accounting_unavailable", e.getCode());
+        assertEquals(5, e.getRetryAfterSeconds());
+    }
+
+    @Test
+    void capacityRefusalOfTheStartTurn_is503NotServerError() throws Exception {
+        when(conversationService.startConversation(any(), any(), any(), any()))
+                .thenThrow(new TurnCapacityExceededException("This node is already running 1000 conversation turns"));
+        when(userConversationStore.readUserConversation(any(), any())).thenReturn(null);
+
+        var exception = assertThrows(OpenAiApiException.class,
+                () -> bridge.prepare(statefulModel, simpleRequest(), headers("chat-a"), USER_ID));
+
+        assertEquals(503, exception.getStatus());
+        assertEquals("capacity_exceeded", exception.getCode());
+    }
+
+    @Test
+    void mapperSendsRetryAfterForCapacityErrors() {
+        var response = new OpenAiExceptionMapper().toResponse(OpenAiApiException.capacityExceeded("busy"));
+        assertEquals(503, response.getStatus());
+        assertEquals("5", response.getHeaderString("Retry-After"));
+
+        var plain = new OpenAiExceptionMapper().toResponse(OpenAiApiException.serverError(null, "boom"));
+        assertNull(plain.getHeaderString("Retry-After"));
     }
 
     @Test

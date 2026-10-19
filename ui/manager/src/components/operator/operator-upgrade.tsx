@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowUpCircle, Loader2 } from "lucide-react";
@@ -8,6 +8,8 @@ import type {
   InstructionsChoice,
   OperatorUpgradeAssessment,
 } from "@/lib/operator/operator-revision";
+import { diffLines, summarizeDiff } from "@/lib/operator/prompt-diff";
+import { cn } from "@/lib/utils";
 
 interface OperatorUpgradeNoticeProps {
   assessment: OperatorUpgradeAssessment;
@@ -21,6 +23,15 @@ interface OperatorUpgradeNoticeProps {
   stageLabel?: string;
   /** The last upgrade's failure, if any. */
   error?: string | null;
+  /**
+   * The instructions stored in `platform.operator`, which an upgrade that keeps
+   * the current text installs on the NEW agent. Shown (as a diff against the
+   * default) and confirmed before it is installed: the variable is
+   * editor-writable, so an upgrade must not carry its content over unseen.
+   */
+  storedPromptBody?: string;
+  /** Today's default for the operator's scope — what the stored text is compared with. */
+  defaultPromptBody?: string;
 }
 
 /**
@@ -38,6 +49,8 @@ export function OperatorUpgradeNotice({
   busy,
   stageLabel,
   error,
+  storedPromptBody,
+  defaultPromptBody,
 }: OperatorUpgradeNoticeProps) {
   const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -49,6 +62,17 @@ export function OperatorUpgradeNotice({
   const [choice, setChoice] = useState<InstructionsChoice>(
     assessment.instructions === "default" ? "use-new-default" : "keep-current",
   );
+
+  // Installing stored instructions the admin did not just write needs a read and
+  // an explicit yes. A default body is ours and needs neither.
+  const [reviewed, setReviewed] = useState(false);
+  const needsReview =
+    assessment.instructions !== "default" && choice === "keep-current" && storedPromptBody !== undefined;
+  const diff = useMemo(
+    () => (needsReview ? diffLines(defaultPromptBody ?? "", storedPromptBody ?? "") : []),
+    [needsReview, defaultPromptBody, storedPromptBody],
+  );
+  const diffSummary = useMemo(() => summarizeDiff(diff), [diff]);
 
   const added = assessment.addedEndpoints;
   const removed = assessment.removedEndpoints;
@@ -140,7 +164,10 @@ export function OperatorUpgradeNotice({
 
       <AlertDialog
         open={confirmOpen}
-        onOpenChange={setConfirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) setReviewed(false);
+        }}
         variant="warning"
         title={t("operator.upgrade.confirmTitle", "Upgrade the Platform Operator?")}
         description={t(
@@ -149,8 +176,10 @@ export function OperatorUpgradeNotice({
         )}
         confirmLabel={t("operator.upgrade.confirm", "Upgrade now")}
         cancelLabel={t("common.cancel", "Cancel")}
+        confirmDisabled={needsReview && !reviewed}
         onConfirm={() => {
           setConfirmOpen(false);
+          setReviewed(false);
           onUpgrade(choice);
         }}
       >
@@ -169,7 +198,10 @@ export function OperatorUpgradeNotice({
                 type="radio"
                 name="operator-upgrade-instructions"
                 checked={choice === "use-new-default"}
-                onChange={() => setChoice("use-new-default")}
+                onChange={() => {
+                  setChoice("use-new-default");
+                  setReviewed(false);
+                }}
                 data-testid="operator-upgrade-use-default"
               />
               <span>{t("operator.upgrade.useNewDefault", "Replace them with the new default")}</span>
@@ -190,6 +222,67 @@ export function OperatorUpgradeNotice({
               </span>
             </label>
           </fieldset>
+        )}
+        {needsReview && (
+          <section className="mt-4 space-y-2 text-sm" data-testid="operator-upgrade-review">
+            <h3 className="font-medium">
+              {t("operator.upgrade.reviewTitle", "Review the stored instructions")}
+            </h3>
+            <p className="text-muted-foreground">
+              {t(
+                "operator.upgrade.reviewBody",
+                "These instructions were saved earlier and will be installed on the new operator. Anyone who can edit platform settings could have changed them, so read what differs from the default before you continue.",
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground" data-testid="operator-upgrade-review-summary">
+              {t("operator.upgrade.reviewSummary", "{{added}} lines added, {{removed}} default lines removed", {
+                added: diffSummary.added,
+                removed: diffSummary.removed,
+              })}
+            </p>
+            <pre
+              className="max-h-56 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs"
+              data-testid="operator-upgrade-diff"
+            >
+              {diff
+                .filter((line) => line.kind !== "same")
+                .map((line, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "whitespace-pre-wrap",
+                      line.kind === "added" ? "bg-warning/15 text-foreground" : "bg-destructive/10 text-muted-foreground line-through",
+                    )}
+                    data-diff={line.kind}
+                  >
+                    {line.kind === "added" ? "+ " : "- "}
+                    {line.text}
+                  </div>
+                ))}
+            </pre>
+            <details>
+              <summary className="cursor-pointer text-muted-foreground">
+                {t("operator.upgrade.reviewFull", "Show the full stored text")}
+              </summary>
+              <pre
+                className="mt-1 max-h-56 overflow-auto rounded-md border border-border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap"
+                data-testid="operator-upgrade-stored-body"
+              >
+                {storedPromptBody}
+              </pre>
+            </details>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={reviewed}
+                onChange={(e) => setReviewed(e.target.checked)}
+                data-testid="operator-upgrade-review-confirm"
+              />
+              <span>
+                {t("operator.upgrade.reviewConfirm", "I have read these instructions and want to install them")}
+              </span>
+            </label>
+          </section>
         )}
       </AlertDialog>
     </div>

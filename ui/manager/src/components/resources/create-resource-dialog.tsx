@@ -142,6 +142,7 @@ export function CreateResourceDialog({
               })}
             </h2>
             <button
+              aria-label={t("common.close", "Close")}
               onClick={onClose}
               className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
               data-testid="create-resource-close"

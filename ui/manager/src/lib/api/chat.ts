@@ -2,6 +2,7 @@ import { api, apiErrorFromResponse, isApiError } from "../api-client";
 import { parseSseFrame } from "./sse-utils";
 import type { SimpleConversationMemorySnapshot } from "./conversations";
 import type { Environment } from "@/lib/constants";
+import { seg } from "./path-segment";
 
 // --- Types ---
 
@@ -140,7 +141,7 @@ export async function startConversation(
   const params = new URLSearchParams({ environment });
   if (userId) params.set("userId", userId);
   const result = await api.post<{ location: string }>(
-    `/agents/${agentId}/start?${params.toString()}`
+    `/agents/${seg(agentId)}/start?${params.toString()}`
   );
   return parseConversationIdFromLocation(result.location);
 }
@@ -157,7 +158,7 @@ export function readConversation(
     returnCurrentStepOnly: String(returnCurrentStepOnly),
   });
   return api.get<SimpleConversationMemorySnapshot>(
-    `/agents/${conversationId}?${params.toString()}`
+    `/agents/${seg(conversationId)}?${params.toString()}`
   );
 }
 
@@ -174,7 +175,7 @@ export async function sendMessage(
     returnCurrentStepOnly: "true",
   });
   const response = await fetch(
-    `${api.getBaseUrl()}/agents/${conversationId}?${params.toString()}`,
+    `${api.getBaseUrl()}/agents/${seg(conversationId)}?${params.toString()}`,
     {
       method: "POST",
       headers: {
@@ -202,7 +203,7 @@ export function sendMessageWithContext(
     returnCurrentStepOnly: "true",
   });
   return api.post<SimpleConversationMemorySnapshot>(
-    `/agents/${conversationId}?${params.toString()}`,
+    `/agents/${seg(conversationId)}?${params.toString()}`,
     inputData
   );
 }
@@ -221,7 +222,7 @@ export async function* sendMessageStreaming(
   signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const response = await fetch(
-    `${api.getBaseUrl()}/agents/${conversationId}/stream`,
+    `${api.getBaseUrl()}/agents/${seg(conversationId)}/stream`,
     {
       method: "POST",
       headers: {
@@ -281,7 +282,7 @@ export async function* sendMessageStreaming(
 
 /** End a conversation. */
 export function endConversation(conversationId: string): Promise<void> {
-  return api.post(`/agents/${conversationId}/endConversation`);
+  return api.post(`/agents/${seg(conversationId)}/endConversation`);
 }
 
 /**
@@ -297,7 +298,7 @@ export function endConversation(conversationId: string): Promise<void> {
  */
 async function postStepMove(conversationId: string, move: "undo" | "redo"): Promise<boolean> {
   try {
-    await api.post<void>(`/agents/${encodeURIComponent(conversationId)}/${move}`);
+    await api.post<void>(`/agents/${seg(conversationId)}/${seg(move)}`);
     return true;
   } catch (err) {
     if (isApiError(err) && err.status === 409) return false;
@@ -335,5 +336,5 @@ export function rerunLastStep(
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  return api.post(`/agents/${conversationId}/rerun?${params.toString()}`);
+  return api.post(`/agents/${seg(conversationId)}/rerun?${params.toString()}`);
 }

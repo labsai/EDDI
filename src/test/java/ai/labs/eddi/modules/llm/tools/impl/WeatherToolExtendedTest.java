@@ -5,7 +5,10 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -15,14 +18,12 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import static ai.labs.eddi.modules.llm.tools.impl.ToolTestResults.textOf;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -32,7 +33,7 @@ import static org.mockito.Mockito.*;
  */
 class WeatherToolExtendedTest {
 
-    private SafeHttpClient mockHttpClient;
+    private OutboundHttp mockHttpClient;
     private WeatherTool weatherTool;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -60,7 +61,7 @@ class WeatherToolExtendedTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        mockHttpClient = mock(SafeHttpClient.class);
+        mockHttpClient = mock(OutboundHttp.class);
         weatherTool = new WeatherTool(mockHttpClient);
 
         // Inject test JSON serialization via reflection
@@ -79,8 +80,8 @@ class WeatherToolExtendedTest {
     }
 
     private void mockResponse(int statusCode, String body, boolean truncated) throws IOException, InterruptedException {
-        when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
-                .thenReturn(new SafeHttpClient.BoundedResponse(statusCode, body.getBytes(StandardCharsets.UTF_8), truncated));
+        when(mockHttpClient.send(any(OutboundRequest.class), any()))
+                .thenReturn(TestOutbound.response(statusCode, body.getBytes(StandardCharsets.UTF_8), truncated));
     }
 
     // ==================== getCurrentWeather ====================
@@ -233,7 +234,7 @@ class WeatherToolExtendedTest {
         @Test
         @DisplayName("should handle IOException from HTTP client")
         void handlesIOException() throws Exception {
-            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+            when(mockHttpClient.send(any(OutboundRequest.class), any()))
                     .thenThrow(new IOException("Connection refused"));
 
             String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
@@ -372,7 +373,7 @@ class WeatherToolExtendedTest {
             assertFalse(current.contains(KEY), current);
             assertFalse(forecast.contains(KEY), forecast);
             assertTrue(current.contains("units must be one of"), current);
-            verify(mockHttpClient, never()).sendBounded(any(HttpRequest.class), anyLong());
+            verify(mockHttpClient, never()).send(any(OutboundRequest.class), any());
         }
 
         @Test
@@ -389,7 +390,7 @@ class WeatherToolExtendedTest {
         @Test
         @DisplayName("an exception quoting the request URL is redacted in the answer")
         void exceptionMessagesAreRedacted() throws Exception {
-            when(mockHttpClient.sendBounded(any(HttpRequest.class), anyLong()))
+            when(mockHttpClient.send(any(OutboundRequest.class), any()))
                     .thenThrow(new IOException("failed: https://api.openweathermap.org/data/2.5/weather?q=London&appid=" + KEY + "&units=metric"));
 
             String current = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
@@ -410,8 +411,8 @@ class WeatherToolExtendedTest {
 
             textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
-            ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
-            verify(mockHttpClient).sendBounded(captor.capture(), anyLong());
+            ArgumentCaptor<OutboundRequest> captor = ArgumentCaptor.forClass(OutboundRequest.class);
+            verify(mockHttpClient).send(captor.capture(), any());
             assertTrue(captor.getValue().uri().getRawQuery().contains("appid=a+b%26c"), captor.getValue().uri().getRawQuery());
         }
 
@@ -423,7 +424,9 @@ class WeatherToolExtendedTest {
             String result = textOf(() -> weatherTool.getCurrentWeather("London", "metric"));
 
             assertTrue(result.contains("exceeded " + WeatherTool.MAX_RESPONSE_BYTES + " bytes"), result);
-            verify(mockHttpClient).sendBounded(any(HttpRequest.class), eq(WeatherTool.MAX_RESPONSE_BYTES));
+            ArgumentCaptor<BodyMode> mode = ArgumentCaptor.forClass(BodyMode.class);
+            verify(mockHttpClient).send(any(OutboundRequest.class), mode.capture());
+            assertEquals(WeatherTool.MAX_RESPONSE_BYTES, mode.getValue().maxBytes());
         }
 
         @Test

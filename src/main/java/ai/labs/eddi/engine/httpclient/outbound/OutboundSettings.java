@@ -135,9 +135,8 @@ public record OutboundSettings(String engine, Map<Profile, ProfileSettings> prof
      * Reads the settings from {@code config}.
      * <p>
      * The {@code default} profile's connect timeout falls back to
-     * {@code httpClient.connectTimeoutInMillis}, the property
-     * {@code SafeHttpClient} read before this facade existed, so a deployment that
-     * tuned it keeps its value.
+     * {@code httpClient.connectTimeoutInMillis}, the property the retired
+     * {@code SafeHttpClient} read, so a deployment that tuned it keeps its value.
      *
      * @throws IllegalStateException
      *             on a value that cannot be honoured — fail at startup, not on the

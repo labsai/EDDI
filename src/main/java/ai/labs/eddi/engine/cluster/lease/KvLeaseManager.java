@@ -29,11 +29,13 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -58,10 +60,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * re-acquired at once.</li>
  * </ul>
  * <b>Heartbeat</b>: one node-wide task refreshes every held lease each
- * {@code heartbeat-interval} with a compare-and-set on the last revision. A
- * revision mismatch means the lease was taken over: the handle fires
- * {@link LeaseHandle#onLost}, which cancels the running turn. An I/O failure is
- * ignored — the database fence decides whether the turn's write lands.
+ * {@code heartbeat-interval} with a compare-and-set on the last revision, the
+ * renewals side by side. In NATS mode it runs on a scheduler thread of its own,
+ * which nothing else uses: work that shares a thread with it (reconnect hooks,
+ * sweeps) could otherwise delay it past the TTL and lose every lease of a live
+ * node at once. A revision mismatch means the lease was taken over: the handle
+ * fires {@link LeaseHandle#onLost}, which cancels the running turn. An I/O
+ * failure is ignored — the database fence decides whether the turn's write
+ * lands.
  * <p>
  * <b>Fairness</b>: a waiter leaves a {@code w.<key>} marker. A holder that sees
  * another node's marker when it releases holds back its own next acquire of
@@ -548,6 +554,11 @@ public class KvLeaseManager implements IConversationLeaseManager {
      * client retries on another node — and does not lead the HITL recovery. Leases
      * already held stay held until their turns finish. Turns still waiting for a
      * lease when the drain starts are answered the same way.
+     * <p>
+     * Leader leases ({@code leader.*}) are released at once: a drained node no
+     * longer runs the leader's work ({@link #tryAcquireKey} answers empty while
+     * draining), so keeping its leader lease alive through the heartbeat would
+     * leave that work undone on every node until the drain ended.
      */
     public void setDraining(boolean drain) {
         draining = drain;
@@ -555,6 +566,12 @@ public class KvLeaseManager implements IConversationLeaseManager {
             for (Set<Waiter> set : new ArrayList<>(waiters.values())) {
                 for (Waiter w : new ArrayList<>(set)) {
                     w.future.completeExceptionally(drainingRefusal());
+                }
+            }
+            for (Held h : new ArrayList<>(held.values())) {
+                if (h.key.startsWith(LEADER)) {
+                    LOGGER.infof("Drained: handing over leader lease %s", sanitize(h.key));
+                    release(h);
                 }
             }
         }
@@ -672,15 +689,28 @@ public class KvLeaseManager implements IConversationLeaseManager {
         return leases;
     }
 
+    /**
+     * Releases every held lease at shutdown, side by side and within a bounded
+     * time. A release costs up to three NATS calls; one after another, a few dozen
+     * leases against a NATS that answers slowly would outlast the pod's termination
+     * grace. A lease this misses expires on the server within the TTL — safe, only
+     * slower for the next turn.
+     */
     @Override
     public void releaseAll() {
         stopAcquiring();
-        for (Held h : new ArrayList<>(held.values())) {
-            release(h);
-        }
         if (heartbeat != null) {
             heartbeat.cancel(false);
         }
+        List<CompletableFuture<Void>> releases = new ArrayList<>();
+        for (Held h : new ArrayList<>(held.values())) {
+            try {
+                releases.add(CompletableFuture.runAsync(() -> release(h), io));
+            } catch (RuntimeException e) {
+                release(h); // executor already gone: release on this thread
+            }
+        }
+        awaitAll(releases, config.natsRequestTimeout().multipliedBy(4));
     }
 
     private void wakeWaiters(String key) {
@@ -699,23 +729,79 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     // ---------------------------------------------------------------- heartbeat
 
+    /**
+     * Renews every held lease. The renewals run side by side on the I/O executor
+     * and this method waits for them: done one after another, a NATS that answers
+     * slowly (each call may take up to the request timeout) would stretch one pass
+     * over hundreds of leases past the lease TTL, and the node would lose all of
+     * them at once although it is alive. The wait is bounded by one heartbeat
+     * interval, so a stalled call never delays the next tick; a lease whose
+     * previous renewal is still in flight is skipped, never renewed twice
+     * concurrently.
+     */
     void heartbeatAll() {
+        List<CompletableFuture<Void>> renewals = new ArrayList<>();
         for (Held h : new ArrayList<>(held.values())) {
-            if (h.lost || h.released) {
+            if (h.lost || h.released || !h.renewing.compareAndSet(false, true)) {
                 continue;
             }
+            CompletableFuture<Void> renewal = new CompletableFuture<>();
+            renewals.add(renewal);
             try {
-                OptionalLong next = kv.update(h.key, encode(h.since), h.revision);
-                if (next.isPresent()) {
-                    h.revision = next.getAsLong();
-                } else if (!h.released) {
-                    lose(h, "taken_over");
-                }
-            } catch (ClusterUnavailableException e) {
-                // Keep running: the DB fence decides whether the turn's write lands.
+                io.execute(() -> {
+                    try {
+                        renew(h);
+                    } finally {
+                        h.renewing.set(false);
+                        renewal.complete(null);
+                    }
+                });
             } catch (RuntimeException e) {
-                LOGGER.debugf("Heartbeat of %s failed: %s", sanitize(h.key), e.getMessage());
+                // The executor refused (shutting down): nothing to renew any more.
+                h.renewing.set(false);
+                renewal.complete(null);
             }
+        }
+        // At most one heartbeat interval: the scheduler does not overlap runs, so a
+        // longer wait would delay the next tick, and with it every other lease. A
+        // renewal still running then finishes on the I/O executor, and the next tick
+        // skips its lease through `renewing`.
+        awaitAll(renewals, config.leaseHeartbeatInterval());
+    }
+
+    private void renew(Held h) {
+        if (h.lost || h.released) {
+            return;
+        }
+        try {
+            OptionalLong next = kv.update(h.key, encode(h.since), h.revision);
+            if (next.isPresent()) {
+                h.revision = next.getAsLong();
+            } else if (!h.released) {
+                lose(h, "taken_over");
+            }
+        } catch (ClusterUnavailableException e) {
+            // Keep running: the DB fence decides whether the turn's write lands.
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Heartbeat of %s failed: %s", sanitize(h.key), e.getMessage());
+        }
+    }
+
+    /**
+     * Waits for {@code tasks}, at most {@code budget}. Every task is itself bounded
+     * by the NATS request timeout; the budget only keeps a stuck executor from
+     * holding the caller forever.
+     */
+    private static void awaitAll(List<CompletableFuture<Void>> tasks, Duration budget) {
+        if (tasks.isEmpty()) {
+            return;
+        }
+        try {
+            CompletableFuture.allOf(tasks.toArray(CompletableFuture[]::new)).get(budget.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException e) {
+            LOGGER.debugf("Lease batch did not complete within %s: %s", budget, e.getMessage());
         }
     }
 
@@ -822,6 +908,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
         volatile long revision;
         volatile boolean lost;
         volatile boolean released;
+        /** A heartbeat renewal of this lease is in flight. */
+        final AtomicBoolean renewing = new AtomicBoolean();
         private final List<Runnable> lostCallbacks = new ArrayList<>();
 
         Held(String key, long fence, boolean takenOver) {

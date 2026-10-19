@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.backup.impl;
 
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -158,6 +159,33 @@ public final class SourceUrlValidator {
         }
 
         LOGGER.debugf("Source URL validated: %s", sanitize(sourceUrl));
+    }
+
+    /**
+     * The SSRF policy every request to an approved source is sent with.
+     * <p>
+     * {@link #validate} resolves the host once; the sync then opens many
+     * connections over seconds to minutes, each resolving the name again. A
+     * rebinding DNS name could pass validation as a public address and then answer
+     * with an internal one, which received the forwarded
+     * {@code X-Source-Authorization} (security review 2026-10-17, M8). The outbound
+     * facade cannot pin a resolved address to a request, so instead every request
+     * is checked again, by the facade, immediately before it is sent:
+     * {@link SsrfPolicy#STRICT} when the deployment refuses private targets, and
+     * {@link SsrfPolicy#METADATA_ONLY} when it allows them — globally or for this
+     * allow-listed origin — so even then the cloud metadata service is refused. The
+     * remaining window is between the facade's lookup and the HTTP client's own,
+     * which are normally answered by the same JVM address cache.
+     */
+    public static SsrfPolicy connectPolicy(String sourceUrl, SyncSourcePolicy policy) {
+        SyncSourcePolicy effective = policy == null ? SyncSourcePolicy.STRICT : policy;
+        URI uri;
+        try {
+            uri = URI.create(sourceUrl);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            return SsrfPolicy.STRICT;
+        }
+        return effective.allowPrivateTargets() || effective.permits(uri) ? SsrfPolicy.METADATA_ONLY : SsrfPolicy.STRICT;
     }
 
     /**

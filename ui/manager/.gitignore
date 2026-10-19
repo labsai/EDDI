@@ -38,6 +38,9 @@ openapi_paths.txt
 ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
+# The .ds-sync install is local tooling that never ships; its lockfile stays out of git
+# so scanners do not report its transitive advisories against the project.
+.ds-sync/package-lock.json
 .design-sync/node_modules
 .ds-sync/node_modules
 

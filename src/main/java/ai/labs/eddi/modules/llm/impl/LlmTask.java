@@ -415,7 +415,7 @@ public class LlmTask implements ILifecycleTask {
                         "httpCall RAG '" + httpCallRag + "'");
                 if (httpCallContext != null) {
                     systemMessage += "\n\n## Search Results:\n" + markRetrievedContext(task, "httpcall:" + httpCallRag, httpCallContext);
-                    LOGGER.infof("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
+                    LOGGER.debugf("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
                     var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
                             Map.of("httpCall", httpCallRag, "contextLength", httpCallContext.length()));
                     currentStep.storeData(traceData);
@@ -432,7 +432,7 @@ public class LlmTask implements ILifecycleTask {
                         "vector RAG for task '" + taskId + "'");
                 if (ragContext != null) {
                     systemMessage += "\n\n## Relevant Context:\n" + markRetrievedContext(task, "knowledge-base", ragContext);
-                    LOGGER.infof("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
+                    LOGGER.debugf("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
             } catch (Exception e) {
                 LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", taskId, e.getMessage());
@@ -490,7 +490,7 @@ public class LlmTask implements ILifecycleTask {
                 summaryPrefix = "## CONVERSATION SUMMARY (turns 1-" + throughStep + " condensed)\n" + existingSummary + "\n\n"
                         + "[You can use the recallConversationDetail tool to access full details from these summarized turns.]";
                 skipSteps = throughStep;
-                LOGGER.infof("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
+                LOGGER.debugf("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
                         throughStep + 1);
             }
         }
@@ -2828,7 +2828,7 @@ public class LlmTask implements ILifecycleTask {
 
                         String serialized = jsonSerialization.serialize(result);
 
-                        LOGGER.infof("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());
+                        LOGGER.debugf("httpCall RAG '%s' executed: keys=%s, size=%d", httpCallName, result.keySet(), serialized.length());
                         return serialized;
 
                     } catch (Exception e) {
