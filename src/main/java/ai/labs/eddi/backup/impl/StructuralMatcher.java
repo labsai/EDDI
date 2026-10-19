@@ -32,6 +32,10 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.configs.apicalls.rest.RestApiCallsStore;
+import ai.labs.eddi.configs.llm.rest.RestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.rest.RestMcpCallsStore;
+import ai.labs.eddi.configs.rag.rest.RestRagStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import io.quarkus.security.ForbiddenException;
@@ -84,6 +88,27 @@ public class StructuralMatcher {
     private final IRestWorkflowStore workflowStore;
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
+
+    /**
+     * The stores that redact plaintext credentials for non-administrators, read
+     * here without the redaction. The target of an upgrade or sync is compared
+     * against, and written back from, what this class reads — through the loopback
+     * REST client an editor got the redacted copy, so the diff showed the marker
+     * and the write put it over the stored credential. Field-injected so the direct
+     * constructions in tests keep compiling; null there, which falls back to the
+     * loopback read.
+     */
+    @Inject
+    RestLlmStore llmStore;
+
+    @Inject
+    RestApiCallsStore apiCallsStore;
+
+    @Inject
+    RestMcpCallsStore mcpCallsStore;
+
+    @Inject
+    RestRagStore ragStore;
 
     @Inject
     public StructuralMatcher(IRestAgentStore agentStore,
@@ -756,24 +781,24 @@ public class StructuralMatcher {
             case "ai.labs.rules" -> restInterfaceFactory.get(
                     IRestRuleSetStore.class)
                     .readRuleSet(id, version);
-            case "ai.labs.apicalls" -> restInterfaceFactory.get(
-                    IRestApiCallsStore.class)
-                    .readApiCalls(id, version);
-            case "ai.labs.llm" -> restInterfaceFactory.get(
-                    IRestLlmStore.class)
-                    .readLlm(id, version);
+            case "ai.labs.apicalls" -> apiCallsStore != null
+                    ? apiCallsStore.readUnredacted(id, version)
+                    : restInterfaceFactory.get(IRestApiCallsStore.class).readApiCalls(id, version);
+            case "ai.labs.llm" -> llmStore != null
+                    ? llmStore.readUnredacted(id, version)
+                    : restInterfaceFactory.get(IRestLlmStore.class).readLlm(id, version);
             case "ai.labs.property" -> restInterfaceFactory.get(
                     IRestPropertySetterStore.class)
                     .readPropertySetter(id, version);
             case "ai.labs.output" -> restInterfaceFactory.get(
                     IRestOutputStore.class)
                     .readOutputSet(id, version, "", "", 0, 0);
-            case "ai.labs.mcpcalls" -> restInterfaceFactory.get(
-                    IRestMcpCallsStore.class)
-                    .readMcpCalls(id, version);
-            case "ai.labs.rag" -> restInterfaceFactory.get(
-                    IRestRagStore.class)
-                    .readRag(id, version);
+            case "ai.labs.mcpcalls" -> mcpCallsStore != null
+                    ? mcpCallsStore.readUnredacted(id, version)
+                    : restInterfaceFactory.get(IRestMcpCallsStore.class).readMcpCalls(id, version);
+            case "ai.labs.rag" -> ragStore != null
+                    ? ragStore.readUnredacted(id, version)
+                    : restInterfaceFactory.get(IRestRagStore.class).readRag(id, version);
             default -> throw new IllegalStateException(
                     "No typed store read is registered for extension type " + authority);
         };
