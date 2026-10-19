@@ -1,4 +1,4 @@
-## 🛡️ feat(manager): LLM input/output guardrails editor and `guardrail_triggered` chat notice (2026-10-17)
+## 🛡️ feat(manager): LLM input/output guardrails editor and `guardrail_triggered` chat notice (2026-10-19)
 
 **Repo:** EDDI (`feat/manager-llm-guardrails`, based on `feat/llm-input-output-guardrails`, PR #1064, because that PR had not merged when this was written)
 
@@ -21,6 +21,6 @@ The backend shipped input/output guardrails on LLM tasks with only a TypeScript 
 
 ### Not done / next
 
-- The `classifier` type exists on `feat/llm-classifier-guardrail`, not yet in a PR; until it lands, an older server skips it with a WARN. The editor offers it regardless.
+- The `classifier` type exists on `feat/llm-classifier-guardrail`, not yet in a PR. Until that backend lands the editor does not offer it (it is left out of `GUARDRAIL_TYPES`); a stored `classifier` entry still shows as a custom type and keeps its settings panel. The classifier PR adds it back.
 - The operator system prompt is unchanged: its guardrail text was already added with the backend PRs.
 - Live-turn notices only: a conversation reloaded from history does not show them (the audit ledger holds the record).

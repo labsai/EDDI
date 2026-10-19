@@ -61,15 +61,21 @@ describe("TaskGuardrailsSection", () => {
       "pii-redaction",
       "regex-filter",
       "max-length",
-      "classifier",
     ]);
     expect(output.map((o) => (o as HTMLOptionElement).value)).toEqual([
       "pii-redaction",
       "regex-filter",
       "max-length",
       "json-object",
-      "classifier",
     ]);
+  });
+
+  it("does not offer the classifier type, which this server does not register yet", () => {
+    show(<Harness initial={base} />);
+    for (const phase of ["input", "output"]) {
+      const options = within(screen.getByTestId(`guardrail-add-type-${phase}`)).getAllByRole("option");
+      expect(options.map((o) => (o as HTMLOptionElement).value)).not.toContain("classifier");
+    }
   });
 
   it("adds a guardrail as just its type and opens the side sheet", () => {
@@ -263,6 +269,8 @@ describe("TaskGuardrailsSection", () => {
     });
   });
 
+  // A stored classifier entry (written for a server that has the classifier
+  // backend) is not offered as a new type, but it still opens and keeps its settings.
   describe("classifier", () => {
     const withClassifier = (parameters: Record<string, string> = {}): LlmTask => ({
       ...base,

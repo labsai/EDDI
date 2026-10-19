@@ -881,7 +881,7 @@
     "guardrailActionRedact": "ocultó texto",
     "guardrailActionReprompt": "repreguntó al modelo",
     "guardrailActionWarn": "advirtió",
-    "guardrailNotice": "Guardrail ({{phase}}): {{type}} {{action}}"
+    "guardrailNotice": "Salvaguarda ({{phase}}): {{type}} {{action}}"
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",

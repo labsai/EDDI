@@ -3,13 +3,18 @@ import type { GuardrailActionName, GuardrailConfig } from "./types";
 /** Where a guardrail runs: on the user's message, or on the model's answer. */
 export type GuardrailPhaseName = "input" | "output";
 
+/**
+ * The types the backend registers today. `classifier` is not among them yet: it
+ * returns with the classifier guardrail backend. Until then a stored `classifier`
+ * entry shows as a custom type (and keeps its settings panel) but is not offered,
+ * because this server would skip it with a WARN.
+ */
 export const GUARDRAIL_TYPES = [
   "prompt-injection",
   "pii-redaction",
   "regex-filter",
   "max-length",
   "json-object",
-  "classifier",
 ] as const;
 export type GuardrailTypeName = (typeof GUARDRAIL_TYPES)[number];
 
@@ -29,12 +34,11 @@ const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
   "pii-redaction": ["input", "output"],
   "regex-filter": ["input", "output"],
   "max-length": ["input", "output"],
-  classifier: ["input", "output"],
   "json-object": ["output"],
 };
 
 /** Types without a rewrite: `redact` has nothing to rewrite with, so the engine blocks instead. */
-const NO_REWRITE: ReadonlySet<string> = new Set(["prompt-injection", "json-object", "classifier"]);
+const NO_REWRITE: ReadonlySet<string> = new Set(["prompt-injection", "json-object"]);
 
 export function isKnownGuardrailType(type: string): type is GuardrailTypeName {
   return (GUARDRAIL_TYPES as readonly string[]).includes(type);
@@ -192,12 +196,6 @@ export const TYPE_TEXT: Record<GuardrailTypeName, [string, string, string, strin
     "JSON object",
     "llmEditor.grTypeJsonDesc",
     "Finds an answer that is not exactly one JSON object (a Markdown code fence is tolerated). Checks the shape only.",
-  ],
-  classifier: [
-    "llmEditor.grTypeClassifier",
-    "Safety classifier model",
-    "llmEditor.grTypeClassifierDesc",
-    "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. EDDI ships no classifier model.",
   ],
 };
 
