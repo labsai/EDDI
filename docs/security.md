@@ -538,7 +538,14 @@ Server-Side Request Forgery (SSRF) occurs when an attacker tricks a server-side 
 > `metadata.google.internal` and the whole link-local range (`169.254.0.0/16`,
 > `fe80::/10`) — including a hostname that resolves there
 > (`UrlValidationUtils.rejectCloudMetadataTarget`). The metadata service hands out
-> the instance's cloud credentials; nobody configures it as an API. With protection
+> the instance's cloud credentials; nobody configures it as an API. A URL whose
+> host the check cannot read is refused too: an `http(s)` URL with an underscore
+> in its host (`x_y.example`), a percent-encoded host, or an IP literal with a
+> trailing dot (`169.254.169.254.`) has no host to `java.net.URI`, while the
+> httpCalls client parses it with `java.net.URL`, resolves it and connects — so a
+> registry-style name pointed at `169.254.169.254` used to pass unchecked
+> (security review 2026-10-17, H2). Use a standard host name; a Docker service
+> name with an underscore needs a hyphenated alias. With protection
 > off redirects are still followed, so the httpCalls client checks every redirect
 > hop too: a public URL answering `302 Location: http://169.254.169.254/…` fails
 > instead of being followed. The MCP client and the A2A client never follow a
