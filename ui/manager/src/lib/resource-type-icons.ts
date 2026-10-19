@@ -3,6 +3,7 @@ import {
   BookA,
   Braces,
   Brain,
+  FlaskConical,
   GitBranch,
   Globe,
   Library,
@@ -47,6 +48,7 @@ export const RESOURCE_TYPE_ICONS = {
   rag: Library,
   snippets: Puzzle,
   parser: ScanText,
+  testsuite: FlaskConical,
   workflow: Workflow,
   templating: Braces,
 } as const satisfies Record<string, LucideIcon>;
