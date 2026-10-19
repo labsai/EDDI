@@ -378,15 +378,26 @@ public class HttpClientModule {
      * Returns the redirect target unchanged, or throws when its host is a metadata
      * or link-local address.
      *
+     * A hop without a host is refused rather than waved through: that is not a
+     * destination this check can see, so it is not one it can vouch for. A host
+     * {@code java.net.URI} cannot read (an underscore, percent-encoding, a trailing
+     * dot after an IP literal) is refused by
+     * {@link UrlValidationUtils#rejectCloudMetadataTarget} for the same reason —
+     * the client would still resolve and connect to it (security review 2026-10-17,
+     * H2).
+     *
      * @throws IllegalArgumentException
-     *             when the hop targets the cloud instance-metadata service
+     *             when the hop targets the cloud instance-metadata service, or its
+     *             host cannot be read
      */
     static RequestOptions requireNotMetadataHop(RequestOptions next) {
         String host = next.getHost();
-        if (host != null && !host.isBlank()) {
-            boolean bareIpv6 = host.indexOf(':') >= 0 && !host.startsWith("[");
-            UrlValidationUtils.rejectCloudMetadataTarget("http://" + (bareIpv6 ? "[" + host + "]" : host) + "/");
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("Redirect refused: the hop names no host, so it cannot be checked against the cloud "
+                    + "instance-metadata block.");
         }
+        boolean bareIpv6 = host.indexOf(':') >= 0 && !host.startsWith("[");
+        UrlValidationUtils.rejectCloudMetadataTarget("http://" + (bareIpv6 ? "[" + host + "]" : host) + "/");
         return next;
     }
 

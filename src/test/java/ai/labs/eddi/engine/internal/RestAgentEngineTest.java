@@ -293,6 +293,25 @@ class RestAgentEngineTest {
         }
 
         @Test
+        @DisplayName("L4: every turn re-checks access to the conversation's agent, and a refusal stops the turn")
+        void turnAccessRecheckedOnSayAndRerun() throws Exception {
+            var guard = mock(ConversationAccessGuard.class);
+            var engine = new RestAgentEngine(conversationService, mock(IConversationMemoryStore.class), identity, ownershipValidator, guard,
+                    mock(ResourceAccessGuard.class), mock(HitlAccessGuard.class), mock(IHitlToolJournalStore.class),
+                    mock(AgentDisplayNameResolver.class), 30);
+            doThrow(new ForbiddenException("Access denied: you do not have access to this agent")).when(guard)
+                    .requireConversationTurnAccess("conv-revoked");
+
+            assertThrows(ForbiddenException.class, () -> engine.sayWithinContext("conv-revoked", false, false, List.of(),
+                    new InputData("Hello", Map.of()), mock(AsyncResponse.class)));
+            assertThrows(ForbiddenException.class, () -> engine.say("conv-revoked", false, false, List.of(), "Hello", mock(AsyncResponse.class)));
+            assertThrows(ForbiddenException.class,
+                    () -> engine.rerunLastConversationStep("conv-revoked", null, false, false, List.of(), mock(AsyncResponse.class)));
+            verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            verify(guard, never()).requireConversationOwner(anyString());
+        }
+
+        @Test
         @DisplayName("should resume with CONFLICT for agent mismatch")
         void agentMismatch() throws Exception {
             var asyncResponse = mock(AsyncResponse.class);

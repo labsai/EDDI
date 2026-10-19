@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -174,6 +175,52 @@ class RestGlobalVariableStoreTest {
         Response response = rest.upsertVariable(DEFAULT, "cred", input);
         assertEquals(200, response.getStatus());
         verify(store).upsert(any());
+    }
+
+    // --- M5: platform.* keys are the administrator's ---
+
+    @Test
+    void nonAdminCannotWriteAPlatformKey() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var input = new GlobalVariable(DEFAULT, "platform.operator", "{\"agentId\":\"mine\"}", null, false);
+
+        var e = assertThrows(ForbiddenException.class, () -> rest.upsertVariable(DEFAULT, "platform.operator", input));
+
+        assertEquals(403, e.getResponse().getStatus());
+        assertEquals("application/json", e.getResponse().getMediaType().toString());
+        @SuppressWarnings("unchecked")
+        var body = (Map<String, Object>) e.getResponse().getEntity();
+        assertEquals("platform.", body.get("reservedPrefix"));
+        assertTrue(body.get("error").toString().contains("platform."));
+        verifyNoInteractions(store);
+        verifyNoInteractions(resolver);
+    }
+
+    @Test
+    void nonAdminCannotDeleteAPlatformKey_inAnyCase_inAnyTenant() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+
+        assertThrows(ForbiddenException.class, () -> rest.deleteVariable(DEFAULT, "platform.operator"));
+        assertThrows(ForbiddenException.class, () -> rest.deleteVariable("tenant-a", "Platform.Operator"));
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void nonAdminMayStillReadAPlatformKey_andWriteLookalikes() {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        when(store.get(DEFAULT, "platform.operator")).thenReturn(new GlobalVariable("platform.operator", "{}"));
+
+        assertNotNull(rest.getVariable(DEFAULT, "platform.operator"));
+        assertEquals(200, rest.upsertVariable(DEFAULT, "platformer", new GlobalVariable(DEFAULT, "platformer", "x", null, true)).getStatus());
+    }
+
+    @Test
+    void adminMayWriteAndDeleteAPlatformKey() {
+        var input = new GlobalVariable(DEFAULT, "platform.operator", "{}", null, false);
+
+        assertEquals(200, rest.upsertVariable(DEFAULT, "platform.operator", input).getStatus());
+        assertEquals(204, rest.deleteVariable(DEFAULT, "platform.operator").getStatus());
+        verify(store).delete(DEFAULT, "platform.operator");
     }
 
     @Test

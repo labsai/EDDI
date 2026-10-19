@@ -45,6 +45,36 @@ function loginFormAction(html: string): string {
   return (action as string).replace(/&amp;/g, "&");
 }
 
+/**
+ * `eddi-mcp` has `consentRequired: true` (security review 2026-10-17, L7): the
+ * first authorization by a user is answered with Keycloak's consent page, a
+ * `required-action?execution=OAUTH_GRANT` redirect, rather than the callback.
+ * A real MCP client shows that page to the user once; this test accepts it
+ * the way the user would, by posting the consent form's `accept` button with
+ * its `code`, and returns the redirect that follows. Any other location is
+ * returned unchanged.
+ */
+async function acceptConsentIfAsked(request: APIRequestContext, location: string): Promise<string> {
+  if (!location.includes("execution=OAUTH_GRANT")) return location;
+  const page = await request.get(location);
+  expect(page.status(), `Keycloak did not render its consent page: ${location}`).toBe(200);
+  const html = await page.text();
+  // Keycloak renders the consent form's action as a path; resolve it against
+  // the page, or the request context would send it to its own baseURL.
+  const rawAction = /<form[^>]+action="([^"]+)"/i.exec(html)?.[1]?.replace(/&amp;/g, "&");
+  const action = rawAction ? new URL(rawAction, location).toString() : undefined;
+  const code = /<input[^>]+name="code"[^>]+value="([^"]+)"/i.exec(html)?.[1]
+    ?? /<input[^>]+value="([^"]+)"[^>]+name="code"/i.exec(html)?.[1];
+  expect(action, "no form on the consent page").toBeTruthy();
+  expect(code, "no code field on the consent page").toBeTruthy();
+  const accepted = await request.post(action as string, {
+    form: { code: code as string, accept: "Yes" },
+    maxRedirects: 0,
+  });
+  expect(accepted.status(), "accepting the consent did not redirect").toBe(302);
+  return accepted.headers()["location"] ?? "";
+}
+
 /** Runs authorization-code + PKCE end to end and returns the access token. */
 async function tokenViaAuthorizationCode(request: APIRequestContext): Promise<string> {
   const { verifier, challenge } = pkcePair();
@@ -75,7 +105,7 @@ async function tokenViaAuthorizationCode(request: APIRequestContext): Promise<st
     "the login POST did not redirect — check the seeded administrator's password",
   ).toBe(302);
 
-  const location = submitted.headers()["location"] ?? "";
+  const location = await acceptConsentIfAsked(request, submitted.headers()["location"] ?? "");
   expect(location, `no redirect target after login; got: ${location}`).toContain(REDIRECT_URI);
   const code = new URL(location).searchParams.get("code");
   expect(code, `no authorization code in the redirect: ${location}`).toBeTruthy();

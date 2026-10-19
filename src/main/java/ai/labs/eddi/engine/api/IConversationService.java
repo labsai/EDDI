@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Core conversation lifecycle service — extracted from RestAgentEngine. All
@@ -161,6 +162,51 @@ public interface IConversationService {
          */
         default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
             onComplete(snapshot);
+        }
+    }
+
+    /**
+     * Optional capability of a {@link ConversationResponseHandler}: observe the
+     * tool names this (non-streaming) turn's tool loop is about to run - name only,
+     * never arguments. It does NOT make the turn streamed: no event sink is
+     * installed, so tokens and the LLM execution path are unchanged. May be called
+     * from the coordinator thread, possibly after the caller has stopped waiting.
+     * <p>
+     * A separate interface, not a method on the handler, so the engine's only
+     * contact with a plain handler stays its completion callbacks.
+     */
+    interface ToolCallObserving {
+        Consumer<String> toolCallObserver();
+    }
+
+    /** The handler {@code delegate} with a tool-call observer attached. */
+    static ConversationResponseHandler observing(Consumer<String> observer, ConversationResponseHandler delegate) {
+        return new ObservingHandler(observer, delegate);
+    }
+
+    /** See {@link #observing}. */
+    final class ObservingHandler implements ConversationResponseHandler, ToolCallObserving {
+        private final Consumer<String> observer;
+        private final ConversationResponseHandler delegate;
+
+        private ObservingHandler(Consumer<String> observer, ConversationResponseHandler delegate) {
+            this.observer = observer;
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+            delegate.onComplete(snapshot);
+        }
+
+        @Override
+        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            delegate.onSkipped(snapshot);
+        }
+
+        @Override
+        public Consumer<String> toolCallObserver() {
+            return observer;
         }
     }
 

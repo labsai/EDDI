@@ -30,6 +30,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.util.Arrays;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -319,6 +322,86 @@ class MemberTurnExecutorTest {
         assertNull(entry.signatureNonce());
         assertNull(entry.signatureTimestampMs());
         assertNull(entry.signatureKeyVersion());
+    }
+
+    // =================================================================
+    // member_tool_call (WS8a)
+    // =================================================================
+
+    private MemberTurnExecutor executorWhoseMemberCalls(String tool, ConversationResponseHandler[] seenHandler) throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(8, ConversationResponseHandler.class);
+            seenHandler[0] = handler;
+            if (handler instanceof IConversationService.ToolCallObserving observing) {
+                observing.toolCallObserver().accept(tool);
+            }
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        return new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, null, "default"),
+                new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+    }
+
+    private GroupConversation newGc() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        return gc;
+    }
+
+    @Test
+    void memberToolCall_reachesGroupListener_withNameOnly() throws Exception {
+        var handler = new ConversationResponseHandler[1];
+        var executor = executorWhoseMemberCalls("web_search", handler);
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+
+        executor.executeAgentTurn(member(), newGc(), "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, listener, null);
+
+        var captor = ArgumentCaptor.forClass(GroupConversationEventSink.MemberToolCallEvent.class);
+        verify(listener).onMemberToolCall(captor.capture());
+        assertEquals(AGENT_A, captor.getValue().agentId());
+        assertEquals("Agent A", captor.getValue().displayName());
+        assertEquals("web_search", captor.getValue().tool());
+        // No arguments can leak: the payload has exactly these three components.
+        assertEquals(List.of("agentId", "displayName", "tool"),
+                Arrays.stream(GroupConversationEventSink.MemberToolCallEvent.class.getRecordComponents()).map(c -> c.getName()).toList());
+    }
+
+    @Test
+    void memberToolCall_nullListener_installsNoObserver() throws Exception {
+        var handler = new ConversationResponseHandler[1];
+        var executor = executorWhoseMemberCalls("web_search", handler);
+
+        assertDoesNotThrow(() -> executor.executeAgentTurn(member(), newGc(), "input", protocol(MemberFailurePolicy.SKIP), 0,
+                phase(PhaseType.OPINION), null, null, null));
+        assertFalse(handler[0] instanceof IConversationService.ToolCallObserving, "no listener: the turn must not carry an observer");
+    }
+
+    @Test
+    void memberToolCall_afterCancellation_isDropped() {
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        var cancellation = new GroupConversationService.MemberTurnCancellation();
+        cancellation.cancel();
+
+        MemberTurnExecutor.announceToolCall(member(), "web_search", listener, cancellation);
+
+        verifyNoInteractions(listener);
+    }
+
+    @Test
+    void memberToolCall_throwingListener_doesNotPropagate() {
+        var listener = Mockito.mock(GroupDiscussionEventListener.class);
+        doThrow(new IllegalStateException("sse closed")).when(listener).onMemberToolCall(any());
+
+        assertDoesNotThrow(() -> MemberTurnExecutor.announceToolCall(member(), "web_search", listener, null));
     }
 
     @Test
