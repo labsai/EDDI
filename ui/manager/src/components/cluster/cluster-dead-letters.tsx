@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Inbox, Lock, RotateCcw, Trash2 } from "lucide-react";
 import type { BulkResult, DeadLetterFilter, DeadLetterView } from "@/lib/api/cluster";
 import { deadLetterReasonHelp, deadLetterReasonLabel, KNOWN_DEAD_LETTER_REASONS, notReplayableLabel, outcomeLabel } from "@/lib/cluster-labels";
+import { useDebounce } from "@/hooks/use-debounce";
 import { useClusterDeadLetters, useDeadLetterSummary, useDiscardDeadLetters, useReplayDeadLetters } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -86,19 +87,24 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
   const [confirm, setConfirm] = useState<{ action: "replay" | "discard"; ids: string[] } | null>(null);
   const [result, setResult] = useState<{ action: "replay" | "discard"; result: BulkResult } | null>(null);
 
+  // Free-text ids are sent once typing pauses, not per keystroke.
+  const debouncedAgentId = useDebounce(agentId.trim(), 250);
+  const debouncedConversationId = useDebounce(conversationId.trim(), 250);
   const filter: DeadLetterFilter = useMemo(() => {
     const span = PERIODS[period];
     return {
       reason: reason || undefined,
       nodeId: nodeId || undefined,
-      agentId: agentId.trim() || undefined,
-      conversationId: conversationId.trim() || undefined,
+      agentId: debouncedAgentId || undefined,
+      conversationId: debouncedConversationId || undefined,
       // Rounded to the minute so the query key — and the page — stay stable between refreshes.
       from: span ? Math.floor((Date.now() - span) / 60_000) * 60_000 : undefined,
     };
-  }, [reason, nodeId, agentId, conversationId, period]);
+  }, [reason, nodeId, debouncedAgentId, debouncedConversationId, period]);
   const after = cursors[cursors.length - 1] ?? null;
-  const { data, isLoading, isError, refetch } = useClusterDeadLetters(filter, after);
+  // While a new page loads, `data` still holds the previous one (keepPreviousData)
+  // and so its cursor: paging again then would push that same cursor twice.
+  const { data, isLoading, isError, refetch, isPlaceholderData } = useClusterDeadLetters(filter, after);
   const replay = useReplayDeadLetters();
   const discard = useDiscardDeadLetters();
 
@@ -356,7 +362,7 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
         <Button
           size="sm"
           variant="outline"
-          disabled={cursors.length <= 1}
+          disabled={cursors.length <= 1 || isPlaceholderData}
           onClick={() => {
             setCursors((c) => c.slice(0, -1));
             setSelected(new Set());
@@ -370,7 +376,7 @@ export function ClusterDeadLettersPanel({ nodes, initialConversationId = "" }: {
         <Button
           size="sm"
           variant="outline"
-          disabled={!data?.nextCursor}
+          disabled={!data?.nextCursor || isPlaceholderData}
           onClick={() => {
             setCursors((c) => [...c, data!.nextCursor]);
             setSelected(new Set());

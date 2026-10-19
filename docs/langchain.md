@@ -548,7 +548,9 @@ is exactly why each is worth setting explicitly.
   files, so the weights land in RSS and page cache, not the Java heap. They still count
   against the container's memory limit. Size the pod for the model *plus* EDDI's heap, and
   note that `JAVA_MAX_MEM_RATIO` only governs the heap, so raising it does not make room
-  for the model — it takes room away.
+  for the model — it takes room away. The image sets it to 75 % for EDDI's own work; with
+  an in-process Jlama model, lower it (for example `JAVA_MAX_MEM_RATIO=50`) and raise the
+  memory limit by the size of the weights.
 
 For an air-gapped deployment, pre-seed `modelCachePath` from a machine that has network
 access and mount it read-only. Jlama reaches out to Hugging Face whenever the model is

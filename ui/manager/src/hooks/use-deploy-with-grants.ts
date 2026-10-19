@@ -12,7 +12,8 @@ import {
   type PreflightGrantIssue,
 } from "@/lib/api/agents";
 import { getErrorMessage } from "@/lib/api-client";
-import { agentKeys } from "@/lib/query-keys";
+import { mapWithConcurrency } from "@/lib/concurrency";
+import { agentDeploymentQueries } from "@/lib/query-keys";
 
 /* ─── The grant decision, shared with the one mounted dialog ─── */
 
@@ -236,11 +237,15 @@ type DeployBase = Pick<GrantRequest, "agentId" | "agentName" | "version" | "envi
  * Deploy and wait; on a grant refusal the preflight did not predict, ask once
  * and redeploy. The tail both the single and the batch flow end in.
  */
-async function deployAndSettle(base: DeployBase, signal?: AbortSignal): Promise<DeployWithGrantsOutcome> {
+async function deployAndSettle(
+  base: DeployBase,
+  signal?: AbortSignal,
+  ask: typeof requestGrantDecision = requestGrantDecision,
+): Promise<DeployWithGrantsOutcome> {
   let result = await deployAgentAndWait(base.environment, base.agentId, base.version, signal);
   if (result.status !== "READY" && isGrantFailure(result.failure)) {
     const failure = result.failure;
-    const decision = await requestGrantDecision({
+    const decision = await ask({
       ...base,
       enforcement: "UNKNOWN",
       issues: issuesFromFailure(failure),
@@ -315,8 +320,10 @@ export function mergeGrantIssues(perAgent: { agentId: string; issues: GrantIssue
  *   the ones that needed no grant, so a team is never left half-live.
  * - The unexpected refusal (a race, a preflight that could not run) still gets
  *   its one second chance, per agent, through the ordinary single-agent dialog.
- * - Targets are deployed one after another: a second dialog would cancel the
- *   first, and a deploy that waits is not something to fan out.
+ * - Targets deploy {@link DEPLOY_MANY_CONCURRENCY} at a time. One after another,
+ *   a five-member team waited five whole deploys. The one thing that must not
+ *   overlap is the grant dialog (a second request cancels the first), so the
+ *   per-agent second-chance dialogs are queued and shown one at a time.
  * - A transport error on one target is that target's `failed` outcome, not a
  *   throw that hides the others.
  */
@@ -364,27 +371,41 @@ export async function runDeployManyWithGrants(options: DeployManyOptions): Promi
     }
   }
 
-  const results: DeployManyResult[] = [];
-  for (const target of targets) {
+  const askOneAtATime = serializeGrantDecisions();
+  return mapWithConcurrency(targets, DEPLOY_MANY_CONCURRENCY, async (target): Promise<DeployManyResult> => {
     // Left the page (or the caller gave up): deploy nothing more.
-    if (options.signal?.aborted) {
-      results.push({ target, outcome: { kind: "cancelled" } });
-      continue;
-    }
-    let outcome: DeployWithGrantsOutcome;
+    if (options.signal?.aborted) return { target, outcome: { kind: "cancelled" } };
     try {
-      outcome = await deployAndSettle(baseOf(target), options.signal);
+      return { target, outcome: await deployAndSettle(baseOf(target), options.signal, askOneAtATime) };
     } catch (err) {
       const message = getErrorMessage(err);
-      outcome = {
-        kind: "failed",
-        result: { status: "ERROR", agentId: target.agentId, version: target.version, environment, error: message },
-        message,
+      return {
+        target,
+        outcome: {
+          kind: "failed",
+          result: { status: "ERROR", agentId: target.agentId, version: target.version, environment, error: message },
+          message,
+        },
       };
     }
-    results.push({ target, outcome });
-  }
-  return results;
+  });
+}
+
+/** Deploys of one batch in flight at once: quicker than one by one, gentle on the backend. */
+export const DEPLOY_MANY_CONCURRENCY = 3;
+
+/**
+ * A {@link requestGrantDecision} that queues: each request waits for the
+ * previous one's answer before it opens, because the dialog shows one request
+ * at a time and a new one cancels whatever is open.
+ */
+export function serializeGrantDecisions(): typeof requestGrantDecision {
+  let queue: Promise<unknown> = Promise.resolve();
+  return (request) => {
+    const next = queue.then(() => requestGrantDecision(request));
+    queue = next.catch(() => undefined);
+    return next;
+  };
 }
 
 /**
@@ -410,7 +431,7 @@ export function useDeployWithGrants() {
       setIsRunning(true);
       try {
         const result = await runDeployWithGrants(options);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries(agentDeploymentQueries([options.agentId]));
         void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
         return result;
       } finally {
@@ -427,7 +448,7 @@ export function useDeployWithGrants() {
       setIsRunning(true);
       try {
         const result = await runDeployManyWithGrants(options);
-        void queryClient.invalidateQueries({ queryKey: agentKeys.all });
+        void queryClient.invalidateQueries(agentDeploymentQueries(options.targets.map((t) => t.agentId)));
         void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
         return result;
       } finally {

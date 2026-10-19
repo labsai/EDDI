@@ -68,7 +68,7 @@ export function GroupCard({
         <div className="relative">
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+            className="reveal-on-touch rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:p-2"
             aria-label={t("common.actions", "Actions")}
             data-testid={`group-menu-${group.id}`}
           >

@@ -4,7 +4,7 @@
    and composes all sub-components.
    ────────────────────────────────────────────── */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
@@ -358,6 +358,16 @@ export function ChatWidget() {
   const [confirmingRestart, setConfirmingRestart] = useState(false);
   /** Bumped to move focus into the composer once the field that replaced it goes. */
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
+  /**
+   * isProcessing is also raised by undo, redo, retry and cancel, which use it
+   * as the re-entrancy guard. Those are not the agent composing a reply, so
+   * this flag keeps the typing dots and the Stop button (which would cancel
+   * the conversation and raise a false "interrupted" banner) off for them.
+   */
+  const [historyBusy, setHistoryBusy] = useState(false);
+  useEffect(() => {
+    if (!state.isProcessing) setHistoryBusy(false);
+  }, [state.isProcessing]);
   /** Controller for the in-flight SSE read, so it can be stopped on demand. */
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -1495,6 +1505,7 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
       await undoConversation("", "", state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId);
@@ -1535,6 +1546,7 @@ export function ChatWidget() {
 
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
       await redoConversation("", "", state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId);
@@ -1567,6 +1579,9 @@ export function ChatWidget() {
   /* ─── Quick reply handler ───────────────────── */
   const handleQuickReply = useCallback(
     (value: string) => {
+      // The clicked button unmounts with the replies; keep a keyboard user's
+      // place by moving focus to the composer once it is enabled again.
+      setComposerFocusSignal((n) => n + 1);
       handleSend(value);
     },
     [handleSend],
@@ -1592,6 +1607,15 @@ export function ChatWidget() {
    * Stop — so when there is something to lose it asks first. An untouched
    * conversation has nothing to lose and restarts at once.
    */
+  // Cancelling the confirmation unmounts the focused button; give focus back
+  // to the control that opened it.
+  const closeRestartConfirm = useCallback(() => {
+    setConfirmingRestart(false);
+    requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>('[data-testid="restart-btn"]')?.focus(),
+    );
+  }, []);
+
   const requestRestart = useCallback(() => {
     if (state.messages.some((m) => m.role === "user")) {
       setConfirmingRestart(true);
@@ -1660,6 +1684,7 @@ export function ChatWidget() {
     const gen = generationRef.current;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
+      setHistoryBusy(true);
       await cancelConversation(state.conversationId);
       // "This request was cancelled." and EXECUTION_INTERRUPTED describe the
       // conversation that was cancelled, not one started since.
@@ -1694,6 +1719,7 @@ export function ChatWidget() {
     if (!state.conversationId) return;
     const gen = generationRef.current;
     dispatch({ type: "SET_PROCESSING", value: true });
+    setHistoryBusy(true);
     try {
       await rerunLastStep(state.conversationId);
       const snapshot = await readConversation("", "", state.conversationId, true);
@@ -1730,6 +1756,8 @@ export function ChatWidget() {
     // Abort the local read first so tokens stop arriving immediately, then ask
     // the server to stop producing them.
     abortRef.current?.abort();
+    // The Stop button unmounts when the turn ends; hand focus to the composer.
+    setComposerFocusSignal((n) => n + 1);
     abortRef.current = null;
     // Stopping before the first token left an empty bubble rendering
     // "No response", implying the agent answered with nothing.
@@ -1759,28 +1787,76 @@ export function ChatWidget() {
   // scroll on every token, smoothly, which fought anyone scrolling up to
   // re-read mid-reply (and the smooth animation never caught up with the
   // tokens). Following is an instant jump; leaving the bottom ends it.
-  useEffect(() => {
+  // A layout effect, so the jump lands before the browser paints the new
+  // content instead of one frame after it.
+  // Where the transcript was last scrolled to, by the reader or by us. Moving
+  // up from here is what tells "the reader left the bottom" apart from a
+  // smooth scroll still on its way down.
+  const lastScrollTopRef = useRef(0);
+  useLayoutEffect(() => {
     const el = messagesContainerRef.current;
     if (!el || !stickToBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
+    lastScrollTopRef.current = el.scrollTop;
   }, [state.messages, state.isProcessing]);
+
+  // Content also grows without a state change: the throttled trailing render
+  // of a streaming reply, lazy images, KaTeX and highlight.js arriving late,
+  // the paused card filling in, and the viewport shrinking under an on-screen
+  // keyboard. Re-pin for all of them while the reader is following.
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const repin = () => {
+      if (!stickToBottomRef.current) return;
+      el.scrollTop = el.scrollHeight;
+      lastScrollTopRef.current = el.scrollTop;
+    };
+    const mutations =
+      typeof MutationObserver === "function" ? new MutationObserver(repin) : null;
+    mutations?.observe(el, { childList: true, subtree: true, characterData: true });
+    const resizes = typeof ResizeObserver === "function" ? new ResizeObserver(repin) : null;
+    resizes?.observe(el);
+    // `load` does not bubble, so listen in the capture phase for images.
+    el.addEventListener("load", repin, true);
+    return () => {
+      mutations?.disconnect();
+      resizes?.disconnect();
+      el.removeEventListener("load", repin, true);
+    };
+  }, []);
 
   const handleScroll = useCallback(() => {
     const el = messagesContainerRef.current;
     if (!el) return;
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
-    stickToBottomRef.current = atBottom;
-    setShowScrollBtn(!atBottom);
+    const scrolledUp = el.scrollTop < lastScrollTopRef.current - 1;
+    lastScrollTopRef.current = el.scrollTop;
+    // Only the reader moving UP ends following. A smooth scroll towards the
+    // bottom fires scroll events that are "not at bottom yet" all the way
+    // down; treating those as leaving used to turn following off again right
+    // after the Scroll-to-bottom button was pressed.
+    if (atBottom) stickToBottomRef.current = true;
+    else if (scrolledUp) stickToBottomRef.current = false;
+    setShowScrollBtn(!atBottom && !stickToBottomRef.current);
   }, []);
 
   const scrollToBottom = useCallback(() => {
+    const el = messagesContainerRef.current;
     stickToBottomRef.current = true;
+    setShowScrollBtn(false);
+    if (!el) return;
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    messagesEndRef.current?.scrollIntoView({ behavior: reduced ? "auto" : "smooth" });
-    setShowScrollBtn(false);
+    // Scroll the transcript itself: scrollIntoView would also scroll the host
+    // page when the widget is embedded in an iframe.
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
   }, []);
 
   /* ─── Composer focus handoff ────────────────── */
@@ -1800,6 +1876,11 @@ export function ChatWidget() {
   }, [dispatch]);
 
   /* ─── Derived state ─────────────────────────── */
+  // Once the reply's text is arriving, the bubble itself shows the agent at
+  // work; dots below it would be a second "agent is typing".
+  const lastMessage = state.messages[state.messages.length - 1];
+  const replyIsStreaming =
+    !!lastMessage?.isStreaming && lastMessage.role !== "user" && !!lastMessage.content;
   const isEnded = state.conversationState === "ENDED";
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
@@ -1868,9 +1949,11 @@ export function ChatWidget() {
                   />
                 )}
                 {state.isProcessing &&
+                  !historyBusy &&
                   !state.isThinking &&
                   !state.isEscalating &&
-                  !state.activeTool && <TypingIndicator />}
+                  !state.activeTool &&
+                  !replyIsStreaming && <TypingIndicator />}
               </>
             )}
 
@@ -1904,6 +1987,7 @@ export function ChatWidget() {
           <QuickReplies
             replies={state.quickReplies}
             onSelect={handleQuickReply}
+            disabled={state.isProcessing || !profileSettled}
           />
         )}
 
@@ -2003,7 +2087,7 @@ export function ChatWidget() {
                   )}
                 </div>
                 <div className="chat-actions__right">
-                  {state.isProcessing && !isPaused && (
+                  {state.isProcessing && !historyBusy && !isPaused && (
                     <button
                       className="chat-actions__btn chat-actions__btn--stop"
                       onClick={handleStop}
@@ -2040,7 +2124,7 @@ export function ChatWidget() {
                 aria-describedby="chat-confirm-text"
                 data-testid="restart-confirm"
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") setConfirmingRestart(false);
+                  if (e.key === "Escape") closeRestartConfirm();
                 }}
               >
                 <span id="chat-confirm-text" className="chat-confirm__text">
@@ -2058,7 +2142,7 @@ export function ChatWidget() {
                   <button
                     type="button"
                     className="chat-confirm__btn"
-                    onClick={() => setConfirmingRestart(false)}
+                    onClick={closeRestartConfirm}
                     autoFocus
                     data-testid="restart-confirm-cancel"
                   >
@@ -2077,6 +2161,7 @@ export function ChatWidget() {
                 onSend={handleRequestedFieldSend}
                 onCancel={handleRequestedFieldCancel}
                 disabled={state.isProcessing}
+                autoFocus={state.messages.some((m) => m.role === "user")}
               />
             ) : (
               <ChatInput
