@@ -25,6 +25,7 @@ import java.util.logging.Logger;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import static ai.labs.eddi.utils.LogCaptureSupport.FORGED_RECORD;
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
@@ -130,7 +131,8 @@ class AgentSigningServiceTest {
 
         @BeforeEach
         void setUp() {
-            service = new AgentSigningService(secretProvider, new SimpleMeterRegistry(), clock);
+            service = new AgentSigningService(secretProvider, new SimpleMeterRegistry(),
+                    () -> TimeUnit.MILLISECONDS.toNanos(clock.millis()));
             service.initMetrics();
         }
 

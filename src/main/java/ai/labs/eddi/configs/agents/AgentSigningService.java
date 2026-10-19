@@ -9,6 +9,7 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -20,7 +21,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
-import java.time.Clock;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.Collection;
@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -88,7 +87,6 @@ public class AgentSigningService {
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
-    private final Clock clock;
     private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
     /**
      * Upper bound on remembered misses. An audit entry can name any well-formed
@@ -110,17 +108,22 @@ public class AgentSigningService {
 
     @Inject
     public AgentSigningService(ISecretProvider secretProvider, MeterRegistry meterRegistry) {
-        this(secretProvider, meterRegistry, Clock.systemUTC());
+        this(secretProvider, meterRegistry, Ticker.systemTicker());
     }
 
-    AgentSigningService(ISecretProvider secretProvider, MeterRegistry meterRegistry, Clock clock) {
+    /**
+     * @param ticker
+     *            time source for the missing-key expiry: monotonic
+     *            {@link Ticker#systemTicker()} in production, so a wall-clock step
+     *            back cannot stretch the 60 s window; a controllable one in tests
+     */
+    AgentSigningService(ISecretProvider secretProvider, MeterRegistry meterRegistry, Ticker ticker) {
         this.secretProvider = secretProvider;
         this.meterRegistry = meterRegistry;
-        this.clock = clock;
         this.missingKeys = Caffeine.newBuilder()
                 .expireAfterWrite(MISSING_KEY_RECHECK)
                 .maximumSize(MAX_MISSING_KEYS)
-                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
+                .ticker(ticker)
                 // Evict on the caller's thread: the work is tiny, and the bound then holds
                 // the moment a put returns instead of whenever a pool thread gets to it.
                 .executor(Runnable::run)
