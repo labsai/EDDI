@@ -1090,8 +1090,8 @@ class ToolLoopRunner {
         trace.add(callStep);
 
         // Agent test harness: a test conversation's tool call is answered by its
-        // suite's
-        // mock (or refused) and never reaches an executor. A no-op prefix check for
+        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
+        // for
         // every other conversation. Self-contained early return — keep it that way.
         String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
                 toolSources == null ? null : toolSources.get(toolRequest.name()));
@@ -1102,7 +1102,8 @@ class ToolLoopRunner {
             mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
             mockedStep.put("mocked", true);
             trace.add(mockedStep);
-            return mockedResult;
+            // A mock stands in for the tool's own answer; a refusal means it never ran.
+            return new ToolCallResult(mockedResult, mockedResult, ToolMockRegistry.isRefusal(mockedResult));
         }
 
         // Check per-conversation TOOL budget before executing tool.

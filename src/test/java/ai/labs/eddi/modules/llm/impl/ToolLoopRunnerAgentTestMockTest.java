@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -118,5 +119,27 @@ class ToolLoopRunnerAgentTestMockTest {
         String result = call("alice", "createBooking", "{}", new ArrayList<>());
 
         assertTrue(result.contains("real result"), result);
+    }
+
+    @Test
+    @DisplayName("a mock counts as the tool's answer; a refusal counts as a call that never ran")
+    void mockIsExecutedRefusalIsNot() {
+        ToolMockRegistry.register(TEST_USER, new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null,
+                List.of(new ToolMock("getAvailability", null, new MockResponse(403, "forbidden"))), null)));
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getUserId()).thenReturn(TEST_USER);
+        var task = new LlmConfiguration.Task();
+        task.setId("t");
+
+        var mocked = runner.executeToolCall(ToolExecutionRequest.builder().id("c1").name("getAvailability").arguments("{}").build(), memory,
+                new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("getAvailability", "http"), 100, null, "conv-1", false, false,
+                false, task, false, List.of(), new ArrayList<>());
+        var refused = runner.executeToolCall(ToolExecutionRequest.builder().id("c2").name("createBooking").arguments("{}").build(), memory,
+                new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("createBooking", "http"), 100, null, "conv-1", false, false,
+                false, task, false, List.of(), new ArrayList<>());
+
+        assertFalse(mocked.notExecuted());
+        assertTrue(refused.notExecuted());
+        assertEquals(0, executed.get());
     }
 }

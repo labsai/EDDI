@@ -210,6 +210,14 @@ public final class ToolMockRegistry {
         }
     }
 
+    /**
+     * Whether {@code toolResult} is one of this registry's refusals rather than a
+     * mock's answer.
+     */
+    public static boolean isRefusal(String toolResult) {
+        return NOT_EXECUTED_JSON.equals(toolResult) || UNKNOWN_SESSION_JSON.equals(toolResult) || MEMORY_BLOCKED_JSON.equals(toolResult);
+    }
+
     /** Arms mocking for the conversation of {@code userId}. */
     public static void register(String userId, Session session) {
         SESSIONS.put(userId, session);
