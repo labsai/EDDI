@@ -47,6 +47,14 @@ public class TurnDeadlineHeaderReader {
         inputData.setRequestArrivalEpochMs(RequestArrivalStamp.arrivalEpochMs(current));
     }
 
+    /**
+     * When the active request arrived ({@link RequestArrivalStamp}), or
+     * {@code null} when there is no active request.
+     */
+    public Long requestArrivalEpochMs() {
+        return RequestArrivalStamp.arrivalEpochMs(currentRequest());
+    }
+
     private RoutingContext currentRequest() {
         try {
             return currentVertxRequest.getCurrent();

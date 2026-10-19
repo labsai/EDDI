@@ -60,6 +60,7 @@ class RestAgentEngineCallerTimeoutTest {
 
     private IConversationService conversationService;
     private SimpleMeterRegistry meterRegistry;
+    private TurnDeadlineHeaderReader headerReader;
     private RestAgentEngine restAgentEngine;
 
     @BeforeEach
@@ -79,11 +80,20 @@ class RestAgentEngineCallerTimeoutTest {
                 mock(IHitlToolJournalStore.class), mock(AgentDisplayNameResolver.class), TIMEOUT_SECONDS);
         meterRegistry = new SimpleMeterRegistry();
         restAgentEngine.meterRegistry = meterRegistry;
+        // The arrival comes from the request (the router's first route), which a
+        // directly constructed engine has none of: the reader stands in for it.
+        headerReader = mock(TurnDeadlineHeaderReader.class);
+        // Explicit: an unstubbed Long would be 0L (epoch 0), not "no arrival".
+        when(headerReader.requestArrivalEpochMs()).thenReturn(null);
+        restAgentEngine.turnDeadlineHeaderReader = headerReader;
     }
 
-    private static InputData arrivedMsAgo(long ago) {
+    /** A turn whose request arrived {@code ago} ms before now. */
+    private InputData arrivedMsAgo(long ago) {
+        long arrival = System.currentTimeMillis() - ago;
+        when(headerReader.requestArrivalEpochMs()).thenReturn(arrival);
         var inputData = new InputData("Hello", Map.of());
-        inputData.setRequestArrivalEpochMs(System.currentTimeMillis() - ago);
+        inputData.setRequestArrivalEpochMs(arrival);
         return inputData;
     }
 

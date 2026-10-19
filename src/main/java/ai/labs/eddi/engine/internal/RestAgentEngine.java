@@ -310,25 +310,29 @@ public class RestAgentEngine implements IRestAgentEngine {
      */
     private boolean armCallerTimeout(InputData inputData, AsyncResponse response) {
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(requestTimeout()));
-        Long arrival = inputData != null ? inputData.getRequestArrivalEpochMs() : null;
-        if (agentTimeout <= 0 || arrival == null) {
+        // Read from the request itself, never from the body-bound InputData: the
+        // arrival is the server's own timestamp.
+        Long arrival = turnDeadlineHeaderReader != null ? turnDeadlineHeaderReader.requestArrivalEpochMs() : null;
+        if (agentTimeout <= 0 || arrival == null || inputData == null) {
             // No arrival (a direct call, not over HTTP): the budget starts now, as it
             // always did.
             response.setTimeout(agentTimeout, TimeUnit.SECONDS);
             return true;
         }
-        long givesUpAt = arrival + TimeUnit.SECONDS.toMillis(agentTimeout);
-        long remainingMs = givesUpAt - System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        // Never negative, even if the clock stepped back since the stamp.
+        long waitedMs = Math.max(0L, now - arrival);
+        long remainingMs = TimeUnit.SECONDS.toMillis(agentTimeout) - waitedMs;
         if (remainingMs <= 0) {
             LOGGER.debugf("Turn not queued: the request waited %d ms for a thread, beyond systemRuntime.agentTimeoutInSeconds=%d",
-                    System.currentTimeMillis() - arrival, agentTimeout);
+                    waitedMs, agentTimeout);
             if (meterRegistry != null) {
                 meterRegistry.counter("eddi.turn.rejected", "reason", "caller_timed_out").increment();
             }
             response.resume(requestTimeout());
             return false;
         }
-        inputData.setCallerGivesUpAtEpochMs(givesUpAt);
+        inputData.setCallerGivesUpAtEpochMs(now + remainingMs);
         response.setTimeout(remainingMs, TimeUnit.MILLISECONDS);
         return true;
     }

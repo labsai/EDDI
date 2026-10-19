@@ -14,6 +14,7 @@ import io.vertx.ext.web.Router;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.concurrent.TimeUnit;
 
@@ -62,9 +63,11 @@ class MetricsScrapeRouteTest {
         new MetricsScrapeRoute(registries(true), vertx, true, "q", "metrics").register(router);
 
         verify(router).route("/q/metrics");
-        verify(route).order(MetricsScrapeRoute.ORDER);
-        assertTrue(MetricsScrapeRoute.ORDER > -100, "must run after the authorization filter (order -100)");
-        assertTrue(MetricsScrapeRoute.ORDER < 0, "must run before the /q sub-router (order >= 0)");
+        var order = ArgumentCaptor.forClass(Integer.class);
+        verify(route).order(order.capture());
+        int registeredOrder = order.getValue();
+        assertTrue(registeredOrder > -100, "must run after the authorization filter (order -100), was " + registeredOrder);
+        assertTrue(registeredOrder < 0, "must run before the /q sub-router (order >= 0), was " + registeredOrder);
         verify(route).method(HttpMethod.GET);
         verify(route).method(HttpMethod.HEAD);
         verify(route).handler(any());

@@ -89,6 +89,7 @@ class RequestArrivalStampTest {
 
         assertEquals(1_234L, inputData.getRequestArrivalEpochMs());
         assertEquals(5_000L, inputData.getRequestedTurnDeadlineMs());
+        assertEquals(1_234L, new TurnDeadlineHeaderReader(current).requestArrivalEpochMs());
     }
 
     @Test
@@ -102,5 +103,6 @@ class RequestArrivalStampTest {
 
         assertNull(inputData.getRequestArrivalEpochMs());
         assertNull(inputData.getRequestedTurnDeadlineMs());
+        assertNull(new TurnDeadlineHeaderReader(current).requestArrivalEpochMs());
     }
 }
