@@ -45,6 +45,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.ExecutionAbandonedException;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
@@ -1283,6 +1284,29 @@ class ConversationServiceResumeTest {
             assertEquals(1, handler.completed.size(), "the client must be answered, not left to time out");
             assertEquals(ConversationState.ERROR, handler.completed.getFirst().getConversationState());
             assertNotNull(handler.completed.getFirst().getError());
+            assertTrue(handler.skipped.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a resume the runtime routes to onFailure (watchdog abandonment) still answers the waiting client, once")
+        void watchdogFailureIsAnswered() throws Exception {
+            var handler = new Recorder();
+            // The runtime hands the resume straight to onFailure, as the agent-timeout
+            // watchdog does for an abandoned execution: the body's own delivery never runs.
+            doAnswer(invocation -> {
+                IRuntime.IFinishedExecution<Object> listener = invocation.getArgument(1);
+                var abandoned = new ExecutionAbandonedException("abandoned by the watchdog");
+                listener.onFailure(abandoned);
+                return CompletableFuture.failedFuture(abandoned);
+            }).when(runtime).submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any());
+            var stored = createResumeSnapshot();
+            stored.setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+            doReturn(stored).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            queuedResume(handler).call();
+
+            assertEquals(1, handler.completed.size(), "the client must be answered, not left to its timeout");
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, handler.completed.getFirst().getConversationState());
             assertTrue(handler.skipped.isEmpty());
         }
 

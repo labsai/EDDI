@@ -645,6 +645,14 @@ class ConversationHitlService {
                         // The resumed pipeline already deferred a re-pause announcement;
                         // this path commits nothing, so the caller hears the stored state.
                         resumeDelivery.deliver(conversationService.committedStateOrError(conversationId));
+                        // A client waiting for the reply is answered with what the store
+                        // holds (EXECUTION_INTERRUPTED after the watchdog, ERROR after a
+                        // failure that escaped the body) instead of waiting out its own
+                        // timeout. Once only: if the REST timeout answered first, this
+                        // second answer is simply ignored.
+                        if (handler != null && replyDelivered.compareAndSet(false, true)) {
+                            deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        }
                     }
                 }
 
@@ -798,6 +806,28 @@ class ConversationHitlService {
             handler.onSkipped(snapshot);
         } catch (Exception e) {
             LOGGER.warnf(e, "Could not tell the client that the resume of %s was dropped", sanitize(conversationId));
+        }
+    }
+
+    /**
+     * Answers a waiting client with the conversation as the store holds it after a
+     * resume the runtime routed to its failure callback (the watchdog abandoned it,
+     * or a failure escaped the resume body). Carries the same {@code error} a say
+     * turn's failure carries when that state is ERROR. Never throws.
+     */
+    private void deliverStored(ConversationResponseHandler handler, String conversationId, Environment environment, Boolean returnDetailed,
+                               Boolean returnCurrentStepOnly, List<String> returningFields) {
+        try {
+            var stored = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (stored == null) {
+                return;
+            }
+            var snapshot = convertSimpleConversationMemorySnapshot(stored, returnDetailed, returnCurrentStepOnly, returningFields);
+            snapshot.setEnvironment(environment);
+            conversationService.recordTurnOutcome(convertConversationMemorySnapshot(stored), snapshot, null);
+            handler.onComplete(snapshot);
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Could not deliver the interrupted resume of %s", sanitize(conversationId));
         }
     }
 
