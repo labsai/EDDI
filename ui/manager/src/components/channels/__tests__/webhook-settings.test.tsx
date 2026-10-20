@@ -28,6 +28,20 @@ describe("webhook settings", () => {
     expect(screen.getByTestId("webhook-signing-instructions").textContent).toContain("X-Hub-Signature-256: sha256=");
   });
 
+  it("shows the effective generic-HMAC header, prefix and encoding", () => {
+    const { rerender } = renderWithProviders(<WebhookSigningInstructions scheme="generic-hmac" />);
+    const text = () => screen.getByTestId("webhook-signing-instructions").textContent ?? "";
+    expect(text()).toContain("X-Signature: <hex HMAC-SHA256(secret, body)>");
+    expect(text()).not.toContain("<signatureHeader>");
+    rerender(
+      <WebhookSigningInstructions
+        scheme="generic-hmac"
+        platformConfig={{ signatureHeader: "X-Acme-Sig", signaturePrefix: "sha256=", signatureEncoding: "base64" }}
+      />,
+    );
+    expect(text()).toContain("X-Acme-Sig: sha256=<base64 HMAC-SHA256(secret, body)>");
+  });
+
   it("promises stale-request refusal only for the timestamped eddi-v1 scheme", () => {
     const { rerender } = renderWithProviders(<WebhookSigningInstructions scheme="eddi-v1" />);
     expect(screen.getByTestId("webhook-replay-note").textContent).toContain("5 minutes");

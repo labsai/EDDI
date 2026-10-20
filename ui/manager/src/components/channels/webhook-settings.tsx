@@ -116,13 +116,18 @@ export function WebhookPlatformFields({
 }
 
 /** Endpoint URL and how to sign a request for the integration's scheme. */
-export function WebhookSigningInstructions({ scheme }: { scheme: string }) {
+export function WebhookSigningInstructions({ scheme, platformConfig = {} }: { scheme: string; platformConfig?: Record<string, string> }) {
   const { t } = useTranslation();
+  // Mirror WebhookChannelSettings: a blank header falls back to X-Signature,
+  // a blank encoding to hex, and the prefix is sent as configured (none by default).
+  const genericHeader = platformConfig.signatureHeader?.trim() || "X-Signature";
+  const genericEncoding = platformConfig.signatureEncoding?.trim().toLowerCase() || "hex";
+  const genericPrefix = platformConfig.signaturePrefix ?? "";
   const header =
     scheme === "github"
       ? "X-Hub-Signature-256: sha256=<hex HMAC-SHA256(secret, body)>"
       : scheme === "generic-hmac"
-        ? "<signatureHeader>: <signaturePrefix><hex|base64 HMAC-SHA256(secret, body)>"
+        ? `${genericHeader}: ${genericPrefix}<${genericEncoding} HMAC-SHA256(secret, body)>`
         : "X-Eddi-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256(secret, t + \".\" + body)>";
   return (
     <div className="text-xs text-muted-foreground space-y-1" data-testid="webhook-signing-instructions">

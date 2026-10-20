@@ -547,7 +547,7 @@ export function ChannelDetailPage() {
           </Button>
         </div>
         {isWebhook ? (
-          <WebhookSigningInstructions scheme={draft.platformConfig.signatureScheme || "eddi-v1"} />
+          <WebhookSigningInstructions scheme={draft.platformConfig.signatureScheme || "eddi-v1"} platformConfig={draft.platformConfig} />
         ) : (
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium">{t("channelDetail.requiredScopes", "Required Bot Token Scopes:")}</p>
