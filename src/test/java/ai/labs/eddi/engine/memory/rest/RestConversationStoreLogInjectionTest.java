@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.memory.ConversationPurgeService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -146,10 +147,12 @@ class RestConversationStoreLogInjectionTest {
         // Greater than zero, which is what gates the line under test.
         when(attachmentStore.deleteByConversation(anyString())).thenReturn(3L);
 
-        List<String> logged = captureLogsOf(RestConversationStore.class,
+        // The delete itself moved to ConversationPurgeService (the REST resource keeps
+        // only its caller check), so that is where these lines are logged.
+        List<String> logged = captureLogsOf(ConversationPurgeService.class,
                 () -> deletePermanently(forgedConversationId));
 
-        assertNoForgedRecordBoundary(logged, "the attachments-deleted line of RestConversationStore");
+        assertNoForgedRecordBoundary(logged, "the attachments-deleted line of the conversation purge");
         assertTrue(logged.stream().anyMatch(value -> value.contains(CONVERSATION_ID)),
                 "the conversation id is sanitized, not dropped: " + logged);
     }
@@ -166,10 +169,12 @@ class RestConversationStoreLogInjectionTest {
         when(attachmentStore.deleteByConversation(anyString()))
                 .thenThrow(new IllegalStateException("blob store unavailable" + LogCaptureSupport.FORGED_RECORD));
 
-        List<String> logged = captureLogsOf(RestConversationStore.class,
+        // The delete itself moved to ConversationPurgeService (the REST resource keeps
+        // only its caller check), so that is where these lines are logged.
+        List<String> logged = captureLogsOf(ConversationPurgeService.class,
                 () -> deletePermanently(forgedConversationId));
 
-        assertNoForgedRecordBoundary(logged, "the attachment-failure line of RestConversationStore");
+        assertNoForgedRecordBoundary(logged, "the attachment-failure line of the conversation purge");
         assertTrue(logged.stream().anyMatch(value -> value.contains("blob store unavailable")),
                 "the cause is sanitized, not dropped: " + logged);
         assertTrue(logged.stream().anyMatch(value -> value.contains(CONVERSATION_ID)),

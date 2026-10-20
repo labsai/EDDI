@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.agenttests.IRestAgentTestRuns;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
@@ -73,7 +74,8 @@ class McpRoleTierParityTest {
     private static final List<String> ALL_ROLES = List.of(ADMIN, EDITOR, USER, VIEWER, APPROVER);
 
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
-            McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class};
+            McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
+            McpAgentTestTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -204,7 +206,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(85, measured.size());
+        assertEquals(88, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -288,6 +290,7 @@ class McpRoleTierParityTest {
         mirrors.put(IRestGroupTemplates.class, McpRoles.AUTHOR); // list_group_templates, create_group_from_template
         mirrors.put(IRestGroupWorkspace.class, McpRoles.AUTHOR); // add_team_task, list_team_backlog
         mirrors.put(IRestDocs.class, McpRoles.DOCS); // list_docs, read_docs
+        mirrors.put(IRestAgentTestRuns.class, McpRoles.AUTHOR); // run_agent_tests, get_agent_test_run, list_agent_test_runs
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());

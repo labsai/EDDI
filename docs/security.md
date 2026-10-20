@@ -288,6 +288,19 @@ Conversation descriptors share the `descriptors` collection with configuration d
 - `GET`/`PATCH /descriptorstore/descriptors/{id}` and every `/descriptorstore/descriptors/{id}/shares/**` operation (including access requests) answer `404` for an id whose descriptor is not configuration. The configuration descriptor store also refuses to write a conversation descriptor at all, because its whole-document write would drop the fields only a conversation descriptor has — its owner among them.
 - **Conversation ownership fails closed.** When a conversation's descriptor records no owner, the owner recorded in the conversation memory is used (the pre-v5.1.6 fallback the listing always had); when neither records one, only an administrator may read, continue, list or delete it. It used to be open to every authenticated caller.
 
+### Editors never read a plaintext credential back
+
+Vault values belong to the administrator, so a configuration store does not hand a literal credential to anyone else. `GET` on an LLM, MCP-calls, httpcalls, RAG or channel configuration — including `?version=` reads of old versions, and MCP `read_resource` / `read_channel_integration`, which go through the same REST stores — returns the document as stored to `eddi-admin` and a redacted copy to every other caller (`ConfigSecretRedactor`):
+
+- a string under a credential-named field (`apiKey`, `botToken`, `signingSecret`, `password`, `clientSecret`, `connectionString`, …) anywhere in the document — LLM task parameters, `a2aAgents[].apiKey`, `mcpServers[].apiKey`, `modelCascade` step and judge parameters, `platformConfig`, `embeddingParameters`, `storeParameters` — is replaced by a `<redacted: …>` marker;
+- an httpcall's credential headers (`Authorization`, `X-Api-Key`, `*-Key`, `Cookie`) are replaced whole; credential-named query values in `request.path`, a userinfo password in any URL, and credential-shaped values in `request.body` are replaced in place with `<redacted: credential>`.
+
+A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`.
+
+**A document carrying the marker is never stored.** Every write to these five stores — create, update, JSON Patch, duplicate — and every import or upgrade that creates one directly answers `400` with `{"error": "bad_request", "message": …, "fields": [<paths>]}` when any string in the document contains `<redacted: ` (the whole-value marker and the in-string `<redacted: credential>` both begin with it), for administrators too. Re-enter the credential or replace it with a `${vault:…}` reference. Without this, an editor who opened a configuration in the Manager and saved it would silently replace the stored key with the marker. The store deliberately does not merge the stored literal back in either, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault.
+
+Server-side work started by an editor reads the unredacted document, with the same access check: RAG ingestion (so a knowledge base whose key is a literal still ingests) and agent upgrade and sync (`StructuralMatcher` compares against, and `UpgradeExecutor` writes back, the target's stored values — an export's `${vault:REDACTED}` placeholder is replaced by the target's own key, never by the marker). A sync **source** read from a peer through a non-admin credential does carry the marker, so its affected resources are refused rather than stored. The upgrade and sync **previews** those reads feed are redacted again at the REST boundary for anyone who is not `eddi-admin` (`PreviewRedaction`), so an editor's preview shows the marker where the stored document holds a literal.
+
 ### RestAgentManagement Gate
 
 `RestAgentManagement.checkUserAuthIfApplicable()` enforces per-request auth on the managed-conversation endpoints (`/agents/managed/*`):
@@ -432,6 +445,17 @@ a data-subject request by username will not find them.
 ## Threat Model
 
 When an LLM is given access to tools, every argument it supplies must be treated as **untrusted input**. An attacker can craft prompts that cause the LLM to pass malicious arguments to tools — a class of attacks known as **prompt injection**. EDDI mitigates these risks at the tool-execution layer so that individual tools do not need to implement their own defences.
+
+### Input and output screening
+
+Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length` and `json-object`. Design points that matter for a security review:
+
+- **A blocked input never reaches the model** — and no `preRequest` property mutation runs for it. Earlier messages of the history window are screened again on every turn, so a message blocked or redacted on its own turn is not replayed to the model later.
+- **Redaction changes what the model sees and what is delivered, not what is stored as the user's message.** Conversation memory keeps the user's input verbatim (it is the record); the ledger records the guardrail outcome and the delivered answer, never the guardrail's view of the screened text.
+- **Fail-safe vocabulary.** An unknown action is `block`; an unknown type is skipped with a WARN (configuration must keep loading on older versions). A guardrail that throws or returns no verdict **fails closed** when its action is `block` or `reprompt` (the turn is blocked, reason `guardrail_error`) and open when it is `redact` or `warn`; the per-guardrail `failMode` parameter overrides either way.
+- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data.
+- **Streaming.** An output guardrail that can change the answer forces the task to buffer it — streamed tokens cannot be retracted.
+- **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
 ---
 

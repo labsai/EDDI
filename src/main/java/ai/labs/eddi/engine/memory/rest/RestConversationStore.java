@@ -21,8 +21,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
-import ai.labs.eddi.engine.memory.ConversationMemory;
-import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.ConversationPurgeService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -183,6 +182,15 @@ public class RestConversationStore implements IRestConversationStore {
      */
     @Inject
     Instance<AutoVaultedSecrets> autoVaultedSecretsInstance;
+
+    /**
+     * The permanent delete, which checks no caller; this resource checks first.
+     * Field-injected like the vault above, so constructing the resource directly
+     * (tests) still works — {@link #purgeService()} then builds one over the same
+     * collaborators.
+     */
+    @Inject
+    ConversationPurgeService conversationPurgeService;
 
     /**
      * Field-injected like the other late additions, so the unit tests that build
@@ -762,36 +770,9 @@ public class RestConversationStore implements IRestConversationStore {
         });
 
         if (deletePermanently) {
-            // If the conversation is a live pending approval, resolve the HITL state
-            // BEFORE removing the document: endConversation disarms the armed
-            // timeout schedule (otherwise it fires later against a deleted
-            // conversation, logs "Conversation not found", and leaves a dead
-            // schedule row), clears the bookmark, writes the hitl.approval
-            // cancellation audit, and invalidates the cached AWAITING_HUMAN state
-            // (which getConversationState would otherwise keep serving for a
-            // nonexistent conversation until TTL).
-            try {
-                if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
-                    // G4: attribute the pause-terminating end (this store has no request
-                    // principal and also runs from scheduled cleanup).
-                    conversationService.endConversation(conversationId, "system:admin-end");
-                }
-            } catch (Exception e) {
-                log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
-                        sanitize(conversationId), e.getMessage()));
-            }
-
-            // The snapshot holds the only references to the conversation's vault
-            // slots: if they cannot be deleted, nothing is — a retry can then still
-            // find them. Deleting the snapshot anyway would orphan the credentials.
-            if (!deleteAutoVaultedSecretsForConversation(conversationId)) {
-                throw new ResourceStoreException("Could not delete the vault secrets of conversation " + conversationId
-                        + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
-            }
-            deleteAttachmentsForConversation(conversationId);
-            conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            conversationDescriptorStore.deleteAllDescriptor(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId)));
+            // The caller was checked above; the delete itself lives outside the REST
+            // layer, so this resource exposes no unchecked purge.
+            purgeService().purge(conversationId);
         } else {
             softDelete(conversationId);
         }
@@ -1314,36 +1295,16 @@ public class RestConversationStore implements IRestConversationStore {
      * @return {@code false} when the slots could not be deleted — the caller must
      *         then keep the conversation so the cleanup can be retried
      */
+    private ConversationPurgeService purgeService() {
+        if (conversationPurgeService != null) {
+            return conversationPurgeService;
+        }
+        return new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore, conversationService,
+                autoVaultedSecretsInstance, attachmentStorageInstance);
+    }
+
     private boolean deleteAutoVaultedSecretsForConversation(String conversationId) {
-        if (autoVaultedSecretsInstance == null || !autoVaultedSecretsInstance.isResolvable()) {
-            return true;
-        }
-        ConversationMemorySnapshot snapshot;
-        try {
-            snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        } catch (ResourceNotFoundException e) {
-            return true; // no snapshot, no references
-        } catch (Exception e) {
-            log.warn(format("Could not read conversation %s to delete its auto-vaulted secrets: %s", sanitize(conversationId),
-                    e.getMessage()));
-            return false;
-        }
-        if (snapshot == null) {
-            return true;
-        }
-        try {
-            var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
-            int deleted = autoVaultedSecretsInstance.get().deleteForConversation(ConversationMemory.everyPropertyVersion(memory),
-                    snapshot.getUserId());
-            if (deleted > 0) {
-                log.debug(format("Deleted %d auto-vaulted secret(s) for conversation %s", deleted, sanitize(conversationId)));
-            }
-            return true;
-        } catch (Exception e) {
-            log.warn(format("Failed to delete auto-vaulted secrets for conversation %s; keeping the conversation for a retry: %s",
-                    sanitize(conversationId), e.getMessage()));
-            return false;
-        }
+        return purgeService().deleteAutoVaultedSecrets(conversationId);
     }
 
     /**
@@ -1416,16 +1377,6 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     private void deleteAttachmentsForConversation(String conversationId) {
-        if (attachmentStorageInstance.isResolvable()) {
-            try {
-                long deleted = attachmentStorageInstance.get().deleteByConversation(conversationId);
-                if (deleted > 0) {
-                    log.debug(format("Deleted %d attachments for conversation %s", deleted, sanitize(conversationId)));
-                }
-            } catch (Exception e) {
-                log.warn(format("Failed to delete attachments for conversation %s: %s",
-                        sanitize(conversationId), sanitize(e.getMessage())));
-            }
-        }
+        purgeService().deleteAttachments(conversationId);
     }
 }

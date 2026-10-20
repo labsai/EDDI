@@ -22,6 +22,8 @@ import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -50,6 +52,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final McpToolProviderManager mcpToolProviderManager;
     private final RestVersionInfo<McpCallsConfiguration> restVersionInfo;
+    private final ResourceAccessGuard resourceAccessGuard;
 
     // Field-injected, like the other optional collaborators, so the direct
     // constructions in tests keep compiling.
@@ -71,6 +74,7 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         this.mcpCallsStore = mcpCallsStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.mcpToolProviderManager = mcpToolProviderManager;
+        this.resourceAccessGuard = resourceAccessGuard;
     }
 
     @Override
@@ -89,6 +93,25 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
 
     @Override
     public McpCallsConfiguration readMcpCalls(String id, Integer version) {
+        McpCallsConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, McpCallsConfiguration.class);
+    }
+
+    /**
+     * {@link #readMcpCalls} without the read-redaction, for server-side work an
+     * editor's request starts whose result never reaches the caller as this
+     * document — upgrade and sync compare against it and write it back
+     * ({@code StructuralMatcher}, {@code UpgradeExecutor}). Comparing against the
+     * redacted copy would diff against the marker and then write it over the stored
+     * credential. The same access check applies.
+     */
+    public McpCallsConfiguration readUnredacted(String id, Integer version) {
         return restVersionInfo.read(id, version);
     }
 
@@ -163,6 +186,9 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
      * path treats a non-200 update as "create it directly instead".
      */
     private void requireMayAuthorCallerToken(Object configuration) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(configuration);
         if (callerTokenAuthorPolicy != null) {
             callerTokenAuthorPolicy.requireMayAuthor(configuration, KIND);
         }
