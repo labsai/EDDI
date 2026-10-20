@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
@@ -118,6 +120,14 @@ public class DreamService {
     private final SummarizationService summarizationService;
     private final MeterRegistry meterRegistry;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Charges priced consolidation calls to the tenant's monthly cost budget and
+     * stops a run once that budget is spent. Field-injected so the direct
+     * constructor (and its tests) is unaffected; null meters and gates nothing.
+     */
+    @Inject
+    TenantQuotaService tenantQuotaService;
 
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
@@ -527,6 +537,13 @@ public class DreamService {
                 break;
             }
 
+            // The tenant's monthly cost budget, asked like the LLM task and tool-call
+            // gates ask it. A spent budget (or a quota store that cannot answer) ends
+            // the phase exactly as maxCostPerRun does — not a failed cycle.
+            if (tenantBudgetSpent(userId)) {
+                break;
+            }
+
             // 2. Build content: JSON array of entries
             String content = buildEntriesJson(groupEntries);
 
@@ -570,6 +587,7 @@ public class DreamService {
             }
             llmCallsMade++;
             estimatedCostAccumulated += estimateCost(llmResult, content.length(), config.getInputPricePer1M(), config.getOutputPricePer1M());
+            meterTenantCost(llmResult, content.length(), config);
 
             // 4. Parse response (handles markdown fences, validates output). Two
             // consolidated entries with the same key would upsert onto the same
@@ -918,6 +936,65 @@ public class DreamService {
         double inputTokens = Math.ceil((double) inputContentLength / CHARS_PER_TOKEN_LOWER_BOUND);
         double outputTokens = Math.ceil((double) outputLength / CHARS_PER_TOKEN_LOWER_BOUND);
         return inputTokens * inputRate + outputTokens * outputRate;
+    }
+
+    /**
+     * True when the tenant's monthly cost budget no longer allows a model call
+     * ({@link TenantQuotaService#checkCostBudget}, the same gate LLM tasks and tool
+     * calls ask). Logged; the caller ends the summarization phase.
+     */
+    private boolean tenantBudgetSpent(String userId) {
+        if (tenantQuotaService == null) {
+            return false;
+        }
+        QuotaCheckResult check = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+        if (check.allowed()) {
+            return false;
+        }
+        LOGGER.warnf("[DREAM] Stopping consolidation for user='%s': %s", LogSanitizer.sanitize(userId), check.reason());
+        return true;
+    }
+
+    /**
+     * Charge one consolidation call to the tenant's monthly cost counter — at the
+     * dream config's own prices only. {@link #estimateCost} substitutes upper-bound
+     * prices for an unpriced model, which is right for ending a run early and wrong
+     * for billing: the tenant counter holds priced spend only, exactly as for
+     * conversation turns, so an unpriced dream config meters $0 and writes nothing.
+     * Never throws — the call already happened.
+     */
+    private void meterTenantCost(SummarizationService.SummarizationResult llmResult, int inputContentLength,
+                                 AgentConfiguration.DreamConfig config) {
+        if (tenantQuotaService == null) {
+            return;
+        }
+        double cost = pricedCost(llmResult, inputContentLength, config.getInputPricePer1M(), config.getOutputPricePer1M());
+        if (!(cost > 0.0) || !Double.isFinite(cost)) {
+            return;
+        }
+        try {
+            QuotaCheckResult result = tenantQuotaService.recordCost(tenantQuotaService.getDefaultTenantId(), cost);
+            meterRegistry.counter("eddi.tenant.cost.metering", "outcome",
+                    result.accountingUnavailable() ? "unavailable" : result.allowed() ? "recorded" : "over_budget").increment();
+        } catch (RuntimeException e) {
+            meterRegistry.counter("eddi.tenant.cost.metering", "outcome", "error").increment();
+            LOGGER.errorf(e, "[DREAM] Could not charge $%.6f of consolidation to the tenant cost budget", cost);
+        }
+    }
+
+    /**
+     * The billable cost of one consolidation call: {@link #estimateCost} at the
+     * configured prices, with an unconfigured (null or negative) price counting $0
+     * rather than the upper bound. Both unpriced: $0.
+     */
+    static double pricedCost(SummarizationService.SummarizationResult result, int inputContentLength, Double inputPricePer1M,
+                             Double outputPricePer1M) {
+        boolean inputPriced = inputPricePer1M != null && inputPricePer1M >= 0;
+        boolean outputPriced = outputPricePer1M != null && outputPricePer1M >= 0;
+        if (!inputPriced && !outputPriced) {
+            return 0.0;
+        }
+        return estimateCost(result, inputContentLength, inputPriced ? inputPricePer1M : 0.0, outputPriced ? outputPricePer1M : 0.0);
     }
 
     /**

@@ -46,6 +46,7 @@ import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.TurnCostMeter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -431,11 +432,21 @@ class ConversationServiceResumeTest {
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
 
+            TurnCostMeter turnCostMeter = mock(TurnCostMeter.class);
+            conversationService.turnCostMeter = turnCostMeter;
+
             conversationService.resumeConversation(CONVERSATION_ID, decision, null);
 
             // Verify agent was retrieved with the correct environment, agentId, and version
             verify(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            verify(agent).continueConversation(any(IConversationMemory.class), any(), isNull());
+            // Even without a client handler the resume gets a completion callback: it is
+            // the settle point that charges what the resumed turn spent.
+            ArgumentCaptor<IConversation.IConversationOutputRenderer> renderer = ArgumentCaptor
+                    .forClass(IConversation.IConversationOutputRenderer.class);
+            verify(agent).continueConversation(any(IConversationMemory.class), any(), renderer.capture());
+            IConversationMemory settled = mock(IConversationMemory.class);
+            renderer.getValue().renderOutput(settled);
+            verify(turnCostMeter).meterSettledStep(settled);
         }
     }
 

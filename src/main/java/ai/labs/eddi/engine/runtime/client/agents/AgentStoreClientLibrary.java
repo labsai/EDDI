@@ -95,6 +95,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
         }
 
         ((Agent) agent).setTurnDeadline(agentConfig.getTurnDeadlineMs(), agentConfig.getTurnDeadlineReserveMs());
+        ((Agent) agent).setMaxCostPerConversationUsd(agentConfig.getMaxCostPerConversationUsd());
         if (turnBudgetValidator != null) {
             turnBudgetValidator.warnIfOverBudget(agentConfig, agentId, version);
         }
