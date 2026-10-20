@@ -1151,7 +1151,6 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
     "provider": "openai",
     "baseUrl": "http://vllm.guardrails.svc:8000/v1",
     "modelName": "ibm-granite/granite-guardian-3.3-8b",
-    "apiKey": "${vault:guardian-key}",
     "customParameters": "{\"chat_template_kwargs\": {\"guardian_config\": {\"criteria_id\": \"jailbreak\"}, \"think\": false}}",
     "maxTokens": "20",
     "labelPattern": "<score>\\s*(\\w+)\\s*</score>",
@@ -1163,6 +1162,8 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
   }
 }
 ```
+
+The example sends no `apiKey` because an in-cluster vLLM is typically unauthenticated. If your server needs one, add `"apiKey": "${vault:<name>}"` and serve the endpoint over `https://`: the key travels in an `Authorization` header, and over plain `http://` it is readable on the network.
 
 Use other `criteria_id` values (or `custom_criteria` with your own description) from the model card for other risks. With `"think": true` the model writes a reasoning trace before the score — raise `maxTokens` and `timeoutMs` accordingly; `labelPattern` still finds the final score.
 
@@ -1196,7 +1197,7 @@ To check against your own policy instead of the model's default one, write the p
 
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **last user message** the model would see is checked again only if it differs from what the user typed (a `prompt` template, attachment extracts); otherwise the first result is reused, so a finding is recorded once. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **last user message** the model would see is checked again only if it differs from what the user typed (a `prompt` template, attachment extracts); otherwise the first result is reused, so a finding is recorded once. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. The one exception is the [`classifier`](#the-classifier-type-a-safety-classifier-model), which does not re-screen history (one model call per history message on every turn would multiply its cost by the window size); each of those messages was classified on its own turn, so a classifier that was added later, or a message it let through, is not caught on a later turn.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.)
 - An `onError` fallback is the author's own text and is not screened.
 
