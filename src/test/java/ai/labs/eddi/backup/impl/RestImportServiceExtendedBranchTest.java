@@ -89,14 +89,14 @@ class RestImportServiceExtendedBranchTest {
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null));
             assertTrue(ex.getMessage().contains("targetAgentId"), ex.getMessage());
 
-            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any(), anyBoolean());
         }
 
         @Test
         @DisplayName("upgrade strategy case-insensitive")
         void upgradeCaseInsensitive() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
-            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
@@ -123,7 +123,7 @@ class RestImportServiceExtendedBranchTest {
         @Test
         @DisplayName("upgrade executor throws → InternalServerErrorException")
         void upgradeExecutorThrows() throws Exception {
-            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), any(), any(), anyBoolean()))
                     .thenThrow(new RuntimeException("upgrade boom"));
 
             doAnswer(inv -> {
@@ -443,7 +443,7 @@ class RestImportServiceExtendedBranchTest {
         @DisplayName("empty workflowOrder is treated as null")
         void emptyWorkflowOrder() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
-            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
@@ -459,14 +459,14 @@ class RestImportServiceExtendedBranchTest {
             assertEquals(201, response.getStatus());
             // Verify that empty string is converted to null selectedSet and null
             // workflowOrder
-            verify(upgradeExecutor).executeUpgrade(any(), eq("t1"), isNull(), isNull());
+            verify(upgradeExecutor).executeUpgrade(any(), eq("t1"), isNull(), isNull(), anyBoolean());
         }
 
         @Test
         @DisplayName("workflowOrder with spaces trims entries")
         void workflowOrderWithSpaces() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
-            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), eq(List.of("wf1", "wf2"))))
+            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), isNull(), eq(List.of("wf1", "wf2")), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
@@ -495,7 +495,7 @@ class RestImportServiceExtendedBranchTest {
         @DisplayName("selectedOriginIds with trailing commas are filtered")
         void trailingCommas() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/t1?version=1");
-            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), eq(Set.of("r1", "r2")), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("t1"), eq(Set.of("r1", "r2")), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {

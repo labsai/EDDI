@@ -356,8 +356,19 @@ eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_quota_unavailable_total{tenant,type} # Refusals caused by the quota store failing, not by a limit
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
-eddi_tenant_usage_cost_total                # Cost usage (per tenant)
+eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
+eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling)
 ```
+
+`eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
+**priced** spend is charged to an enabled tenant quota — see
+[Tenant Quotas → The monthly cost budget](tenant-quotas.md#the-monthly-cost-budget).
+An unpriced model meters $0, so a flat line on a busy deployment usually means
+the models carry no `inputPricePer1M` / `outputPricePer1M`. A rising
+`outcome="unavailable"` means turns spent money the counter could not record at
+the time — the quota store was down when they settled. The amount is carried on the
+conversation (`audit:pending_cost`) and charged at its next settle.
 
 Denials carry `tenant` and `type` (`conversation` / `api_call` / `agent` / `cost`);
 aggregate at query time rather than expecting an untagged total:
@@ -416,7 +427,8 @@ eddi_coordinator_dead_letters_retained      # The same gauge under the name the 
 eddi_runtime_executor_active                # Conversation work running; tag: pool (turn|nested|managed)
 eddi_runtime_executor_queued                # Conversation work waiting for a thread; tag: pool
 eddi_runtime_executor_max_threads           # Worker pool size (quarkus.thread-pool.max-threads); tag: pool
-eddi_turn_rejected_total                    # Turns refused with 503 capacity_exceeded; tag: reason (in_flight_limit|conversation_queue)
+eddi_turn_rejected_total                    # Turns refused before they were queued; tag: reason (in_flight_limit|conversation_queue = 503 capacity_exceeded, caller_timed_out = 408)
+eddi_turn_skipped_total                     # Queued turns dropped unrun; tag: reason (caller_timed_out)
 eddi_conversation_max_in_flight_turns       # The node's resolved eddi.conversation.max-in-flight-turns (gauge; heap-derived with auto)
 eddi_datastore_pool_wait_seconds            # Wait for a pooled MongoDB connection, per checkout (timer; PostgreSQL: agroal_blocking_time_*)
 eddi_datastore_pool_wait_timeouts_total     # Checkouts that gave up waiting for a connection
@@ -465,6 +477,15 @@ how many gave up at the effective pool-wait limit: `waitQueueTimeoutMS` when the
 connection string sets it, otherwise `eddi.mongodb.max-wait-time-ms` (10 s by
 default; `0` leaves the driver's own 120 s).
 
+`reason="caller_timed_out"` counts REST turns whose caller had already given up:
+`systemRuntime.agentTimeoutInSeconds` had passed since the request arrived. In
+`eddi_turn_rejected_total` the request had used up that time before it reached
+the engine, and was answered `408` without queueing a turn; in
+`eddi_turn_skipped_total` the turn was queued and dropped when its turn came
+(`eddi.conversation.skip-turns-of-timed-out-callers`). Either one rising means
+the node takes longer to start a turn than its callers wait: it is overloaded,
+so add nodes or shed load earlier with a lower `max-in-flight-turns`.
+
 ### Pipeline Metrics
 
 ```text
@@ -493,7 +514,9 @@ eddi_llm_request_errors_total               # Failed calls; tags: provider, mode
 **Tag values are bounded.** `provider` is langchain4j's provider name (`OPEN_AI`,
 `ANTHROPIC`, …) or, where langchain4j has no name for the provider and reports
 `OTHER` (Jlama and HuggingFace, which used to share `provider="OTHER"`), EDDI's own
-model type (`jlama`, `huggingface`). `model` keeps its own
+model type (`jlama`, `huggingface`). A self-hosted `openai-compatible` endpoint
+reports its `serverName` (`vllm`, `llama-server`, …; default `openai-compatible`)
+instead of `OPEN_AI`, bounded to 32 characters of `a-z 0-9 . _ -`. `model` keeps its own
 series for the first 100 distinct model names a node sees, cut to 128 characters;
 every name after that is tagged `model="other"`. A model name can be templated from
 a property, and a property can be user input, so an uncapped tag was an unbounded

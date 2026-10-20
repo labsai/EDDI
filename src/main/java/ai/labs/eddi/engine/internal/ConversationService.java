@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.TurnCostMeter;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -227,6 +228,15 @@ public class ConversationService implements IConversationService, UserErasurePar
     TurnIdempotencyService turnIdempotency;
 
     /**
+     * Charges each settled turn's priced spend to the tenant's monthly cost counter
+     * (see {@link TurnCostMeter}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} (a directly constructed instance)
+     * meters nothing.
+     */
+    @Inject
+    TurnCostMeter turnCostMeter;
+
+    /**
      * Verifies a {@code groupId} found only on an earlier step before group memory
      * is scoped to it (see {@code ConversationGroups}). Field-injected, so directly
      * constructed tests see {@code null} and only the current step's value counts.
@@ -312,6 +322,16 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.conversation.max-in-flight-turns", defaultValue = InFlightTurnLimit.AUTO)
     String maxInFlightTurnsSetting = InFlightTurnLimit.AUTO;
+
+    /**
+     * Whether a turn still queued when its caller stopped waiting is dropped
+     * instead of run ({@link ProcessingTurn#callerHasGivenUp}). Its caller has its
+     * {@code 408} already, so running it spends a model call and the database on an
+     * answer nobody receives. Under overload that is every queued turn, which is
+     * how goodput fell to zero. Off runs such turns as before.
+     */
+    @ConfigProperty(name = "eddi.conversation.skip-turns-of-timed-out-callers", defaultValue = "true")
+    boolean skipTurnsOfTimedOutCallers = true;
 
     /** Heap budget per in-flight turn for {@code max-in-flight-turns=auto}. */
     @ConfigProperty(name = "eddi.conversation.in-flight-turn-memory-mb", defaultValue = "2")
@@ -464,6 +484,12 @@ public class ConversationService implements IConversationService, UserErasurePar
          * until the pause is persisted — see {@link DeferredDelivery}.
          */
         final DeferredDelivery deferredDelivery = new DeferredDelivery();
+        /**
+         * When the caller stops waiting (epoch ms); {@code 0} = it waits for the turn.
+         */
+        private volatile long callerGivesUpAtEpochMs;
+        /** Set when the turn was dropped because its caller had given up. */
+        private final AtomicBoolean droppedForCaller = new AtomicBoolean(false);
 
         /**
          * A token outside any limit (tests build it reflectively). The counter has
@@ -539,6 +565,32 @@ public class ConversationService implements IConversationService, UserErasurePar
          */
         void handPermitToBody() {
             permitHeldByBody.set(true);
+        }
+
+        /**
+         * When the caller stops waiting for this turn's answer; {@code null} or
+         * non-positive means it waits for as long as the turn takes.
+         */
+        void callerGivesUpAt(Long epochMs) {
+            callerGivesUpAtEpochMs = epochMs != null && epochMs > 0 ? epochMs : 0;
+        }
+
+        /**
+         * Whether the caller had stopped waiting by {@code nowEpochMs}. Asked once,
+         * when the queued turn is about to run; a {@code true} answer marks the turn as
+         * {@linkplain #wasDroppedForCaller() dropped for its caller}.
+         */
+        boolean callerHasGivenUp(long nowEpochMs) {
+            long givesUpAt = callerGivesUpAtEpochMs;
+            if (givesUpAt <= 0 || nowEpochMs < givesUpAt) {
+                return false;
+            }
+            droppedForCaller.set(true);
+            return true;
+        }
+
+        boolean wasDroppedForCaller() {
+            return droppedForCaller.get();
         }
 
         /** Gives the capacity permit back, exactly once. */
@@ -662,6 +714,9 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             var conversationMemory = conversation.getConversationMemory();
             conversationMemory.setResolutionProvenance(resolutionPrincipal.provenance());
+            // Settle point of the CONVERSATION_START turn, which runs inline and never
+            // reaches admitTurn's completion callback (an LLM greeting costs too).
+            meterTurnCost(conversationMemory);
             // A behavior rule may pause on the CONVERSATION_START turn — this path
             // needs the same HITL bookkeeping as the say path (bookmark BEFORE the
             // store, then counter + timeout schedule) or a finite timeout policy
@@ -1010,6 +1065,18 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
+     * Charge the current step's not-yet-metered priced spend to the tenant. Runs
+     * from the completion callback, before the turn is persisted, so the step's
+     * {@code audit:metered_cost} marker is stored with the cost it describes. Never
+     * throws.
+     */
+    void meterTurnCost(IConversationMemory memory) {
+        if (turnCostMeter != null) {
+            turnCostMeter.meterSettledStep(memory);
+        }
+    }
+
+    /**
      * What a finished turn tells its caller and its own step: the {@code error}
      * object when it failed, or the idempotency record when it settled.
      * <p>
@@ -1079,6 +1146,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                     public Consumer<String> toolCallObserver() {
                         return responseHandler instanceof ToolCallObserving observing ? observing.toolCallObserver() : null;
                     }
+
+                    @Override
+                    public void callerGone(SimpleConversationMemorySnapshot snapshot) {
+                        responseHandler.onCallerGone(snapshot);
+                    }
                 });
     }
 
@@ -1146,6 +1218,15 @@ public class ConversationService implements IConversationService, UserErasurePar
         void completed(SimpleConversationMemorySnapshot snapshot);
 
         void skipped(SimpleConversationMemorySnapshot snapshot);
+
+        /**
+         * The turn was dropped unrun because its caller had stopped waiting
+         * ({@link ProcessingTurn#callerHasGivenUp}); answered as skipped unless the
+         * listener knows better.
+         */
+        default void callerGone(SimpleConversationMemorySnapshot snapshot) {
+            skipped(snapshot);
+        }
 
         /** Progress events for a streamed turn; {@code null} for a plain one. */
         default ConversationEventSink eventSink() {
@@ -1247,7 +1328,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             throws Exception {
 
         long startTime = System.nanoTime();
-        final long arrivalEpochMs = System.currentTimeMillis();
+        // The request's arrival when the REST layer stamped it: time spent waiting
+        // for a request thread counts against a turn deadline too.
+        final long arrivalEpochMs = inputData != null && inputData.getRequestArrivalEpochMs() != null
+                ? inputData.getRequestArrivalEpochMs()
+                : System.currentTimeMillis();
         rejectIfShuttingDown();
         // Assigned inside the try; the catch blocks need it, and the lambdas below
         // need an effectively-final alias (processingTurn).
@@ -1314,6 +1399,9 @@ public class ConversationService implements IConversationService, UserErasurePar
             // releases it through releaseTurn / ProcessingTurn.release (C11).
             admittedTurn = admitTurn(conversationId);
             final ProcessingTurn processingTurn = admittedTurn;
+            if (skipTurnsOfTimedOutCallers && inputData != null) {
+                processingTurn.callerGivesUpAt(inputData.getCallerGivesUpAtEpochMs());
+            }
 
             // Tenant quota — atomic slot acquisition AFTER cheap validations
             // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
@@ -1339,7 +1427,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                 memorySnapshot.setEnvironment(environment);
                 recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                 processingTurn.release();
-                listener.skipped(memorySnapshot);
+                if (processingTurn.wasDroppedForCaller()) {
+                    listener.callerGone(memorySnapshot);
+                } else {
+                    listener.skipped(memorySnapshot);
+                }
             };
 
             // Everything bound to one memory instance lives in the builder, so a queued
@@ -1387,6 +1479,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 listener.leaseLost(memorySnapshot, returnConversationMemory.getFenceToken());
                                 return;
                             }
+                            // Settle point: charge the turn's priced spend to the tenant.
+                            // After the lease check — a turn stopped by lease loss stores
+                            // nothing, and the node that took the conversation over runs
+                            // (and meters) it again. A replayed idempotent turn never gets
+                            // here: it is answered from the stored outcome.
+                            meterTurnCost(returnConversationMemory);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -1788,6 +1886,15 @@ public class ConversationService implements IConversationService, UserErasurePar
                 public void onSkipped(SimpleConversationMemorySnapshot answer) {
                     turnIdempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(answer, true));
                     responseHandler.onSkipped(answer);
+                }
+
+                @Override
+                public void onCallerGone(SimpleConversationMemorySnapshot answer) {
+                    // Released, not remembered: the turn never ran, so a retry with the
+                    // same key has to run it rather than be told it was skipped.
+                    turnIdempotency.abandon(conversationId, key,
+                            new IllegalStateException("The turn was not run: its caller had stopped waiting for it"));
+                    responseHandler.onCallerGone(answer);
                 }
             };
         }
@@ -2709,6 +2816,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     @Override
     public void resetConversationState(String conversationId, ConversationState targetState) {
         setConversationState(conversationId, targetState);
+    }
+
+    /**
+     * A queued turn was dropped because its caller had stopped waiting
+     * ({@code eddi_turn_skipped_total{reason="caller_timed_out"}}).
+     */
+    void countTurnSkippedForCaller() {
+        meterRegistry.counter("eddi.turn.skipped", "reason", "caller_timed_out").increment();
     }
 
     /**

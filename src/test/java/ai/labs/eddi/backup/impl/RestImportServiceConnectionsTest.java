@@ -46,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -289,7 +290,7 @@ class RestImportServiceConnectionsTest {
         when(connectionStore.idOfName("default", "jira")).thenReturn(null);
         when(restConnectionStore.createConnection(any()))
                 .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
-        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenReturn(upgraded());
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any(), anyBoolean())).thenReturn(upgraded());
 
         Response response;
         try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
@@ -300,7 +301,7 @@ class RestImportServiceConnectionsTest {
         assertNull(response.getHeaderString("X-Connections-Skipped"));
         var order = inOrder(restConnectionStore, upgradeExecutor);
         order.verify(restConnectionStore).createConnection(any());
-        order.verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any());
+        order.verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any(), anyBoolean());
         verify(connectionStore, never()).deleteAllPermanently(any());
     }
 
@@ -308,7 +309,7 @@ class RestImportServiceConnectionsTest {
     @DisplayName("strategy=upgrade never overwrites an existing connection, and counts the skip")
     void upgradeSkipsAnExistingConnection() throws Exception {
         when(connectionStore.idOfName("default", "jira")).thenReturn("1111222233334444aaaabbbb");
-        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenReturn(upgraded());
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any(), anyBoolean())).thenReturn(upgraded());
 
         Response response;
         try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
@@ -317,7 +318,7 @@ class RestImportServiceConnectionsTest {
 
         assertEquals("1", response.getHeaderString("X-Connections-Skipped"));
         verify(restConnectionStore, never()).createConnection(any());
-        verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any());
+        verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any(), anyBoolean());
     }
 
     @Test
@@ -326,7 +327,8 @@ class RestImportServiceConnectionsTest {
         when(connectionStore.idOfName("default", "jira")).thenReturn(null);
         when(restConnectionStore.createConnection(any()))
                 .thenReturn(Response.status(201).header("X-Resource-URI", CREATED_CONNECTION_URI).build());
-        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any())).thenThrow(new RuntimeException("Upgrade failed: store down"));
+        when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_AGENT_ID), any(), any(), anyBoolean()))
+                .thenThrow(new RuntimeException("Upgrade failed: store down"));
 
         try (var cdi = stubCdi(IRestConnectionStore.class, restConnectionStore, IConnectionStore.class, connectionStore)) {
             assertThrows(InternalServerErrorException.class,

@@ -304,7 +304,54 @@ public interface IConversationMemoryStore {
      */
     Long getRevision(String conversationId);
 
+    /**
+     * The persisted state and revision of a conversation, in ONE projection read.
+     *
+     * @param state
+     *            the stored state, or {@code null} when the conversation does not
+     *            exist
+     * @param revision
+     *            as {@link #getRevision}: {@code null} means "unknown", never
+     *            "changed"
+     */
+    record StateAndRevision(ConversationState state, Long revision) {
+    }
+
+    /**
+     * {@link #getConversationState} and {@link #getRevision} together, as one round
+     * trip instead of two. A queued turn needs both when it starts (the queued-say
+     * guard and the stale-snapshot guard); asking twice cost a second wait for a
+     * database connection on every turn.
+     *
+     * @return both values; {@code null} when this store cannot answer them in one
+     *         read, in which case the caller asks the two methods separately — so a
+     *         store (or a test double) that predates this method behaves exactly as
+     *         before
+     */
+    default StateAndRevision getStateAndRevision(String conversationId) {
+        return null;
+    }
+
     Long getActiveConversationCount(String agentId, Integer agentVersion);
+
+    /**
+     * The agent's open conversations grouped by their own compatibility generation,
+     * across every agent version — counts only, no content.
+     * <p>
+     * Counted by what a conversation <em>is</em>, not by the version it last ran
+     * on: a conversation follows the newest ready version of its own generation, so
+     * after a few compatible saves many idle conversations are stored on versions
+     * that are no longer deployed and would be missed by a count per deployed
+     * version. A conversation without a generation (it predates generations) is
+     * counted under the {@code null} key. Conversations that are ENDED or
+     * AWAITING_HUMAN are left out, exactly as in
+     * {@link #getActiveConversationCount}.
+     *
+     * @param agentId
+     *            the agent
+     * @return open conversations per generation; empty when there are none
+     */
+    Map<Integer, Long> getActiveConversationCountsByGeneration(String agentId);
 
     /**
      * How much an agent is used, across all its versions — counts only, no content.

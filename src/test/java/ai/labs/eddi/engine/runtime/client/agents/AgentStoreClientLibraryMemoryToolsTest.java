@@ -62,6 +62,18 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
+    @DisplayName("the deployed agent carries its maxCostPerConversationUsd; a version without one has none")
+    void carriesTheConversationCostCeiling() throws Exception {
+        var config = configuration(false, null);
+        config.setMaxCostPerConversationUsd(0.75);
+        when(agentStoreService.getAgentConfiguration("agent-1", 5)).thenReturn(config);
+        when(agentStoreService.getAgentConfiguration("agent-1", 6)).thenReturn(configuration(false, null));
+
+        assertEquals(0.75, library.getAgent("agent-1", 5).getMaxCostPerConversationUsd());
+        assertNull(library.getAgent("agent-1", 6).getMaxCostPerConversationUsd());
+    }
+
+    @Test
     @DisplayName("a version without a generation deploys without one")
     void legacyVersionHasNoGeneration() throws Exception {
         when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));

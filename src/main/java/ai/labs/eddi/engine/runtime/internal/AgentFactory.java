@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.runtime.client.agents.IAgentStoreClientLibrary;
 import ai.labs.eddi.engine.runtime.model.DeploymentEvent;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.modules.llm.impl.WorkflowTraversal;
 import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.Gauge;
@@ -439,6 +440,9 @@ public class AgentFactory implements IAgentFactory {
         if (agentConfigurationCache != null) {
             agentConfigurationCache.invalidate(agentId);
         }
+        // The LLM task's cached workflow traversals (httpcalls, mcpcalls, RAG) of the
+        // agent's versions — same lifetime rule, see WorkflowTraversal#CACHE.
+        WorkflowTraversal.invalidateAgent(agentId);
     }
 
     @Override

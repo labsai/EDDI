@@ -1694,7 +1694,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_coordinator_total_processed_total`, and of turns refused because the node already ran `eddi.conversation.max-in-flight-turns` (`eddi_turn_rejected_total`, answered 503 `capacity_exceeded`).",
+          "description": "Rate of `eddi_coordinator_total_processed_total`; of turns refused before they were queued (`eddi_turn_rejected_total`: `in_flight_limit` answered 503 `capacity_exceeded`, `caller_timed_out` answered 408 because the request waited out `systemRuntime.agentTimeoutInSeconds` for a thread); and of queued turns dropped unrun because their caller had already timed out (`eddi_turn_skipped_total`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1717,6 +1717,17 @@
               "refId": "B",
               "expr": "sum by (reason) (rate(eddi_turn_rejected_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "rejected ({{reason}})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (reason) (rate(eddi_turn_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "skipped ({{reason}})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -12056,6 +12067,158 @@
           "fieldConfig": {
             "defaults": {
               "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 261,
+          "type": "timeseries",
+          "title": "Tenant cost metering by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_tenant_cost_metering_total` by `outcome`: how each settled turn or Dream run was charged against the tenant monthly cost budget. A non-zero `error` rate means a charge failed and was logged rather than thrown, so spend is being under-counted.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 28
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_tenant_cost_metering_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 262,
+          "type": "timeseries",
+          "title": "LLM spend gate refusals",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 28
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_llm_spend_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
               "color": {
                 "mode": "palette-classic"
               },

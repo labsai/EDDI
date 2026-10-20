@@ -72,6 +72,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_VALUE = "value";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
+    private static final String KEY_COMPATIBILITY_GENERATION = "compatibilityGeneration";
     private static final String KEY_END_REASON = "endReason";
     private static final String KEY_CONVERSATION_STATE = "conversationState";
     private static final String KEY_USER_ID = "userId";
@@ -678,8 +679,6 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         }
     }
 
-    private static final String KEY_COMPATIBILITY_GENERATION = "compatibilityGeneration";
-
     /**
      * No generation (absent or null — {@code eq(key, null)} matches both) or one
      * lower than {@code target}. {@code lt} alone would skip the very conversations
@@ -920,6 +919,21 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public StateAndRevision getStateAndRevision(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return new StateAndRevision(null, null);
+        }
+        Document stored = conversationCollectionDocument.find(Filters.eq(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(new Document(KEY_CONVERSATION_STATE, 1).append(KEY_REVISION, 1)).first();
+        if (stored == null) {
+            return new StateAndRevision(null, null);
+        }
+        Object state = stored.get(KEY_CONVERSATION_STATE);
+        return new StateAndRevision(state != null ? ConversationState.valueOf(state.toString()) : null,
+                longOrUnversioned(stored.get(KEY_REVISION)));
+    }
+
+    @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         // Plan §10(a): AWAITING_HUMAN conversations do not count as active — with
         // the default WAIT_INDEFINITELY policy a single forgotten approval would
@@ -930,6 +944,21 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 Filters.nin(KEY_CONVERSATION_STATE,
                         ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
         return conversationCollectionDocument.countDocuments(query);
+    }
+
+    @Override
+    public Map<Integer, Long> getActiveConversationCountsByGeneration(String agentId) {
+        // One grouped count; a conversation without the field groups under a null _id.
+        Bson open = Filters.and(Filters.eq(KEY_AGENT_ID, agentId),
+                Filters.nin(KEY_CONVERSATION_STATE, ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
+        Map<Integer, Long> counts = new LinkedHashMap<>();
+        for (Document group : conversationCollectionDocument.aggregate(List.of(Aggregates.match(open),
+                Aggregates.group("$" + KEY_COMPATIBILITY_GENERATION, Accumulators.sum("n", 1L))))) {
+            Object generation = group.get("_id");
+            counts.merge(generation instanceof Number number ? Integer.valueOf(number.intValue()) : null,
+                    ((Number) group.get("n")).longValue(), Long::sum);
+        }
+        return counts;
     }
 
     @Override

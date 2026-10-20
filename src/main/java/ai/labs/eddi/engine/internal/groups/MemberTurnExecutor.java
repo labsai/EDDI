@@ -468,7 +468,9 @@ public class MemberTurnExecutor {
                     // are per-conversation (the snapshot's conversationCost is that
                     // conversation's running total, the sum of the per-STEP
                     // AUDIT_COST over every step), and GroupCostLedger replaces
-                    // rather than adds. A turn in
+                    // rather than adds. (Tenant metering does NOT happen here: this member
+                    // turn already went through ConversationService.say, whose settle
+                    // point charged it.) A turn in
                     // a separate conversation attributed to the agent's own key would
                     // overwrite that agent's real accumulated cost with this
                     // conversation's smaller one — silently shrinking totalCost and

@@ -109,6 +109,43 @@ describe("AgentWizardPage — providers", () => {
     await user.selectOptions(screen.getByTestId("wizard-provider"), "jlama");
     expect(screen.getByTestId("wizard-apikey-input")).toHaveValue("");
   });
+
+  /**
+   * WS10: a self-hosted OpenAI-compatible server has no default model or URL,
+   * so both block Next until given, and its key is optional.
+   */
+  it("needs a model and a base URL for a self-hosted server, and sends no key unless given", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ ...created, provider: "openai-compatible", model: "granite" });
+      }),
+    );
+    const user = userEvent.setup();
+    await toLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai-compatible");
+    expect(screen.getByTestId("wizard-model")).toHaveValue("");
+    expect(screen.getByTestId("wizard-selfhosted-capabilities")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-apikey-input")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-next")).toBeDisabled();
+
+    await user.type(screen.getByTestId("wizard-model"), "ibm-granite/granite-4.0-h-small");
+    expect(screen.getByTestId("wizard-next")).toBeDisabled();
+    await user.type(screen.getByTestId("wizard-baseurl"), "http://vllm.inference.svc:8000/v1");
+    // The key is optional.
+    expect(screen.getByTestId("wizard-next")).toBeEnabled();
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.provider).toBe("openai-compatible");
+    expect(body!.model).toBe("ibm-granite/granite-4.0-h-small");
+    expect(body!.baseUrl).toBe("http://vllm.inference.svc:8000/v1");
+    expect(body!.apiKey ?? "").toBe("");
+  });
 });
 
 describe("AgentWizardPage — built-in tool whitelist", () => {

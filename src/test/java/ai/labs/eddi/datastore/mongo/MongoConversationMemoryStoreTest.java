@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
@@ -243,6 +244,40 @@ class MongoConversationMemoryStoreTest {
 
             List<ConversationMemorySnapshot> active = store.loadActiveConversationMemorySnapshot("agent1", 1);
             assertEquals(2, active.size());
+        }
+
+        @Test
+        @DisplayName("getActiveConversationCountsByGeneration — groups open conversations by their own generation, across versions")
+        void activeCountsByGeneration() throws Exception {
+            // Generation 2 spread over three agent versions, as after compatible saves:
+            // the count is by what the conversation is, not by where it last ran
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, 2, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 2, 2, ConversationState.READY));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, 1, ConversationState.IN_PROGRESS));
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 1, null, ConversationState.IN_PROGRESS));
+            // ended and paused conversations do not count, as in getActiveConversationCount
+            String endedId = store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.IN_PROGRESS));
+            store.setConversationState(endedId, ConversationState.ENDED);
+            store.storeConversationMemorySnapshot(withGeneration("gen-agent", 3, 2, ConversationState.AWAITING_HUMAN));
+            // another agent is never mixed in
+            store.storeConversationMemorySnapshot(withGeneration("other-agent", 1, 2, ConversationState.IN_PROGRESS));
+
+            Map<Integer, Long> counts = store.getActiveConversationCountsByGeneration("gen-agent");
+
+            assertEquals(3, counts.size(), counts.toString());
+            assertEquals(3L, counts.get(2));
+            assertEquals(1L, counts.get(1));
+            assertEquals(1L, counts.get(null), "a conversation without a generation is counted under null");
+            assertTrue(counts.containsKey(null));
+            assertTrue(store.getActiveConversationCountsByGeneration("nobody").isEmpty());
+        }
+
+        private ConversationMemorySnapshot withGeneration(String agentId, int agentVersion, Integer generation,
+                                                          ConversationState state) {
+            var snapshot = createSnapshot(null, agentId, agentVersion, "u", state);
+            snapshot.setCompatibilityGeneration(generation);
+            return snapshot;
         }
 
         @Test
@@ -1317,6 +1352,29 @@ class MongoConversationMemoryStoreTest {
     }
 
     // ─── Helpers ────────────────────────────────────────────────
+
+    /**
+     * The turn-start read: state and revision in one round trip. It must agree with
+     * the two reads it replaces, also after a write moved the revision on.
+     */
+    @Test
+    @DisplayName("getStateAndRevision agrees with getConversationState and getRevision")
+    void stateAndRevisionAgreeWithTheSeparateReads() throws Exception {
+        var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.READY);
+        String id = store.storeConversationMemorySnapshot(snapshot);
+
+        var first = store.getStateAndRevision(id);
+        assertEquals(new IConversationMemoryStore.StateAndRevision(store.getConversationState(id), store.getRevision(id)), first);
+        assertEquals(ConversationState.READY, first.state());
+
+        var reloaded = store.loadConversationMemorySnapshot(id);
+        reloaded.setConversationState(ConversationState.ENDED);
+        store.storeConversationMemorySnapshot(reloaded);
+
+        var second = store.getStateAndRevision(id);
+        assertEquals(new IConversationMemoryStore.StateAndRevision(ConversationState.ENDED, store.getRevision(id)), second);
+        assertTrue(second.revision() > first.revision(), "a write moves the revision on, and the combined read sees it");
+    }
 
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,
                                                              int agentVersion, String userId,

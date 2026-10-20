@@ -38,6 +38,7 @@ public class Agent implements IAgent {
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private Long turnDeadlineMs;
     private Long turnDeadlineReserveMs;
+    private Double maxCostPerConversationUsd;
     private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
@@ -69,6 +70,9 @@ public class Agent implements IAgent {
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
         var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        // Transient carrier, like the tool-approval config below: the LLM task reads
+        // the ceiling from memory, also on the CONVERSATION_START turn.
+        conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
         // Which versions the conversation may follow. Null on a version stored before
         // generations existed: the conversation then stays on this version.
         conversationMemory.setCompatibilityGeneration(compatibilityGeneration);
@@ -96,6 +100,10 @@ public class Agent implements IAgent {
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }
+        // Every say, rerun and HITL resume continues through here, so the carrier
+        // always reflects the version that runs the turn (null clears a ceiling the
+        // memory may carry from a version that had one).
+        conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 
@@ -144,6 +152,15 @@ public class Agent implements IAgent {
     @Override
     public Long getTurnDeadlineReserveMs() {
         return turnDeadlineReserveMs;
+    }
+
+    @Override
+    public Double getMaxCostPerConversationUsd() {
+        return maxCostPerConversationUsd;
+    }
+
+    public void setMaxCostPerConversationUsd(Double maxCostPerConversationUsd) {
+        this.maxCostPerConversationUsd = maxCostPerConversationUsd;
     }
 
     public void setTurnDeadline(Long turnDeadlineMs, Long turnDeadlineReserveMs) {

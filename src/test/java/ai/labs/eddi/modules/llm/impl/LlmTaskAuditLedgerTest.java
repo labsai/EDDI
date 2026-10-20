@@ -535,19 +535,22 @@ class LlmTaskAuditLedgerTest {
     // ==================== audit disabled ====================
 
     @Test
-    @DisplayName("no audit collector → not a single audit key is written")
+    @DisplayName("no audit collector → no audit evidence is written, only the cost the tenant budget charges")
     void noAuditCollectorWritesNothing() throws Exception {
         when(memory.getAuditCollector()).thenReturn(null);
         agentReturns("done", List.of(Map.of("type", "tool_call")), Map.of("toolCostUsd", 0.01));
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task("taskA"))));
 
-        assertTrue(stored.keySet().stream().noneMatch(k -> k.startsWith("audit:")),
+        // audit:cost is no longer ledger-only: TurnCostMeter charges it to the tenant's
+        // monthly budget, which must not depend on eddi.audit.enabled.
+        assertEquals(0.01, auditCost(), 1e-9);
+        assertTrue(stored.keySet().stream().filter(k -> k.startsWith("audit:")).allMatch(MemoryKeys.AUDIT_COST::equals),
                 "audit evidence must stay behind the collector gate: " + stored.keySet());
     }
 
     @Test
-    @DisplayName("no audit collector → the token counts are still recorded (the /v1 usage block), nothing else")
+    @DisplayName("no audit collector → the token counts (the /v1 usage block) and the cost are still recorded, nothing else")
     void noAuditCollectorStillRecordsTokenUsage() throws Exception {
         when(memory.getAuditCollector()).thenReturn(null);
         agentReturns("done", List.of(Map.of("type", "tool_call")),
@@ -558,7 +561,8 @@ class LlmTaskAuditLedgerTest {
         var tokenUsage = auditMap(MemoryKeys.AUDIT_TOKEN_USAGE);
         assertNotNull(tokenUsage, "the caller's usage must not depend on the audit ledger: " + stored.keySet());
         assertEquals(15L, tokenUsage.get("totalTokens"));
-        assertTrue(stored.keySet().stream().filter(k -> k.startsWith("audit:")).allMatch(MemoryKeys.AUDIT_TOKEN_USAGE::equals),
-                "only the token counts may bypass the collector gate: " + stored.keySet());
+        assertTrue(stored.keySet().stream().filter(k -> k.startsWith("audit:"))
+                .allMatch(k -> MemoryKeys.AUDIT_TOKEN_USAGE.equals(k) || MemoryKeys.AUDIT_COST.equals(k)),
+                "only the token counts and the cost may bypass the collector gate: " + stored.keySet());
     }
 }

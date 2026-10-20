@@ -21,6 +21,7 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.Stack;
 import java.util.function.Consumer;
@@ -114,6 +115,25 @@ public interface IConversationMemory extends Serializable {
      * Set (or clear, with {@code null}) the deadline of the turn about to run.
      */
     default void setTurnDeadline(TurnDeadline turnDeadline) {
+        // no-op by default
+    }
+
+    /**
+     * The agent's per-conversation LLM cost ceiling in USD
+     * ({@code maxCostPerConversationUsd}), or {@code null} when unlimited.
+     * Transient: carried from the agent onto memory for every turn, never
+     * persisted.
+     * <p>
+     * An {@link OptionalDouble}, not a nullable {@code Double}, so that "no
+     * ceiling" cannot be mistaken for {@code 0} ("no spend at all") — which is what
+     * a mocked memory hands back for a {@code Double}.
+     */
+    default OptionalDouble getConversationCostCeilingUsd() {
+        return OptionalDouble.empty();
+    }
+
+    /** Set (or clear, with {@code null}) the per-conversation cost ceiling. */
+    default void setConversationCostCeilingUsd(Double maxCostPerConversationUsd) {
         // no-op by default
     }
 

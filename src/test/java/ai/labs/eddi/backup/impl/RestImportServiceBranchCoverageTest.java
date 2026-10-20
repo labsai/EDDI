@@ -122,7 +122,7 @@ class RestImportServiceBranchCoverageTest {
         @DisplayName("upgrade with workflowOrder passes through")
         void upgradeWithWorkflowOrder() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), eq(List.of("wf1", "wf2"))))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), eq(List.of("wf1", "wf2")), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
@@ -142,7 +142,7 @@ class RestImportServiceBranchCoverageTest {
         @DisplayName("upgrade with selectedOriginIds passes through")
         void upgradeWithSelectedOriginIds() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=3");
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), eq(Set.of("res1", "res2")), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), eq(Set.of("res1", "res2")), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
