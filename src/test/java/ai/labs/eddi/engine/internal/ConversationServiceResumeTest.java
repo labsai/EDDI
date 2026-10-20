@@ -1122,6 +1122,15 @@ class ConversationServiceResumeTest {
         }
 
         @Test
+        @DisplayName("a non-secret entry that only carries the placeholder text was never a secret: a 400 before the CAS")
+        void placeholderTextWithoutTheSecretFlagRefused() throws Exception {
+            pausedWithContext("userToken", PLACEHOLDER, null);
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", true));
+            pausedWithContext("userToken", PLACEHOLDER, false);
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", true));
+        }
+
+        @Test
         @DisplayName("a secret entry for a key that was secret in the paused turn proceeds")
         void validEntryProceeds() throws Exception {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(

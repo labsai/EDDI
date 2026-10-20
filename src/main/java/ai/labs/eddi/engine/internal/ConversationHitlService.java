@@ -814,10 +814,18 @@ class ConversationHitlService {
         if (!found) {
             return false;
         }
-        Object value = stored instanceof Context context
-                ? context.getValue()
-                : stored instanceof Map<?, ?> map ? map.get("value") : null;
-        return MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(value);
+        // Both the flag and the placeholder: the scrub always writes the placeholder
+        // with
+        // secret=true, while a non-secret entry that happens to carry the placeholder
+        // text
+        // was never a secret and must not be re-supplied.
+        if (stored instanceof Context context) {
+            return Boolean.TRUE.equals(context.getSecret()) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(context.getValue());
+        }
+        if (stored instanceof Map<?, ?> map) {
+            return Boolean.TRUE.equals(map.get("secret")) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(map.get("value"));
+        }
+        return false;
     }
 
     /**
