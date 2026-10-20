@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.container.AsyncResponse;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -70,6 +72,7 @@ class RestAgentEngineResumeReplyTest {
     private Principal principal;
     private AsyncResponse async;
     private RestAgentEngine engine;
+    private OwnershipValidator ownershipValidator;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -77,7 +80,7 @@ class RestAgentEngineResumeReplyTest {
         identity = mock(SecurityIdentity.class);
         principal = mock(Principal.class);
         async = mock(AsyncResponse.class);
-        var ownershipValidator = mock(OwnershipValidator.class);
+        ownershipValidator = mock(OwnershipValidator.class);
         var descriptorStore = mock(IConversationDescriptorStore.class);
         var descriptor = new ConversationDescriptor();
         descriptor.setUserId(USER_ID);
@@ -143,6 +146,33 @@ class RestAgentEngineResumeReplyTest {
         verify(async).resume(captor.capture());
         assertSame(snapshot, captor.getValue());
         assertTrue(snapshot.getConversationOutputs().getFirst().toString().contains(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER));
+    }
+
+    @Test
+    @DisplayName("an approver who may not read the conversation gets no reply: 403 before the resume, the pause untouched")
+    void approverOnlyCannotReadTheReply() throws Exception {
+        doThrow(new ForbiddenException("not the owner")).when(ownershipValidator).requireOwnerOrAdminStrict(any(), any(), any());
+
+        engine.resumeConversation(CONVERSATION_ID, approved(), null, false, null, async);
+
+        // The refusal travels through AsyncResponse.resume(Throwable), as the other
+        // permission errors of this endpoint do, and reaches the 403 mapper.
+        var captor = ArgumentCaptor.forClass(Throwable.class);
+        verify(async).resume(captor.capture());
+        assertInstanceOf(ForbiddenException.class, captor.getValue());
+        verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        verify(conversationService, never()).resumeConversation(anyString(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("the same approver without reply flags still resumes: deciding a pause needs no read access")
+    void approverOnlyStillResumesWithoutAReply() throws Exception {
+        doThrow(new ForbiddenException("not the owner")).when(ownershipValidator).requireOwnerOrAdminStrict(any(), any(), any());
+
+        engine.resumeConversation(CONVERSATION_ID, approved(), null, null, null, async);
+
+        assertEquals(200, responseSentTo(async).getStatus());
+        verify(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), isNull());
     }
 
     @Test

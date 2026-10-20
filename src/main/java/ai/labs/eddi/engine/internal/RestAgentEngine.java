@@ -760,6 +760,14 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .build();
         }
         validateConversationOwnership(conversationId, true);
+        if (handler != null) {
+            // A reply is a read of the conversation, and resume admits approver-only
+            // callers: the approver role decides a pause, it does not license reading
+            // the conversation (approval-status limits an approver to the paused turn).
+            // So a reply takes the owner-or-admin access say takes. Checked before the
+            // resume runs, so a refused request leaves the pause untouched.
+            validateConversationOwnership(conversationId);
+        }
         // Null-safe principal (parity with the cancel/end paths): an anonymous caller
         // must not NPE; see resolveApprover for what is recorded instead.
         String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
