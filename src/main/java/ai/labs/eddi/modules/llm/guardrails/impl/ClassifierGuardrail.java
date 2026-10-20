@@ -408,7 +408,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 return null;
             }
             String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
-            Matcher matcher = pattern.get().matcher(new BudgetedCharSequence(tail, TimeUnit.MILLISECONDS.toNanos(LABEL_MATCH_BUDGET_MS)));
+            Matcher matcher = pattern.get().matcher(BudgetedCharSequence.withBudget(tail, TimeUnit.MILLISECONDS.toNanos(LABEL_MATCH_BUDGET_MS)));
             String found = null;
             try {
                 while (matcher.find()) {
@@ -514,14 +514,14 @@ public class ClassifierGuardrail implements ContentGuardrail {
         private final long deadlineNanos;
         private int reads;
 
-        BudgetedCharSequence(CharSequence text, long budgetNanos) {
-            this.text = text;
-            this.deadlineNanos = System.nanoTime() + budgetNanos;
-        }
-
-        private BudgetedCharSequence(CharSequence text, long deadlineNanos, boolean absolute) {
+        /** {@code deadlineNanos} is an absolute {@link System#nanoTime()} value. */
+        private BudgetedCharSequence(CharSequence text, long deadlineNanos) {
             this.text = text;
             this.deadlineNanos = deadlineNanos;
+        }
+
+        static BudgetedCharSequence withBudget(CharSequence text, long budgetNanos) {
+            return new BudgetedCharSequence(text, System.nanoTime() + budgetNanos);
         }
 
         @Override
@@ -539,7 +539,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
 
         @Override
         public CharSequence subSequence(int start, int end) {
-            return new BudgetedCharSequence(text.subSequence(start, end), deadlineNanos, true);
+            return new BudgetedCharSequence(text.subSequence(start, end), deadlineNanos);
         }
 
         @Override
