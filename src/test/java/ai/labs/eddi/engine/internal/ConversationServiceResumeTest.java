@@ -27,6 +27,8 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
@@ -1056,6 +1058,108 @@ class ConversationServiceResumeTest {
             // this path (mirrors the RejectedExecutionException discard test above).
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+        }
+    }
+
+    // =========================================================================
+    // Secret context on resume: validated before the CAS
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation — secret context on resume")
+    class SecretContextOnResume {
+
+        private static final String PLACEHOLDER = MemoryKeys.SECRET_CONTEXT_PLACEHOLDER;
+
+        private ConversationMemorySnapshot pausedWithContext(String key, String storedValue, Boolean storedSecret)
+                throws Exception {
+            var snapshot = createResumeSnapshot();
+            var stored = new Context(Context.ContextType.string, storedValue);
+            stored.setSecret(storedSecret);
+            snapshot.getConversationSteps().getFirst().getWorkflows().getFirst().getLifecycleTasks()
+                    .add(new ResultSnapshot("context:" + key, stored, null, new Date(), null, false));
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            return snapshot;
+        }
+
+        private HitlDecision decisionWith(String key, String value, Boolean secret) {
+            var supplied = new Context(Context.ContextType.string, value);
+            supplied.setSecret(secret);
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setContext(Map.of(key, supplied));
+            return decision;
+        }
+
+        private void assertRefusedWithoutConsumingThePause(HitlDecision decision) throws Exception {
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertFalse(e.getMessage().contains("tok-"), "the message must not echo a value");
+            verify(conversationMemoryStore, never()).compareAndSetState(any(), any(), any());
+            verify(conversationCoordinator, never()).submitInOrder(any(), any());
+        }
+
+        @Test
+        @DisplayName("a non-secret entry is a 400 before the CAS")
+        void nonSecretEntryRefused() throws Exception {
+            pausedWithContext("userToken", PLACEHOLDER, true);
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", null));
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", false));
+        }
+
+        @Test
+        @DisplayName("a key the paused turn never had is a 400 before the CAS")
+        void unknownKeyRefused() throws Exception {
+            pausedWithContext("userToken", PLACEHOLDER, true);
+            assertRefusedWithoutConsumingThePause(decisionWith("somethingElse", "tok-1", true));
+        }
+
+        @Test
+        @DisplayName("a key that was not secret in the paused turn is a 400 before the CAS")
+        void keyThatWasNotSecretRefused() throws Exception {
+            pausedWithContext("language", "en", null);
+            assertRefusedWithoutConsumingThePause(decisionWith("language", "tok-1", true));
+        }
+
+        @Test
+        @DisplayName("a non-secret entry that only carries the placeholder text was never a secret: a 400 before the CAS")
+        void placeholderTextWithoutTheSecretFlagRefused() throws Exception {
+            pausedWithContext("userToken", PLACEHOLDER, null);
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", true));
+            pausedWithContext("userToken", PLACEHOLDER, false);
+            assertRefusedWithoutConsumingThePause(decisionWith("userToken", "tok-1", true));
+        }
+
+        @Test
+        @DisplayName("a secret entry for a key that was secret in the paused turn proceeds")
+        void validEntryProceeds() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            pausedWithContext("userToken", PLACEHOLDER, true);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            conversationService.resumeConversation(CONVERSATION_ID, decisionWith("userToken", "tok-1", true), null);
+
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+        }
+
+        @Test
+        @DisplayName("a resume without context is not affected")
+        void noContextUnaffected() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(createResumeSnapshot()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
         }
     }
 

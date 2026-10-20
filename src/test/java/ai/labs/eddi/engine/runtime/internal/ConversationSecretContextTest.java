@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException.PauseOrigin;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IData;
@@ -44,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -420,5 +422,107 @@ class ConversationSecretContextTest {
     @DisplayName("S4: a loaded longTerm property that IS a short secret is persisted as the placeholder")
     void loadedLongTermShortSecretScrubbedDuringInitIsPersisted() throws Exception {
         initWithStoredLongTerm("rememberedPin", "4711", "4711");
+    }
+
+    // ---- HITL resume re-supplying the secret ----
+
+    /** A turn that carried the secret and paused at a RULE gate on wf1. */
+    private void pausedTurnCarryingSecret() throws Exception {
+        doAnswer(invocation -> {
+            throw new ConversationPauseException("wf1", 1, "gated", PauseOrigin.RULE);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        conversation().say("hello", contexts(TOKEN, true));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        assertEquals(PLACEHOLDER, memory.getCurrentStep().<Context>getLatestData("context:userToken").getResult().getValue());
+    }
+
+    private static HitlDecision approvedWith(Map<String, Context> context) {
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.APPROVED);
+        decision.setContext(context);
+        return decision;
+    }
+
+    /** What a task after the pause does: read the live value and copy it around. */
+    private void resumedTaskCopiesToken(List<Object> seen) throws Exception {
+        doAnswer(invocation -> {
+            var step = memory.getCurrentStep();
+            IData<Context> live = step.getLatestData("context:userToken");
+            seen.add(live.getResult().getValue());
+            step.storeData(new Data<>("httpCalls:request", Map.of("headers", Map.of("Authorization", "Bearer " + live.getResult().getValue()))));
+            step.addConversationOutputString("debug", "sent Bearer " + live.getResult().getValue());
+            memory.getConversationProperties().put("lastHeader",
+                    new Property("lastHeader", "Bearer " + live.getResult().getValue(), Scope.conversation));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("resume: the re-supplied secret is live for the resumed tasks and gone from the stored step afterwards")
+    void resumeReSuppliedSecretIsLiveThenScrubbed() throws Exception {
+        pausedTurnCarryingSecret();
+        List<Object> seen = new ArrayList<>();
+        resumedTaskCopiesToken(seen);
+        var supplied = new Context(Context.ContextType.string, TOKEN);
+        supplied.setSecret(true);
+        var decision = approvedWith(Map.of("userToken", supplied));
+
+        conversation().resume(decision);
+
+        assertEquals(List.of(TOKEN), seen, "the resumed task must see the real value, not the placeholder");
+        assertEquals(ConversationState.READY, memory.getConversationState());
+        assertFalse(storedDocument().contains(TOKEN), "stored conversation still carries the secret: " + storedDocument());
+        assertEquals(PLACEHOLDER, memory.getCurrentStep().<Context>getLatestData("context:userToken").getResult().getValue());
+        assertEquals("Bearer " + PLACEHOLDER, memory.getConversationProperties().get("lastHeader").getValueString());
+        assertNull(decision.getContext(), "the decision must not keep the value");
+    }
+
+    @Test
+    @DisplayName("resume: the audit entries of the resumed turn are redacted")
+    void resumeAuditEntriesAreRedacted() throws Exception {
+        pausedTurnCarryingSecret();
+        List<AuditEntry> ledger = new ArrayList<>();
+        memory.setAuditCollector(ledger::add);
+        doAnswer(invocation -> {
+            memory.getAuditCollector().collect(new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "ai.labs.llm", "llm", 0, 1L,
+                    Map.of("userInput", "hello"), null, Map.of("compiledPrompt", "use Bearer " + TOKEN), null, List.of(), 0.0,
+                    Instant.now(), null, null));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
+        var supplied = new Context(Context.ContextType.string, TOKEN);
+        supplied.setSecret(true);
+
+        conversation().resume(approvedWith(Map.of("userToken", supplied)));
+
+        assertEquals(1, ledger.size());
+        assertEquals("use Bearer " + PLACEHOLDER, ledger.getFirst().llmDetail().get("compiledPrompt"));
+    }
+
+    @Test
+    @DisplayName("resume without context: the resumed task still sees the placeholder, as before")
+    void resumeWithoutContextSeesPlaceholder() throws Exception {
+        pausedTurnCarryingSecret();
+        List<Object> seen = new ArrayList<>();
+        resumedTaskCopiesToken(seen);
+
+        conversation().resume(approvedWith(null));
+
+        assertEquals(List.of(PLACEHOLDER), seen);
+    }
+
+    @Test
+    @DisplayName("resume: an entry that is not secret, or whose key was not secret when paused, is never injected")
+    void resumeNeverInjectsWhatIsNotAPausedSecret() throws Exception {
+        pausedTurnCarryingSecret();
+        List<Object> seen = new ArrayList<>();
+        resumedTaskCopiesToken(seen);
+        var notSecret = new Context(Context.ContextType.string, TOKEN);
+        var unknownKey = new Context(Context.ContextType.string, TOKEN);
+        unknownKey.setSecret(true);
+
+        conversation().resume(approvedWith(Map.of("userToken", notSecret, "other", unknownKey)));
+
+        assertEquals(List.of(PLACEHOLDER), seen);
+        assertNull(memory.getCurrentStep().getLatestData("context:other"));
     }
 }
