@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   MODEL_SUGGESTIONS,
+  acceptsOptionalApiKey,
   groupModelSuggestions,
   acceptsOptionalToken,
   isBaseUrlRequired,
   isProvisionableBySetup,
+  isProvisionableByTeamSetup,
+  offeredWithoutBaseUrl,
   supportsBaseUrl,
 } from "@/lib/model-suggestions";
+import { SELF_HOSTED_PROVIDER_ID } from "@/lib/llm-provider-catalog";
 import { LLM_PROVIDERS, getProviderConfig } from "@/lib/api/agent-setup";
 
 /**
@@ -56,7 +60,10 @@ describe("model suggestions", () => {
 
   it("requires a base URL only for providers that talk to a model server", () => {
     expect(isBaseUrlRequired("ollama")).toBe(true);
+    // A self-hosted OpenAI-compatible server has no default URL at all.
+    expect(isBaseUrlRequired("openai-compatible")).toBe(true);
     expect(isBaseUrlRequired("anthropic")).toBe(false);
+    expect(isBaseUrlRequired("openai")).toBe(false);
   });
 
   it("offers an optional base URL for every provider with an endpoint", () => {
@@ -76,6 +83,12 @@ describe("model suggestions", () => {
   it("gives every provider at least one suggestion or a default", () => {
     for (const provider of LLM_PROVIDERS) {
       const suggestions = MODEL_SUGGESTIONS[provider.id] ?? [];
+      // A self-hosted server serves whatever its operator loaded: any default
+      // would be a guess. The wizard shows an example and requires the field.
+      if (provider.id === SELF_HOSTED_PROVIDER_ID) {
+        expect(provider.defaultModel).toBe("");
+        continue;
+      }
       expect(
         suggestions.length > 0 || provider.defaultModel.length > 0,
         `provider "${provider.id}" offers the user nothing to start from`,
@@ -130,6 +143,26 @@ describe("setup-provisionable providers", () => {
     for (const provider of LLM_PROVIDERS.filter((p) => p.id !== "gemini-vertex")) {
       expect(isProvisionableBySetup(provider.id), provider.id).toBe(true);
     }
+  });
+
+  it("offers an optional API key for the self-hosted type only", () => {
+    expect(acceptsOptionalApiKey("openai-compatible")).toBe(true);
+    expect(acceptsOptionalApiKey("openai")).toBe(false);
+    expect(acceptsOptionalApiKey("jlama")).toBe(false);
+  });
+
+  it("keeps the self-hosted type out of the team builder, which has no base URL field", () => {
+    expect(isProvisionableBySetup("openai-compatible")).toBe(true);
+    expect(isProvisionableByTeamSetup("openai-compatible")).toBe(false);
+    expect(isProvisionableByTeamSetup("gemini-vertex")).toBe(false);
+    expect(isProvisionableByTeamSetup("ollama")).toBe(true);
+  });
+
+  it("hides the self-hosted type where there is no base URL, unless kept", () => {
+    expect(offeredWithoutBaseUrl("openai-compatible")).toBe(false);
+    expect(offeredWithoutBaseUrl("openai-compatible", "openai", undefined)).toBe(false);
+    expect(offeredWithoutBaseUrl("openai-compatible", undefined, "openai-compatible")).toBe(true);
+    expect(offeredWithoutBaseUrl("ollama")).toBe(true);
   });
 
   it("offers an optional token for Jlama only", () => {

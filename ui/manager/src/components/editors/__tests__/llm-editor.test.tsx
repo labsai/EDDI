@@ -1109,6 +1109,31 @@ describe("LlmEditor", () => {
     expect(hint({ region: "mars" })).toContain("https://dashscope-intl.aliyuncs.com");
   });
 
+  it("asks a self-hosted endpoint for its baseUrl, shows it once set, and marks the key optional", () => {
+    const view = renderWithProviders(
+      <LlmEditor
+        data={{ tasks: [{ type: "openai-compatible", actions: [], parameters: { modelName: "granite" } }] }}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("self-hosted-endpoint-hint")).toHaveTextContent("Add a baseUrl parameter");
+    expect(screen.queryByTestId("compatible-endpoint-hint")).not.toBeInTheDocument();
+    expect(screen.getByText("API key (optional)")).toBeInTheDocument();
+    view.unmount();
+
+    renderWithProviders(
+      <LlmEditor
+        data={{
+          tasks: [
+            { type: "openai-compatible", actions: [], parameters: { modelName: "granite", baseUrl: "http://vllm:8000/v1" } },
+          ],
+        }}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByTestId("self-hosted-endpoint-hint")).toHaveTextContent("http://vllm:8000/v1");
+  });
+
   it("keeps an unknown type as a custom option instead of rewriting it", () => {
     renderWithProviders(
       <LlmEditor

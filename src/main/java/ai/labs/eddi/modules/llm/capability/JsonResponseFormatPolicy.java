@@ -5,11 +5,14 @@
 package ai.labs.eddi.modules.llm.capability;
 
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider.Capabilities;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_AZURE_OPENAI;
@@ -79,6 +82,14 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  * <strong>no</strong>/<strong>no</strong></td>
  * </tr>
  * <tr>
+ * <td>openai-compatible</td>
+ * <td>{@code jsonMode}</td>
+ * <td>{@code jsonModeWithTools}</td>
+ * <td>a self-hosted endpoint declares both in its own parameters (see
+ * {@link OpenAiCompatibleEndpoint}); both default to <strong>no</strong>, so an
+ * unknown server is never sent a {@code response_format} it may reject</td>
+ * </tr>
+ * <tr>
  * <td>anthropic, bedrock</td>
  * <td>no</td>
  * <td>no</td>
@@ -115,6 +126,11 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  *            {@link #supportsNativeSchema}) and the text converts (see
  *            {@link ResponseSchemaConverter}), the request carries it as a
  *            {@code JSON_SCHEMA} response format instead of schemaless JSON
+ * @param endpoint
+ *            the capabilities an {@code openai-compatible} endpoint declares in
+ *            its own parameters — the task's, or for a cascade step the
+ *            <em>step's</em>; {@code null} for every other type, which is
+ *            decided by the matrix above
  *
  *            <h2>Native schema enforcement</h2>
  *            <table border="1">
@@ -159,6 +175,14 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  *            only</td>
  *            </tr>
  *            <tr>
+ *            <td>openai-compatible</td>
+ *            <td><strong>no</strong></td>
+ *            <td>native {@code json_schema} support varies by server and
+ *            version; an endpoint gets schemaless JSON when it declares
+ *            {@code jsonMode}. A {@code jsonSchema} flag belongs with the
+ *            structured-output work, not here</td>
+ *            </tr>
+ *            <tr>
  *            <td>everything else</td>
  *            <td><strong>no</strong></td>
  *            <td>schemaless JSON where the matrix allows it; the prompt block
@@ -168,10 +192,10 @@ import static ai.labs.eddi.modules.llm.bootstrap.LlmModule.LLM_TYPE_OPENAI;
  *
  * @since 6.1.0
  */
-public record JsonResponseFormatPolicy(boolean requested, String provider, Support override, String responseSchema) {
+public record JsonResponseFormatPolicy(boolean requested, String provider, Support override, String responseSchema, Capabilities endpoint) {
 
     /** Never applies — the request is sent exactly as it is built. */
-    public static final JsonResponseFormatPolicy DISABLED = new JsonResponseFormatPolicy(false, null, Support.AUTO, null);
+    public static final JsonResponseFormatPolicy DISABLED = new JsonResponseFormatPolicy(false, null, Support.AUTO, null, null);
 
     /** Providers whose binding honours a request-level JSON schema. */
     private static final Set<String> REQUEST_LEVEL_SCHEMA = Set.of(LLM_TYPE_OPENAI, LLM_TYPE_AZURE_OPENAI, LLM_TYPE_MISTRAL, LLM_TYPE_GEMINI);
@@ -190,7 +214,12 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
 
     /** Policy without a schema: schemaless JSON mode only. */
     public JsonResponseFormatPolicy(boolean requested, String provider, Support override) {
-        this(requested, provider, override, null);
+        this(requested, provider, override, null, null);
+    }
+
+    /** Policy for a type whose capabilities the matrix decides. */
+    public JsonResponseFormatPolicy(boolean requested, String provider, Support override, String responseSchema) {
+        this(requested, provider, override, responseSchema, null);
     }
 
     /**
@@ -212,6 +241,20 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
      */
     public static JsonResponseFormatPolicy of(boolean requested, String provider, String overrideToken, String responseSchema) {
         return new JsonResponseFormatPolicy(requested, provider, Support.parse(overrideToken), responseSchema);
+    }
+
+    /**
+     * As {@link #of(boolean, String, String, String)}, also reading the
+     * capabilities an {@code openai-compatible} endpoint declares in
+     * {@code parameters}. Pass the parameters of the model the request goes to: a
+     * cascade step's merged parameters, not the task's. For any other type the
+     * parameters are not read. Never throws: a flag that is not a boolean counts as
+     * {@code false} (see {@code OpenAiCompatibleEndpoint#capabilities}).
+     */
+    public static JsonResponseFormatPolicy of(boolean requested, String provider, String overrideToken, String responseSchema,
+                                              Map<String, String> parameters) {
+        return new JsonResponseFormatPolicy(requested, provider, Support.parse(overrideToken), responseSchema,
+                OpenAiCompatibleEndpoint.capabilities(provider, parameters).orElse(null));
     }
 
     /** Whether the provider enforces a JSON schema carried on the request. */
@@ -248,6 +291,9 @@ public record JsonResponseFormatPolicy(boolean requested, String provider, Suppo
         }
         if (override == Support.ON) {
             return true;
+        }
+        if (endpoint != null) {
+            return toolsInRequest ? endpoint.jsonModeWithTools() : endpoint.jsonMode();
         }
         return toolsInRequest ? supportsRequestLevelJsonWithTools(provider) : supportsRequestLevelJson(provider);
     }
