@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -1210,6 +1211,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+                streamingHandler.onGuardrailTriggered(type, phase, action, taskId);
+            }
+
+            @Override
             public void onComplete() {
                 // Handled separately after memory conversion
             }
@@ -1338,7 +1344,19 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             // Everything bound to one memory instance lives in the builder, so a queued
             // turn can be rebuilt over the current document when it finally runs (H13a).
+            final String idempotencyKey = idempotencyKeyOf(inputData, rerunOnly);
             ConversationStepRunner.TurnBuilder turnBuilder = memory -> {
+                // Rebuilt over a newer document: a turn committed while this one queued. If
+                // that turn carried this request's Idempotency-Key, it WAS this request —
+                // sent again to another node while the first ran there, where the in-flight
+                // registry of the running node cannot see it. Checked here, under the
+                // conversation's lease, so the duplicate never runs a second time; it is
+                // answered as skipped (409 + Retry-After) and its retry is served the
+                // stored answer by the persisted lookup.
+                if (memory != conversationMemory && idempotencyKey != null
+                        && turnIdempotency.isRecordedIn(convertConversationMemory(memory), idempotencyKey)) {
+                    throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
+                }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
@@ -1964,6 +1982,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
 
         @Override
+        public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+            delegate.onGuardrailTriggered(type, phase, action, taskId);
+        }
+
+        @Override
         public void onComplete(SimpleConversationMemorySnapshot snapshot) {
             idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, false));
             delegate.onComplete(snapshot);
@@ -2114,7 +2137,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * undo itself stands.
      */
     void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
-        if (userMemoryStore == null || step == null) {
+        // Agent-test conversations never wrote user memory, so an undo has nothing to
+        // revert.
+        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())) {
             return;
         }
         var changes = ConversationMemory.propertyChanges(step);
@@ -2253,10 +2278,15 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig,
                                                final boolean memoryToolsEnabled) {
+        // An agent-test conversation neither reads nor writes long-term user memory:
+        // without a store, Conversation skips loadUserProperties at init and
+        // storePropertiesPermanently at every turn end. A test must not change what
+        // real users have stored, nor pass or fail because of it.
+        final IUserMemoryStore memoryStore = AgentTestConversations.isTestUserId(userId) ? null : userMemoryStore;
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
-                return userMemoryStore;
+                return memoryStore;
             }
 
             @Override

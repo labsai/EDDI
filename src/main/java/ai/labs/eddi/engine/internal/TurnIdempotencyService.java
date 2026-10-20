@@ -55,11 +55,21 @@ import java.util.function.LongSupplier;
  * <li><b>In memory, this node only</b> — a map of in-flight keys to the future
  * of their turn, so a duplicate can <em>wait</em>, plus a short-lived copy of
  * the finished snapshot that bridges the moment between "the answer was handed
- * over" and "the step was persisted". Behind a NATS coordinator with several
- * nodes, a duplicate that lands on a different node than the running turn
- * cannot wait for it (and meets today's {@code 409}); once the turn has
- * completed the persisted lookup works on every node.</li>
+ * over" and "the step was persisted".</li>
  * </ul>
+ *
+ * <h2>Several nodes</h2>
+ * <p>
+ * In cluster mode a duplicate can land on a node other than the one running the
+ * turn, where the in-flight map cannot see it, and is admitted as an owner. It
+ * then queues for the conversation's lease behind the running turn and, when it
+ * gets it, finds the conversation superseded and is rebuilt over the current
+ * document — which is where {@link #isRecordedIn} catches it: the turn that
+ * committed in the meantime carries the same key, so the duplicate is answered
+ * as skipped ({@code 409} + {@code Retry-After}) instead of running a second
+ * time, and its retry is served the stored answer by the persisted lookup on
+ * any node. The lease makes the check and the run one step cluster-wide.
+ * </p>
  *
  * <p>
  * Keys are scoped to the conversation — the same key on two conversations is
@@ -396,6 +406,26 @@ public class TurnIdempotencyService {
             throw new InvalidIdempotencyKeyException("The idempotency key must not start or end with a space");
         }
         return raw;
+    }
+
+    /**
+     * Whether {@code snapshot} holds a turn recorded under {@code key} within the
+     * TTL — a duplicate of that turn must not run again.
+     */
+    public boolean isRecordedIn(ConversationMemorySnapshot snapshot, String key) {
+        return key != null && isEnabled() && findStoredStep(snapshot, key) >= 0;
+    }
+
+    /**
+     * A queued turn found, once it held the conversation's lease, that a turn with
+     * its own {@code Idempotency-Key} committed while it waited: it is a duplicate
+     * and is not run.
+     */
+    public static class TurnAlreadyRecordedException extends IllegalStateException {
+        public TurnAlreadyRecordedException(String conversationId) {
+            super("a turn with the same Idempotency-Key was recorded on conversation " + conversationId
+                    + " while this request waited for it; not running it twice");
+        }
     }
 
     /** A malformed {@code Idempotency-Key}; the REST layer answers 400. */

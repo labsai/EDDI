@@ -71,6 +71,18 @@ export interface ChatMessage {
    * on it. A flag rather than a match on the text, which is translated.
    */
   isError?: boolean;
+  /** Guardrails that fired on the turn this agent bubble answers, in order. */
+  guardrails?: GuardrailNotice[];
+}
+
+/**
+ * A guardrail that fired during a turn (`guardrail_triggered`). Carries what the
+ * backend sends and nothing of the screened text.
+ */
+export interface GuardrailNotice {
+  phase: string;
+  type: string;
+  action: string;
 }
 
 export type SSEEventType =
@@ -81,6 +93,7 @@ export type SSEEventType =
   | "tool_call"
   | "cascade_step_start"
   | "cascade_escalation"
+  | "guardrail_triggered"
   | "done"
   | "error";
 

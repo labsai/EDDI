@@ -150,6 +150,8 @@ Preserve the no-retry-after-start and dead-letter invariants; document the new p
 
 ### WS5 — Multi-node correctness (design decision + ≈1–2 weeks)
 
+> **Status 2026-10-17: done, superseded by cluster mode.** The facts below describe `main` before the NATS cluster work (#956, #957, #958, #970): the build-profile coordinator is gone, and `eddi.messaging.type=nats` gives per-conversation leases with fencing in a NATS KV bucket (a variant of Option A, with the lease in NATS rather than the database), cluster-wide nonces, rate limits, cost totals and audit positions, event-driven cache invalidation, deployment propagation and shared dead letters — see [`docs/clustering.md`](../docs/clustering.md). Idempotency keys are honoured across nodes by a re-check under the lease (`fix/cluster-resilience`). The per-model LLM circuit breaker stays per node, as intended. Read this section as history.
+
 **Facts (verified on `origin/main`)**
 - `NatsConversationCoordinator` publishes the conversation id (:360) and then **executes locally** (:381). The stream is `RetentionPolicy.WorkQueue` with file storage (:239) and a 24 h max age; the only subscriber is the dead-letter one (:611). Net: one synchronous JetStream write per turn that sits on disk for 24 h, and **no cross-node ordering**.
 - Two nodes can run the same conversation concurrently. The append path deliberately **merges** on revision conflict ("both turns survive", `ConversationMemoryStore` :289+), so a concurrent/zombie turn merges instead of failing.

@@ -34,7 +34,8 @@ plaintext to the URL in the request body.
   or `${vars:…}` value in `X-Mcp-Authorization` with a 400 instead of resolving
   it.
 - **Platform Operator** prompt: never set `allowedHosts`; ask for the endpoint
-  when a setup is refused for an unknown destination. Revision 17 → 18.
+  when a setup is refused for an unknown destination. Revision 17 → 18 on this
+  branch; `main` had moved to 18 in parallel, so the merge landed it as 19.
 - Docs: `docs/secrets-vault.md` ("Where a wizard key may be sent"),
   `docs/mcp-client.md`.
 
@@ -52,7 +53,9 @@ plaintext to the URL in the request body.
 - **`allowedHosts ["*"]` is wizard-request syntax only.** The secrets REST API
   still rejects `*` in `allowedHosts`, and still accepts a create without the
   field. Refusing that under enforce too would be a breaking change for the
-  Manager's Secrets page, so it is left as a follow-up.
+  Manager's Secrets page, so it is left as a follow-up. *Superseded by
+  `2026-10-17-fix-security-review-h1-leftovers.md`: a REST create under
+  enforce now requires `allowedHosts`, with `["*"]` as the explicit opt-out.*
 
 ### Tests
 

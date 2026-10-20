@@ -111,6 +111,28 @@ public class VaultHostAllowlist {
         return new ArrayList<>(distinct);
     }
 
+    /**
+     * The one entry that says "no destination restriction" out loud. It is accepted
+     * only alone, as {@code ["*"]}, and stored as the empty list every other layer
+     * already reads as unrestricted; it is never a pattern.
+     */
+    public static final String ANY_HOST = "*";
+
+    /** Whether a request list is exactly {@code ["*"]}. */
+    public static boolean isExplicitlyUnrestricted(List<String> allowedHosts) {
+        return allowedHosts != null && allowedHosts.size() == 1 && allowedHosts.getFirst() != null
+                && ANY_HOST.equals(allowedHosts.getFirst().trim());
+    }
+
+    /**
+     * {@link #validatedHosts} for a REST body that may also say {@code ["*"]}: that
+     * comes back as the empty list, which is what an unrestricted secret stores.
+     * {@code null} stays {@code null} ("not supplied").
+     */
+    public static List<String> requestedHosts(List<String> allowedHosts) {
+        return isExplicitlyUnrestricted(allowedHosts) ? List.of() : validatedHosts(allowedHosts);
+    }
+
     private static boolean validPort(String entry) {
         int colon = entry.lastIndexOf(':');
         if (colon < 0 || entry.endsWith("]")) {

@@ -171,6 +171,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.a2a.task-ttl` | `24h` | How long an A2A task/context mapping is kept in the shared bucket, so a peer's follow-up reaches the conversation whichever node it lands on |
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
+| `eddi.coordinator.dead-letter.max-bytes` | `1073741824` | Size cap of the dead-letter stream in bytes (`<= 0`: none). When full, new dead letters are refused — the oldest are kept for the operator — and stay in the node-local ring (audit entries go to the JSONL file) until there is room |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---
@@ -245,6 +246,18 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | Property | Default | Description |
 |---|---|---|
 | `eddi.rag.in-memory.max-segments` | `50000` | Most segments all `in-memory` knowledge bases may hold together. In-memory stores are never evicted, so this is what bounds their heap use — at 1536 dimensions, 50,000 segments are roughly 300 MB of vectors plus their text. A write past it fails (an ingestion run reports `FAILED` naming this setting) and nothing is evicted to make room. `0` or negative disables the cap — see [rag.md](rag.md#vector-stores) |
+
+---
+
+## Agent testing
+
+Full narrative: [agent-testing.md](agent-testing.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.agent-tests.max-parallel-cases` | `4` | Case repetitions of one run that execute at the same time, each a real conversation in the `test` environment |
+| `eddi.agent-tests.max-concurrent-runs` | `2` | Runs that may execute at once on one node; another start is answered 429 |
+| `eddi.agent-tests.max-runs-per-agent` | `50` | Run records kept per agent; older ones are deleted when a run finishes |
 
 ---
 
@@ -339,7 +352,7 @@ but redacts their content (`eddi.audit.erasure-mode`).
 | `eddi.audit.flush-interval-seconds` | `3` | Batch flush cadence |
 | `eddi.audit.max-queue-size` | `100000` | In-memory queue. When full, entries are **dropped** and counted by `eddi_audit_entries_dropped_total` — alert on it, because a non-zero value means the trail has holes |
 | `eddi.audit.dead-letter-path` | `/opt/eddi/data/eddi-audit-deadletter.jsonl` | Where undeliverable entries are written. **Must be on a persistent volume**, or dropped entries vanish with the container |
-| `eddi.audit.agent-signing-enabled` | `true` | Sign agent configurations for provenance |
+| `eddi.audit.agent-signing-enabled` | `true` | Sign each audit entry with the agent's Ed25519 key, when the vault holds one under `agent-signing-key:{agentId}`. An agent without a key is not looked up again for 60 s, so a key written into the vault by hand is used within a minute |
 | `eddi.audit.verify.recover-legacy` | `true` | Accept pre-HMAC rows during chain verification |
 | `eddi.audit.verify.recover-legacy-max-rows` | `500` | Cap on how many such rows are tolerated |
 | `eddi.audit.hmac-key` | *(empty)* | Independent signing secret for the ledger (`EDDI_AUDIT_HMAC_KEY`). Empty: the ledger signs with the key it pinned in the vault on first start, which a KEK rotation does not change. See [audit-ledger.md](audit-ledger.md#signing-keys-and-rotation) |
@@ -605,6 +618,7 @@ below. See [Enabling connections](connections.md#enabling-connections).
 |---|---|---|
 | `quarkus.otel.sdk.disabled` | `true` | Tracing is off until a collector exists. Set `false` (env `QUARKUS_OTEL_SDK_DISABLED=false`) together with the endpoint below; `docker-compose.monitoring.yml` and the Helm chart's `tracing.otlpEndpoint` value (under `eddi:`) do both |
 | `quarkus.otel.exporter.otlp.endpoint` | `http://localhost:4317` | OTLP gRPC endpoint spans are exported to |
+| `eddi.tracing.propagate-outbound` | `true` | Adds the W3C `traceparent`/`tracestate` of the current span (a tool call's `execute_tool` span) to EDDI's outbound calls — httpcalls, everything on the `OutboundHttp` facade (built-in tools, A2A, the RAG crawler, OAuth, Slack, …) and MCP (header and `params._meta`) — so downstream services join the trace. Never sends `baggage`, never overwrites an author-configured header, drops the headers on cross-origin redirects. Inert while `quarkus.otel.sdk.disabled=true`. Set `false` to keep EDDI's own spans without revealing trace ids. See [trace propagation](monitoring/monitoring-guide.md#trace-propagation-to-the-services-eddi-calls) |
 | `quarkus.micrometer.binder.http-server.max-uri-tags` | see `application.properties` | Distinct `uri` tag values `http_server_requests_seconds_*` may carry; requests past the cap are not measured. `http.server.requests` publishes no histogram buckets on purpose — buckets would multiply every one of these series — so the dashboards chart HTTP latency as mean and peak |
 | `quarkus.datasource.metrics.enabled` | `true` | Build-time. Publishes the Agroal pool meters (`agroal_*`) for the PostgreSQL datastore; on the MongoDB datastore the datasource is inactive and nothing is registered. MongoDB pool meters (`mongodb_driver_pool_*`) come from a listener on EDDI's own client and need no setting |
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |

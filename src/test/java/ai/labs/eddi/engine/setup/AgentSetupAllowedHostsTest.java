@@ -112,6 +112,16 @@ class AgentSetupAllowedHostsTest {
         }
 
         @Test
+        @DisplayName("an explicit LLM host list does not lock the setup-api apiAuth to the model provider")
+        void apiAuthKeepsItsDerivedHostsUnderAnExplicitLlmList() {
+            assertNull(AgentSetupService.apiAuthRequestedHosts(List.of("api.anthropic.com")),
+                    "an explicit LLM list must leave apiAuth to the generated calls' target hosts");
+            assertNull(AgentSetupService.apiAuthRequestedHosts(null));
+            assertEquals(List.of("*"), AgentSetupService.apiAuthRequestedHosts(List.of("*")),
+                    "an explicit [\"*\"] stores every wizard secret open, apiAuth included");
+        }
+
+        @Test
         @DisplayName("a named OpenAI-compatible provider is restricted to its catalog endpoints")
         void catalogProvider() {
             List<String> hosts = SetupSecretHosts.forLlm("deepseek", null);

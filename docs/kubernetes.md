@@ -726,6 +726,7 @@ helm install eddi ./helm/eddi \
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
 | `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %, memory 80 %) |
+| `autoscaling.extraMetrics` / `autoscaling.behavior` | `[]` / `{}` | Further `autoscaling/v2` metrics and scaling behavior, as given. CPU is a weak signal for a node that mostly waits on LLMs; scale on in-flight turns instead — see [Clustering → Autoscaling](clustering.md#autoscaling). A target set to `null` drops that metric |
 | `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |
 | `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |

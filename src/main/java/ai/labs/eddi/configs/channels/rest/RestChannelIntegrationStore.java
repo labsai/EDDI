@@ -16,6 +16,8 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
+import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -104,7 +106,16 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     @Override
     public ChannelIntegrationConfiguration readChannel(String id, Integer version) {
-        return restVersionInfo.read(id, version);
+        ChannelIntegrationConfiguration stored = restVersionInfo.read(id, version);
+        // An administrator sees the document as stored, so a plaintext credential can
+        // be found and moved into the vault; everyone else admitted here reads a copy
+        // with literals redacted (M1 of the 2026-10-17 review) - see
+        // ConfigSecretRedactor. ?version= reads go through the same path.
+        // A Slack signingSecret matters most here: its holder can forge
+        // /integrations/slack/* events.
+        return resourceAccessGuard != null && resourceAccessGuard.isAdmin()
+                ? stored
+                : ConfigSecretRedactor.redact(stored, ChannelIntegrationConfiguration.class);
     }
 
     @Override
@@ -231,6 +242,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     }
 
     void validateConfiguration(ChannelIntegrationConfiguration config) {
+        // A document read through the redacted view must not be stored with the
+        // marker in place of the credential — see RedactionMarkerGuard.
+        RedactionMarkerGuard.requireNone(config);
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }

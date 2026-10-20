@@ -383,7 +383,7 @@ Three properties are worth knowing:
 
 The agent grant says *which agent* may use a key. It says nothing about *where* the key goes: an editor who may change an agent's LLM configuration can point `baseUrl` at a host of their own, keep `apiKey: ${vault:openai-key}`, and the deploy-time check passes because the agent *is* granted the key. `${connection:…}` closes this with its `baseUrlAllowlist`; `${vault:…}` had nothing.
 
-A secret may now carry an optional **`allowedHosts`** list: the exact destinations it may be sent to.
+A secret carries an **`allowedHosts`** list: the exact destinations it may be sent to. Under `enforce` (the shipped default) a create must say what it is — see [Required on a create](#required-on-a-create) below.
 
 ```bash
 # At creation, with the value ...
@@ -399,10 +399,24 @@ curl -X PUT "$EDDI/secretstore/secrets/default/openai-key/grant" \
 
 - **Entries are exact `host` or `host:port`** — no scheme, no path, no wildcard, compared case-insensitively. `host` alone admits that host on any port; `host:port` admits only that port, where the destination's port is the one in its URL or the scheme default (443 for `https`, 80 for `http`). There is no suffix matching: `example.com` admits neither `api.example.com` nor `example.com.attacker.net`. At most 100 entries.
 - **Enforced where the reference is resolved for an outbound request**, because that is the only moment the destination is known: an HTTP call (`httpcalls.json` — URL, headers, body and query parameters are all collected and checked against the fully resolved target URL before anything is sent), an LLM provider's configured endpoint (`baseUrl`, `endpoint`, `url`, `serverUrl` or `host` in `langchain.json`), an embedding model's `baseUrl` or `endpoint` in a RAG configuration, every host a vector store connects to (pgvector and Qdrant `host:port`, the Elasticsearch `serverUrl`, the Chroma `baseUrl`, each host of a MongoDB Atlas connection string — checked after the string is decrypted, since it is often the secret itself, and before anything connects; for `mongodb+srv://` that is the SRV name, which is the entry to list: the driver resolves it to replica-set hosts only within that name's parent domain, so the list trusts whoever controls that DNS zone), an MCP server's `url` for a static `apiKey`, and an A2A peer's URL — for a task call, the endpoint the peer's agent card announced, which need not be the configured host. A refusal names the reference, the destination and the list — none of them a secret — and the `PUT …/grant` call that fixes it; the call, the build or the discovery fails (an MCP server is reported as `INVALID_CONFIGURATION`), the key is not sent. A list that cannot be read is treated the same way: a key whose destinations are unknown is not a key that may go anywhere.
-- **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing until an operator sets it. `[]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
+- **Absent or empty means any destination.** That is what every secret stored before the field existed has, so adding the field changes nothing for those until an operator sets it. `[]` or `["*"]` on the grant endpoint removes a restriction; an omitted field on a rotation or a grant edit keeps the stored list.
 - **Changing the list evicts what was built with the old one.** Models, embedding models and stores and MCP clients are checked when they are built and then cached, so a grant edit that sets `allowedHosts` also invalidates the secret's cache entry, and every cache listening for that rebuilds — re-checking — on next use.
 - **What it does not cover.** An LLM or embedding configuration with *no* endpoint parameter uses the provider's own default endpoint, which an editor cannot choose, so it is not checked — the list exists to stop an editor-chosen destination, not a vendor's.
-- **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+- **Returned in the metadata** (`GET …/{tenantId}/{keyName}`, the list endpoint, the grant response, and a space's secret list) as `allowedHosts`. The Manager's Secrets page shows a restricted secret's hosts under its agent grant and edits them in the **Access** dialog, which sends the list only when it changed (removing every host sends `[]`).
+- **Secrets that are still open are named at startup.** Every secret vaulted before the setup wizard started setting `allowedHosts` — and any an admin stored without it — may still be sent anywhere. Nothing narrows them automatically (only you know which host a key belongs to, and a wrong guess breaks a working agent). Instead, when the vault is enabled, `UnrestrictedSecretsCheck` scans the current version of every LLM, MCP-calls, RAG, httpcalls and channel configuration for `${vault:…}` references after boot and logs **one** `[SECURITY]` WARN listing each referenced secret without `allowedHosts` as `tenant/key`, the configurations that use it, and the `PUT …/grant` call above. The list endpoint (`GET /secretstore/secrets/{tenantId}`) carries the same information per entry: `unrestrictedDestination: true` when `allowedHosts` is empty (live), and `referencedBy`, the configurations the last complete scan found (absent until one has finished — also after a scan that could not read every configuration, which says so in a second `[SECURITY]` WARN rather than report a shorter list as complete). The scan does not follow `${vars:…}` or `${connection:…}` indirection and reads current configuration versions only.
+
+### Required on a create
+
+`allowedAgents` limits which agents may reference a secret, but any editor can write a configuration that sends a referenced secret to a URL of their choosing, so a secret created without `allowedHosts` went wherever the next configuration edit pointed it (security review 2026-10-17, H1). Under `eddi.vault.grant-enforcement=enforce` a **create** — through `PUT /secretstore/secrets/{tenantId}/{keyName}` or a space's `PUT /spacestore/secrets/{key}` — therefore has to say where the secret may go, the same way it already has to say which agents may use it:
+
+| `allowedHosts` on a create | Result under `enforce` |
+| --- | --- |
+| omitted | **400**, naming the field and the `["*"]` opt-out |
+| `[]` | **400** — every layer reads an empty list as "any host", so a list filtered down to nothing must not create an open secret |
+| `["*"]` | stored with no destination restriction, said out loud. `"*"` is only accepted alone; it is never a pattern |
+| `["api.openai.com", …]` | stored as given, validated as above |
+
+Under `warn` and `off` an omitted list still creates an unrestricted secret. A **rotation** may omit the list in every mode and keeps the stored one. The setup wizard derives the list itself ([Where a wizard key may be sent](#where-a-wizard-key-may-be-sent)), and the Manager's **Add Secret** dialog, its inline create in the secret picker and the Workspaces page ask for it, offering *Any host* as the explicit choice.
 
 ## Encryption
 
@@ -430,8 +444,11 @@ generations existed carries no generation and reads as generation 1.
 data `tenantId|keyName|dekId`, so a ciphertext copied into another row by someone
 with write access to the database fails authentication instead of decrypting as that
 row's value. Rows written before this keep decrypting through a no-AAD fallback, so
-nothing has to be migrated; a DEK rotation re-seals a tenant's secrets in the bound
-form. System values (such as the pinned audit key) are bound to their name and have
+nothing has to be migrated, and the fallback retires itself: the first time such a row
+is resolved it is re-sealed in the bound form in place (same value, same DEK
+generation, not counted as a rotation), guarded on the IV it was read with so a
+concurrent store or DEK rotation always wins, and logged once per key. A DEK rotation
+still re-seals every remaining row, including those never read. System values (such as the pinned audit key) are bound to their name and have
 no unbound form. Wrapped DEKs are not bound.
 
 **Sealed runtime data is bound too.** OAuth connection grants are sealed through the
@@ -532,7 +549,7 @@ eddi.vault.grant-enforcement=enforce
 eddi.setup.vault-key-reuse=checksum
 ```
 
-> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset` clears each tenant's unrecoverable entries so it can start fresh.
+> **⚠️ Important:** The vault master key encrypts all stored API keys. If the master key is lost, all encrypted secrets become **permanently unrecoverable**. Back up your `~/.eddi/.env` file. If the key has already changed and the old one is unavailable, follow [Lost master key](#lost-master-key): adopt the new key with `POST /secretstore/secrets/admin/adopt-master-key?confirm=true`, then `POST /secretstore/secrets/{tenantId}/reset?confirm=true` clears each tenant's unrecoverable entries so it can start fresh.
 
 ## Secret Input (Agent Conversations)
 
@@ -730,7 +747,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 | Method   | Path                         | Description                                            |
 | -------- | ---------------------------- | ------------------------------------------------------ |
-| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …, "allowedHosts": …}`). A create under `enforce` must carry `allowedAgents` |
+| `PUT`    | `/{tenantId}/{keyName}`      | Store a secret (JSON body: `{"value": …, "description": …, "allowedAgents": …, "allowedHosts": …}`). A create under `enforce` must carry `allowedAgents` and `allowedHosts` |
 | `PUT`    | `/{tenantId}/{keyName}/grant` | Replace `allowedAgents` (and optionally the description and `allowedHosts`) **without** the value — see [Changing a grant](#changing-a-grant-without-the-secrets-value) and [Destination allow-list](#destination-allow-list-allowedhosts). `?dryRun=true` previews the impact without writing |
 | `POST`   | `/{tenantId}/{keyName}/grant/agents/{agentId}` | Add one agent to `allowedAgents`, atomically and idempotently; never changes a `*` grant — see [Adding one agent](#adding-one-agent-to-a-grant). `?dryRun=true` previews |
 | `DELETE` | `/{tenantId}/{keyName}`      | Delete a secret                                        |
@@ -739,20 +756,21 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
 | `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
-| `POST`   | `/{tenantId}/reset`          | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable |
+| `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
 > **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
-**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, the agent grant list and an optional [destination allow-list](#destination-allow-list-allowedhosts). On a **create**, `allowedAgents` is required under `eddi.vault.grant-enforcement=enforce` (the default) — send `["*"]` to grant every agent explicitly; under `warn` and `off` an omitted list still defaults to `["*"]`. On an **update** — rotating the value — an omitted `allowedAgents`, `allowedHosts` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
+**`PUT /{tenantId}/{keyName}`** — the request body carries the plaintext value, an optional description, the agent grant list and the [destination allow-list](#destination-allow-list-allowedhosts). On a **create**, `allowedAgents` and `allowedHosts` are required under `eddi.vault.grant-enforcement=enforce` (the default) — send `["*"]` to grant every agent, or to allow any host, explicitly; under `warn` and `off` an omitted `allowedAgents` still defaults to `["*"]` and an omitted `allowedHosts` leaves the secret unrestricted ([Required on a create](#required-on-a-create)). On an **update** — rotating the value — an omitted `allowedAgents`, `allowedHosts` or `description` keeps what is stored: a rotation used to reset a narrowed grant to `["*"]` and wipe the description whenever the client did not restate them.
 
 ```json
 {
   "value": "sk-...",
   "description": "OpenAI production key",
-  "allowedAgents": ["*"]
+  "allowedAgents": ["*"],
+  "allowedHosts": ["api.openai.com"]
 }
 ```
 
@@ -791,7 +809,7 @@ It returns the vault reference:
 }
 ```
 
-**`POST /{tenantId}/reset`** — deletes every secret and the DEK for the tenant:
+**`POST /{tenantId}/reset?confirm=true`** — deletes every secret and the DEK for the tenant (without `confirm=true`: `400`, `{"error": "confirm=true is required", …}`):
 
 ```json
 {
@@ -981,7 +999,7 @@ When the previous master key is **gone for good**:
      keyed-checksum key if it no longer unwraps (`checksumKeyReset`; a new one is
      created on the next store);
    - answers with `tenantsNeedingReset`, the tenants whose DEKs the key cannot open.
-3. `POST /secretstore/secrets/{tenantId}/reset` for each of them, then store the
+3. `POST /secretstore/secrets/{tenantId}/reset?confirm=true` for each of them, then store the
    secrets again.
 
 Never call it while a KEK rotation is merely unfinished, or because one replica was
@@ -995,7 +1013,7 @@ at startup, because nothing can be stranded.
 
 #### Resetting a tenant
 
-`POST /{tenantId}/reset` deletes every secret and every DEK generation of the tenant,
+`POST /{tenantId}/reset?confirm=true` deletes every secret and every DEK generation of the tenant,
 and — before the DEKs go — everything else sealed with them, such as the tenant's
 [OAuth connection grants](connections.md); their users reconnect. Left in place those
 values were not merely unreadable: the tenant's next DEK is generation 1 again, with
@@ -1082,12 +1100,21 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
+| Google (`AIza…`), xAI (`xai-…`), Groq (`gsk_…`), GitHub (`ghp_…`, `github_pat_…`), Slack (`xoxb-…` and siblings), AWS access key ids (`AKIA…`/`ASIA…`), bare JWTs (`eyJ….eyJ….…`) | `<REDACTED>` | `xoxb-1234-…` → `<REDACTED>` |
+| `Authorization: Basic\|Token\|Digest …` | `Authorization: Basic <REDACTED>` | the credential after the scheme word, which the name rule (stopping at the space) used to leave. A `Digest` header loses its whole directive list (`username`, `nonce`, `response`, …), not only the first token |
+| `Basic <base64>` with no header name in front | `Basic <REDACTED>` | only when the token decodes to `user:password` (printable text around a colon), so `Basic configuration` stays prose |
+| `Ocp-Apim-Subscription-Key: …` (`api-key:` / `x-api-key:` are matched by the API key rule) | `Ocp-Apim-Subscription-Key: <REDACTED>` | |
+| Database connection-string password (`mongodb(+srv)://`, `postgres(ql)://`, `mysql://`, `redis(s)://`, `amqp(s)://`) | `mongodb://user:<REDACTED>@host` | the host stays legible |
 
 > A bare `${vault:...}` reference is deliberately **not** redacted — it is a pointer, not a secret, and hiding it removes exactly the information an approver needs to judge a request. A reference followed by extra value material (`${vault:k}SECRET-TAIL`) **is** redacted as a whole.
 
 ### Export Sanitization
 
 `SecretScrubber` removes plaintext secrets from agent export (backup) payloads — detected by field name, by credentials embedded in a URL, and by Shannon entropy — replacing each with `${vault:REDACTED}`. This prevents secrets from leaking when agents are shared or exported. Existing `${vault:...}` / `${eddivault:...}` references are deliberately left intact: a reference is a pointer to a secret, not the secret itself.
+
+### Configuration Read Redaction
+
+`ConfigSecretRedactor` is applied by the LLM, MCP-calls, httpcalls, RAG and channel stores whenever a caller who is not `eddi-admin` reads a document (including `?version=` reads and MCP `read_resource`). A plaintext credential — by field name anywhere in the document, by header name in a header map, as a userinfo password or credential-named query value in a URL, or by shape in an httpcall body — is replaced; a `${vault:…}`, `${vars:…}`, `${connection:…}` or `${caller:…}` reference is returned as it is. A write that carries the marker back is refused with a `400` naming the fields. Details in [Security → Editors never read a plaintext credential back](security.md#editors-never-read-a-plaintext-credential-back).
 
 ### Memory Protection
 

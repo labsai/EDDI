@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
+import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
   {
@@ -289,7 +290,7 @@ function isNotAnId(pathname: string): boolean {
  * be swallowed. `groupstore` was, silently, for as long as this list said only
  * `channelstore`.
  */
-const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore"];
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore", "testsuitestore"];
 
 /**
  * The extension each resource store stamps on its `eddi://` URIs — the backend's
@@ -308,6 +309,7 @@ const STORE_EXTENSIONS: Record<string, string> = {
   ragstore: "ai.labs.rag",
   snippetstore: "ai.labs.snippet",
   parserstore: "ai.labs.parser",
+  testsuitestore: "ai.labs.testsuite",
 };
 
 /**
@@ -969,14 +971,31 @@ export const handlers = [
   // the list the page re-reads. Values are never returned, as on the server.
   http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
   http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { description?: string };
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+      allowedHosts?: string[];
+    };
     const key = String(params.key);
+    const existing = (readSpaceStore(request, "secrets") as { keyName: string; allowedAgents?: string[]; allowedHosts?: string[]; createdAt?: string }[])
+      .find((s) => s.keyName === key);
+    // Both lists are required on a create under grant-enforcement=enforce (the
+    // shipped default); `["*"]` is the explicit "every agent" / "any host". A
+    // rotation may omit either and keeps the stored one.
+    if (!existing && (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0)) {
+      return HttpResponse.json({ error: "allowedAgents is required on create" }, { status: 400 });
+    }
+    if (!existing && (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0)) {
+      return HttpResponse.json({ error: "allowedHosts is required on create" }, { status: 400 });
+    }
+    const anyHost = body.allowedHosts?.length === 1 && body.allowedHosts[0] === "*";
     const secret = {
       keyName: key,
       reference: `\${vault:${tenantOf(request)}/${key}}`,
       description: body.description ?? null,
-      allowedAgents: ["*"],
-      createdAt: new Date().toISOString(),
+      allowedAgents: body.allowedAgents ? [...body.allowedAgents] : (existing?.allowedAgents ?? ["*"]),
+      allowedHosts: body.allowedHosts ? (anyHost ? [] : [...body.allowedHosts]) : (existing?.allowedHosts ?? []),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
     };
     writeSpaceStore(request, "secrets", key, secret);
     return HttpResponse.json(secret);
@@ -4173,9 +4192,11 @@ export const secretsHandlers = [
       if (!dryRun) {
         existing.allowedAgents = [...body.allowedAgents];
         if (body.description !== undefined) existing.description = body.description;
-        // Present means "replace"; `[]` lifts the restriction, as on the backend.
+        // Present means "replace"; `[]` or `["*"]` lifts the restriction, as on the backend.
         if (body.allowedHosts !== undefined) {
-          existing.allowedHosts = body.allowedHosts.length > 0 ? [...body.allowedHosts] : undefined;
+          const lifts =
+            body.allowedHosts.length === 0 || (body.allowedHosts.length === 1 && body.allowedHosts[0] === "*");
+          existing.allowedHosts = lifts ? undefined : [...body.allowedHosts];
         }
       }
       const allowedHosts = body.allowedHosts ?? existing.allowedHosts;
@@ -4249,14 +4270,28 @@ export const secretsHandlers = [
     const body = (await request.json().catch(() => ({}))) as {
       description?: string;
       allowedAgents?: string[];
+      allowedHosts?: string[];
     };
     const now = new Date().toISOString();
     const existing = findMockSecret(tenantId, keyName);
+    // `["*"]` is the explicit "no restriction", stored as no list at all.
+    const storedHosts = (hosts: string[]) => (hosts.length === 1 && hosts[0] === "*" ? undefined : [...hosts]);
     if (existing) {
       existing.lastRotatedAt = now;
       if (body.description !== undefined) existing.description = body.description;
       if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+      // Omitted on an update keeps the stored list, as on the backend.
+      if (body.allowedHosts) existing.allowedHosts = storedHosts(body.allowedHosts);
     } else {
+      // Under grant-enforcement=enforce (the shipped default) a create must say
+      // where the secret may go: hosts, or the explicit ["*"]. An empty list is
+      // refused too — it would read as "anywhere" without anybody saying so.
+      if (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedHosts is required on create: list the hosts, or [\"*\"] for any host" },
+          { status: 400 },
+        );
+      }
       secretsState.push({
         tenantId,
         keyName,
@@ -4266,6 +4301,7 @@ export const secretsHandlers = [
         checksum: "0".repeat(64),
         description: body.description ?? "",
         allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+        allowedHosts: storedHosts(body.allowedHosts),
       });
     }
     const ref = tenantId === "default"
@@ -5939,5 +5975,125 @@ export const connectionHandlers = [
     // 204 whether or not a grant existed — whether a given user had linked a
     // given connection is not something a caller learns by probing.
     return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ---------------------------------------------------------------------------
+// Agent regression harness — test suites (`/testsuitestore/testsuites`) and runs
+// (`/agenttests/runs`). Its own group rather than `createResourceHandlers`
+// because that factory also mocks `jsonSchema` and `POST /{id}` (duplicate),
+// which this store does not have — see ResourceTypeConfig.duplicable/jsonSchema.
+// ---------------------------------------------------------------------------
+
+/** Runs started through the mock, by id. A RUNNING run turns PASSED after `MOCK_RUN_DURATION_MS`. */
+const startedMockRuns = new Map<string, ReturnType<typeof buildRunningRun>>();
+export const MOCK_RUN_DURATION_MS = 4000;
+
+function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
+  if (Date.now() - run.startedAt < MOCK_RUN_DURATION_MS) return run;
+  const [, passed] = buildMockRuns(run.agentId);
+  return {
+    ...passed!,
+    id: run.id,
+    suiteId: run.suiteId,
+    suiteVersion: run.suiteVersion ?? passed!.suiteVersion,
+    agentVersion: run.agentVersion,
+    startedAt: run.startedAt,
+    finishedAt: run.startedAt + MOCK_RUN_DURATION_MS,
+    durationMs: MOCK_RUN_DURATION_MS,
+  };
+}
+
+/**
+ * The suite store: id -> every saved version (index 0 is version 1). The list,
+ * a read, a create, a save and a delete all go through it, so a suite created or
+ * edited in mock mode is the one the list and the run picker then show.
+ */
+const suiteStore = new Map<string, { docs: unknown[]; createdOn: number; lastModifiedOn: number }>();
+function seedSuites() {
+  suiteStore.clear();
+  const t = Date.now();
+  suiteStore.set("res1", { docs: [MOCK_SUITE], createdOn: t - 86400000, lastModifiedOn: t - 3600000 });
+}
+seedSuites();
+/** Restores the seeded suite; tests that save or create suites call it in afterEach. */
+export function resetAgentTestMockState(): void {
+  seedSuites();
+  startedMockRuns.clear();
+}
+
+export const agentTestHandlers = [
+  http.get("*/testsuitestore/testsuites/descriptors", () => {
+    return HttpResponse.json(
+      [...suiteStore.entries()].map(([id, s]) => ({
+        resource: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${s.docs.length}`,
+        name: ((s.docs[s.docs.length - 1] as { name?: string }).name ?? "") || id,
+        description: ((s.docs[s.docs.length - 1] as { description?: string }).description ?? ""),
+        createdOn: s.createdOn,
+        lastModifiedOn: s.lastModifiedOn,
+        deleted: false,
+      }))
+    );
+  }),
+  http.get("*/testsuitestore/testsuites/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (isNotAnId(url.pathname)) return;
+    const stored = suiteStore.get(String(params.id));
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const version = Number(url.searchParams.get("version") ?? stored.docs.length);
+    return HttpResponse.json((stored.docs[version - 1] ?? stored.docs[stored.docs.length - 1]) as Record<string, unknown>);
+  }),
+  http.post("*/testsuitestore/testsuites", async ({ request }) => {
+    const id = `suite${String(suiteStore.size + 1).padStart(20, "0")}`;
+    const t = Date.now();
+    suiteStore.set(id, { docs: [await request.json()], createdOn: t, lastModifiedOn: t });
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/testsuitestore/testsuites/${id}?version=1` },
+    });
+  }),
+  http.put("*/testsuitestore/testsuites/:id", async ({ request, params }) => {
+    const id = String(params.id);
+    const stored = suiteStore.get(id);
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    stored.docs.push(await request.json());
+    stored.lastModifiedOn = Date.now();
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${stored.docs.length}` },
+    });
+  }),
+  http.delete("*/testsuitestore/testsuites/:id", ({ params }) => {
+    suiteStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/agenttests/runs", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId") ?? "";
+    const started = [...startedMockRuns.values()].filter((r) => r.agentId === agentId).map(settleMockRun);
+    const all = [...started.reverse(), ...buildMockRuns(agentId)];
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
+  }),
+  http.get("*/agenttests/runs/:runId", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (started) return HttpResponse.json(settleMockRun(started));
+    // Fixture runs carry an agent id of their own; the id is all the lookup needs.
+    const found = buildMockRuns("agent1").find((r) => r.id === runId);
+    return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
+  http.post("*/agenttests/runs", async ({ request }) => {
+    const body = (await request.json()) as {
+      suiteId: string;
+      agentId: string;
+      suiteVersion?: number;
+      agentVersion?: number;
+    };
+    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion, body.agentVersion);
+    startedMockRuns.set(run.id, run);
+    return HttpResponse.json(run, { status: 202 });
   }),
 ];

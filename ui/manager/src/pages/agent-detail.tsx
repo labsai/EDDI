@@ -2,6 +2,7 @@ import { ConversationReviewSection } from "@/components/editors/conversation-rev
 import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
+import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
 import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
@@ -87,6 +88,7 @@ import {
   UserMemorySection,
   MemoryPolicySection,
   SessionManagementSection,
+  LimitsSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -265,9 +267,18 @@ export function AgentDetailPage() {
     [agent, editable, configPending],
   );
 
+  /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
+  const [ceilingInvalid, setCeilingInvalid] = useState(false);
+
   /** Writes the draft as one new version. Resolves whether it landed. */
   const saveDraft = useCallback(async (): Promise<boolean> => {
     if (!draft || !isDirty) return true;
+    // Every save path comes through here — the buttons, the shortcut and the
+    // leave-page guard — so this is the one place that can refuse them all.
+    if (ceilingInvalid) {
+      toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
+      return false;
+    }
     const sent = draft;
     try {
       const result = await updateAgentMutation.mutateAsync({ id: id!, version: resolvedVersion, agent: sent });
@@ -300,7 +311,7 @@ export function AgentDetailPage() {
       }
       return false;
     }
-  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t]);
+  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t, ceilingInvalid]);
 
   useEffect(() => {
     if (!rebaseFrom || !agent || agent === rebaseFrom) return;
@@ -495,6 +506,7 @@ export function AgentDetailPage() {
     touched("enableMemoryTools", "userMemoryConfig"),
     touched("memoryPolicy"),
     touched("sessionManagement"),
+    touched("maxCostPerConversationUsd"),
     touched("conversationReview"),
     touched("hitlConfig"),
     touched("channels"),
@@ -997,6 +1009,9 @@ export function AgentDetailPage() {
         modified={touched("conversationReview")}
       />
 
+      {/* Spend limits */}
+      <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
+
       {/* Human-in-the-Loop */}
       <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
 
@@ -1006,6 +1021,10 @@ export function AgentDetailPage() {
       {/* Raw config (collapsible) */}
       <RawConfigSection agent={doc} />
       </fieldset>
+
+      {/* Golden conversations: runs the SAVED version, so it sits outside the
+          draft fieldset — nothing here edits the agent document. */}
+      <AgentTestsSection key={id} agentId={id!} agentVersion={resolvedVersion} />
 
       {/* Floating save bar — the header's controls scroll away on a page this
           long, and the edit is usually made far below them. */}

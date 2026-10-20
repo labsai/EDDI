@@ -19,6 +19,7 @@ import {
   type ChatMessage,
   type MessageAttachment,
   type SSEEvent,
+  type GuardrailNotice,
 } from "@/lib/api/chat";
 import {
   buildAttachmentContext,
@@ -1161,6 +1162,10 @@ function handleSSEEvent(
                       content: snapshotText,
                       timestamp: prev.timestamp,
                       isStreaming: prev.isStreaming,
+                      // A blocked or rewritten answer often arrives with no token
+                      // at all: this back-fill is its only text, and the notice
+                      // that explains it must survive the replacement.
+                      guardrails: prev.guardrails,
                     };
                   }
                   return { messages: updated };
@@ -1356,6 +1361,32 @@ function handleSSEEvent(
         totalSteps,
         timestamp: Date.now(),
       });
+      return false;
+    }
+    case "guardrail_triggered": {
+      // A guardrail fired. Pure observability: the turn's text already shows the
+      // outcome (a block message, a rewritten answer); this says why. The
+      // payload is `{type, phase, action, taskId}` and never the screened text.
+      try {
+        const parsed = JSON.parse(event.data);
+        if (typeof parsed.type === "string" && parsed.type) {
+          const notice: GuardrailNotice = {
+            type: parsed.type,
+            phase: typeof parsed.phase === "string" ? parsed.phase : "",
+            action: typeof parsed.action === "string" ? parsed.action : "",
+          };
+          store.setState((s) => {
+            const msgs = [...s.messages];
+            const last = msgs[msgs.length - 1];
+            if (last?.role === "agent") {
+              msgs[msgs.length - 1] = { ...last, guardrails: [...(last.guardrails ?? []), notice] };
+            }
+            return { messages: msgs };
+          });
+        }
+      } catch {
+        // Malformed payload — nothing to show.
+      }
       return false;
     }
     case "cascade_escalation": {

@@ -6,9 +6,16 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
 import dev.langchain4j.exception.ToolArgumentsException;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -151,6 +158,26 @@ public class ToolExecutionService {
     private final AtomicInteger runningWorkers = new AtomicInteger();
 
     private final AtomicInteger awaitedWorkers = new AtomicInteger();
+
+    /** Instrumentation scope of the {@code execute_tool} spans. */
+    static final String TRACER_NAME = "eddi.tools";
+
+    /** Span name prefix; the tool's dispatch name follows, per GenAI semconv. */
+    static final String SPAN_NAME_PREFIX = "execute_tool ";
+
+    static final String OPERATION_EXECUTE_TOOL = "execute_tool";
+
+    /** Whether the result came from the tool-result cache rather than the tool. */
+    static final String ATTR_CACHE_HIT = "eddi.tool.cache_hit";
+
+    static final String ATTR_ERROR_TYPE = "error.type";
+
+    /**
+     * Resolved on first use by {@link #tracer()}. Package-private so a test can
+     * install an SDK tracer directly instead of replacing the JVM-wide
+     * {@link GlobalOpenTelemetry}, which other test classes share.
+     */
+    volatile Tracer tracer;
 
     @Inject
     ToolCacheService cacheService;
@@ -296,12 +323,19 @@ public class ToolExecutionService {
             meterRegistry.counter("eddi.tool.cache.bypassed", "tool", toolName).increment();
         }
 
-        try {
+        // One execute_tool span per call, CURRENT for the whole call: an outbound
+        // request the tool makes (httpcalls, OutboundHttp, A2A, MCP) becomes its
+        // child, and the traceparent it propagates names this span. carryContext
+        // below picks it up from Context.current() for a time-bounded call, so the
+        // worker thread sees the same parent.
+        Span span = startToolSpan(toolName);
+        try (Scope ignored = span.makeCurrent()) {
             // 1. Check rate limit — per conversation, so one conversation exhausting
             // its allowance cannot starve the same tool for every other user.
             if (enableRateLimiting && !rateLimiter.tryAcquire(conversationId, toolName, rateLimit)) {
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                 meterRegistry.counter("eddi.tool.execution.ratelimited", "tool", toolName).increment();
+                markFailed(span, "rate_limited");
                 return "Error: Rate limit exceeded for tool: " + toolName;
             }
 
@@ -311,6 +345,7 @@ public class ToolExecutionService {
                 if (cachedResult != null) {
                     meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
                     meterRegistry.counter("eddi.tool.execution.cached", "tool", toolName).increment();
+                    span.setAttribute(ATTR_CACHE_HIT, true);
                     return cachedResult;
                 }
             }
@@ -321,6 +356,7 @@ public class ToolExecutionService {
             // held the conversation turn open for as long as it felt like. The wait
             // is bounded here rather than in each of the seven tool sources because
             // this is the one place all of them pass through.
+            span.setAttribute(ATTR_CACHE_HIT, false);
             String result = executeBounded(toolExecution, timeoutMs);
 
             // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
@@ -365,6 +401,7 @@ public class ToolExecutionService {
             meterRegistry.counter("eddi.tool.execution.timeout", "tool", toolName).increment();
             LOGGER.warnf("Tool '%s' exceeded its %dms execution timeout and was abandoned; the model was told so.",
                     toolName, timedOut.timeoutMs);
+            markFailed(span, "timeout");
             return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
 
         } catch (Exception e) {
@@ -372,8 +409,67 @@ public class ToolExecutionService {
             // charged, whatever kind it is.
             long executionTime = System.currentTimeMillis() - startTime;
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            markFailed(span, e.getClass().getName());
             return describeFailure(toolName, executionTime, e);
+        } finally {
+            span.end();
         }
+    }
+
+    /**
+     * Opens the {@code execute_tool} span for one call, per the OpenTelemetry GenAI
+     * semantic conventions (the revision pinned by
+     * {@link LlmTelemetryListener#SEMCONV_SCHEMA_VERSION}).
+     *
+     * <p>
+     * Every call gets one — including a rate-limited call and a cache hit, which
+     * never reach the tool. Both are a span start and end on a no-op tracer when
+     * OTel is off, and when it is on they are exactly what an operator looking at a
+     * slow or odd turn needs to see: the model asked for this tool, and it was
+     * refused ({@code error.type=rate_limited}) or answered from the cache
+     * ({@code eddi.tool.cache_hit=true}) rather than not asked at all.
+     * </p>
+     *
+     * <p>
+     * {@code INTERNAL}, not {@code CLIENT}: the tool is EDDI code. The outbound
+     * request a tool makes is the client span, and it is this span's child.
+     * </p>
+     */
+    private Span startToolSpan(String toolName) {
+        var builder = tracer().spanBuilder(SPAN_NAME_PREFIX + toolName)
+                .setSpanKind(SpanKind.INTERNAL)
+                .setAttribute("gen_ai.operation.name", OPERATION_EXECUTE_TOOL)
+                .setAttribute("gen_ai.tool.name", toolName)
+                .setAttribute("eddi.semconv.schema_version", LlmTelemetryListener.SEMCONV_SCHEMA_VERSION);
+        ToolCallTrace call = ToolCallTrace.current();
+        if (call != null) {
+            if (call.callId() != null && !call.callId().isBlank()) {
+                builder.setAttribute("gen_ai.tool.call.id", call.callId());
+            }
+            if (call.source() != null) {
+                builder.setAttribute("eddi.tool.source", call.source());
+            }
+        }
+        return builder.startSpan();
+    }
+
+    private static void markFailed(Span span, String errorType) {
+        span.setAttribute(ATTR_ERROR_TYPE, errorType);
+        span.setStatus(StatusCode.ERROR);
+    }
+
+    /**
+     * Resolved lazily, for the reason {@code LlmTelemetryListener} gives:
+     * {@link GlobalOpenTelemetry} is a no-op until Quarkus installs the SDK, and a
+     * tracer fetched before that would stay a no-op for the life of the bean.
+     */
+    private Tracer tracer() {
+        Tracer current = tracer;
+        if (current == null) {
+            current = GlobalOpenTelemetry.getTracer(TRACER_NAME);
+            tracer = current;
+        }
+        return current;
     }
 
     /**
@@ -560,8 +656,9 @@ public class ToolExecutionService {
      * {@link CallerIdentityContext#propagate} — the single place that pairing is
      * maintained, so a {@code ${caller:token}} header and a {@code PER_USER}
      * connection resolve on the worker exactly as they would inline;</li>
-     * <li>the OpenTelemetry context, so spans a tool opens stay children of the
-     * {@code eddi.pipeline.task} span instead of becoming roots.</li>
+     * <li>the OpenTelemetry context, so spans a tool opens — and the
+     * {@code traceparent} its outbound requests carry — stay children of this
+     * call's {@code execute_tool} span instead of becoming roots.</li>
      * </ul>
      */
     private Callable<String> carryContext(Supplier<String> toolExecution) {

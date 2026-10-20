@@ -38,6 +38,13 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     int findSecretCalls;
     int updateSecretGrantCalls;
     int findDekCalls;
+    int resealInPlaceCalls;
+
+    /**
+     * When set, runs at the start of {@link #resealSecretInPlace} — a concurrent
+     * writer landing between a read and its write-back, made deterministic.
+     */
+    Runnable beforeResealInPlace;
 
     /**
      * When set, every {@link #getMetaValue} throws it — a transient store error.
@@ -174,6 +181,21 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         stored.setIv(secret.getIv());
         stored.setDekId(secret.getDekId());
         stored.setLastRotatedAt(secret.getLastRotatedAt());
+        return true;
+    }
+
+    @Override
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        resealInPlaceCalls++;
+        if (beforeResealInPlace != null) {
+            beforeResealInPlace.run();
+        }
+        EncryptedSecret stored = secrets.get(key(tenantId, keyName));
+        if (stored == null || !Objects.equals(stored.getDekId(), dekId) || !Objects.equals(stored.getIv(), expectedIv)) {
+            return false;
+        }
+        stored.setEncryptedValue(encryptedValue);
+        stored.setIv(iv);
         return true;
     }
 

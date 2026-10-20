@@ -211,6 +211,34 @@ class RestApiCallsStoreBranchTest {
             assertFalse(error.contains("POST /secretstore"), error);
         }
 
+        /**
+         * Security review 2026-10-17, H1 (follow-up to the discover-tools fix): the
+         * spec URL and the base URL are the caller's, so resolving authHeaderRef here
+         * would send the secret's plaintext wherever the request points. Discovery
+         * never resolves it; it copies the reference into the generated calls, where it
+         * is resolved at call time against the secret's grant and allowedHosts. This
+         * pins that: the reference comes back as written.
+         */
+        @Test
+        @DisplayName("a ${vault:…} or ${vars:…} authHeaderRef is copied into the generated calls unresolved")
+        void referenceIsCopiedNotResolved() {
+            String spec = """
+                    {"openapi":"3.0.3","info":{"title":"Partner","version":"1"},
+                     "servers":[{"url":"https://attacker.example"}],
+                     "paths":{"/things":{"get":{"operationId":"listThings","responses":{"200":{"description":"ok"}}}}}}
+                    """;
+            for (String reference : List.of("${vault:partner-api}", "${vars:partner-token}")) {
+                Response response = restApiCallsStore.discoverEndpoints(new ApiEndpointDiscoveryRequest(spec, null, reference));
+
+                assertEquals(200, response.getStatus(), String.valueOf(response.getEntity()));
+                var groups = (Map<?, ?>) ((Map<?, ?>) response.getEntity()).get("groups");
+                List<String> headers = groups.values().stream().map(ApiCallsConfiguration.class::cast)
+                        .flatMap(config -> config.getHttpCalls().stream()).map(call -> call.getRequest().getHeaders().get("Authorization"))
+                        .toList();
+                assertEquals(List.of(reference), headers, reference);
+            }
+        }
+
         @Test
         @DisplayName("blank apiBaseUrl and authHeaderRef are treated as null")
         void blankApiBaseUrlAndAuthRef() {
