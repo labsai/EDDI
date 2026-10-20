@@ -120,6 +120,7 @@ class ReservedPrincipalsTest {
     void matching() {
         assertTrue(ReservedPrincipals.isReserved("SLACK:T1:U2"));
         assertTrue(ReservedPrincipals.isReserved("anonymous"));
+        assertTrue(ReservedPrincipals.isReserved("Unverified:alice"));
         assertTrue(!ReservedPrincipals.isReserved("alice"));
         assertTrue(!ReservedPrincipals.isReserved("anonymous.user"));
         assertTrue(!ReservedPrincipals.isReserved(null));

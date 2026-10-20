@@ -61,6 +61,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import java.security.NoSuchAlgorithmException;
@@ -453,6 +454,9 @@ class ConversationHitlService {
             final DeferredDelivery resumeDelivery = new DeferredDelivery();
             // The state resumeFinished committed, once it has; read by its delivery step.
             final AtomicReference<ConversationState> committedResumeState = new AtomicReference<>();
+            // Whether the caller's handler has been given (or is holding) its answer, so a
+            // failure path can tell "nothing delivered yet" from "already answered".
+            final AtomicBoolean replyDelivered = new AtomicBoolean(false);
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     returnMemory -> {
@@ -468,6 +472,10 @@ class ConversationHitlService {
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, returnDetailed, returnCurrentStepOnly,
                                 returningFields);
                         memorySnapshot.setEnvironment(environment);
+                        // Same as a say turn: a failed turn carries its reason (and with it
+                        // Retry-After). No input data, so no idempotency key is recorded.
+                        conversationService.recordTurnOutcome(returnMemory, memorySnapshot, null);
+                        replyDelivered.set(true);
                         if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                             resumeDelivery.defer(committedState -> {
                                 if (committedState != null) {
@@ -516,6 +524,11 @@ class ConversationHitlService {
                     memory.setCancelled(true);
                     LOGGER.infof("Resume of conversation %s aborted: cancelled/ended before execution (state=%s)",
                             conversationId, persistedNow);
+                    // Nothing will render this resume, so a waiting client is told it was
+                    // dropped (ENDED -> 410, otherwise 409), as a dropped say turn is.
+                    if (replyDelivered.compareAndSet(false, true)) {
+                        deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                    }
                     return null;
                 }
                 try {
@@ -523,6 +536,11 @@ class ConversationHitlService {
                 } catch (Exception e) {
                     LOGGER.error("Error during conversation resume: " + conversationId, e);
                     memory.setConversationState(ConversationState.ERROR);
+                    // The resume threw: when its output was never rendered the client is
+                    // still waiting, so answer with the ERROR snapshot and its reason.
+                    if (handler != null && replyDelivered.compareAndSet(false, true)) {
+                        deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                    }
                 }
                 return null;
             };
@@ -712,6 +730,9 @@ class ConversationHitlService {
                             + "restoring the pause so the approval is not wedged IN_PROGRESS", conversationId);
                     inFlightConversations.remove(conversationId, memory);
                     restorePauseAfterFailedResume(conversationId, memory, true);
+                    if (replyDelivered.compareAndSet(false, true)) {
+                        deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                    }
                 }
             };
 
@@ -753,6 +774,46 @@ class ConversationHitlService {
             inFlightConversations.remove(conversationId, memory);
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Tells a waiting client its resume was dropped without being applied, with the
+     * conversation as it is stored now (the REST handler maps ENDED to 410 and
+     * anything else to 409). A no-op without a handler. Never throws: this runs on
+     * failure paths that must not fail again.
+     */
+    private void deliverSkipped(ConversationResponseHandler handler, String conversationId, Environment environment, Boolean returnDetailed,
+                                Boolean returnCurrentStepOnly, List<String> returningFields) {
+        if (handler == null) {
+            return;
+        }
+        try {
+            var stored = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (stored == null) {
+                return;
+            }
+            var snapshot = convertSimpleConversationMemorySnapshot(stored, returnDetailed, returnCurrentStepOnly, returningFields);
+            snapshot.setEnvironment(environment);
+            handler.onSkipped(snapshot);
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Could not tell the client that the resume of %s was dropped", sanitize(conversationId));
+        }
+    }
+
+    /**
+     * Answers a waiting client with the ERROR outcome of a resume that threw, with
+     * the same {@code error} a say turn's failure carries. Never throws.
+     */
+    private void deliverFailed(ConversationResponseHandler handler, IConversationMemory memory, Environment environment, Boolean returnDetailed,
+                               Boolean returnCurrentStepOnly, List<String> returningFields) {
+        try {
+            var snapshot = convertSimpleConversationMemorySnapshot(memory, returnDetailed, returnCurrentStepOnly, returningFields);
+            snapshot.setEnvironment(environment);
+            conversationService.recordTurnOutcome(memory, snapshot, null);
+            handler.onComplete(snapshot);
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Could not deliver the failed resume of %s", sanitize(memory.getConversationId()));
         }
     }
 

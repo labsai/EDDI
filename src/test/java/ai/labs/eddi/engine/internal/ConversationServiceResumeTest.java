@@ -61,6 +61,7 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -1168,6 +1169,165 @@ class ConversationServiceResumeTest {
     // =========================================================================
     // Reply flags: the handler's snapshot is built the way say builds it
     // =========================================================================
+
+    // =========================================================================
+    // A waiting client is always answered: failure and drop paths
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation — a client waiting for the reply is always answered")
+    class ReplyDelivery {
+
+        /** Records what the handler was given, and how. */
+        final class Recorder implements IConversationService.ConversationResponseHandler {
+            final List<SimpleConversationMemorySnapshot> completed = new ArrayList<>();
+            final List<SimpleConversationMemorySnapshot> skipped = new ArrayList<>();
+
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                completed.add(snapshot);
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                skipped.add(snapshot);
+            }
+        }
+
+        private final AtomicReference<IConversationMemory> memoryRef = new AtomicReference<>();
+        private final AtomicReference<IConversation.IConversationOutputRenderer> rendererRef = new AtomicReference<>();
+        private ConversationMemorySnapshot stored;
+        private IConversation conversation;
+
+        @BeforeEach
+        void paused() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            stored = createResumeSnapshot();
+            doReturn(stored).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doAnswer(inv -> {
+                memoryRef.set(inv.getArgument(0));
+                rendererRef.set(inv.getArgument(2));
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+        }
+
+        private HitlDecision approvedDecision() {
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            return decision;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Callable<Void> queuedResume(IConversationService.ConversationResponseHandler handler) throws Exception {
+            conversationService.resumeConversation(CONVERSATION_ID, approvedDecision(), handler, false, true, List.of());
+            ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("a resumed turn that ends in ERROR carries its error, so Retry-After reaches the client")
+        void erroredTurnCarriesItsError() throws Exception {
+            var handler = new Recorder();
+            doAnswer(inv -> {
+                var memory = memoryRef.get();
+                memory.setConversationState(ConversationState.ERROR);
+                memory.getCurrentStep().addConversationOutputList(MemoryKeys.TASK_ERRORS, List.of(Map.of(
+                        "code", "PROVIDER_RATE_LIMITED", "retryable", true, "retryAfterMs", 12_000L, "text", "slow down")));
+                // what Conversation.resume's finally does
+                rendererRef.get().renderOutput(memory);
+                return null;
+            }).when(conversation).resume(any(HitlDecision.class));
+
+            queuedResume(handler).call();
+
+            assertEquals(1, handler.completed.size());
+            assertEquals(ConversationState.ERROR, handler.completed.getFirst().getConversationState());
+            assertEquals("PROVIDER_RATE_LIMITED", handler.completed.getFirst().getError().code());
+            assertEquals(12L, handler.completed.getFirst().getError().retryAfterSeconds());
+            assertTrue(handler.skipped.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a resume that throws before rendering anything answers with the ERROR snapshot, once")
+        void throwingResumeIsAnswered() throws Exception {
+            var handler = new Recorder();
+            doThrow(new IllegalStateException("boom")).when(conversation).resume(any(HitlDecision.class));
+
+            queuedResume(handler).call();
+
+            assertEquals(1, handler.completed.size(), "the client must be answered, not left to time out");
+            assertEquals(ConversationState.ERROR, handler.completed.getFirst().getConversationState());
+            assertNotNull(handler.completed.getFirst().getError());
+            assertTrue(handler.skipped.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a resume that throws AFTER rendering is not answered twice")
+        void throwingAfterRenderIsAnsweredOnce() throws Exception {
+            var handler = new Recorder();
+            doAnswer(inv -> {
+                memoryRef.get().setConversationState(ConversationState.ERROR);
+                rendererRef.get().renderOutput(memoryRef.get());
+                throw new LifecycleException("failed after rendering");
+            }).when(conversation).resume(any(HitlDecision.class));
+
+            queuedResume(handler).call();
+
+            assertEquals(1, handler.completed.size());
+        }
+
+        @Test
+        @DisplayName("a resume cancelled before it ran is reported as skipped, with the stored state")
+        void abortedBeforeExecutionIsSkipped() throws Exception {
+            var handler = new Recorder();
+            var queued = queuedResume(handler);
+            memoryRef.get().setCancelled(true);
+            stored.setConversationState(ConversationState.ENDED);
+
+            queued.call();
+
+            assertEquals(1, handler.skipped.size());
+            assertEquals(ConversationState.ENDED, handler.skipped.getFirst().getConversationState());
+            assertTrue(handler.completed.isEmpty());
+            verify(conversation, never()).resume(any(HitlDecision.class));
+        }
+
+        @Test
+        @DisplayName("a resume the coordinator dropped is reported as skipped, with the restored pause")
+        void discardedResumeIsSkipped() throws Exception {
+            var handler = new Recorder();
+            var queued = queuedResume(handler);
+            stored.setConversationState(ConversationState.AWAITING_HUMAN);
+
+            ((IDiscardableTask) queued).onDiscarded(new RejectedExecutionException("pool saturated"));
+
+            assertEquals(1, handler.skipped.size());
+            assertEquals(ConversationState.AWAITING_HUMAN, handler.skipped.getFirst().getConversationState());
+            assertTrue(handler.completed.isEmpty());
+        }
+
+        @Test
+        @DisplayName("without a handler none of this reads the store again: the empty-200 path is untouched")
+        void noHandlerReadsNothingExtra() throws Exception {
+            var queued = queuedResume(null);
+            memoryRef.get().setCancelled(true);
+            queued.call();
+            ((IDiscardableTask) queued).onDiscarded(new RejectedExecutionException("pool saturated"));
+            doThrow(new IllegalStateException("boom")).when(conversation).resume(any(HitlDecision.class));
+            memoryRef.get().setCancelled(false);
+            queued.call();
+
+            // the one load the resume itself does, and nothing for delivery
+            verify(conversationMemoryStore, times(1)).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+    }
 
     @Nested
     @DisplayName("resumeConversation — reply flags")

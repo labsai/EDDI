@@ -14,3 +14,4 @@ Files: [`RestAgentEngine.java`](../../src/main/java/ai/labs/eddi/engine/internal
 
 - The endpoint is converted to `AsyncResponse` rather than blocking a worker: it is the same shape and timeout contract as `say`, and the no-flag path resumes the async response immediately.
 - Presence of any `say` flag, not a particular value, is what asks for the reply, so `returnCurrentStepOnly=false` returns the whole conversation as it does on `say`.
+- **Follow-up fixes.** `unverified:` is now a `ReservedPrincipals` prefix (no token may carry it). The resumed reply runs `recordTurnOutcome` like `say`, so an ERROR turn carries `error` and `Retry-After`. A waiting client is always answered: a resume dropped before it ran (cancelled/ended, or refused by the coordinator) is delivered as `onSkipped` (410 for ENDED, else 409, one mapping shared with `say`), and a resume that throws without rendering is delivered as the ERROR snapshot.

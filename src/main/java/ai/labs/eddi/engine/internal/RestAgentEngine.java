@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -351,6 +352,43 @@ public class RestAgentEngine implements IRestAgentEngine {
         return Response.status(Response.Status.REQUEST_TIMEOUT).build();
     }
 
+    /**
+     * The answer for a turn that was dropped without consuming its input (say) or a
+     * resume that was dropped without being applied: 410 when the conversation has
+     * ended, otherwise 409 naming why. One mapping for both, so they cannot drift.
+     */
+    private static Response skippedResponse(String conversationId, SimpleConversationMemorySnapshot snapshot, boolean resume) {
+        ConversationState state = snapshot.getConversationState();
+        if (state == ConversationState.ENDED) {
+            // Ended while the message was queued — the same answer as ending first.
+            return Response.status(Response.Status.GONE).entity("Conversation has ended").build();
+        }
+        String reason;
+        if (state == ConversationState.AWAITING_HUMAN) {
+            reason = resume
+                    ? "Conversation is awaiting human approval — your decision was not applied;"
+                            + " decide again via POST /agents/" + conversationId + "/resume (or cancel)"
+                    : "Conversation is awaiting human approval — your message was not processed;"
+                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
+        } else if (state == ConversationState.IN_PROGRESS) {
+            reason = "Conversation is processing another turn — your " + (resume ? "decision was not applied" : "message was not processed")
+                    + "; retry shortly";
+        } else {
+            // Idle, yet skipped: the conversation changed while the message was
+            // queued (a superseded rerun, or a turn that could not be rebuilt over
+            // the current conversation). Retrying blindly is not necessarily right.
+            reason = "The conversation changed while your " + (resume ? "decision" : "message") + " was queued — it was not "
+                    + (resume ? "applied" : "processed") + "; reload the conversation before sending it again";
+        }
+        var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
+        if (state == ConversationState.IN_PROGRESS) {
+            // Busy: another turn (in a cluster, possibly on another node) holds the
+            // conversation. Retrying shortly is exactly right, so say when.
+            conflict.header("Retry-After", "2");
+        }
+        return conflict.build();
+    }
+
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, boolean rerunOnly, AsyncResponse response) {
 
@@ -400,32 +438,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
             @Override
             public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                ConversationState state = snapshot.getConversationState();
-                if (state == ConversationState.ENDED) {
-                    // Ended while the message was queued — the same answer as ending first.
-                    response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
-                    return;
-                }
-                String reason;
-                if (state == ConversationState.AWAITING_HUMAN) {
-                    reason = "Conversation is awaiting human approval — your message was not processed;"
-                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
-                } else if (state == ConversationState.IN_PROGRESS) {
-                    reason = "Conversation is processing another turn — your message was not processed; retry shortly";
-                } else {
-                    // Idle, yet skipped: the conversation changed while the message was
-                    // queued (a superseded rerun, or a turn that could not be rebuilt over
-                    // the current conversation). Retrying blindly is not necessarily right.
-                    reason = "The conversation changed while your message was queued — it was not processed;"
-                            + " reload the conversation before sending it again";
-                }
-                var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
-                if (state == ConversationState.IN_PROGRESS) {
-                    // Busy: another turn (in a cluster, possibly on another node) holds the
-                    // conversation. Retrying shortly is exactly right, so say when.
-                    conflict.header("Retry-After", "2");
-                }
-                response.resume(conflict.build());
+                response.resume(skippedResponse(conversationId, snapshot, false));
             }
         };
 
@@ -678,6 +691,11 @@ public class RestAgentEngine implements IRestAgentEngine {
                         response.resume(snapshot);
                     }
                 }
+
+                @Override
+                public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                    response.resume(skippedResponse(conversationId, snapshot, true));
+                }
             };
         }
         try {
@@ -722,7 +740,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         if (trimmed.length() > MAX_UNVERIFIED_APPROVER_LENGTH) {
             trimmed = trimmed.substring(0, MAX_UNVERIFIED_APPROVER_LENGTH);
         }
-        return "unverified:" + trimmed.replaceAll("[^A-Za-z0-9._@:+-]", "_");
+        return ReservedPrincipals.UNVERIFIED_APPROVER_PREFIX + trimmed.replaceAll("[^A-Za-z0-9._@:+-]", "_");
     }
 
     /**

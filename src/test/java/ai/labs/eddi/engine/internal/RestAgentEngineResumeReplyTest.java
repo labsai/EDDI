@@ -169,6 +169,38 @@ class RestAgentEngineResumeReplyTest {
         assertEquals(12L, response.getHeaders().getFirst("Retry-After"));
     }
 
+    private Response skippedWith(ConversationState state) throws Exception {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(state);
+        var target = mock(AsyncResponse.class);
+        doAnswer(inv -> {
+            ((ConversationResponseHandler) inv.getArgument(2)).onSkipped(snapshot);
+            return null;
+        }).when(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any(), any(), any(), any());
+
+        engine.resumeConversation(CONVERSATION_ID, approved(), null, true, null, target);
+
+        return responseSentTo(target);
+    }
+
+    @Test
+    @DisplayName("a resume dropped for an ended conversation is 410, as on say")
+    void skippedEndedIs410() throws Exception {
+        assertEquals(410, skippedWith(ConversationState.ENDED).getStatus());
+    }
+
+    @Test
+    @DisplayName("a resume dropped while paused or busy is 409; busy says when to retry")
+    void skippedOtherStatesAre409() throws Exception {
+        Response paused = skippedWith(ConversationState.AWAITING_HUMAN);
+        assertEquals(409, paused.getStatus());
+        assertTrue(String.valueOf(paused.getEntity()).contains("decision was not applied"));
+        Response busy = skippedWith(ConversationState.IN_PROGRESS);
+        assertEquals(409, busy.getStatus());
+        assertEquals("2", String.valueOf(busy.getHeaders().getFirst("Retry-After")));
+        assertEquals(409, skippedWith(ConversationState.READY).getStatus());
+    }
+
     @Test
     @DisplayName("the request gets say's timeout and a 408 when the turn outlives it")
     void timeoutIs408() throws Exception {

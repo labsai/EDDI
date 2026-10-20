@@ -35,6 +35,12 @@ import java.util.Set;
 public final class ReservedPrincipals {
 
     /**
+     * What a resume's {@code decidedBy} is prefixed with when it is the caller's
+     * own claim and nobody is authenticated: a claim, not an identity.
+     */
+    public static final String UNVERIFIED_APPROVER_PREFIX = "unverified:";
+
+    /**
      * Prefixes of synthetic principals. Compared case-insensitively, so a
      * {@code Slack:} spelling is refused too.
      */
@@ -55,6 +61,9 @@ public final class ReservedPrincipals {
             "a2a:",
             // HITL decisions taken over MCP: mcp:<name>
             "mcp:",
+            // An approver named only by the caller's own claim (no one authenticated):
+            // unverified:<claim>. Recorded as decidedBy, so a token may not look like one.
+            UNVERIFIED_APPROVER_PREFIX,
             // Owner stamped on a conversation started without any identity
             "anonymous-",
             // The pseudonym an erased user's records are rewritten to
