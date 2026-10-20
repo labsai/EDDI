@@ -242,7 +242,18 @@ public class ConversationUpgradeService {
         }
         String nextAfter = scan(agentId, requested, targetGeneration, dryRun, maxCandidates, after, tallies);
         boolean truncated = nextAfter != null;
-        countEnded(agentId, requested, targetGeneration, tallies);
+        // An interrupted scan stops with the flag set on purpose. Cleared for this one
+        // read, or the store's driver refuses it and the caller loses the report and
+        // its
+        // cursor; restored afterwards.
+        boolean interrupted = Thread.interrupted();
+        try {
+            countEnded(agentId, requested, targetGeneration, tallies);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
 
         List<ConversationUpgradeReport.VersionCounts> versions = new ArrayList<>();
         Tally totals = new Tally();

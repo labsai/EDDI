@@ -533,6 +533,13 @@ class ConversationUpgradeServiceTest {
             Thread.currentThread().interrupt();
             return GenerationUpgradeOutcome.UPGRADED;
         });
+        // As the MongoDB driver does: a read on an interrupted thread is refused.
+        when(store.countEndedGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION))).thenAnswer(invocation -> {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IResourceStore.ResourceStoreException("interrupted");
+            }
+            return Map.of();
+        });
 
         try {
             var report = service().upgrade(Environment.production, AGENT, null, false, null, null);
@@ -541,6 +548,7 @@ class ConversationUpgradeServiceTest {
             assertTrue(report.truncated());
             assertEquals(last, report.nextAfter());
             verify(store, never()).loadGenerationUpgradeCandidates(eq(AGENT), any(), eq(TARGET_GENERATION), eq(last), anyInt());
+            assertTrue(Thread.currentThread().isInterrupted(), "the interrupt is restored for the caller");
         } finally {
             Thread.interrupted();
         }
