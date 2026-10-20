@@ -16,6 +16,8 @@ import ai.labs.eddi.engine.model.Deployment;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -351,5 +353,19 @@ class RestUserConversationStoreTest {
 
         assertNotNull(roles, "/userconversationstore/userconversations must not be role-less");
         assertEquals(List.of("eddi-admin"), List.of(roles.value()));
+    }
+
+    // ==================== OpenAPI request-body media type ====================
+
+    @Test
+    @DisplayName("createUserConversation must declare the JSON body it consumes")
+    void createUserConversationDeclaresJsonRequestBody() throws NoSuchMethodException {
+        Consumes consumes = IRestUserConversationStore.class
+                .getMethod("createUserConversation", String.class, String.class, UserConversation.class)
+                .getAnnotation(Consumes.class);
+
+        assertNotNull(consumes, "POST takes a UserConversation body; without @Consumes the generated "
+                + "OpenAPI document leaves its media type unspecified");
+        assertEquals(List.of(MediaType.APPLICATION_JSON), List.of(consumes.value()));
     }
 }
