@@ -27,12 +27,13 @@ what you ask.
 ## Connect to your EDDI server
 
 The plugin contains no server address, because every deployment has its own. Add the
-server once:
+server once. `--scope user` makes it available in every project; without it, Claude Code
+adds the server to the current project only and the skills find no EDDI tools elsewhere.
 
 **Authentication off** (local development):
 
 ```
-claude mcp add --transport http eddi http://localhost:7070/mcp
+claude mcp add --scope user --transport http eddi http://localhost:7070/mcp
 ```
 
 **Authentication on** (Keycloak). EDDI's realm ships a public client, `eddi-mcp`, for MCP
@@ -40,7 +41,7 @@ clients. Point Claude Code at it, and it signs you in through the browser and re
 its own token:
 
 ```
-claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp
+claude mcp add --scope user --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp
 ```
 
 What your account can do depends on its EDDI role. A token without roles signs in fine,
