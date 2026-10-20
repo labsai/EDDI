@@ -955,7 +955,7 @@ public class McpAdminTools {
     // ── Schedule Management ───────────────────────────────────────────────
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
-            + "For CRON: provide cronExpression. For HEARTBEAT: provide heartbeatIntervalSeconds. "
+            + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
             + "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON, or HEARTBEAT when only heartbeatIntervalSeconds is given)",
