@@ -37,6 +37,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -1252,6 +1253,23 @@ class ConversationServiceResumeTest {
             assertEquals("PROVIDER_RATE_LIMITED", handler.completed.getFirst().getError().code());
             assertEquals(12L, handler.completed.getFirst().getError().retryAfterSeconds());
             assertTrue(handler.skipped.isEmpty());
+        }
+
+        @Test
+        @DisplayName("an ERROR turn that reported no task error still carries a generic error, as on say")
+        void erroredTurnWithoutTaskErrorGetsTheGenericError() throws Exception {
+            var handler = new Recorder();
+            doAnswer(inv -> {
+                memoryRef.get().setConversationState(ConversationState.ERROR);
+                rendererRef.get().renderOutput(memoryRef.get());
+                return null;
+            }).when(conversation).resume(any(HitlDecision.class));
+
+            queuedResume(handler).call();
+
+            assertEquals(1, handler.completed.size());
+            assertNotNull(handler.completed.getFirst().getError(), "the reply of a failed resumed turn must say that it failed");
+            assertEquals(TurnError.TURN_FAILED, handler.completed.getFirst().getError().code());
         }
 
         @Test
