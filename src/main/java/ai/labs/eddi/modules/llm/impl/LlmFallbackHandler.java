@@ -141,6 +141,20 @@ final class LlmFallbackHandler {
         return fallback;
     }
 
+    /**
+     * Serves engine text that is not the configured fallback message — a
+     * guardrail's block message — with the same fallback semantics: the step's
+     * {@code llm:fallback:<taskId>} flag (so later history leaves the turn's answer
+     * out) and the {@code fallbackField} wrapping a {@code convertToObject} task's
+     * {@code postResponse} expects. The text is used verbatim, never rendered, and
+     * neither the fallback quick replies nor the fallback recovery metric apply.
+     */
+    Fallback serveText(Task task, IWritableConversationStep step, String text, boolean convertToObject) {
+        String taskId = task.getId() != null ? task.getId() : "default";
+        step.storeData(dataFactory.createData(MemoryKeys.LLM_FALLBACK_PREFIX + taskId, Boolean.TRUE));
+        return wrap(text, task.getResponseValidation(), convertToObject);
+    }
+
     private String renderMessage(ResponseValidation config, Map<String, Object> templateData) {
         String template = config != null ? config.getFallbackMessage() : null;
         if (isNullOrEmpty(template) || template.isBlank()) {

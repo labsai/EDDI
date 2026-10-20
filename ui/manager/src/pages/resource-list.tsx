@@ -302,7 +302,7 @@ export function ResourceListPage() {
                           )}
                           {/* Duplicate reads the whole configuration to copy
                               it, so it needs VIEW; deleting is the owner's. */}
-                          {item.access.canView && (
+                          {item.access.canView && rt.duplicable !== false && (
                             <Button
                               variant="ghost"
                               size="icon"

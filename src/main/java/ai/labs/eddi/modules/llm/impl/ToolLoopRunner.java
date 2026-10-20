@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
+import ai.labs.eddi.modules.llm.tools.ToolCallTrace;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +49,7 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
 import io.micrometer.core.instrument.Metrics;
+import io.opentelemetry.context.Scope;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -54,6 +57,7 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -392,7 +396,34 @@ class ToolLoopRunner {
                 }
             }
 
+            // The agent's per-conversation cost ceiling, checked between rounds: the
+            // spend before this loop (every step's audit:cost) plus what this loop has
+            // spent so far — its tokens at the task's prices and its tool cost. Without
+            // it one tool-heavy turn could run far past the ceiling, since the task-level
+            // gate only sees a loop's cost once the whole loop has finished.
+            OptionalDouble costCeiling = memory.getConversationCostCeilingUsd();
+            boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
+            double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
+            double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;
+
             for (int i = startIteration; i < maxIterations; i++) {
+                if (ceilingApplies && modelAnswered) {
+                    double spent = costBeforeLoop
+                            + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                                    tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
+                            + toolCostDelta(conversationId, toolCostAtLoopStart);
+                    if (spent >= costCeiling.getAsDouble()) {
+                        String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
+                                spent);
+                        LlmSpendGate.countMidLoop(conversationId, detail);
+                        Map<String, Object> ceilingStep = new HashMap<>();
+                        ceilingStep.put("type", "cost_ceiling");
+                        ceilingStep.put("error", detail);
+                        trace.add(ceilingStep);
+                        return finish(currentMessages, transcriptOut, costCeilingReachedMessage());
+                    }
+                }
+
                 // Cooperative cancellation: if this step was interrupted (e.g. a cascade
                 // per-step timeout called future.cancel(true)), stop before issuing another
                 // model call — avoids launching further side-effectful tools on a step whose
@@ -939,6 +970,16 @@ class ToolLoopRunner {
     }
 
     /**
+     * The answer of a tool loop stopped by the conversation's cost ceiling. Like
+     * {@link #iterationBudgetSpentMessage}, it says that what already ran has taken
+     * effect.
+     */
+    static String costCeilingReachedMessage() {
+        return "I stopped before finishing because this conversation reached its cost limit. Everything I already did has "
+                + "taken effect — completed calls are not rolled back.";
+    }
+
+    /**
      * Runs one tool call through the repeat guard and appends its result. A call
      * the guard refuses is answered with a {@code NOT_EXECUTED} result and traced
      * as {@code tool_repeat_refused}; it never reaches an executor. Otherwise the
@@ -1088,6 +1129,23 @@ class ToolLoopRunner {
         callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
 
+        // Agent test harness: a test conversation's tool call is answered by its
+        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
+        // for
+        // every other conversation. Self-contained early return — keep it that way.
+        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                toolSources == null ? null : toolSources.get(toolRequest.name()));
+        if (mockedResult != null) {
+            Map<String, Object> mockedStep = new HashMap<>();
+            mockedStep.put("type", "tool_result");
+            mockedStep.put("tool", toolRequest.name());
+            mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
+            mockedStep.put("mocked", true);
+            trace.add(mockedStep);
+            // A mock stands in for the tool's own answer; a refusal means it never ran.
+            return new ToolCallResult(mockedResult, mockedResult, ToolMockRegistry.isRefusal(mockedResult));
+        }
+
         // Check per-conversation TOOL budget before executing tool.
         //
         // Enforcement is opt-OUT: enforceBudget on the task wins, otherwise
@@ -1190,9 +1248,14 @@ class ToolLoopRunner {
             }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
-            toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                    () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
-                    toolTimeoutMs);
+            // The source and the model's call id label the execute_tool span the
+            // service opens; they ride in the OTel context because nothing but the
+            // trace depends on them (see ToolCallTrace).
+            try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
+                toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
+                        () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
+                        toolTimeoutMs);
+            }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }

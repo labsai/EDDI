@@ -249,6 +249,18 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 
 ---
 
+## Agent testing
+
+Full narrative: [agent-testing.md](agent-testing.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.agent-tests.max-parallel-cases` | `4` | Case repetitions of one run that execute at the same time, each a real conversation in the `test` environment |
+| `eddi.agent-tests.max-concurrent-runs` | `2` | Runs that may execute at once on one node; another start is answered 429 |
+| `eddi.agent-tests.max-runs-per-agent` | `50` | Run records kept per agent; older ones are deleted when a run finishes |
+
+---
+
 ## Security & authentication
 
 > Authentication itself is Quarkus OIDC, not an `eddi.*` property:
@@ -577,7 +589,7 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-agents-per-tenant` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-api-calls-per-minute` | `-1` | `-1` = unlimited |
-| `eddi.tenant.quota.max-monthly-cost-usd` | `-1` | `-1` = unlimited |
+| `eddi.tenant.quota.max-monthly-cost-usd` | `-1` | `-1` = unlimited. Priced LLM and tool spend per UTC month; once reached, LLM tasks serve their fallback answer and tool calls are refused. Unpriced models meter $0 — see [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget) |
 | `eddi.variables.cache-ttl-minutes` | `2` | [Global variable](global-variables.md) cache lifetime |
 | `eddi.deployment.env` | `development` *(when unset)* | Value matched by the `deploymentContext` behavior-rule condition, letting one agent behave differently per environment |
 
@@ -607,6 +619,7 @@ below. See [Enabling connections](connections.md#enabling-connections).
 |---|---|---|
 | `quarkus.otel.sdk.disabled` | `true` | Tracing is off until a collector exists. Set `false` (env `QUARKUS_OTEL_SDK_DISABLED=false`) together with the endpoint below; `docker-compose.monitoring.yml` and the Helm chart's `tracing.otlpEndpoint` value (under `eddi:`) do both |
 | `quarkus.otel.exporter.otlp.endpoint` | `http://localhost:4317` | OTLP gRPC endpoint spans are exported to |
+| `eddi.tracing.propagate-outbound` | `true` | Adds the W3C `traceparent`/`tracestate` of the current span (a tool call's `execute_tool` span) to EDDI's outbound calls — httpcalls, everything on the `OutboundHttp` facade (built-in tools, A2A, the RAG crawler, OAuth, Slack, …) and MCP (header and `params._meta`) — so downstream services join the trace. Never sends `baggage`, never overwrites an author-configured header, drops the headers on cross-origin redirects. Inert while `quarkus.otel.sdk.disabled=true`. Set `false` to keep EDDI's own spans without revealing trace ids. See [trace propagation](monitoring/monitoring-guide.md#trace-propagation-to-the-services-eddi-calls) |
 | `quarkus.micrometer.binder.http-server.max-uri-tags` | see `application.properties` | Distinct `uri` tag values `http_server_requests_seconds_*` may carry; requests past the cap are not measured. `http.server.requests` publishes no histogram buckets on purpose — buckets would multiply every one of these series — so the dashboards chart HTTP latency as mean and peak |
 | `quarkus.datasource.metrics.enabled` | `true` | Build-time. Publishes the Agroal pool meters (`agroal_*`) for the PostgreSQL datastore; on the MongoDB datastore the datasource is inactive and nothing is registered. MongoDB pool meters (`mongodb_driver_pool_*`) come from a listener on EDDI's own client and need no setting |
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |

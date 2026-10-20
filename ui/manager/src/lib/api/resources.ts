@@ -14,6 +14,10 @@ export interface ResourceTypeConfig {
   /** The backend extension type used in eddi:// URI schemes (e.g. "ai.labs.property") */
   extension: string;
   labelKey: string;
+  /** `false` when the store has no `POST /{id}` duplicate operation (test suites). */
+  duplicable?: false;
+  /** `false` when the store serves no `GET /jsonSchema` (test suites). */
+  jsonSchema?: false;
   // No icon here: resolve it with getResourceTypeIcon(slug) from
   // lib/resource-type-icons.ts, the one table every surface shares.
 }
@@ -89,6 +93,15 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     plural: "parsers",
     extension: "ai.labs.parser",
     labelKey: "resources.types.parser",
+  },
+  {
+    slug: "testsuite",
+    store: "testsuitestore",
+    plural: "testsuites",
+    extension: "ai.labs.testsuite",
+    labelKey: "resources.types.testsuite",
+    duplicable: false,
+    jsonSchema: false,
   },
 ];
 

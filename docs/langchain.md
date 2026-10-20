@@ -45,8 +45,9 @@ User Input → Parser → Behavior Rules → [LangChain Task] → Output Generat
 
 The Langchain task integrates with multiple LLM providers via the langchain4j library:
 
-- **OpenAI** (ChatGPT, GPT-4, GPT-4o) — also any other OpenAI-compatible endpoint via `baseUrl`
+- **OpenAI** (ChatGPT, GPT-4, GPT-4o)
 - **OpenAI-compatible providers** with their own type: `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `minimax`, `openrouter`, `groq` ([details](#openai-compatible-providers))
+- **Self-hosted OpenAI-compatible servers** — vLLM, llama.cpp's `llama-server`, TGI, KServe, LiteLLM and the like — with type `openai-compatible` and per-endpoint capability flags ([details](#self-hosted-openai-compatible-servers))
 - **Anthropic** (Claude)
 - **Google Gemini** (`gemini` - AI Studio API, `gemini-vertex` - Vertex AI)
 - **Mistral AI** (Mistral Large, Codestral, Pixtral)
@@ -796,8 +797,10 @@ Groq's `qwen3.8-27b`. Override either per task or per deployment as usual.
 }
 ```
 
-**Any other endpoint.** Cohere, Together, a corporate gateway and the like still work through
-`type: openai` with a `baseUrl`; they simply have no preset.
+**Any other endpoint.** A server you run yourself belongs on
+[`type: openai-compatible`](#self-hosted-openai-compatible-servers). Cohere, Together, a corporate
+gateway and the like still work through `type: openai` with a `baseUrl`; they simply have no
+preset, and are judged by OpenAI's capabilities.
 
 **Known limitation.** A durable tool-approval pause stores the in-flight transcript, including
 each assistant turn's `thinking`, and resumes from it, so DeepSeek and Kimi tool turns survive a
@@ -805,6 +808,76 @@ pause. On the degraded resume (the transcript exceeded `eddi.hitl.tool.transcrip
 gating assistant message is replayed with its thinking, unless that single message exceeds its
 64 KB cap: it is then persisted without the thinking, and those two providers can reject the
 resumed request with a 400. Raise the cap or approve such calls quickly if you hit it.
+
+#### Self-hosted OpenAI-compatible servers
+
+Production on-prem inference usually runs on vLLM, llama.cpp's `llama-server`, Hugging Face
+TGI, KServe or a LiteLLM gateway. All of them speak the OpenAI chat-completions protocol, but
+none of them is OpenAI: what each supports depends on the server, its version and the model it
+serves. Type `openai-compatible` reaches such a server through the OpenAI client and lets the
+config **declare** what it supports, instead of inheriting OpenAI's answers.
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "id": "granite",
+      "type": "openai-compatible",
+      "parameters": {
+        "baseUrl": "http://vllm.inference.svc.cluster.local:8000/v1",
+        "modelName": "ibm-granite/granite-4.0-h-small",
+        "apiKey": "${vault:vllm-key}",
+        "serverName": "vllm",
+        "jsonMode": "true",
+        "jsonModeWithTools": "false",
+        "vision": "false",
+        "timeout": "120000",
+        "systemMessage": "You are a helpful assistant",
+        "addToOutput": "true"
+      }
+    }
+  ]
+}
+```
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `baseUrl` | yes | The server's OpenAI API, usually ending in `/v1`. `http://` is accepted (in-cluster traffic); the cloud-metadata service is refused, as for every model URL |
+| `modelName` | yes | The model id exactly as the server lists it under `/v1/models`. There is no default |
+| `apiKey` | no | Sent as a bearer token when set. Left blank or unset, the request carries **no** `Authorization` header at all, which is what most local servers expect |
+| `jsonMode` | no, default `false` | The server accepts `response_format: {"type": "json_object"}`. With `convertToObject: "true"` a tool-less request then carries it |
+| `jsonModeWithTools` | no, default `false` | It also accepts that format in the same request as tool definitions (llama-server, TGI and older vLLM releases do not always) |
+| `vision` | no, default `false` | The served model accepts images. Image attachments are then sent to it whatever its name: a self-hosted model cannot be recognised by name, so this type has no model table. Images are inlined, never sent by URL |
+| `serverName` | no, default `openai-compatible` | What traces and metrics report as `gen_ai.provider.name` and the `provider` tag, so `vllm` and `llama-server` traffic can be told apart. Lower-cased; anything other than 1–32 characters of `a-z 0-9 . _ -` falls back to the default, because it becomes a metric tag |
+| `customParameters` | no | Extra top-level request-body fields as a JSON object: vLLM's `chat_template_kwargs`, `guided_json`, `top_k` and the like. It must be a JSON object; anything else fails the model build instead of being dropped |
+
+Every other `type: openai` parameter works too (`temperature`, `maxTokens`, `returnThinking`,
+`sendThinking`, `customHeaders`, …), without OpenAI's model-specific rules.
+
+**Conservative by default.** All three capability flags start off, so a server EDDI knows nothing
+about is never sent a request feature it might answer with a 400; turn on what your server
+supports. Each flag must be `"true"` or `"false"`. Any other value (a typo such as `"ture"`)
+fails the deploy with a message naming the parameter instead of reading as `false`, and so does
+a missing `baseUrl` or `modelName`. A flag may also be a template (`{context.x}`) or a global
+variable (`${vars:vllm-json}`); it is then read per request once resolved, and a value that is
+still not a boolean counts as `false` with one WARN per distinct value. It never fails the turn.
+
+**Precedence.** The per-task `jsonResponseFormat` (`on`/`off`) and `multimodal.vision` overrides
+still win over the endpoint's flags; then the flags; then, for vision only, the deployment
+override `eddi.multimodal.openai-compatible.vision`; then the default, which is off. In a
+[model cascade](model-cascade.md) each `openai-compatible` step is judged by its **own**
+parameters (merged over the task's, as every step's are), not by the task's type.
+
+**Not yet.** Native `json_schema` structured output stays off for this type: schemaless JSON is
+sent when `jsonMode` allows it, and the prompt block carries the schema. Model discovery through
+`GET /v1/models` is not wired up either.
+
+**Migrating from `type: openai` + `baseUrl`.** That keeps working exactly as before (nothing is
+rewritten), but EDDI judges such an endpoint as OpenAI: it sends JSON mode alongside tools,
+decides vision by OpenAI model names and reports the traffic as OpenAI. To get the endpoint's
+real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelName` and
+`apiKey`, and add the flags your server supports.
 
 ---
 
@@ -852,7 +925,7 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
-| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
@@ -955,6 +1028,98 @@ Identity masking prepends identity concealment rules to the system prompt. This 
 > **Note**: Both `enabled: true` **and** at least one rule are required. If `rules` is empty, masking is skipped even when enabled.
 
 **Execution order**: Identity masking is applied first, then counterweight. Both modify the system prompt before it is sent to the LLM.
+
+---
+
+## Input and Output Guardrails
+
+A task can screen the **user's message before the model is called** (`inputGuardrails`) and the **model's answer before it is stored or delivered** (`outputGuardrails`). Both are ordered lists; each entry names a guardrail `type` and what a finding does (`action`). Nothing is screened unless you configure it — a task without these lists runs no guardrail code at all.
+
+```json
+{
+  "tasks": [ {
+    "actions": ["support"],
+    "type": "openai",
+    "parameters": { "systemMessage": "You are a support agent.", "addToOutput": "true" },
+    "inputGuardrails": [
+      { "type": "prompt-injection", "action": "block", "blockMessage": "I can't process that request." },
+      { "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,ssn,creditcard" } }
+    ],
+    "outputGuardrails": [
+      { "type": "pii-redaction", "action": "redact" },
+      { "type": "json-object", "action": "reprompt", "maxRetries": 2 }
+    ]
+  } ]
+}
+```
+
+| Field | Description | Default |
+|---|---|---|
+| `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
+| `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
+| `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
+| `blockMessage` | The answer the user gets when this guardrail blocks. Used as-is — it is never run through the template engine. | `Request blocked by guardrail '<type>'.` / `Response withheld by guardrail '<type>'.` |
+| `parameters` | Per-type settings, plain strings (never templated). Two work for every type: `repromptMessage` overrides the corrective message of a reprompt (`{reason}` is replaced by the guardrail's reason), and `failMode` (`closed`/`open`) decides what a failing guardrail does — see below. | — |
+
+### Actions
+
+| Action | Input phase | Output phase |
+|---|---|---|
+| `block` | The model is **not called**, `preRequest` and `postResponse` do not run; the block message is the turn's answer. | The answer is replaced by the block message (not parsed as JSON, not recorded as the model's response). |
+| `redact` | The message the model sees is rewritten. Conversation memory keeps what the user sent. | The answer is rewritten before it is stored, parsed or delivered. A guardrail with no rewrite (a pure violation) is replaced by the block message. |
+| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
+| `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
+
+A block message is served the way an [`onError` fallback](#fallback-answers-and-onerror) is: the turn is flagged as a fallback, so later turns' history keeps the user's question but not the block message, and a `convertToObject` task with `responseValidation.fallbackField` gets it wrapped as `{"<fallbackField>": "<block message>"}` — the shape its `postResponse` reads. Because the history builder merges a fallback turn's question into the next user message, input guardrails treat only that message's last text part as the current turn; the earlier parts are screened as history.
+
+**When a guardrail fails.** A guardrail that throws, or returns no verdict, could not check the text. What happens then is its `failMode`:
+
+| `failMode` | Effect | Default for |
+|---|---|---|
+| `closed` | Treated as a finding that blocks: the turn is answered with the guardrail's `blockMessage` (an earlier history message is withheld). | `block`, `reprompt` — a guardrail that exists to keep something out must not let it through because it could not look (a `reprompt` cannot verify any answer either, so it blocks without re-asking) |
+| `open` | Recorded as a `warn`; the text passes. | `redact`, `warn` |
+
+Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`). Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
+
+A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
+
+### Built-in types
+
+| Type | Phases | Finds | Parameters |
+|---|---|---|---|
+| `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
+| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
+| `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
+| `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
+
+For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
+
+Patterns in `parameters` are author configuration evaluated against untrusted text. Keep them free of nested quantifiers (`(a+)+`); an invalid pattern is ignored with a WARN.
+
+### Where guardrails run
+
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **last user message** the model would see is checked again only if it differs from what the user typed (a `prompt` template, attachment extracts); otherwise the first result is reused, so a finding is recorded once. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`.
+- **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.)
+- An `onError` fallback is the author's own text and is not screened.
+
+### Streaming
+
+Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
+
+### Audit, events and metrics
+
+Every guardrail that fires produces:
+
+- an audit record under the step key `audit:guardrail:<phase>:<type>` (`{phase, type, action, reason, retryCount, taskId}`), collected into the [audit ledger](audit-ledger.md) entry as `output.guardrails`. The `reason` is EDDI's (e.g. `pii:email`, `prompt_injection_pattern`) — never the screened text;
+- an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
+- the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
+
+Reprompts are model calls: their tokens are added to the turn's token usage and cost.
+
+### Compatibility
+
+The two lists are optional; existing configurations load unchanged. An older EDDI ignores them (unknown properties are skipped) and runs the agent unguarded — keep that in mind before downgrading.
 
 ---
 
@@ -1772,6 +1937,49 @@ $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
 and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
 Negative `toolPricing` values are clamped to 0.0.
 
+**Prices drive the tenant budget.** Each settled turn charges its priced cost —
+LLM tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step prices) plus
+tracked tool cost — to the tenant's `maxMonthlyCostUsd`. Once that budget is spent,
+every LLM task serves its fallback answer (`responseValidation.fallbackMessage`, or
+the default sentence) instead of calling its model, and records
+`llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 in token cost,
+but once the tenant budget is spent (by priced tools or other priced models) its
+calls are refused too. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
+
+#### Per-conversation LLM cost ceiling
+
+`maxCostPerConversationUsd` is an **agent-level** setting (on the agent configuration, next to
+`workflows`, not on an LLM task) that bounds what one conversation may spend:
+
+```json
+{
+  "workflows": ["eddi://ai.labs.workflow/workflowstore/workflows/0123456789abcdef01234567?version=1"],
+  "maxCostPerConversationUsd": 0.50
+}
+```
+
+What counts is the conversation's **priced** spend — the sum of every step's `audit:cost`: LLM
+tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step and judge prices) plus tracked
+tool cost. It is checked
+
+- **before each LLM task calls its model** (plain, streaming, tool loop or cascade): once the
+  conversation has spent the ceiling, the model is not called; the task serves its fallback answer
+  (`responseValidation.fallbackMessage`, or the default sentence) whatever its `onError`, the step
+  records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
+  `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
+- **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
+  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
+  answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
+  cascade's own step prices apply at the next task-level check.
+
+The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
+(the default) means unlimited; `0` allows no priced spend; a negative value is treated as
+unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
+refuses every model call, priced or not, since the spend so far already equals it. This is
+unrelated to the task-level `maxBudgetPerConversation` (tool cost only; see `enforceBudget`
+above), which is unchanged.
+
 #### Tool cache scoping
 
 **What is cached.** Built-in tools, except those bound to one conversation, which
@@ -2003,6 +2211,7 @@ Layer 2 is applied **per request**, never baked into the model instance, and it 
 | `anthropic`, `bedrock` | ❌ — both reject a JSON format without a schema | ❌ |
 | `xai`, `deepseek`, `moonshot`, `qwen`, `zhipu`, `groq` | ✅ | ❌ — no verified tools + JSON support |
 | `minimax`, `openrouter` | ❌ | ❌ |
+| `openai-compatible` | the endpoint's `jsonMode` (default ❌) | the endpoint's `jsonModeWithTools` (default ❌) |
 | `ollama`, `jlama`, `huggingface`, `oracle-genai` | ❌ (not verified — opt in with `jsonResponseFormat: "on"`) | ❌ |
 
 #### Native schema enforcement

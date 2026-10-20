@@ -143,6 +143,12 @@ export const LLM_PROVIDERS = [
   // repo id — it is shown as the model placeholder and seeds the operator
   // activation form. See MODEL_SUGGESTIONS.jlama.
   { id: "jlama", name: "Jlama (In-Process)", defaultModel: "tjake/Llama-3.2-1B-Instruct-JQ4", needsKey: false, group: "local" },
+  // A self-hosted server speaking the OpenAI protocol (vLLM, llama-server, TGI,
+  // KServe, LiteLLM, ...). It has no default model and no default URL — both are
+  // the deployment's — so `defaultModel` is blank and the model field must be
+  // filled in. The API key is optional (see acceptsOptionalApiKey); capability
+  // flags are set in the LLM editor's model settings.
+  { id: "openai-compatible", name: "Self-hosted (OpenAI-compatible)", defaultModel: "", needsKey: false, group: "local" },
 ] as const satisfies readonly {
   id: string;
   name: string;

@@ -204,6 +204,19 @@ All execution metrics support a `tool` label for per-tool breakdown:
 rate(eddi_tool_execution_success_total{tool="weather"}[5m])
 ```
 
+**Which call was slow — tracing.** The duration timer says a tool is slow on
+average; a trace says which call, in which turn, and where the time went. With
+tracing on (`QUARKUS_OTEL_SDK_DISABLED=false` plus an OTLP endpoint) every tool
+call is an `execute_tool <tool>` span with `gen_ai.tool.name`,
+`gen_ai.tool.call.id`, `eddi.tool.source` and, when it never reached the tool,
+`eddi.tool.cache_hit=true` or `error.type=rate_limited`/`timeout`. While it runs,
+EDDI sends that span's W3C `traceparent` to the httpcall, MCP (header and
+`params._meta`), A2A or built-in-tool endpoint it calls, so a traced downstream
+service shows up as its child. Switch the propagation off with
+`eddi.tracing.propagate-outbound=false`. Backends (Jaeger, Tempo, Langfuse, Phoenix)
+and the propagation rules are in the
+[monitoring guide](monitoring/monitoring-guide.md#sending-traces-to-langfuse--arize-phoenix--jaeger--tempo).
+
 ### Tool Cache Metrics
 
 ```text
@@ -322,6 +335,18 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### Agent Test Metrics
+
+```text
+eddi_agent_tests_runs_total{status}         # Finished agent test runs, by PASSED / FAILED / ERROR
+eddi_agent_tests_turns_total                # Turns the runs executed (each a real test-environment turn)
+eddi_agent_tests_run_duration_seconds       # Wall time of a run (timer)
+```
+
+A run drives real conversations in the `test` environment, so its model and
+tool cost also appear in the conversation and cost metrics. See
+[Agent Testing](agent-testing.md).
+
 ### Tenant Quota Metrics
 
 ```text
@@ -330,8 +355,19 @@ eddi_tenant_quota_denied_total{tenant,type} # Quota denials, always tagged
 eddi_tenant_quota_unavailable_total{tenant,type} # Refusals caused by the quota store failing, not by a limit
 eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
-eddi_tenant_usage_cost_total                # Cost usage (per tenant)
+eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
+eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
+eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling)
 ```
+
+`eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
+**priced** spend is charged to an enabled tenant quota — see
+[Tenant Quotas → The monthly cost budget](tenant-quotas.md#the-monthly-cost-budget).
+An unpriced model meters $0, so a flat line on a busy deployment usually means
+the models carry no `inputPricePer1M` / `outputPricePer1M`. A rising
+`outcome="unavailable"` means turns spent money the counter could not record at
+the time — the quota store was down when they settled. The amount is carried on the
+conversation (`audit:pending_cost`) and charged at its next settle.
 
 Denials carry `tenant` and `type` (`conversation` / `api_call` / `agent` / `cost`);
 aggregate at query time rather than expecting an untagged total:
@@ -467,7 +503,9 @@ eddi_llm_request_errors_total               # Failed calls; tags: provider, mode
 **Tag values are bounded.** `provider` is langchain4j's provider name (`OPEN_AI`,
 `ANTHROPIC`, …) or, where langchain4j has no name for the provider and reports
 `OTHER` (Jlama and HuggingFace, which used to share `provider="OTHER"`), EDDI's own
-model type (`jlama`, `huggingface`). `model` keeps its own
+model type (`jlama`, `huggingface`). A self-hosted `openai-compatible` endpoint
+reports its `serverName` (`vllm`, `llama-server`, …; default `openai-compatible`)
+instead of `OPEN_AI`, bounded to 32 characters of `a-z 0-9 . _ -`. `model` keeps its own
 series for the first 100 distinct model names a node sees, cut to 128 characters;
 every name after that is tagged `model="other"`. A model name can be templated from
 a property, and a property can be user input, so an uncapped tag was an unbounded
@@ -653,7 +691,13 @@ eddi_counterweight_activation_count_total   # Counterweight activations; tag: le
 eddi_counterweight_strict_downgraded_total  # strict downgraded because the model could not honour it
 eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
+eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
 ```
+
+`eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that
+passes the text records nothing. Unknown guardrail types are skipped before they are
+counted, so `type` only ever carries a registered guardrail. See
+[Input and Output Guardrails](langchain.md#input-and-output-guardrails).
 
 ### Agent Identity & Signing Metrics
 

@@ -8,6 +8,7 @@ import { getErrorMessage } from "@/lib/api-client";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
 import {
   ARTIFACT_DEFAULT_MAX_PER_DISCUSSION,
   CONTEXT_WINDOW_DEFAULT_MAX_RECENT_ENTRIES,
@@ -360,6 +361,8 @@ export function GroupAdvancedEditor({
                     }}
                     className={`${inputCls} w-40`}
                     testId="adv-window-provider"
+                    // No base URL field and no parent task to inherit one from.
+                    include={(id) => offeredWithoutBaseUrl(id, summarizerProvider)}
                     leadingOptions={
                       <option value="">{t("groups.contextWindowNoSummarizer", "None")}</option>
                     }

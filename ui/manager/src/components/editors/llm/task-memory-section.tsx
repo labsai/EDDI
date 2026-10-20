@@ -4,6 +4,7 @@ import { ScrollText, RotateCcw } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import { ContentEditor } from "../content-editor";
 import { ProviderSelect } from "@/components/shared/provider-select";
+import { offeredWithoutBaseUrl } from "@/lib/model-suggestions";
 import type { TaskSectionProps } from "./task-section-props";
 
 /**
@@ -128,6 +129,9 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
                     disabled={readOnly}
                     className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
                     testId="summary-provider-select"
+                    // A self-hosted endpoint works here only by inheriting the task's own
+                    // baseUrl and key, i.e. when the task is openai-compatible too.
+                    include={(id) => offeredWithoutBaseUrl(id, task.type, task.conversationSummary?.llmProvider)}
                   />
                   <p className="mt-0.5 text-[10px] text-muted-foreground">
                     {t("llmEditor.summaryProviderHint", "Use a cheap/fast model for summarization")}

@@ -56,6 +56,7 @@ import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
+import { TaskGuardrailsSection } from "./llm/task-guardrails-section";
 import { ModelSettingsSection } from "./llm/model-settings-section";
 import { ParameterVerdictNote } from "./llm/model-settings/parameter-verdict-note";
 import { numberProblem } from "./llm/model-settings/model-settings-utils";
@@ -99,7 +100,7 @@ import {
 } from "./llm/types";
 
 import { ProviderSelect } from "@/components/shared/provider-select";
-import { getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalog";
+import { SELF_HOSTED_PROVIDER_ID, getDefaultBaseUrl, getProviderRegions } from "@/lib/llm-provider-catalog";
 
 /** The Model section edits temperature itself; the settings panel leaves it there. */
 const MODEL_SECTION_KEYS: ReadonlySet<string> = new Set(["temperature"]);
@@ -343,6 +344,19 @@ function TaskEditor({
           className="h-8 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           testId="model-type-select"
         />
+        {task.type === SELF_HOSTED_PROVIDER_ID && (
+          <span
+            className={baseUrlParam ? "text-[10px] text-muted-foreground" : "text-[10px] text-warning"}
+            data-testid="self-hosted-endpoint-hint"
+          >
+            {baseUrlParam
+              ? t("llmEditor.compatibleEndpointOverridden", "Endpoint: {{url}}", { url: baseUrlParam })
+              : t(
+                  "llmEditor.selfHostedNeedsBaseUrl",
+                  "Add a baseUrl parameter: the URL of your server's OpenAI API, e.g. http://vllm:8000/v1",
+                )}
+          </span>
+        )}
         {compatibleEndpoint && (
           <span
             className="text-[10px] text-muted-foreground"
@@ -469,7 +483,9 @@ function TaskEditor({
                       ? t("llmEditor.accessToken", "Access token")
                       : credentialKey === "authToken"
                         ? t("llmEditor.authToken", "Hugging Face token (optional)")
-                        : t("llmEditor.apiKey", "API key")
+                        : spec.credentialOptional
+                          ? t("llmEditor.apiKeyOptional", "API key (optional)")
+                          : t("llmEditor.apiKey", "API key")
                   }
                 >
                   {(control) => (
@@ -2004,6 +2020,9 @@ function TaskEditor({
 
 
           <TaskResponseValidationSection task={task} onChange={onChange} readOnly={readOnly} />
+
+
+          <TaskGuardrailsSection task={task} onChange={onChange} readOnly={readOnly} />
 
 
           <TaskToolApprovalsSection task={task} onChange={onChange} readOnly={readOnly} />

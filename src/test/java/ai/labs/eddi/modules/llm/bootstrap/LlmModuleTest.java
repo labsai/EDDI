@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAILanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleLanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
+import ai.labs.eddi.modules.llm.impl.builder.SelfHostedOpenAiLanguageModelBuilder;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.DisplayName;
@@ -51,6 +52,9 @@ class LlmModuleTest {
         for (String id : COMPATIBLE_IDS) {
             assertInstanceOf(OpenAiCompatibleLanguageModelBuilder.class, builders.get(id).get(), id);
         }
+        // The generic self-hosted type has its own builder, not a catalog preset.
+        assertInstanceOf(SelfHostedOpenAiLanguageModelBuilder.class, builders.get(LlmModule.LLM_TYPE_OPENAI_COMPATIBLE).get());
+        assertTrue(LlmModule.BUILT_IN_TYPES.contains("openai-compatible"), "no catalog row may take the generic id");
     }
 
     @Test

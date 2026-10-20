@@ -212,6 +212,13 @@ export const READ_ENDPOINTS: readonly string[] = [
   // the operator can answer "what version am I on?" correctly after an upgrade —
   // the system prompt cannot, because it was written at activation.
   "GET /administration/version",
+  // Agent test suites and their runs (EDDI 6.5.0+): what a suite asserts and how
+  // the last runs went. Suite WRITES are deliberately not granted — authoring a
+  // suite is the admin's statement of intended behaviour, not the operator's.
+  "GET /testsuitestore/testsuites/descriptors",
+  "GET /testsuitestore/testsuites/{id}",
+  "GET /agenttests/runs",
+  "GET /agenttests/runs/{runId}",
   // EDDI's own documentation, served read-only over REST since EDDI 6.2.0
   // precisely so an OpenAPI-generated agent picks it up as ordinary tools
   // (`DocsService`; see `docs/mcp-server.md` → "The same docs over REST" in the
@@ -425,6 +432,11 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   "PATCH /descriptorstore/descriptors/{id}",
   "POST /administration/{environment}/deploy/{agentId}",
   "POST /administration/{environment}/undeploy/{agentId}",
+  // Starting an agent test run deploys the version under test to the `test`
+  // environment (never production) through the same deploy the line above
+  // grants, then runs scripted conversations whose tool calls are mocked and fail
+  // closed. A write, so it is gated like the deploy it performs.
+  "POST /agenttests/runs",
   "POST /schedulestore/schedules/{scheduleId}/disable",
   "POST /groupstore/groups",
   "POST /administration/agents/setup",

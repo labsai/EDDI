@@ -49,6 +49,7 @@
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)
 - [Deployment Management of Agents](deployment-management-of-agents.md)
+- [Agent Testing — Golden Conversations](agent-testing.md)
 - [Agent Sync (Live & ZIP)](agent-sync-guide.md)
 
 ## Protocols & Integration
