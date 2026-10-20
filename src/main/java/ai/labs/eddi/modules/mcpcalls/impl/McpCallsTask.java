@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.mcpcalls.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -149,17 +150,23 @@ public class McpCallsTask implements ILifecycleTask {
             return;
         }
 
-        // Connect to the MCP server and discover tools (cached)
-        McpServerConfig serverConfig = toServerConfig(config);
-        McpToolProviderManager.McpToolsResult mcpTools = mcpToolProviderManager.discoverTools(List.of(serverConfig));
+        McpToolProviderManager.McpToolsResult mcpTools = null;
+        Set<String> allowedToolNames = null;
+        // Agent test harness: a test conversation whose calls can only be mocked or
+        // refused does not contact the MCP server at all, not even to list its tools.
+        if (ToolMockRegistry.mayRunLive(memory)) {
+            // Connect to the MCP server and discover tools (cached)
+            McpServerConfig serverConfig = toServerConfig(config);
+            mcpTools = mcpToolProviderManager.discoverTools(List.of(serverConfig));
 
-        if (mcpTools == null || mcpTools.toolSpecs().isEmpty()) {
-            LOGGER.warnf("No tools discovered from MCP server '%s' — skipping", config.getMcpServerUrl());
-            return;
+            if (mcpTools == null || mcpTools.toolSpecs().isEmpty()) {
+                LOGGER.warnf("No tools discovered from MCP server '%s' — skipping", config.getMcpServerUrl());
+                return;
+            }
+
+            // Build a lookup of available tool names (after whitelist/blacklist)
+            allowedToolNames = filterToolNames(mcpTools.toolSpecs(), config);
         }
-
-        // Build a lookup of available tool names (after whitelist/blacklist)
-        Set<String> allowedToolNames = filterToolNames(mcpTools.toolSpecs(), config);
 
         // Template data from conversation memory
         Map<String, Object> templateDataObjects = memoryItemConverter.convert(memory);
@@ -190,16 +197,17 @@ public class McpCallsTask implements ILifecycleTask {
                 templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, mcpCall.getPreRequest());
             }
 
-            // 2. Validate tool against whitelist/blacklist
+            // 2. Validate tool against whitelist/blacklist (no discovery: an agent test
+            // conversation whose calls are all answered by mocks — see execute)
             String toolName = mcpCall.getToolName();
-            if (!allowedToolNames.contains(toolName)) {
+            if (allowedToolNames != null && !allowedToolNames.contains(toolName)) {
                 LOGGER.warnf("MCP tool '%s' blocked by whitelist/blacklist for server '%s'", toolName, config.getMcpServerUrl());
                 return;
             }
 
             // 3. Find the executor
-            ToolExecutor executor = mcpTools.executors().get(toolName);
-            if (executor == null) {
+            ToolExecutor executor = mcpTools != null ? mcpTools.executors().get(toolName) : null;
+            if (mcpTools != null && executor == null) {
                 LOGGER.warnf("MCP tool '%s' not found on server '%s'. Available: %s", toolName, config.getMcpServerUrl(),
                         mcpTools.executors().keySet());
                 return;
@@ -243,10 +251,17 @@ public class McpCallsTask implements ILifecycleTask {
             // uses — rate limiting, caching and cost tracking. Calling the executor
             // directly bypassed all three.
             String conversationId = memory.getConversationId();
-            String toolResult = RetryConfiguration.executeWithRetry(
-                    () -> executeMetered(toolName, toolRequest, executor, conversationId),
-                    mcpCall.getRetry(),
-                    "MCP call '" + callName + "'");
+            // Agent test harness: the suite's mock (or NOT_EXECUTED) instead of the call.
+            var mocked = ToolMockRegistry.interceptRuleCall(memory, toolName, argumentsJson, "mcpcall");
+            if (mocked == null && executor == null) {
+                return; // unreachable: no discovery happens only when every call is answered
+            }
+            String toolResult = mocked != null
+                    ? mocked.bodyAsText()
+                    : RetryConfiguration.executeWithRetry(
+                            () -> executeMetered(toolName, toolRequest, executor, conversationId),
+                            mcpCall.getRetry(),
+                            "MCP call '" + callName + "'");
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
 
             // 6. Store result in memory
