@@ -266,6 +266,7 @@
     "POST /administration/quotas/{tenantId}/usage/reset",
     "POST /administration/{environment}/deploy/{agentId}",
     "POST /administration/{environment}/undeploy/{agentId}",
+    "POST /administration/{environment}/upgradeconversations/{agentId}",
     "POST /agents/managed/{intent}/{userId}",
     "POST /agents/managed/{intent}/{userId}/endConversation",
     "POST /agents/managed/{intent}/{userId}/redo",
