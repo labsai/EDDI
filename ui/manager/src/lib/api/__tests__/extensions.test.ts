@@ -43,10 +43,11 @@ describe("RESOURCE_TYPES — extension field alignment with backend", () => {
     rag: "ai.labs.rag",
     snippets: "ai.labs.snippet",
     parser: "ai.labs.parser",
+    testsuite: "ai.labs.testsuite",
   };
 
-  it("has 10 resource types", () => {
-    expect(RESOURCE_TYPES).toHaveLength(10);
+  it("has 11 resource types", () => {
+    expect(RESOURCE_TYPES).toHaveLength(11);
   });
 
   it("every resource type has an extension field", () => {

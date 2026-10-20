@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.httpclient.bootstrap;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -17,6 +18,7 @@ import io.vertx.core.http.HttpClientResponse;
 import io.vertx.core.http.HttpConnection;
 import io.vertx.core.http.RequestOptions;
 import io.vertx.core.net.SocketAddress;
+import io.vertx.core.tracing.TracingPolicy;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,6 +62,31 @@ public class HttpClientModule {
                                              @ConfigProperty(name = "httpClient.connectTimeoutInMillis") Integer connectTimeout,
                                              @ConfigProperty(name = OutboundTargetPolicy.ALLOWED_HOSTS_KEY) Optional<String> allowedHosts) {
 
+        WebClientOptions options = clientOptions(maxConnectionPerRoute, maxRedirects, idleTimeout, connectTimeout);
+
+        // What WebClient.create(vertx, options) does, with the HttpClient kept in hand.
+        //
+        // Deliberately a plain WebClient and NOT a WebClientSession. A session keeps
+        // a single, application-scoped cookie store, and this client is the one and
+        // only client behind every agent's httpcalls — so a Set-Cookie returned to
+        // one user's call was stored and then replayed on the next user's call to the
+        // same host, leaking a session credential across users. A plain WebClient
+        // holds no cookie jar, so nothing is carried between calls. httpcalls already
+        // strips Set-Cookie from what it records (ApiCallExecutor); this removes the
+        // live jar that was the actual replay vector. If a future feature needs
+        // cookies, scope a WebClientSession per conversation/principal rather than
+        // sharing one here.
+        WebClient webClient = WebClient.wrap(
+                guardedHttpClient(vertx, options, OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""))), options);
+
+        return new VertxHttpClient(vertx, webClient, webClient);
+    }
+
+    /**
+     * The options of the one httpcalls client, from the {@code httpClient.*}
+     * settings. Package-private so the tracing policy can be pinned by a test.
+     */
+    static WebClientOptions clientOptions(int maxConnectionPerRoute, int maxRedirects, int idleTimeout, int connectTimeout) {
         WebClientOptions options = new WebClientOptions();
 
         // Mapping configuration
@@ -78,23 +105,19 @@ public class HttpClientModule {
         options.setConnectTimeout(connectTimeout);
         options.setFollowRedirects(true);
         options.setDecompressionSupported(true);
-
-        // What WebClient.create(vertx, options) does, with the HttpClient kept in hand.
-        //
-        // Deliberately a plain WebClient and NOT a WebClientSession. A session keeps
-        // a single, application-scoped cookie store, and this client is the one and
-        // only client behind every agent's httpcalls — so a Set-Cookie returned to
-        // one user's call was stored and then replayed on the next user's call to the
-        // same host, leaking a session credential across users. A plain WebClient
-        // holds no cookie jar, so nothing is carried between calls. httpcalls already
-        // strips Set-Cookie from what it records (ApiCallExecutor); this removes the
-        // live jar that was the actual replay vector. If a future feature needs
-        // cookies, scope a WebClientSession per conversation/principal rather than
-        // sharing one here.
-        WebClient webClient = WebClient.wrap(
-                guardedHttpClient(vertx, options, OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""))), options);
-
-        return new VertxHttpClient(vertx, webClient, webClient);
+        // Quarkus' Vert.x client tracer stays out of this client. With the default
+        // PROPAGATE policy it would open a client span per request and write a fresh
+        // traceparent onto EVERY hop the redirect handler issues — after
+        // stripCredentialsIfCrossOrigin had removed the trace context from a
+        // cross-origin hop, so a redirect to another origin would carry this
+        // deployment's trace id anyway. HttpClientWrapper injects the current span's
+        // traceparent explicitly on the first request, and the redirect handler
+        // copies it to same-origin hops only, so propagation is unchanged; what is
+        // given up is the auto-instrumented HTTP client span for httpcalls, whose
+        // parent (execute_tool, or the pipeline task for a rule-triggered call)
+        // already times the call.
+        options.setTracingPolicy(TracingPolicy.IGNORE);
+        return options;
     }
 
     /**
@@ -304,19 +327,19 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every {@link OutboundHttp#SENSITIVE_HEADERS} entry from {@code next}
-     * when it targets a different origin (scheme, host or effective port) than
+     * Removes every {@link OutboundHttp#SENSITIVE_HEADERS} entry (and the
+     * {@link TracePropagation#HEADERS trace context}) from {@code next} when it
+     * targets a different origin (scheme, host or effective port) than
      * {@code original}. Same-origin hops keep their headers, so an in-service
      * redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
-        if (original == null) {
-            // Cannot prove same-origin, so fail safe and strip.
+        if (original == null || !sameOrigin(original, next)) {
+            // Cannot prove same-origin (null original), so fail safe and strip.
             OutboundHttp.SENSITIVE_HEADERS.forEach(next::removeHeader);
-            return;
-        }
-        if (!sameOrigin(original, next)) {
-            OutboundHttp.SENSITIVE_HEADERS.forEach(next::removeHeader);
+            // The W3C trace context goes too, as in OutboundHttp: the caller vouched
+            // for one origin, and the trace id names this deployment's trace.
+            TracePropagation.HEADERS.forEach(next::removeHeader);
         }
     }
 

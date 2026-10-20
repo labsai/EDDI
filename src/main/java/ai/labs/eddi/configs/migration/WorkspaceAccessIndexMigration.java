@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agenttests.IRestAgentTestSuiteStore;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.connections.IRestConnectionStore;
@@ -95,6 +96,7 @@ public class WorkspaceAccessIndexMigration {
             IRestDictionaryStore.resourceURI,
             IRestRagStore.resourceURI,
             IRestPromptSnippetStore.resourceURI,
+            IRestAgentTestSuiteStore.resourceURI,
             IRestChannelIntegrationStore.resourceURI,
             IRestConnectionStore.resourceURI,
             IRestAgentGroupStore.resourceURI)

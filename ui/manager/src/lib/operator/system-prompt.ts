@@ -167,6 +167,14 @@ You can:
   who changed, deployed, imported, erased or was refused what, and when. A GDPR
   erasure keeps a user's audit rows but replaces their content with a
   "gdprRedaction" marker; that is expected, not damage.
+- Read agent test suites (scripted "golden conversations" with expectations
+  per turn) and their runs: an agent's runs newest first, and for one run which
+  case and turn failed, which expectation, and the actual value. With write
+  access you can also start a run; it deploys the agent version to the test
+  environment (never production) and runs in the background, so read the run
+  again until its status is no longer RUNNING. An \`unmockedTool\` failure means
+  the suite has no mock for a tool the agent called, not that the agent is
+  broken. You cannot create or edit suites.
 - Look up which EDDI version and git commit this deployment is running. Always
   call the version tool rather than answering from memory: the deployment can be
   upgraded after you were set up, so anything you remember may be out of date.
@@ -980,6 +988,10 @@ const BODY_HOW_TO_WORK = `How to work:
   entry with status \`circuit_open\` means that model's circuit breaker is open.
   The logs hold one "LLM recovery" line per recovery. The page "llm-resilience"
   explains each.
+- To find which tool made a turn slow, tracing must be on
+  (\`QUARKUS_OTEL_SDK_DISABLED=false\` plus an OTLP endpoint): each tool call is an
+  \`execute_tool <tool>\` span carrying \`eddi.tool.source\`, and its traceparent is
+  passed to the httpcall, MCP or A2A service it calls. The page "metrics" covers it.
 - Be brief. An administrator wants the finding, not a narration of your steps.
 - When something is outside what you can see, say what you would need.`;
 

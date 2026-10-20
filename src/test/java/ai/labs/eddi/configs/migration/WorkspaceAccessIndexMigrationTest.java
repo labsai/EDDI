@@ -53,7 +53,7 @@ class WorkspaceAccessIndexMigrationTest {
         assertFalse(types.contains("ai.labs.langchain"), "ai.labs.langchain is the file extension, not the descriptor type");
         assertFalse(types.contains("ai.labs.regulardictionary"), "ai.labs.regulardictionary is not the descriptor type");
 
-        assertEquals(15, types.size(), "one entry per configuration type with a REST store");
+        assertEquals(16, types.size(), "one entry per configuration type with a REST store");
         assertEquals(types.size(), types.stream().distinct().count(), "no duplicates");
     }
 

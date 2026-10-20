@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
+import ai.labs.eddi.modules.llm.tools.ToolCallTrace;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +49,7 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
 import io.micrometer.core.instrument.Metrics;
+import io.opentelemetry.context.Scope;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -1088,6 +1091,23 @@ class ToolLoopRunner {
         callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
 
+        // Agent test harness: a test conversation's tool call is answered by its
+        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
+        // for
+        // every other conversation. Self-contained early return — keep it that way.
+        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                toolSources == null ? null : toolSources.get(toolRequest.name()));
+        if (mockedResult != null) {
+            Map<String, Object> mockedStep = new HashMap<>();
+            mockedStep.put("type", "tool_result");
+            mockedStep.put("tool", toolRequest.name());
+            mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
+            mockedStep.put("mocked", true);
+            trace.add(mockedStep);
+            // A mock stands in for the tool's own answer; a refusal means it never ran.
+            return new ToolCallResult(mockedResult, mockedResult, ToolMockRegistry.isRefusal(mockedResult));
+        }
+
         // Check per-conversation TOOL budget before executing tool.
         //
         // Enforcement is opt-OUT: enforceBudget on the task wins, otherwise
@@ -1190,9 +1210,14 @@ class ToolLoopRunner {
             }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
-            toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                    () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
-                    toolTimeoutMs);
+            // The source and the model's call id label the execute_tool span the
+            // service opens; they ride in the OTel context because nothing but the
+            // trace depends on them (see ToolCallTrace).
+            try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
+                toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
+                        () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
+                        toolTimeoutMs);
+            }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
         }

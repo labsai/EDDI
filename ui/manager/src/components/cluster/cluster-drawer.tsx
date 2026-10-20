@@ -18,12 +18,15 @@ export function ClusterDrawer({
   title,
   children,
   testId,
+  widthClass = "max-w-xl",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   testId?: string;
+  /** Tailwind max-width class; wider for comparison-heavy content. */
+  widthClass?: string;
 }) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
@@ -89,7 +92,7 @@ export function ClusterDrawer({
         aria-modal="true"
         aria-labelledby={titleId}
         onKeyDown={trap}
-        className="fixed inset-y-0 end-0 z-50 flex w-full max-w-xl flex-col border-s border-border bg-card shadow-2xl"
+        className={`fixed inset-y-0 end-0 z-50 flex w-full ${widthClass} flex-col border-s border-border bg-card shadow-2xl`}
         data-testid={testId}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-border p-5">
