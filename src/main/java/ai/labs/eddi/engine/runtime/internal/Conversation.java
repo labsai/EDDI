@@ -1298,8 +1298,8 @@ public class Conversation implements IConversation {
             if (live == null || !Boolean.TRUE.equals(live.getSecret())) {
                 continue;
             }
-            IData<Context> stored = step.getLatestData(KEY_CONTEXT + ":" + entry.getKey());
-            if (stored == null || stored.getResult() == null
+            IData<Context> stored = step.getData(KEY_CONTEXT + ":" + entry.getKey());
+            if (stored == null || stored.getResult() == null || !Boolean.TRUE.equals(stored.getResult().getSecret())
                     || !MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(stored.getResult().getValue())) {
                 continue;
             }
