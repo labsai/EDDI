@@ -3549,6 +3549,93 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "source": "https://console.groq.com/docs/reasoning"
         }
       ]
+    },
+    "openai-compatible": {
+      "displayName": "Self-hosted (OpenAI-compatible)",
+      "inherits": "openai",
+      "params": [
+        {
+          "key": "serverName",
+          "type": "string",
+          "group": "connection",
+          "label": "Server name",
+          "description": "Names the server in traces and metrics, e.g. vllm or llama-server; up to 32 characters of a-z, 0-9, dot, dash and underscore.",
+          "default": "openai-compatible",
+          "source": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+        },
+        {
+          "key": "jsonMode",
+          "type": "boolean",
+          "group": "model",
+          "label": "Supports JSON mode",
+          "description": "Turn on if the server accepts response_format json_object; JSON agents then get API-level JSON on requests without tools.",
+          "default": false,
+          "source": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+        },
+        {
+          "key": "jsonModeWithTools",
+          "type": "boolean",
+          "group": "model",
+          "label": "JSON mode with tools",
+          "description": "Turn on if the server also accepts response_format together with tool definitions in one request.",
+          "default": false,
+          "source": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+        },
+        {
+          "key": "vision",
+          "type": "boolean",
+          "group": "model",
+          "label": "Supports images",
+          "description": "Turn on if the served model accepts images; image attachments are then sent to it whatever its name.",
+          "default": false,
+          "source": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html"
+        },
+        {
+          "key": "maxTokens",
+          "type": "int",
+          "group": "output",
+          "label": "Max tokens (legacy)",
+          "description": "Upper limit on the tokens the model may produce (max_tokens).",
+          "min": 1,
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "responseFormat",
+          "type": "enum",
+          "group": "output",
+          "label": "Response format",
+          "description": "Do not use: it fixes JSON mode on the cached model, so tool-calling and streaming requests get it too. For JSON answers set convertToObject to true on the task (jsonResponseFormat overrides it per task) and turn jsonMode on if the server supports JSON mode.",
+          "enum": [
+            "text",
+            "json"
+          ],
+          "source": "https://github.com/labsai/EDDI/blob/main/docs/langchain.md"
+        },
+        {
+          "key": "sendThinking",
+          "type": "boolean",
+          "group": "reasoning",
+          "label": "Send thinking back",
+          "description": "Send earlier reasoning back to the model on the next request, which some servers require during tool use.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        },
+        {
+          "key": "parallelToolCalls",
+          "type": "boolean",
+          "group": "tools",
+          "label": "Parallel tool calls",
+          "description": "Allow the model to call several tools in one step, if the server supports it.",
+          "source": "https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create"
+        },
+        {
+          "key": "customParameters",
+          "type": "json",
+          "group": "advanced",
+          "label": "Custom body fields",
+          "description": "Extra fields for the request body as a JSON object, e.g. vLLM's chat_template_kwargs or guided_json; must be a JSON object.",
+          "source": "https://docs.langchain4j.dev/integrations/language-models/open-ai"
+        }
+      ]
     }
   }
 };

@@ -36,6 +36,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.Reprompter;
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -617,8 +618,9 @@ public class LlmTask implements ILifecycleTask {
         // together. Every execution mode below gets the same policy, so a tool-enabled
         // or streaming agent is no longer silently downgraded to prompt-only JSON.
         boolean jsonMode = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // An openai-compatible endpoint's own capability flags decide for it.
         var jsonPolicy = JsonResponseFormatPolicy.of(jsonMode, resolvedType, task.getJsonResponseFormat(),
-                processedParams.get(KEY_RESPONSE_SCHEMA));
+                processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
 
         // Execute: try agent mode first, fall back to legacy
         String responseContent;
@@ -1247,10 +1249,23 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
         var mm = task.getMultimodal();
-        var vision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        // Per-task override first, then what an openai-compatible endpoint declares.
+        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, capabilityParams(resolvedType, processedParams));
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
         attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
+    }
+
+    /**
+     * The parameters an {@code openai-compatible} endpoint's capability flags are
+     * read from: the rendered task parameters with {@code ${vars:...}} references
+     * in the flags resolved, which otherwise happens only inside
+     * {@code ChatModelRegistry}. Any other type gets the map back unchanged.
+     */
+    private Map<String, String> capabilityParams(String resolvedType, Map<String, String> processedParams) {
+        return OpenAiCompatibleEndpoint.withResolvedFlags(resolvedType, processedParams,
+                globalVariableResolver == null ? null : globalVariableResolver::resolveValue);
     }
 
     /**
@@ -1839,7 +1854,7 @@ public class LlmTask implements ILifecycleTask {
         // Same JSON policy the live loop would have applied — a resumed continuation
         // must not silently lose the API-level JSON the paused turn was running with.
         var jsonPolicy = JsonResponseFormatPolicy.of(Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)), resolvedType,
-                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA));
+                task.getJsonResponseFormat(), processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
 
         // Stream the continuation's model rounds too. Replayed transcript rounds
         // never call the model, so the bridge only ever forwards NEW tokens — text
@@ -2748,7 +2763,7 @@ public class LlmTask implements ILifecycleTask {
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
             var stepPolicy = JsonResponseFormatPolicy.of(jsonMode, stepModel.modelType(), task.getJsonResponseFormat(),
-                    stepModel.params().get(KEY_RESPONSE_SCHEMA));
+                    stepModel.params().get(KEY_RESPONSE_SCHEMA), capabilityParams(stepModel.modelType(), stepModel.params()));
             String text;
             Map<String, Object> metadata;
             if (agentResult != null) {
@@ -2933,6 +2948,8 @@ public class LlmTask implements ILifecycleTask {
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
                 validateGuardrails(llmConfiguration);
+                // Self-hosted endpoints: required fields and capability flags.
+                OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
                 return llmConfiguration;
             } catch (ServiceException e) {

@@ -102,6 +102,7 @@ public class LlmTelemetryListener implements ChatModelListener {
     private static final String ATTR_SPAN = "eddi.telemetry.span";
     private static final String ATTR_START_NANOS = "eddi.telemetry.startNanos";
     private static final String ATTR_MODEL_TYPE = "eddi.telemetry.modelType";
+    private static final String ATTR_PROVIDER_NAME = "eddi.telemetry.providerName";
 
     private static final String UNKNOWN = "unknown";
 
@@ -160,13 +161,35 @@ public class LlmTelemetryListener implements ChatModelListener {
      * is not EDDI's is returned unchanged.
      */
     static ChatModelListener forModelType(ChatModelListener listener, String modelType) {
-        if (!(listener instanceof LlmTelemetryListener telemetry) || modelType == null || modelType.isBlank()) {
+        return forModelType(listener, modelType, null);
+    }
+
+    /**
+     * As {@link #forModelType(ChatModelListener, String)}, with a provider name
+     * that wins over langchain4j's own. A self-hosted {@code openai-compatible}
+     * endpoint runs on the OpenAI client, which reports {@code OPEN_AI} for traffic
+     * that never left the cluster; its {@code serverName} (already bounded by
+     * {@code OpenAiCompatibleEndpoint.telemetryName}) names it instead.
+     *
+     * @param providerName
+     *            the provider label to report, or {@code null} to keep the default
+     *            resolution
+     */
+    static ChatModelListener forModelType(ChatModelListener listener, String modelType, String providerName) {
+        boolean hasType = modelType != null && !modelType.isBlank();
+        boolean hasName = providerName != null && !providerName.isBlank();
+        if (!(listener instanceof LlmTelemetryListener telemetry) || (!hasType && !hasName)) {
             return listener;
         }
         return new ChatModelListener() {
             @Override
             public void onRequest(ChatModelRequestContext context) {
-                context.attributes().put(ATTR_MODEL_TYPE, modelType);
+                if (hasType) {
+                    context.attributes().put(ATTR_MODEL_TYPE, modelType);
+                }
+                if (hasName) {
+                    context.attributes().put(ATTR_PROVIDER_NAME, providerName);
+                }
                 telemetry.onRequest(context);
             }
 
@@ -344,10 +367,15 @@ public class LlmTelemetryListener implements ChatModelListener {
     }
 
     /**
-     * The provider tag: langchain4j's own name where it has one, otherwise the EDDI
-     * model type the decorator recorded (see {@link #forModelType}).
+     * The provider tag: an explicit provider name when the decorator recorded one
+     * (a self-hosted endpoint's {@code serverName}), else langchain4j's own name
+     * where it has one, otherwise the EDDI model type the decorator recorded (see
+     * {@link #forModelType}).
      */
     static String providerOf(ModelProvider provider, Map<Object, Object> attributes) {
+        if (attributes != null && attributes.get(ATTR_PROVIDER_NAME) instanceof String providerName) {
+            return providerName;
+        }
         if ((provider == null || provider == ModelProvider.OTHER) && attributes != null
                 && attributes.get(ATTR_MODEL_TYPE) instanceof String modelType) {
             return modelType;

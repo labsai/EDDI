@@ -119,7 +119,7 @@ class ModelParameterCatalogTest {
         @DisplayName("describes every provider type EDDI ships")
         void everyType() {
             Set<String> expected = new TreeSet<>(Set.of("openai", "anthropic", "gemini", "gemini-vertex", "azure-openai", "mistral",
-                    "ollama", "bedrock", "huggingface", "jlama", "oracle-genai"));
+                    "ollama", "bedrock", "huggingface", "jlama", "oracle-genai", "openai-compatible"));
             OpenAiCompatibleProviders.all().forEach(p -> expected.add(p.id()));
             assertEquals(expected, new TreeSet<>(CATALOG.types()));
         }

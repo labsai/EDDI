@@ -562,8 +562,12 @@ const BODY_AUTHORING_AGENT_CREATE = `- You can create a whole new agent: its sys
   tool-call bodies" below). The same \`vaultKeyName\` field exists on
   createApiAgent. If no key name was given, ask which one to use BEFORE
   proposing the call; a request that will be rejected wastes the approval it
-  asks for. Local providers (ollama) need no key. \`deploy\` + \`environment\`
-  control whether the agent goes live immediately.`;
+  asks for. Local providers (ollama) need no key. A self-hosted
+  OpenAI-compatible server (vLLM, llama-server, TGI, KServe, LiteLLM) is
+  provider \`openai-compatible\`: \`model\` and \`baseUrl\` (llmBaseUrl on
+  createApiAgent) are REQUIRED — there is no default for either — and the key
+  is optional. \`deploy\` + \`environment\` control whether the agent goes
+  live immediately.`;
 
 /**
  * The rule the platform enforces on credential references, stated once, in
@@ -899,6 +903,16 @@ your tool schemas do not cover it, not as a routine first step:
   it, so "my temperature/topP has no effect" usually means the model rejects or
   ignores it — read that page instead of guessing; on Azure OpenAI the
   deployment name hides the model, so \`baseModel\` names it for that check.
+- Self-hosted model servers (vLLM, llama-server, TGI, KServe, LiteLLM) use type
+  \`openai-compatible\`: \`baseUrl\` and \`modelName\` are required (http:// is
+  fine), \`apiKey\` is optional. What the server supports is declared, not
+  guessed: \`jsonMode\` (JSON response format on tool-less requests),
+  \`jsonModeWithTools\` (also alongside tools) and \`vision\` (images reach the
+  model whatever its name) — each "true"/"false", all off by default, and any
+  other value fails the deploy. \`serverName\` (e.g. vllm) names it in traces and
+  metrics; server-specific body fields go in \`customParameters\`. \`type: openai\`
+  with a \`baseUrl\` still works but is judged as OpenAI, so JSON with tools may
+  400 on such a server — switching the type to openai-compatible fixes that.
 - Tool-loop limits on an LLM task: maxToolIterations bounds rounds (default 10,
   ceiling 100); maxToolCallsPerIteration bounds the calls run from ONE model
   response (default 20) and maxToolCallsPerTurn the calls across the whole turn,
