@@ -59,7 +59,7 @@ This starts Keycloak alongside EDDI with a pre-configured realm, clients and acc
 | `viewer` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-viewer` | Read-only access |
 | `user` | *none* (`--demo-users` / `-DemoUsers` sets a one-time one) | `eddi-user` | Standard user access |
 
-The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` unless `KEYCLOAK_BIND` says otherwise — with the user `admin` and the `KC_BOOTSTRAP_ADMIN_PASSWORD` in `~/.eddi/.env`: the installers generate one, and the GCP provisioner generates one on the VM. A plain `docker compose up` without it falls back to the `admin`/`admin` dev default, which is acceptable only while Keycloak stays on loopback — set `KC_BOOTSTRAP_ADMIN_PASSWORD` before widening `KEYCLOAK_BIND` (Keycloak reads it only when it first creates the master realm). The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
+The Keycloak admin console is at `http://localhost:8180/admin` — bound to `127.0.0.1` unless `KEYCLOAK_BIND` says otherwise — with the user `admin` and the `KC_BOOTSTRAP_ADMIN_PASSWORD` in `~/.eddi/.env`: the installers generate one, and the GCP provisioner generates one on the VM. A plain `docker compose up` without it falls back to the `admin`/`admin` dev default, which is acceptable only while Keycloak stays on loopback — set `KC_BOOTSTRAP_ADMIN_PASSWORD` before widening `KEYCLOAK_BIND` (Keycloak reads it only when it first creates the master realm). The auth overlay enforces this: its one-shot `keycloak-guard` service, which Keycloak waits for, refuses to start Keycloak when `KEYCLOAK_BIND` is not loopback and `KC_BOOTSTRAP_ADMIN_PASSWORD` is unset or `admin` — the same pattern as `docker-compose.yml`'s `bind-guard` for EDDI. On an existing volume whose console password you changed by hand, put that password in `.env` to pass it. Because Keycloak reads that password only on first boot, a volume first started with `admin`/`admin` keeps that login whatever `.env` says later; the one-shot `keycloak-admin-rotate` service, which runs once Keycloak is healthy and before EDDI starts, therefore logs in with `admin` and, if that still works, sets the account to the configured `KC_BOOTSTRAP_ADMIN_PASSWORD`. The public `eddi-frontend` client does not allow the password grant: the Manager signs in with the authorization-code flow.
 
 > **Upgrading an existing install.** These accounts used to ship as `viewer`/`viewer` and `user`/`user`, the console as `admin`/`admin`, and the password grant was on. Realm import is one-shot, so an existing Keycloak volume keeps all of that until it is changed. Re-run the installer (`install.sh` or `install.ps1`, whether EDDI is running or stopped):
 >
@@ -925,6 +925,31 @@ fetch `install.sh` from a release tag rather than `main` for a pinned install. T
 (`gcp/provision-vm.sh`) now defaults `--eddi-branch` to `--eddi-version`'s tag or the
 newest stable release instead of `main`, falling back to `main` with a warning when the
 lookup fails.
+
+The checksum list is signed too. A `SHA256SUMS` on its own proves only that the files
+match whatever list the release carries; whoever could replace one release asset could
+replace both. The release job therefore signs it with cosign **keyless**, the same way the
+Docker image is signed: GitHub Actions' OIDC token gets a short-lived Fulcio certificate
+naming the workflow that ran, and the signature is logged in the public Rekor transparency
+log. The Sigstore bundle is attached as `SHA256SUMS.sigstore.json`, after the job has
+verified it against the identity below. When `cosign` is on `PATH`, both installers verify
+the list before they trust any hash in it and refuse to install from a list that does not
+verify. The certificate must name `https://github.com/labsai/EDDI/.github/workflows/ci.yml`
+at `refs/tags/<the release tag>`, issued by `https://token.actions.githubusercontent.com`.
+Without `cosign` they print one warning line and go on with the unsigned list. A release
+before 6.6.0, the first one signed, has no bundle and is used unsigned, with a warning. For
+6.6.0 and later (pre-releases included) a `SHA256SUMS` that cannot be fetched always stops the
+install, and so does a missing bundle **when `cosign` is installed** — a missing signature on a
+signed release is indistinguishable from a removed one. Without `cosign` the bundle is not
+fetched at all, whatever the version. To
+check a release by hand:
+
+```bash
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/<tag> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
 
 ### Fuzz Testing
 

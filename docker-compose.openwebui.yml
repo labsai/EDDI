@@ -24,7 +24,9 @@ services:
       context: .
       dockerfile: src/main/docker/Dockerfile.demo
     environment:
-      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+      # Least-privilege user on `eddi`, created by mongodb-app-user below — the
+      # same split as docker-compose.yml, which explains it.
+      - "MONGODB_CONNECTIONSTRING=mongodb://eddi_app:changeme-app@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
       # DEMO ONLY: no OIDC, so EDDI's own REST API is wide open. This is what
       # lets the seeder below call the (normally role-gated) import endpoint.
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
@@ -62,6 +64,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongodb-app-user:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
       interval: 10s
@@ -77,11 +81,43 @@ services:
     volumes:
       - openwebui-demo-mongodb:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # One-shot: creates (or updates) EDDI's readWrite + dbAdmin user on `eddi`,
+  # holding the root credentials so that EDDI does not. Runs on every `up`, so
+  # it also migrates a volume from before the split.
+  mongodb-app-user:
+    image: mongo:7.0.43
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - "MONGO_ROOT_USERNAME=eddi"
+      - "MONGO_ROOT_PASSWORD=changeme"
+      - "MONGO_APP_USERNAME=eddi_app"
+      - "MONGO_APP_PASSWORD=changeme-app"
+    command:
+      - |
+        exec mongosh --quiet --host mongodb --eval '
+          // The root credentials are read here, from the environment, so they never
+          // appear on the mongosh command line (/proc/<pid>/cmdline, ps).
+          db.getSiblingDB("admin").auth(process.env.MONGO_ROOT_USERNAME, process.env.MONGO_ROOT_PASSWORD);
+          const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
+          const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
+          const eddi = db.getSiblingDB("eddi");
+          // 51003: another starter created the user between getUser and createUser
+          // (several replicas at once); update it instead of failing.
+          let created = false;
+          if (!eddi.getUser(user)) {
+            try { eddi.createUser({ user: user, pwd: pwd, roles: roles }); created = true; print("created MongoDB user " + user); }
+            catch (e) { if (e.code !== 51003) { throw e; } }
+          }
+          if (!created) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }'
 
   # One-shot: creates and deploys a small rule-based agent so the model list is
   # not empty on first start. EDDI seeds nothing automatically — there is no

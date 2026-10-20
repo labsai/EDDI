@@ -32,7 +32,12 @@ services:
       # containers use. Add the name you browse to when it is not localhost.
       - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "QUARKUS_OIDC_TENANT_ENABLED=${QUARKUS_OIDC_TENANT_ENABLED:-false}"
-      - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
+      # EDDI connects as a least-privilege user on the `eddi` database (readWrite +
+      # dbAdmin there, nothing elsewhere), not as the MongoDB root user. The
+      # mongodb-app-user service below creates it, on a new volume and an existing
+      # one alike. MONGO_APP_PASSWORD falls back to the root password so an existing
+      # .env keeps working; set a distinct one to make the split mean something.
+      - "MONGODB_CONNECTIONSTRING=mongodb://${MONGO_APP_USERNAME:-eddi_app}:${MONGO_APP_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD:-changeme}}@mongodb:27017/eddi?authSource=eddi&retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"
       # - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -59,6 +64,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      mongodb-app-user:
+        condition: service_completed_successfully
       bind-guard:
         condition: service_completed_successfully
     healthcheck:
@@ -132,6 +139,48 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # One-shot: makes sure EDDI's own MongoDB user exists with the current
+  # MONGO_APP_PASSWORD, then exits; `eddi` waits for it. It is the only place
+  # besides mongod itself that holds the root credentials. Unlike a script in
+  # /docker-entrypoint-initdb.d — which the mongo image runs on an EMPTY volume
+  # only — it runs on every `up`, so an existing volume is migrated without a
+  # manual step and changing MONGO_APP_PASSWORD in .env rotates the password.
+  # readWrite + dbAdmin on `eddi`: EDDI creates collections and indexes, renames
+  # collections during migrations, and uses collMod to un-hide an index, which
+  # readWrite alone does not allow. No role on any other database.
+  mongodb-app-user:
+    image: mongo:7.0.43
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - "MONGO_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-eddi}"
+      - "MONGO_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-changeme}"
+      - "MONGO_APP_USERNAME=${MONGO_APP_USERNAME:-eddi_app}"
+      - "MONGO_APP_PASSWORD=${MONGO_APP_PASSWORD:-${MONGO_INITDB_ROOT_PASSWORD:-changeme}}"
+    command:
+      - |
+        if [ "$$MONGO_APP_PASSWORD" = "$$MONGO_ROOT_PASSWORD" ]; then
+          echo "[SECURITY] MONGO_APP_PASSWORD is unset or equals the MongoDB root password: EDDI's credential" >&2
+          echo "  then opens the root account too. Set a distinct one in .env (openssl rand -hex 24)." >&2
+        fi
+        exec mongosh --quiet --host mongodb --eval '
+          // The root credentials are read here, from the environment, so they never
+          // appear on the mongosh command line (/proc/<pid>/cmdline, ps).
+          db.getSiblingDB("admin").auth(process.env.MONGO_ROOT_USERNAME, process.env.MONGO_ROOT_PASSWORD);
+          const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
+          const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
+          const eddi = db.getSiblingDB("eddi");
+          // 51003: another starter created the user between getUser and createUser
+          // (several replicas at once); update it instead of failing.
+          let created = false;
+          if (!eddi.getUser(user)) {
+            try { eddi.createUser({ user: user, pwd: pwd, roles: roles }); created = true; print("created MongoDB user " + user); }
+            catch (e) { if (e.code !== 51003) { throw e; } }
+          }
+          if (!created) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }'
 
 volumes:
   mongodb-db:

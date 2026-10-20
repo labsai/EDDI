@@ -139,3 +139,18 @@ client fails over without DNS) or nats.externalUrl.
 {{- .Values.nats.externalUrl -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+The password of EDDI's own MongoDB user (mongodb.appUsername). mongodb.appPassword
+when set; otherwise derived from mongodb.rootPassword with sha256 — stable across
+renders (no lookup, so `helm template` and GitOps agree), distinct from the root
+password, and not reversible to it, so EDDI's connection string no longer hands out
+the root credential. Hex, so it needs no URI encoding.
+*/}}
+{{- define "eddi.mongodbAppPassword" -}}
+{{- if .Values.mongodb.appPassword -}}
+{{- .Values.mongodb.appPassword -}}
+{{- else -}}
+{{- printf "eddi-app:%s" (required "mongodb.rootPassword is required when mongodb.enabled=true" .Values.mongodb.rootPassword) | sha256sum -}}
+{{- end -}}
+{{- end }}
