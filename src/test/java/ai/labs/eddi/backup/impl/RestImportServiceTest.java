@@ -84,7 +84,7 @@ class RestImportServiceTest {
         @DisplayName("upgrade strategy with targetAgentId delegates to upgradeExecutor")
         void upgradeStrategy() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), isNull(), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             // Mock zipArchive.unzip to create minimal directory
@@ -112,7 +112,7 @@ class RestImportServiceTest {
                     () -> importService.importAgent(
                             new ByteArrayInputStream(new byte[0]), "upgrade", null, null, null));
 
-            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any(), anyBoolean());
         }
 
         @Test
@@ -122,7 +122,7 @@ class RestImportServiceTest {
                     () -> importService.importAgent(
                             new ByteArrayInputStream(new byte[0]), "upgrade", null, "   ", null));
 
-            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+            verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any(), anyBoolean());
         }
 
         @Test
@@ -153,7 +153,7 @@ class RestImportServiceTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any(), anyBoolean()))
                     .thenThrow(new RuntimeException("upgrade failed"));
 
             assertThrows(InternalServerErrorException.class,

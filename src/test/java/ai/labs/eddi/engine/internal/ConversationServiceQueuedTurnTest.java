@@ -257,6 +257,74 @@ class ConversationServiceQueuedTurnTest {
         verify(tenantQuotaService, never()).acquireApiCallSlot();
     }
 
+    // --- the caller stopped waiting while the turn was queued
+    // ----------------------
+
+    private static InputData callerGivingUpAt(long epochMs) {
+        var inputData = new InputData("second message", Map.of());
+        inputData.setCallerGivesUpAtEpochMs(epochMs);
+        return inputData;
+    }
+
+    @Test
+    @DisplayName("a turn still queued when its caller gave up is dropped unrun, and the caller is told so")
+    void turnOfGoneCallerIsDroppedUnrun() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = runQueuedSayWith(callerGivingUpAt(System.currentTimeMillis() - 1));
+
+        verify(conversation, never()).say(anyString(), any());
+        verify(handler).onCallerGone(any());
+        verify(handler, never()).onSkipped(any());
+        verify(handler, never()).onComplete(any());
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    @DisplayName("a turn whose caller still waits runs")
+    void turnOfWaitingCallerRuns() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = runQueuedSayWith(callerGivingUpAt(System.currentTimeMillis() + 60_000));
+
+        verify(conversation).say(eq("second message"), any());
+        verify(handler, never()).onCallerGone(any());
+    }
+
+    @Test
+    @DisplayName("eddi.conversation.skip-turns-of-timed-out-callers=false runs the turn of a gone caller, as before")
+    void skippingCanBeTurnedOff() throws Exception {
+        conversationService.skipTurnsOfTimedOutCallers = false;
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+
+        ConversationResponseHandler handler = runQueuedSayWith(callerGivingUpAt(System.currentTimeMillis() - 1));
+
+        verify(conversation).say(eq("second message"), any());
+        verify(handler, never()).onCallerGone(any());
+    }
+
+    @Test
+    @DisplayName("a turn deadline counts from the request's arrival: 50 s spent waiting for a thread leave 10 s of a 60 s budget")
+    void turnDeadlineCountsFromArrival() throws Exception {
+        doReturn(snapshot(ConversationState.READY, 1L, 1)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        doReturn(60_000L).when(agent).getTurnDeadlineMs();
+        IConversation conversation = mock(IConversation.class);
+        stubContinueConversation(conversation);
+        var inputData = new InputData("second message", Map.of());
+        inputData.setRequestArrivalEpochMs(System.currentTimeMillis() - 50_000);
+
+        runQueuedSayWith(inputData);
+
+        long remaining = builtOver.get(0).getTurnDeadline().remainingMs();
+        assertTrue(remaining > 0 && remaining <= 10_000, "60 s budget minus the 50 s already waited, was " + remaining);
+    }
+
     // ---------------------------------------------------------------------------
 
     /**
@@ -354,9 +422,12 @@ class ConversationServiceQueuedTurnTest {
     }
 
     private ConversationResponseHandler runQueuedSay() throws Exception {
+        return runQueuedSayWith(new InputData("second message", Map.of()));
+    }
+
+    private ConversationResponseHandler runQueuedSayWith(InputData inputData) throws Exception {
         ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
-        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(),
-                new InputData("second message", Map.of()), false, handler);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(), inputData, false, handler);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());

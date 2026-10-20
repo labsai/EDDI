@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -17,6 +19,7 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
+import ai.labs.eddi.engine.api.IPromotionImpactReader;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationStatus;
@@ -26,6 +29,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.DeploymentFailure;
 import ai.labs.eddi.engine.model.DeploymentImpact;
 import ai.labs.eddi.engine.model.DeploymentPreflight;
+import ai.labs.eddi.engine.model.PromotionImpact;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
@@ -61,7 +65,7 @@ import static ai.labs.eddi.engine.model.Deployment.Status.*;
  * @author ginccc
  */
 @ApplicationScoped
-public class RestAgentAdministration implements IRestAgentAdministration, IDeploymentStatusReader {
+public class RestAgentAdministration implements IRestAgentAdministration, IDeploymentStatusReader, IPromotionImpactReader {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IDeploymentStore deploymentStore;
@@ -648,12 +652,82 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 continue;
             }
             Integer deployedGeneration = generationOf(agentId, deployed);
-            boolean follows = generation != null && generation.equals(deployedGeneration) && deployed < version;
             Long active = conversationMemoryStore.getActiveConversationCount(agentId, deployed);
             impacts.add(new DeploymentImpact.VersionImpact(deployed, deployedGeneration, active != null ? active : 0L,
-                    follows ? DeploymentImpact.Outcome.FOLLOW : DeploymentImpact.Outcome.STAY));
+                    outcomeFor(generation, version, deployedGeneration, deployed)));
         }
         return new DeploymentImpact(agentId, version, generation, impacts);
+    }
+
+    /**
+     * The one rule for version following: conversations on {@code deployed} move to
+     * {@code version} when both carry the same generation and {@code deployed} is
+     * older. Shared by the impact of an existing version and the preview of one
+     * about to be written, so the two cannot disagree.
+     */
+    private static DeploymentImpact.Outcome outcomeFor(Integer generation, int version, Integer deployedGeneration, int deployed) {
+        boolean follows = generation != null && generation.equals(deployedGeneration) && deployed < version;
+        return follows ? DeploymentImpact.Outcome.FOLLOW : DeploymentImpact.Outcome.STAY;
+    }
+
+    @Override
+    public PromotionImpact previewNextVersion(String agentId) {
+        RuntimeUtilities.checkNotNull(agentId, "agentId");
+        // Conversation counts are an operator's view of the agent — the same EDIT
+        // the write being previewed takes. A caller without it gets no counts rather
+        // than a refusal: the preview itself stays available to them.
+        if (!resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
+            return null;
+        }
+        int currentVersion;
+        AgentConfiguration current;
+        try {
+            currentVersion = documentDescriptorStore.getCurrentResourceId(agentId).getVersion();
+            current = agentStore.read(agentId, currentVersion);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException | RuntimeException e) {
+            log.debugf("No promotion impact for Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return null;
+        }
+        Integer currentGeneration = current != null ? current.getCompatibilityGeneration() : null;
+        // The same rule AgentStore applies on the write, so the preview cannot promise
+        // a generation the save will not produce.
+        int generationIfCompatible = AgentStore.nextCompatibilityGeneration(current, true);
+        int generationIfBreaking = AgentStore.nextCompatibilityGeneration(current, false);
+
+        // Counted by what a conversation is, not by the version it last ran on: it
+        // follows the newest ready version of its OWN generation, so after a few
+        // compatible saves many idle conversations are stored on versions that are no
+        // longer deployed, and a count per deployed version would leave them out. One
+        // grouped count, never the conversations.
+        Map<Integer, Long> byGeneration;
+        try {
+            byGeneration = conversationMemoryStore.getActiveConversationCountsByGeneration(agentId);
+        } catch (RuntimeException e) {
+            // The counts are a courtesy on the preview, not part of it: without them the
+            // preview still answers, just with no conversation impact.
+            log.debugf("No promotion impact for Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return null;
+        }
+        boolean startsNewChain = currentGeneration == null;
+        List<PromotionImpact.GenerationCount> generations = new ArrayList<>();
+        long total = 0;
+        long following = 0;
+        for (Map.Entry<Integer, Long> entry : byGeneration.entrySet()) {
+            long active = entry.getValue() != null ? entry.getValue() : 0L;
+            // A version without a generation has no chain to continue, so nothing follows
+            // it; and a conversation without one never follows anything.
+            boolean follows = !startsNewChain && entry.getKey() != null && entry.getKey() == generationIfCompatible;
+            total += active;
+            if (follows) {
+                following += active;
+            }
+            generations.add(new PromotionImpact.GenerationCount(entry.getKey(), active, follows));
+        }
+        // Newest generation first, conversations without one last.
+        generations.sort(Comparator.comparing(PromotionImpact.GenerationCount::generation, Comparator.nullsFirst(Comparator.<Integer>naturalOrder()))
+                .reversed());
+        return new PromotionImpact(currentVersion, currentGeneration, generationIfCompatible, generationIfBreaking, startsNewChain,
+                total, following, generations);
     }
 
     private static String getConflictExplanations(String agentId, Integer version, Long activeConversationCount) {

@@ -4,15 +4,13 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.integrations.channels.HmacSignatures;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Collection;
 
@@ -40,7 +38,6 @@ import java.util.Collection;
 public class SlackSignatureVerifier {
 
     private static final Logger LOGGER = Logger.getLogger(SlackSignatureVerifier.class);
-    private static final String HMAC_SHA256 = "HmacSHA256";
     private static final String VERSION = "v0";
 
     /** Maximum allowed age of a request timestamp (5 minutes). */
@@ -126,7 +123,7 @@ public class SlackSignatureVerifier {
         try {
             long requestTs = Long.parseLong(timestamp);
             long now = Instant.now().getEpochSecond();
-            if (Math.abs(now - requestTs) > MAX_TIMESTAMP_AGE_SECONDS) {
+            if (!HmacSignatures.isFresh(requestTs, now, MAX_TIMESTAMP_AGE_SECONDS)) {
                 LOGGER.warnf("Slack request timestamp too old: %d (now: %d, delta: %ds)",
                         requestTs, now, Math.abs(now - requestTs));
                 return false;
@@ -145,27 +142,12 @@ public class SlackSignatureVerifier {
         }
         String baseString = VERSION + ":" + timestamp + ":" + rawBody;
         try {
-            Mac mac = Mac.getInstance(HMAC_SHA256);
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), HMAC_SHA256));
-            byte[] hash = mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8));
-
-            String computed = VERSION + "=" + bytesToHex(hash);
-
+            String computed = VERSION + "=" + HmacSignatures.hmacSha256Hex(secret, baseString.getBytes(StandardCharsets.UTF_8));
             // Constant-time comparison to prevent timing attacks
-            return MessageDigest.isEqual(
-                    computed.getBytes(StandardCharsets.UTF_8),
-                    signature.getBytes(StandardCharsets.UTF_8));
+            return HmacSignatures.constantTimeEquals(computed, signature);
         } catch (Exception e) {
             LOGGER.debugf("Slack signature computation failed for a secret: %s", e.getMessage());
             return false;
         }
-    }
-
-    private static String bytesToHex(byte[] bytes) {
-        var sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
     }
 }

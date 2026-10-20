@@ -47,10 +47,13 @@ export function useImportAgentMerge() {
     mutationFn: ({
       file,
       selectedSourceIds,
+      compatible = false,
     }: {
       file: File;
       selectedSourceIds?: string[];
-    }) => importAgentMerge(file, selectedSourceIds),
+      /** Declare the written agent version compatible, so running conversations follow it. */
+      compatible?: boolean;
+    }) => importAgentMerge(file, selectedSourceIds, compatible),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
@@ -104,12 +107,15 @@ export function useImportUpgrade() {
       targetAgentId,
       selectedSourceIds,
       workflowOrder,
+      compatible = false,
     }: {
       file: File;
       targetAgentId: string;
       selectedSourceIds?: string[];
       workflowOrder?: string[];
-    }) => importAgentUpgrade(file, targetAgentId, selectedSourceIds, workflowOrder),
+      /** Declare the written agent version compatible, so running conversations follow it. */
+      compatible?: boolean;
+    }) => importAgentUpgrade(file, targetAgentId, selectedSourceIds, workflowOrder, compatible),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });
     },
@@ -177,6 +183,7 @@ export function useExecuteSync() {
       workflowOrder,
       sourceAuth,
       createNew = false,
+      compatible = false,
     }: {
       sourceUrl: string;
       sourceAgentId: string;
@@ -186,6 +193,8 @@ export function useExecuteSync() {
       workflowOrder: string[] | null;
       sourceAuth: string;
       createNew?: boolean;
+      /** Declare the written agent version compatible, so running conversations follow it. */
+      compatible?: boolean;
     }) =>
       executeSync(
         sourceUrl,
@@ -195,7 +204,8 @@ export function useExecuteSync() {
         selectedResources,
         workflowOrder,
         sourceAuth,
-        createNew
+        createNew,
+        compatible
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentKeys.all });

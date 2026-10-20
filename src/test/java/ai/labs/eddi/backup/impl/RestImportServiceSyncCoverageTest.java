@@ -39,6 +39,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -336,7 +337,7 @@ class RestImportServiceSyncCoverageTest {
         @DisplayName("an upgrade failure becomes a 500 that keeps the reason")
         void upgradeFailureBecomesAServerError() {
             var cause = new IllegalStateException("the target agent changed under the sync");
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenThrow(cause);
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean())).thenThrow(cause);
 
             var thrown = assertThrows(WebApplicationException.class, this::sync);
 
@@ -354,7 +355,7 @@ class RestImportServiceSyncCoverageTest {
         @DisplayName("a 404 from the upgrade executor is passed through, not repackaged as a 500")
         void notFoundFromTheExecutorIsPassedThrough() {
             var notFound = new NotFoundException("No agent found with id " + TARGET_A);
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenThrow(notFound);
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean())).thenThrow(notFound);
 
             var thrown = assertThrows(NotFoundException.class, this::sync);
 
@@ -372,7 +373,7 @@ class RestImportServiceSyncCoverageTest {
         void successfulSyncAnswersWithTheUpgradeResult() {
             var result = cleanResult(TARGET_A);
             when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), eq(Set.of("res-1", "res-2")),
-                    eq(List.of("wf-b", "wf-a")))).thenReturn(result);
+                    eq(List.of("wf-b", "wf-a")), anyBoolean())).thenReturn(result);
 
             Response response;
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
@@ -384,6 +385,45 @@ class RestImportServiceSyncCoverageTest {
             assertSame(result, response.getEntity());
             assertEquals(result.agentUri().toString(), response.getHeaderString("Location"));
             assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+        }
+
+        /**
+         * Promoting an agent is breaking unless the operator says otherwise: a sync
+         * pins the conversations running on the target to their version, which is the
+         * safe default, and only an explicit {@code compatible=true} lets them follow.
+         */
+        @Test
+        @DisplayName("compatible reaches the upgrade, and a sync that does not say defaults to breaking")
+        void compatibleIsPassedToTheUpgrade() {
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean())).thenReturn(cleanResult(TARGET_A));
+
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                importService.executeSync(PUBLIC_SOURCE_URL, "aabbccddeeff112233445566", 1, TARGET_A, null, null, null, null,
+                        true);
+                verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_A), any(), any(), eq(true));
+                verify(upgradeExecutor, never()).executeUpgrade(any(), eq(TARGET_A), any(), any(), eq(false));
+
+                importService.executeSync(PUBLIC_SOURCE_URL, "aabbccddeeff112233445566", 1, TARGET_A, null, null, null, null,
+                        null);
+                importService.executeSync(PUBLIC_SOURCE_URL, "aabbccddeeff112233445566", 1, TARGET_A, null, null, null, null);
+                verify(upgradeExecutor, times(2)).executeUpgrade(any(), eq(TARGET_A), any(), any(), eq(false));
+            }
+        }
+
+        @Test
+        @DisplayName("a batch declares compatibility per request")
+        void batchCompatibleIsPerRequest() {
+            when(upgradeExecutor.executeUpgrade(any(), anyString(), any(), any(), anyBoolean()))
+                    .thenReturn(cleanResult(TARGET_A));
+
+            try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
+                importService.executeSyncBatch(PUBLIC_SOURCE_URL, List.of(
+                        new SyncRequest("aabbccddeeff112233445566", 1, TARGET_A, null, List.of(), null, true),
+                        new SyncRequest("aabbccddeeff112233445577", 1, TARGET_B, null, List.of(), null, null)), null);
+            }
+
+            verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_A), any(), any(), eq(true));
+            verify(upgradeExecutor).executeUpgrade(any(), eq(TARGET_B), any(), any(), eq(false));
         }
 
         /** See {@code PreviewSyncTests#preview()} for why construction is stubbed. */
@@ -426,9 +466,9 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("a batch where some agents failed answers 207 with one entry per request")
         void partialFailureIsMultiStatus() {
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean()))
                     .thenReturn(cleanResult(TARGET_A));
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any(), anyBoolean()))
                     .thenThrow(new RuntimeException("remote refused the read"));
 
             Response response = executeBatch();
@@ -454,7 +494,7 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("a batch where every agent failed is a 500, not a 200 with an empty list")
         void totalFailureIsServerError() {
-            when(upgradeExecutor.executeUpgrade(any(), anyString(), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), anyString(), any(), any(), anyBoolean()))
                     .thenThrow(new RuntimeException("expired token"));
 
             Response response = executeBatch();
@@ -477,7 +517,7 @@ class RestImportServiceSyncCoverageTest {
             promoted.setOriginId(sourceId);
             promoted.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET_A + "?version=1"));
             when(documentDescriptorStore.findByOriginId(sourceId)).thenReturn(List.of(promoted));
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any())).thenReturn(cleanResult(TARGET_A));
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean())).thenReturn(cleanResult(TARGET_A));
 
             Response response;
             try (var ignored = mockConstruction(RemoteApiResourceSource.class)) {
@@ -492,9 +532,9 @@ class RestImportServiceSyncCoverageTest {
         @Test
         @DisplayName("an agent whose own resources failed counts as failed, even though the sync ran")
         void resourceFailuresCountTowardsTheBatchStatus() {
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_A), any(), any(), anyBoolean()))
                     .thenReturn(cleanResult(TARGET_A));
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET_B), any(), any(), anyBoolean()))
                     .thenReturn(new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET_B),
                             true, 1, 0, 0,
                             List.of(new UpgradeResult.ResourceFailure("src-llm", "langchain", "GPT", "store rejected it"))));
@@ -512,7 +552,7 @@ class RestImportServiceSyncCoverageTest {
             try {
                 assertThrows(InternalServerErrorException.class,
                         () -> importService.executeSyncBatch(PUBLIC_SOURCE_URL, twoRequests(), null));
-                verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any());
+                verify(upgradeExecutor, never()).executeUpgrade(any(), anyString(), any(), any(), anyBoolean());
             } finally {
                 // Never leak the flag into the next test on this thread.
                 Thread.interrupted();
@@ -584,7 +624,7 @@ class RestImportServiceSyncCoverageTest {
         private static final URI AGENT_URI = URI.create("eddi://ai.labs.agent/agentstore/agents/" + TARGET + "?version=4");
 
         private Response upgradeWith(UpgradeResult result) {
-            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET), any(), any())).thenReturn(result);
+            when(upgradeExecutor.executeUpgrade(any(), eq(TARGET), any(), any(), anyBoolean())).thenReturn(result);
             return importService.importAgent(
                     new ByteArrayInputStream(new byte[0]), "upgrade", null, TARGET, null);
         }

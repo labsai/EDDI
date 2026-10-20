@@ -1683,7 +1683,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Rate of `eddi_coordinator_total_processed_total`, and of turns refused because the node already ran `eddi.conversation.max-in-flight-turns` (`eddi_turn_rejected_total`, answered 503 `capacity_exceeded`).",
+          "description": "Rate of `eddi_coordinator_total_processed_total`; of turns refused before they were queued (`eddi_turn_rejected_total`: `in_flight_limit` answered 503 `capacity_exceeded`, `caller_timed_out` answered 408 because the request waited out `systemRuntime.agentTimeoutInSeconds` for a thread); and of queued turns dropped unrun because their caller had already timed out (`eddi_turn_skipped_total`).",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -1706,6 +1706,17 @@
               "refId": "B",
               "expr": "sum by (reason) (rate(eddi_turn_rejected_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "rejected ({{reason}})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (reason) (rate(eddi_turn_skipped_total{job=~\"$job\"}[$__rate_interval]))",
+              "legendFormat": "skipped ({{reason}})",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
@@ -15168,6 +15179,82 @@
         {
           "refId": "A",
           "expr": "sum by (outcome) (rate(eddi_turn_idempotency_total{job=~\"$job\"}[$__rate_interval]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "range": true,
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 263,
+      "type": "timeseries",
+      "title": "Inbound webhook events by outcome",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Rate of `eddi_webhook_events_total` by outcome: `accepted` (a turn was started), `duplicate` (200, already accepted), `in_progress` (409, first delivery still running) or `refused_<status>` (HTTP status returned: 400, 401 bad signature, 403, 404 unknown integration, 409 awaiting approval, 413, 415, 422, 429, 500, 503). A rising 401 rate is a misconfigured sender or a probe.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(eddi_webhook_events_total{job=~\"$job\"}[$__rate_interval]))",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"

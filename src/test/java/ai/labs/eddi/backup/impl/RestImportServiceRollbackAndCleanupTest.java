@@ -685,7 +685,7 @@ class RestImportServiceRollbackAndCleanupTest {
         @DisplayName("upgrade import closes the ZipResourceSource, removing the unzipped directory")
         void upgradeImportCleansUp() throws Exception {
             AtomicReference<File> unzipped = stubEmptyZip();
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-1"), any(), any(), anyBoolean()))
                     .thenReturn(new UpgradeResult(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ORIGIN_ID + "?version=2"), true, 1, 0,
                             0, List.of()));
 

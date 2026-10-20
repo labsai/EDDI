@@ -32,6 +32,13 @@ import java.util.List;
  *            number of matched resources whose content was already identical
  * @param failures
  *            resources that could not be processed, with the reason
+ * @param compatible
+ *            whether the agent version this run wrote was declared compatible
+ *            with the one it replaced; null when no agent version was written.
+ *            Lets a script verify the outcome without a second call
+ * @param compatibilityGeneration
+ *            the compatibility generation the written agent version carries;
+ *            null when none was written or it could not be read back
  * @since 6.0.0
  */
 public record UpgradeResult(
@@ -40,7 +47,14 @@ public record UpgradeResult(
         int updated,
         int created,
         int skipped,
-        List<ResourceFailure> failures) {
+        List<ResourceFailure> failures,
+        Boolean compatible,
+        Integer compatibilityGeneration) {
+
+    /** A result that does not say how the agent version was declared. */
+    public UpgradeResult(URI agentUri, boolean agentUpdated, int updated, int created, int skipped, List<ResourceFailure> failures) {
+        this(agentUri, agentUpdated, updated, created, skipped, failures, null, null);
+    }
 
     /**
      * A resource the upgrade could not process.

@@ -10,6 +10,7 @@ import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -25,6 +26,19 @@ import java.util.List;
 @Tag(name = "Operations / Backup", description = "Import and export agents as zip files")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestImportService {
+
+    /**
+     * Text of the {@code compatible} parameter of every endpoint that writes a new
+     * version over an existing agent.
+     */
+    String COMPATIBLE_DESCRIPTION = "Whether the agent version this writes is compatible with the one it replaces, exactly "
+            + "as for a normal agent save. When true, conversations running on the previous version switch to the new "
+            + "one on their next turn once it is deployed; when false (the default) the new version is a breaking change "
+            + "and they stay on the version they started on. Tick it for a promotion only when the change cannot break "
+            + "a conversation in progress. A target whose current version predates compatibility generations starts a "
+            + "chain either way, so its running conversations stay. Has no effect when a new agent is created, or when "
+            + "nothing is written.";
+
     @POST
     @Consumes("application/zip")
     @Operation(description = "Import an agent from a zip file. "
@@ -55,13 +69,26 @@ public interface IRestImportService {
             + "An upgrade answers 201 when something was written, 200 when source and target were already "
             + "identical, and 207 Multi-Status when some resources failed — the body is an UpgradeResult "
             + "listing per-resource outcomes. All three are 2xx, so a client must branch on the status "
-            + "code rather than on response.ok.")
+            + "code rather than on response.ok. "
+            + "compatible (strategy=merge and strategy=upgrade; default false) declares the agent version written "
+            + "compatible with the one it replaces, so running conversations follow it.")
     Response importAgent(InputStream zippedAgentConfigFiles,
                          @QueryParam("strategy")
                          @DefaultValue("create") String strategy,
                          @QueryParam("selectedResources") String selectedOriginIds,
                          @QueryParam("targetAgentId") String targetAgentId,
-                         @QueryParam("workflowOrder") String workflowOrder);
+                         @QueryParam("workflowOrder") String workflowOrder,
+                         @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                         @QueryParam("compatible")
+                         @DefaultValue("false") Boolean compatible);
+
+    /**
+     * A breaking import: the form callers had before {@code compatible} existed.
+     */
+    default Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, String targetAgentId,
+                                 String workflowOrder) {
+        return importAgent(zippedAgentConfigFiles, strategy, selectedOriginIds, targetAgentId, workflowOrder, false);
+    }
 
     @POST
     @Path("/preview")
@@ -69,7 +96,10 @@ public interface IRestImportService {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Preview what an import would do. When targetAgentId is provided, "
             + "uses structural matching with content diffs (upgrade preview). "
-            + "Otherwise uses originId matching (merge preview).")
+            + "Otherwise uses originId matching (merge preview). The answer's conversationImpact says what the "
+            + "import would do to the conversations running on the target agent, whether the version it writes is "
+            + "declared compatible or not (see the compatible parameter of the import); it is null when the preview "
+            + "names no existing agent, would write nothing, or the caller may not see conversation counts.")
     ImportPreview previewImport(InputStream zippedAgentConfigFiles,
                                 @QueryParam("targetAgentId") String targetAgentId);
 
@@ -89,7 +119,8 @@ public interface IRestImportService {
     @Operation(description = "Preview a single-agent sync from a remote EDDI instance to a local target agent. "
             + "Without targetAgentId, the agent an earlier sync promoted from this source (matched by originId) "
             + "is the target; a new one is created only when there is none, or when createNew=true. More than one "
-            + "earlier promotion answers 409 naming them.")
+            + "earlier promotion answers 409 naming them. The answer's conversationImpact says what the sync would do to "
+            + "the conversations running on the target, whether the version it writes is declared compatible or not.")
     ImportPreview previewSync(@QueryParam("sourceUrl") String sourceUrl,
                               @QueryParam("sourceAgentId") String sourceAgentId,
                               @QueryParam("sourceAgentVersion") Integer sourceVersion,
@@ -115,7 +146,9 @@ public interface IRestImportService {
             + "an UpgradeResult listing per-resource outcomes. All three are 2xx, so a client must branch "
             + "on the status code rather than on response.ok. Without targetAgentId the target is found as for "
             + "the preview. selectedResources, when present, must name at least one resource (400 otherwise); "
-            + "leave it out to sync everything. A CONFLICT row is written only when named in selectedResources.")
+            + "leave it out to sync everything. A CONFLICT row is written only when named in selectedResources. "
+            + "compatible (default false) declares the agent version written compatible with the one it replaces, "
+            + "so running conversations follow it.")
     Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
                          @QueryParam("sourceAgentId") String sourceAgentId,
                          @QueryParam("sourceAgentVersion") Integer sourceVersion,
@@ -123,7 +156,17 @@ public interface IRestImportService {
                          @QueryParam("selectedResources") String selectedResources,
                          @QueryParam("workflowOrder") String workflowOrder,
                          @HeaderParam("X-Source-Authorization") String sourceAuth,
-                         @QueryParam("createNew") Boolean createNew);
+                         @QueryParam("createNew") Boolean createNew,
+                         @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
+                         @QueryParam("compatible")
+                         @DefaultValue("false") Boolean compatible);
+
+    /** A breaking sync. */
+    default Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion, String targetAgentId,
+                                 String selectedResources, String workflowOrder, String sourceAuth, Boolean createNew) {
+        return executeSync(sourceUrl, sourceAgentId, sourceVersion, targetAgentId, selectedResources, workflowOrder, sourceAuth,
+                createNew, false);
+    }
 
     @POST
     @Path("/sync/batch")
