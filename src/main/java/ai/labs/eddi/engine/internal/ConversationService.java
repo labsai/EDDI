@@ -2928,6 +2928,17 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
+    public void resumeConversation(String conversationId,
+                                   HitlDecision decision,
+                                   ConversationResponseHandler handler,
+                                   Boolean returnDetailed,
+                                   Boolean returnCurrentStepOnly,
+                                   List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        conversationHitlService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+    }
+
+    @Override
     public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         return conversationHitlService.getConversationMemorySnapshot(conversationId);

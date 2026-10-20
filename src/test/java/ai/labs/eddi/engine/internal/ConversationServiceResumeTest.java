@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -36,6 +37,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -1160,6 +1162,72 @@ class ConversationServiceResumeTest {
             conversationService.resumeConversation(CONVERSATION_ID, decision, null);
 
             verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+        }
+    }
+
+    // =========================================================================
+    // Reply flags: the handler's snapshot is built the way say builds it
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation — reply flags")
+    class ReplyFlags {
+
+        private static final String PLACEHOLDER = MemoryKeys.SECRET_CONTEXT_PLACEHOLDER;
+
+        /**
+         * Resumes with the given flags and settles a two-step memory; returns what the
+         * handler got.
+         */
+        private SimpleConversationMemorySnapshot settleWith(Boolean returnCurrentStepOnly, boolean useThreeArgForm) throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(createResumeSnapshot()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            var received = new AtomicReference<SimpleConversationMemorySnapshot>();
+            IConversationService.ConversationResponseHandler handler = received::set;
+
+            if (useThreeArgForm) {
+                conversationService.resumeConversation(CONVERSATION_ID, decision, handler);
+            } else {
+                conversationService.resumeConversation(CONVERSATION_ID, decision, handler, false, returnCurrentStepOnly, List.of());
+            }
+
+            ArgumentCaptor<IConversation.IConversationOutputRenderer> renderer = ArgumentCaptor
+                    .forClass(IConversation.IConversationOutputRenderer.class);
+            verify(agent).continueConversation(any(IConversationMemory.class), any(), renderer.capture());
+            var settled = new ConversationMemory(CONVERSATION_ID, AGENT_ID, AGENT_VERSION, USER_ID);
+            settled.setConversationState(ConversationState.READY);
+            settled.getConversationOutputs().getLast().put("output", List.of("first turn"));
+            settled.startNextStep();
+            settled.getConversationOutputs().getLast().put("output", List.of("sent Bearer " + PLACEHOLDER));
+            renderer.getValue().renderOutput(settled);
+            return received.get();
+        }
+
+        @Test
+        @DisplayName("returnCurrentStepOnly=true returns the resumed step only, the secret as its placeholder")
+        void currentStepOnly() throws Exception {
+            var snapshot = settleWith(true, false);
+
+            assertEquals(1, snapshot.getConversationOutputs().size());
+            assertTrue(snapshot.getConversationOutputs().getFirst().toString().contains(PLACEHOLDER), snapshot.getConversationOutputs().toString());
+        }
+
+        @Test
+        @DisplayName("returnCurrentStepOnly=false returns every step, as say does")
+        void wholeConversation() throws Exception {
+            assertEquals(2, settleWith(false, false).getConversationOutputs().size());
+        }
+
+        @Test
+        @DisplayName("the three-argument form is the (false, true, []) form it always was")
+        void threeArgFormUnchanged() throws Exception {
+            assertEquals(1, settleWith(null, true).getConversationOutputs().size());
         }
     }
 

@@ -219,13 +219,22 @@ public interface IRestAgentEngine {
     @Operation(summary = "Resume a paused conversation",
                description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state. "
                        + "The optional body field context may re-supply secret context values (secret: true) that the paused turn carried, "
-                       + "for the resumed turn only; any other entry is a 400.")
+                       + "for the resumed turn only; any other entry is a 400. Pass returnCurrentStepOnly (or returnDetailed/returningFields) to "
+                       + "get the resumed turn back as a say response; without them the answer is an empty 200. When no one is "
+                       + "authenticated, a body decidedBy is recorded as unverified:<value> - a claim by the caller, not an identity.")
     @APIResponse(responseCode = "200", description = "Conversation resumed.")
     @APIResponse(responseCode = "400", description = "Missing or invalid decision body.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation is not in AWAITING_HUMAN state.")
-    Response resumeConversation(@PathParam("conversationId") String conversationId,
-                                HitlDecision decision);
+    void resumeConversation(@PathParam("conversationId") String conversationId,
+                            HitlDecision decision,
+                            @Parameter(description = "Opt-in reply: pass any of returnDetailed, returnCurrentStepOnly, returningFields "
+                                    + "to wait for the resumed turn and receive it as a say response (same flags, same shape, secret context "
+                                    + "shown as its placeholder). None of them: an empty 200, as before.")
+                            @QueryParam("returnDetailed") Boolean returnDetailed,
+                            @QueryParam("returnCurrentStepOnly") Boolean returnCurrentStepOnly,
+                            @QueryParam("returningFields") List<String> returningFields,
+                            @Suspended final AsyncResponse response);
 
     @GET
     @NoCache

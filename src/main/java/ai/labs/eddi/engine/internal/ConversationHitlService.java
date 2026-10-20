@@ -268,6 +268,21 @@ class ConversationHitlService {
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
+        resumeConversation(conversationId, decision, handler, false, true, List.of());
+    }
+
+    /**
+     * As above, with the snapshot flags {@code say} takes: the handler receives the
+     * resumed turn rendered through the same
+     * {@code convertSimpleConversationMemorySnapshot} call a say turn uses.
+     */
+    public void resumeConversation(String conversationId,
+                                   HitlDecision decision,
+                                   ConversationResponseHandler handler,
+                                   Boolean returnDetailed,
+                                   Boolean returnCurrentStepOnly,
+                                   List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
         // See resumeConversation's @throws IllegalArgumentException javadoc
         // (IConversationService) for why this is checked here rather than trusted
         // from each caller.
@@ -450,7 +465,8 @@ class ConversationHitlService {
                         if (handler == null) {
                             return;
                         }
-                        var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
+                        var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, returnDetailed, returnCurrentStepOnly,
+                                returningFields);
                         memorySnapshot.setEnvironment(environment);
                         if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                             resumeDelivery.defer(committedState -> {

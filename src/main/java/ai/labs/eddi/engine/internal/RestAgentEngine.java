@@ -654,7 +654,83 @@ public class RestAgentEngine implements IRestAgentEngine {
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
 
     @Override
+    public void resumeConversation(String conversationId, HitlDecision decision, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                   List<String> returningFields, AsyncResponse response) {
+        // Same budget and timeout answer as say. The resumed turn keeps running past a
+        // timeout, exactly as a say turn does; only this request stops waiting.
+        response.setTimeout(agentTimeout, TimeUnit.SECONDS);
+        response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+
+        // Opt-in: without any of the say flags the answer is the empty 200 it has
+        // always been, and the service is called without a handler.
+        boolean wantsReply = returnDetailed != null || returnCurrentStepOnly != null
+                || (returningFields != null && !returningFields.isEmpty());
+        ConversationResponseHandler handler = null;
+        if (wantsReply) {
+            handler = new ConversationResponseHandler() {
+                @Override
+                public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                    TurnError error = snapshot.getError();
+                    Long retryAfterSeconds = error != null ? error.retryAfterSeconds() : null;
+                    if (retryAfterSeconds != null) {
+                        response.resume(Response.ok(snapshot).header("Retry-After", retryAfterSeconds).build());
+                    } else {
+                        response.resume(snapshot);
+                    }
+                }
+            };
+        }
+        try {
+            Response immediate = resume(conversationId, decision, handler,
+                    returnDetailed != null ? returnDetailed : Boolean.FALSE,
+                    returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
+                    returningFields != null ? returningFields : List.of());
+            if (immediate != null) {
+                response.resume(immediate);
+            }
+        } catch (RuntimeException e) {
+            // Ownership/permission exceptions reach the mappers through the AsyncResponse.
+            response.resume(e);
+        }
+    }
+
+    /**
+     * Resume without a reply: the empty 200 (or the error) as ever. The plain,
+     * synchronous form of the endpoint.
+     */
     public Response resumeConversation(String conversationId, HitlDecision decision) {
+        return resume(conversationId, decision, null, false, true, List.of());
+    }
+
+    /** Maximum length of an unverified approver claim recorded from the body. */
+    private static final int MAX_UNVERIFIED_APPROVER_LENGTH = 128;
+
+    /**
+     * The approver to record. An authenticated principal always wins and the body
+     * is ignored. Only when nobody is authenticated is a body {@code decidedBy}
+     * kept, prefixed {@code unverified:}: it is a claim the caller made about
+     * itself, not an identity, and is restricted to a safe character set.
+     */
+    static String resolveApprover(String principalName, boolean anonymous, String claimed) {
+        if (principalName != null && !principalName.isBlank() && !anonymous) {
+            return principalName;
+        }
+        if (claimed == null || claimed.isBlank()) {
+            return null;
+        }
+        String trimmed = claimed.trim();
+        if (trimmed.length() > MAX_UNVERIFIED_APPROVER_LENGTH) {
+            trimmed = trimmed.substring(0, MAX_UNVERIFIED_APPROVER_LENGTH);
+        }
+        return "unverified:" + trimmed.replaceAll("[^A-Za-z0-9._@:+-]", "_");
+    }
+
+    /**
+     * @return the response to send now, or {@code null} when {@code handler} will
+     *         answer once the resumed turn has run
+     */
+    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler, Boolean returnDetailed,
+                            Boolean returnCurrentStepOnly, List<String> returningFields) {
         if (decision == null || decision.getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
@@ -667,12 +743,16 @@ public class RestAgentEngine implements IRestAgentEngine {
         }
         validateConversationOwnership(conversationId, true);
         // Null-safe principal (parity with the cancel/end paths): an anonymous caller
-        // must not NPE — the decision is attributed to "unknown" downstream.
-        String userId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-        decision.setDecidedBy(userId);
+        // must not NPE; see resolveApprover for what is recorded instead.
+        String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        decision.setDecidedBy(resolveApprover(principalName, identity.isAnonymous(), decision.getDecidedBy()));
         try {
-            conversationService.resumeConversation(conversationId, decision, null);
-            return Response.ok().build();
+            if (handler == null) {
+                conversationService.resumeConversation(conversationId, decision, null);
+            } else {
+                conversationService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+            }
+            return handler == null ? Response.ok().build() : null;
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();
