@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Objects;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -94,6 +95,8 @@ public class ConversationMemory implements IConversationMemory {
      * Transient — never serialized. The running turn's deadline, set per turn.
      */
     private transient TurnDeadline turnDeadline;
+    /** The agent's per-conversation cost ceiling; NOT persisted. */
+    private transient Double maxCostPerConversationUsd;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -496,6 +499,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setTurnDeadline(TurnDeadline turnDeadline) {
         this.turnDeadline = turnDeadline;
+    }
+
+    @Override
+    public OptionalDouble getConversationCostCeilingUsd() {
+        return maxCostPerConversationUsd != null ? OptionalDouble.of(maxCostPerConversationUsd) : OptionalDouble.empty();
+    }
+
+    @Override
+    public void setConversationCostCeilingUsd(Double maxCostPerConversationUsd) {
+        this.maxCostPerConversationUsd = maxCostPerConversationUsd;
     }
 
     @Override

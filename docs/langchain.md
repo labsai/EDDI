@@ -852,7 +852,7 @@ resumed request with a 400. Raise the cap or approve such calls quickly if you h
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
-| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (and any group cost ceiling). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
@@ -1960,6 +1960,49 @@ $0.001, `weather` $0.0005; `calculator`, `datetime`, `dataformatter` and
 `textsummarizer` are free. Anything not in that table — http, mcp, a2a, dynamic
 and the remaining built-ins — costs $0.00 until you price it with `toolPricing`.
 Negative `toolPricing` values are clamped to 0.0.
+
+**Prices drive the tenant budget.** Each settled turn charges its priced cost —
+LLM tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step prices) plus
+tracked tool cost — to the tenant's `maxMonthlyCostUsd`. Once that budget is spent,
+every LLM task serves its fallback answer (`responseValidation.fallbackMessage`, or
+the default sentence) instead of calling its model, and records
+`llm:spend_refused:<taskId>` on the step. An unpriced model meters $0 in token cost,
+but once the tenant budget is spent (by priced tools or other priced models) its
+calls are refused too. See [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget).
+
+#### Per-conversation LLM cost ceiling
+
+`maxCostPerConversationUsd` is an **agent-level** setting (on the agent configuration, next to
+`workflows`, not on an LLM task) that bounds what one conversation may spend:
+
+```json
+{
+  "workflows": ["eddi://ai.labs.workflow/workflowstore/workflows/0123456789abcdef01234567?version=1"],
+  "maxCostPerConversationUsd": 0.50
+}
+```
+
+What counts is the conversation's **priced** spend — the sum of every step's `audit:cost`: LLM
+tokens at `inputPricePer1M` / `outputPricePer1M` (or cascade step and judge prices) plus tracked
+tool cost. It is checked
+
+- **before each LLM task calls its model** (plain, streaming, tool loop or cascade): once the
+  conversation has spent the ceiling, the model is not called; the task serves its fallback answer
+  (`responseValidation.fallbackMessage`, or the default sentence) whatever its `onError`, the step
+  records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
+  `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
+- **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
+  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
+  answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
+  cascade's own step prices apply at the next task-level check.
+
+The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
+(the default) means unlimited; `0` allows no priced spend; a negative value is treated as
+unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
+refuses every model call, priced or not, since the spend so far already equals it. This is
+unrelated to the task-level `maxBudgetPerConversation` (tool cost only; see `enforceBudget`
+above), which is unchanged.
 
 #### Tool cache scoping
 

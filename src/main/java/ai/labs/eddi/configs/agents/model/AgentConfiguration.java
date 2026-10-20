@@ -592,6 +592,36 @@ public class AgentConfiguration {
      */
     private Long turnDeadlineReserveMs;
 
+    // === Per-conversation LLM cost ceiling ===
+
+    /**
+     * Ceiling, in USD, on the priced spend of one conversation — the sum of every
+     * step's {@code audit:cost} (LLM tokens at the configured
+     * {@code inputPricePer1M}/{@code outputPricePer1M} or cascade prices, plus
+     * tracked tool cost). Before each LLM task's model call, and between the rounds
+     * of a tool loop, the conversation's spend so far is compared against it; once
+     * it is reached the model is not called again and the task serves its fallback
+     * answer.
+     * <p>
+     * Unset (the default) means unlimited — existing agents behave exactly as
+     * before. A negative value is treated as unlimited. Unpriced models add $0 to
+     * the spend, so a positive ceiling never stops them by itself — but {@code 0}
+     * refuses every model call, priced or not, since the spend so far ($0) already
+     * equals the ceiling.
+     * <p>
+     * Unrelated to the task-level {@code maxBudgetPerConversation}, which bounds
+     * tool cost only (see {@code enforceBudget}).
+     */
+    private Double maxCostPerConversationUsd;
+
+    public Double getMaxCostPerConversationUsd() {
+        return maxCostPerConversationUsd;
+    }
+
+    public void setMaxCostPerConversationUsd(Double maxCostPerConversationUsd) {
+        this.maxCostPerConversationUsd = maxCostPerConversationUsd;
+    }
+
     public Long getTurnDeadlineMs() {
         return turnDeadlineMs;
     }
