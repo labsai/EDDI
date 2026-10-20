@@ -163,6 +163,16 @@ public interface IConversationService {
         default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
             onComplete(snapshot);
         }
+
+        /**
+         * The turn was dropped WITHOUT consuming the input because its caller had
+         * already stopped waiting for it: it was still queued when the time stamped as
+         * {@code InputData.callerGivesUpAtEpochMs} passed. The caller has normally been
+         * answered by its own timeout by then. Defaults to {@link #onSkipped}.
+         */
+        default void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
+            onSkipped(snapshot);
+        }
     }
 
     /**

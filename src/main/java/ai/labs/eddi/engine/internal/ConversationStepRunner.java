@@ -393,6 +393,23 @@ class ConversationStepRunner {
                              Map<String, String> loggingContext, Callable<Void> submittedExecution, TurnBuilder rebuildTurn,
                              Consumer<IConversationMemory> skipNotifier, LeaseHandle lease,
                              ConversationService.ProcessingTurn processingTurn) {
+        // Caller-gone guard, first because it is the cheapest and saves the most: the
+        // caller stopped waiting while the turn was queued (REST: its 408 has been
+        // sent), so nobody will read this answer. Running it anyway is what turns an
+        // overload into a collapse: every queued turn spends its model call and its
+        // writes on a dead request while the live ones wait behind it. The input is
+        // not consumed, so a retry runs normally.
+        if (processingTurn != null && processingTurn.callerHasGivenUp(System.currentTimeMillis())) {
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            LOGGER.debugf("Skipping queued turn for conversation %s: its caller stopped waiting before it could run",
+                    sanitize(conversationId));
+            conversationService.countTurnSkippedForCaller();
+            if (skipNotifier != null) {
+                skipNotifier.accept(submittedMemory);
+            }
+            return null;
+        }
+
         // Queued-say guard: this memory copy was loaded at REST-request time;
         // a previously queued turn may have committed a pause (or a resume may
         // be executing), or the conversation may have been terminally resolved

@@ -31,6 +31,24 @@ public class InputData {
     @JsonIgnore
     private String idempotencyKey;
 
+    /**
+     * When the HTTP request carrying this input reached the server (epoch ms), set
+     * by the REST layer. Time the request spent waiting for a thread counts against
+     * the caller's patience, so budgets start here. Header-side only: never read
+     * from or written to a request body.
+     */
+    @JsonIgnore
+    private Long requestArrivalEpochMs;
+
+    /**
+     * When the caller stops waiting for this turn's answer (epoch ms), set by a
+     * REST surface that answers with a timeout at that point. A turn still queued
+     * then is not run: its caller already has its {@code 408}. Never read from or
+     * written to a request body.
+     */
+    @JsonIgnore
+    private Long callerGivesUpAtEpochMs;
+
     public InputData() {
     }
 
@@ -73,5 +91,25 @@ public class InputData {
     @JsonIgnore
     public void setRequestedTurnDeadlineMs(Long requestedTurnDeadlineMs) {
         this.requestedTurnDeadlineMs = requestedTurnDeadlineMs;
+    }
+
+    @JsonIgnore
+    public Long getRequestArrivalEpochMs() {
+        return requestArrivalEpochMs;
+    }
+
+    @JsonIgnore
+    public void setRequestArrivalEpochMs(Long requestArrivalEpochMs) {
+        this.requestArrivalEpochMs = requestArrivalEpochMs;
+    }
+
+    @JsonIgnore
+    public Long getCallerGivesUpAtEpochMs() {
+        return callerGivesUpAtEpochMs;
+    }
+
+    @JsonIgnore
+    public void setCallerGivesUpAtEpochMs(Long callerGivesUpAtEpochMs) {
+        this.callerGivesUpAtEpochMs = callerGivesUpAtEpochMs;
     }
 }

@@ -351,6 +351,31 @@ class ConversationServiceIdempotencyTest {
 
     // ------------------------------------------------------------------
 
+    @Test
+    @DisplayName("a key whose turn was dropped because its caller gave up is released: the retry with that key runs the turn")
+    void droppedForAGoneCallerReleasesTheKey() throws Exception {
+        ConversationResponseHandler timedOut = mock(ConversationResponseHandler.class);
+        var input = new InputData("hello", new HashMap<>());
+        input.setIdempotencyKey("k-gone");
+        input.setCallerGivesUpAtEpochMs(System.currentTimeMillis() - 1);
+        conversationService.say(CONVERSATION_ID, false, true, List.of(), input, false, timedOut);
+        runQueuedTurns(1);
+
+        verify(timedOut).onCallerGone(any());
+        verify(conversation, never()).say(anyString(), any());
+
+        ConversationResponseHandler retry = mock(ConversationResponseHandler.class);
+        say("k-gone", retry);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        verify(conversationCoordinator, times(2)).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+        captor.getAllValues().getLast().call();
+
+        verify(conversation, times(1)).say(anyString(), any());
+        verify(retry).onComplete(any());
+        verify(retry, never()).onSkipped(any());
+    }
+
     private void say(String key, ConversationResponseHandler handler) throws Exception {
         var input = new InputData("hello", new HashMap<>());
         input.setIdempotencyKey(key);
