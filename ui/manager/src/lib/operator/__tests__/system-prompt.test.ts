@@ -489,6 +489,46 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
     expect(body).toMatch(/DRAINED from the Cluster screen answers differently:\s+HTTP 409/);
   });
 
+  it.each(bodies)("%s: names a database pool-wait timeout as a 503, not a 500", (_label, body) => {
+    // RestAgentEngine's pool-wait response (ConnectionWaitTimeouts) — its message
+    // is what the admin sees, so the prompt quotes its start.
+    expect(body).toContain('"The database is busy: no connection was free in time ..."');
+    expect(body).toContain("eddi.mongodb.max-wait-time-ms");
+  });
+
+  it.each(bodies)("%s: tells a 408 from a 503 and says whether the turn ran", (_label, body) => {
+    // The 408 counts from the request's arrival (RequestArrivalStamp); a turn
+    // still queued when its caller gave up is dropped unrun, input unconsumed.
+    expect(body).toContain("HTTP 408 Request Timeout");
+    expect(body).toMatch(/counted\s+from when the request ARRIVED/);
+    expect(body).toContain('eddi_turn_rejected_total{reason="caller_timed_out"}');
+    expect(body).toContain('eddi_turn_skipped_total{reason="caller_timed_out"}');
+    expect(body).toContain("eddi.conversation.skip-turns-of-timed-out-callers");
+    expect(body).toMatch(/So with the default setting a 408 means the turn did NOT run, unless it had\s+already started/);
+  });
+
+  it.each(bodies)("%s: promises an exactly-once retry only for a skipped turn", (_label, body) => {
+    // With skip-turns-of-timed-out-callers=false the queued turn still runs.
+    expect(body).toMatch(/Only then does\s+sending the message again run it exactly once/);
+    expect(body).toMatch(/a retry can run the same input twice/);
+  });
+
+  it.each(bodies)("%s: calls a started turn's outcome unknown, the watchdog timing from its start", (_label, body) => {
+    // ConversationStepRunner calls future.get(agentTimeout) right after submitting the
+    // turn, so the watchdog runs from submission (executor queue time included).
+    expect(body).toContain("its outcome is UNKNOWN at the moment of the 408");
+    expect(body).toMatch(/starts\s+when the turn is handed to the executor, not when the request arrived/);
+    expect(body).toMatch(/includes any wait in the executor's queue/);
+  });
+
+  it.each(bodies)("%s: reads rising caller_timed_out as overload, not a reason to raise the timeout", (_label, body) => {
+    expect(body).toMatch(/Either `caller_timed_out` counter rising means the node takes longer to\s+START a turn/);
+    expect(body).toMatch(/Add nodes, or lower `eddi\.conversation\.max-in-flight-turns`/);
+    // A turn that queued until just before its deadline, then started, is
+    // counted by neither counter — flat counters do not rule out overload.
+    expect(body).toContain("Flat counters do NOT prove the node is healthy");
+  });
+
   it.each(bodies)("%s: states the heap-derived auto formula and the per-turn budget", (_label, body) => {
     // InFlightTurnLimit: (max heap - RESERVE_MB 256) / per-turn MB, floor 32.
     expect(body).toMatch(/\(max heap − 256 MB\) ÷\s+`eddi\.conversation\.in-flight-turn-memory-mb`/);
@@ -516,6 +556,8 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
     // RestAgentEngine.sayInternal logs every refused say/rerun at WARN; only a
     // refused conversation START (through the mapper) stays at DEBUG.
     expect(withTools).toContain('WARN "Turn rejected for conversation <id>:"');
+    // Both caller_timed_out paths log at DEBUG, so the logs cannot show a 408.
+    expect(withTools).toMatch(/A 408, whether answered at once or for a\s+queued turn that was then dropped, is logged only at DEBUG/);
 
     const without = buildOperatorPromptBody(
       READ_ENDPOINTS.filter((e) => e !== "GET /administration/coordinator/status" && e !== "GET /administration/logs"),
