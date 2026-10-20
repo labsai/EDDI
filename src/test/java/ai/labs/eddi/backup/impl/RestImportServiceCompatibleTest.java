@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -348,6 +349,35 @@ class RestImportServiceCompatibleTest {
 
             assertNull(preview.conversationImpact());
             assertEquals(1, preview.resources().size());
+        }
+
+        @Test
+        @DisplayName("a change to snippets, schedules or connections alone writes no agent version and reports no impact")
+        void standaloneChangesReportNoImpact() {
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_AGENT_ID), anyBoolean())).thenReturn(new ImportPreview("src", "Source",
+                    TARGET_AGENT_ID, "Target", List.of(row(DiffAction.SKIP), standalone("snippet", DiffAction.UPDATE),
+                            standalone("schedule", DiffAction.CREATE), standalone("connection", DiffAction.CREATE))));
+
+            ImportPreview preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), TARGET_AGENT_ID);
+
+            assertNull(preview.conversationImpact());
+            verify(reader, never()).previewNextVersion(anyString());
+        }
+
+        @Test
+        @DisplayName("a workflow-extension change still reports the impact: it repoints a workflow and so writes the agent")
+        void extensionChangeStillReportsImpact() {
+            when(structuralMatcher.buildPreview(any(), eq(TARGET_AGENT_ID), anyBoolean())).thenReturn(new ImportPreview("src", "Source",
+                    TARGET_AGENT_ID, "Target", List.of(row(DiffAction.SKIP), standalone("langchain", DiffAction.UPDATE))));
+            when(reader.previewNextVersion(TARGET_AGENT_ID)).thenReturn(impact());
+
+            ImportPreview preview = importService.previewImport(new ByteArrayInputStream(new byte[0]), TARGET_AGENT_ID);
+
+            assertNotNull(preview.conversationImpact());
+        }
+
+        private ResourceDiff standalone(String type, DiffAction action) {
+            return new ResourceDiff("src-" + type, type, type, action, null, null, "type", null, null, -1);
         }
 
         private void givenPreview(DiffAction action) {

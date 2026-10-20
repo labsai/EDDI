@@ -3844,12 +3844,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * SKIP (nothing would be written, so no version is created), and when the
      * caller may not see the counts.
      */
+    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
+
     private ImportPreview withConversationImpact(ImportPreview preview) {
         if (promotionImpactReader == null || preview == null || preview.targetAgentId() == null) {
             return preview;
         }
-        boolean writesSomething = preview.resources().stream().anyMatch(diff -> diff.action() != DiffAction.SKIP);
-        if (!writesSomething) {
+        // Snippets, schedules and connections are written on their own; only a change
+        // to
+        // the agent, a workflow or a workflow extension makes the import write a new
+        // agent
+        // version, which is what the impact describes.
+        boolean writesAgentVersion = preview.resources().stream()
+                .filter(diff -> !STANDALONE_TYPES.contains(diff.resourceType()))
+                .anyMatch(diff -> diff.action() != DiffAction.SKIP);
+        if (!writesAgentVersion) {
             return preview;
         }
         return preview.withConversationImpact(promotionImpactReader.previewNextVersion(preview.targetAgentId()));
