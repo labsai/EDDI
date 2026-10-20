@@ -15321,7 +15321,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Mean `eddi_guardrail_classifier_duration_seconds` by `provider` and `outcome` (safe, unsafe, unparseable, unavailable, timeout). The classifier runs before the main model on every guarded turn.",
+          "description": "Mean `eddi_guardrail_classifier_duration_seconds` by `provider` and `outcome` (safe, unsafe, unparseable, unavailable, timeout). An input classifier runs before the main model and an output classifier screens its answer afterwards; only turns whose agent configures a classifier guardrail record samples. Empty (\"no samples yet\") when there is no classifier traffic, because a mean latency has no honest value without calls.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -15372,7 +15372,8 @@
                     "value": null
                   }
                 ]
-              }
+              },
+              "noValue": "no samples yet"
             },
             "overrides": []
           },
