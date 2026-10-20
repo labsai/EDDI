@@ -6,6 +6,7 @@ package ai.labs.eddi;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -479,7 +480,7 @@ class ComposeStackTest {
     @DisplayName("bundled admin passwords come from overridable variables with a dev default")
     void adminPasswordsAreOverridable() {
         List<String> offenders = new ArrayList<>();
-        int checked = 0;
+        Set<String> found = new TreeSet<>();
         for (Path file : composeFiles()) {
             for (var entry : services(file).entrySet()) {
                 JsonNode environment = entry.getValue().path("environment");
@@ -497,20 +498,222 @@ class ComposeStackTest {
                     if (value == null) {
                         continue;
                     }
-                    checked++;
+                    found.add(variable);
                     if (!value.matches("^\\$\\{[A-Z_]+:-[^}]*\\}$")) {
                         offenders.add(name(file) + " sets " + variable + " on `" + entry.getKey() + "` to `" + value + "`");
                     }
                 }
             }
         }
-        assertEquals(ADMIN_PASSWORD_VARIABLES.size(), checked,
-                "expected each of " + ADMIN_PASSWORD_VARIABLES + " exactly once across the compose files — a renamed"
+        assertEquals(new TreeSet<>(ADMIN_PASSWORD_VARIABLES), found,
+                "expected each of " + ADMIN_PASSWORD_VARIABLES + " somewhere in the compose files — a renamed"
                         + " variable would otherwise leave this sweep checking nothing");
         assertEquals(List.of(), offenders,
                 "an administrator password is a literal or a required variable. Use ${SOME_VARIABLE:-admin}, so the"
                         + " installers can supply a generated value through .env and a bare `docker compose up` still"
                         + " starts.");
+    }
+
+    private static final Path AUTH_OVERLAY = Path.of("docker-compose.auth.yml");
+
+    /**
+     * {@code KC_BOOTSTRAP_ADMIN_PASSWORD} falls back to {@code admin} so the
+     * loopback quick start needs no .env — which was acceptable only while
+     * {@code KEYCLOAK_BIND} stayed on loopback, and nothing enforced that. The auth
+     * overlay's {@code keycloak-guard} now does, the way docker-compose.yml's
+     * {@code bind-guard} does for EDDI: Keycloak waits for it to complete
+     * successfully, and it reads both values from its own environment with the same
+     * defaults the keycloak service interpolates.
+     */
+    @Test
+    @DisplayName("Keycloak cannot start off loopback with the admin/admin bootstrap fallback")
+    void keycloakWaitsForItsDefaultPasswordGuard() {
+        TreeMap<String, JsonNode> services = services(AUTH_OVERLAY);
+        JsonNode keycloak = services.get("keycloak");
+        JsonNode guard = services.get("keycloak-guard");
+        assertTrue(keycloak != null && guard != null, "docker-compose.auth.yml must declare keycloak and keycloak-guard");
+
+        assertEquals("service_completed_successfully",
+                keycloak.path("depends_on").path("keycloak-guard").path("condition").asText(),
+                "keycloak must wait for keycloak-guard to EXIT 0, or a refusing guard is only a log line");
+
+        assertEquals(keycloak.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                guard.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                "the guard must judge the same password Keycloak will be given");
+        String bind = guard.path("environment").path("KEYCLOAK_BIND").asText();
+        assertEquals("${KEYCLOAK_BIND:-127.0.0.1}", bind, "the guard must read KEYCLOAK_BIND with the ports' default");
+        assertTrue(keycloak.path("ports").get(0).asText().startsWith(bind + ":"),
+                "keycloak's port must be published on the same KEYCLOAK_BIND the guard checks");
+    }
+
+    /**
+     * The guard can only see the configured password; Keycloak reads it on first
+     * boot only, so a volume created with {@code admin}/{@code admin} keeps that
+     * login whatever .env says later (CodeRabbit on PR #1099).
+     * {@code keycloak-admin-rotate} closes that: once Keycloak is healthy, and
+     * before EDDI starts, it sets a still-working default login to the configured
+     * password, which it hands to kcadm on stdin rather than its command line.
+     */
+    @Test
+    @DisplayName("an existing admin/admin login is rotated to the configured password before EDDI starts")
+    void keycloakDefaultLoginIsRotatedOnAnExistingVolume() {
+        TreeMap<String, JsonNode> services = services(AUTH_OVERLAY);
+        JsonNode rotate = services.get("keycloak-admin-rotate");
+        assertTrue(rotate != null, "docker-compose.auth.yml must declare keycloak-admin-rotate");
+        assertEquals("service_healthy", rotate.path("depends_on").path("keycloak").path("condition").asText(),
+                "the rotation needs a running Keycloak to log in to");
+        assertEquals("service_completed_successfully",
+                services.get("eddi").path("depends_on").path("keycloak-admin-rotate").path("condition").asText(),
+                "EDDI must not start before the default login has been checked and rotated");
+        assertEquals(services.get("keycloak").path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                rotate.path("environment").path("KC_BOOTSTRAP_ADMIN_PASSWORD").asText(),
+                "the rotation must set the same password the guard judged");
+
+        String script = rotate.path("command").get(0).asText();
+        assertTrue(script.contains("--password admin") && script.contains("reset-password") && script.contains("-f -"),
+                "the script must try the default login and reset the password from stdin: " + script);
+        assertFalse(script.lines().anyMatch(line -> line.contains("kcadm") && line.contains("$$KC_BOOTSTRAP_ADMIN_PASSWORD")),
+                "the configured password must not appear on a kcadm command line: " + script);
+
+        // The marker is how the guard learns that an existing volume was checked.
+        assertEquals("keycloak-data:/opt/keycloak/data", rotate.path("volumes").get(0).asText(),
+                "the rotation must write its marker into the keycloak-data volume");
+        assertTrue(script.contains("touch \"$$marker\"") && script.contains(".eddi-admin-verified"),
+                "the rotation must leave the marker the guard looks for: " + script);
+        assertEquals("keycloak-data:/kc-data:ro", services.get("keycloak-guard").path("volumes").get(0).asText(),
+                "the guard must see the volume, read-only, to tell an existing one from a fresh one");
+    }
+
+    /**
+     * Runs the guard's script itself, so the decision table is exercised and not
+     * just the wiring. Needs a POSIX {@code sh} — always there on the Linux CI
+     * runner, skipped where there is none.
+     */
+    @Test
+    @DisplayName("the Keycloak guard refuses exactly a non-loopback bind with the default password")
+    void keycloakGuardScriptDecides() throws Exception {
+        Assumptions.assumeTrue(shellAvailable(), "no POSIX sh on PATH");
+        String script = services(AUTH_OVERLAY).get("keycloak-guard").path("command").get(0).asText()
+                // compose's escape: `$$` reaches the shell as `$`
+                .replace("$$", "$");
+
+        assertEquals(0, runGuard(script, "127.0.0.1", "admin"), "loopback with the dev default must start");
+        assertEquals(0, runGuard(script, "::1", "admin"), "IPv6 loopback with the dev default must start");
+        assertEquals(1, runGuard(script, "0.0.0.0", "admin"), "0.0.0.0 with admin/admin must be refused");
+        assertEquals(1, runGuard(script, "192.0.2.10", ""), "an empty password must be refused off loopback");
+        assertEquals(0, runGuard(script, "0.0.0.0", "a-generated-secret"), "a real password may leave loopback");
+
+        // An existing volume keeps the password it was created with: until
+        // keycloak-admin-rotate has seen `admin` refused and left its marker, it stays
+        // on loopback whatever the configured password says.
+        Path volume = Files.createTempDirectory("keycloak-data");
+        try {
+            Files.createDirectory(volume.resolve("h2"));
+            assertEquals(1, runGuard(script, "0.0.0.0", "a-generated-secret", volume),
+                    "an existing volume without the rotation marker must be refused off loopback");
+            assertEquals(0, runGuard(script, "127.0.0.1", "a-generated-secret", volume),
+                    "on loopback it must start, so the rotation can run");
+            Files.createFile(volume.resolve(".eddi-admin-verified"));
+            assertEquals(0, runGuard(script, "0.0.0.0", "a-generated-secret", volume),
+                    "once the rotation has verified the login, the volume may leave loopback");
+        } finally {
+            try (Stream<Path> files = Files.walk(volume)) {
+                files.sorted((a, b) -> b.getNameCount() - a.getNameCount()).forEach(path -> path.toFile().delete());
+            }
+        }
+    }
+
+    private static boolean shellAvailable() {
+        try {
+            return new ProcessBuilder("sh", "-c", "exit 0").start().waitFor() == 0;
+        } catch (IOException e) {
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /**
+     * The script goes through a file, not {@code sh -c}: Windows re-quotes a
+     * command-line argument, which mangles the script's own {@code ""} patterns.
+     */
+    private static int runGuard(String script, String bind, String password) throws Exception {
+        // A data directory that does not exist: a fresh volume.
+        return runGuard(script, bind, password, Path.of("target", "no-such-keycloak-data").toAbsolutePath());
+    }
+
+    private static int runGuard(String script, String bind, String password, Path dataDir) throws Exception {
+        Path file = Files.createTempFile("keycloak-guard", ".sh");
+        try {
+            Files.writeString(file, script, StandardCharsets.UTF_8);
+            ProcessBuilder builder = new ProcessBuilder("sh", file.toAbsolutePath().toString())
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            builder.environment().put("KEYCLOAK_BIND", bind);
+            builder.environment().put("KC_BOOTSTRAP_ADMIN_PASSWORD", password);
+            builder.environment().put("KC_DATA_DIR", dataDir.toString().replace('\\', '/'));
+            return builder.start().waitFor();
+        } finally {
+            Files.deleteIfExists(file);
+        }
+    }
+
+    /**
+     * EDDI used to connect to the bundled MongoDB as the root user
+     * ({@code authSource=admin}), so anything that read its connection string held
+     * the whole server. Every stack that brings its own MongoDB now gives EDDI a
+     * user defined in {@code eddi} and lets a one-shot {@code mongodb-app-user}
+     * service — which runs on every {@code up}, so existing volumes migrate too —
+     * hold the root credentials instead. The mongodb healthcheck pings without
+     * credentials ({@code ping} needs none).
+     */
+    @Test
+    @DisplayName("EDDI connects to a bundled MongoDB as its own user, never as root")
+    void eddiDoesNotConnectAsMongoRoot() {
+        List<String> offenders = new ArrayList<>();
+        int stacks = 0;
+        for (Path file : composeFiles()) {
+            TreeMap<String, JsonNode> services = services(file);
+            if (!services.containsKey("mongodb") || !services.containsKey("eddi")) {
+                continue;
+            }
+            stacks++;
+            String connection = environmentValue(services.get("eddi"), "MONGODB_CONNECTIONSTRING");
+            // The password may FALL BACK to the root password (an existing .env keeps
+            // working); the user must be EDDI's own, defined in `eddi`.
+            if (connection == null || !connection.contains("authSource=eddi")
+                    || !connection.matches("mongodb://(\\$\\{MONGO_APP_USERNAME:-eddi_app\\}|eddi_app):.*")) {
+                offenders.add(name(file) + ": eddi's MONGODB_CONNECTIONSTRING is `" + connection + "`");
+            }
+            JsonNode helper = services.get("mongodb-app-user");
+            if (helper == null || !helper.path("command").toString().contains("createUser")) {
+                offenders.add(name(file) + ": declares no mongodb-app-user that creates EDDI's user");
+            }
+            if (!"service_completed_successfully".equals(
+                    services.get("eddi").path("depends_on").path("mongodb-app-user").path("condition").asText())) {
+                offenders.add(name(file) + ": eddi does not wait for mongodb-app-user to complete");
+            }
+            if (services.get("mongodb").path("healthcheck").path("test").toString().contains("\"-p\"")) {
+                offenders.add(name(file) + ": the mongodb healthcheck carries a password; ping needs none");
+            }
+        }
+        assertTrue(stacks >= 3, "expected the base, Open WebUI and cluster stacks to bring a MongoDB; found " + stacks);
+        assertEquals(List.of(), offenders);
+    }
+
+    /** One {@code environment} entry, in either the map or the list form. */
+    private static String environmentValue(JsonNode service, String variable) {
+        JsonNode environment = service.path("environment");
+        if (environment.isObject()) {
+            return environment.has(variable) ? environment.get(variable).asText() : null;
+        }
+        for (JsonNode item : environment) {
+            if (item.asText().startsWith(variable + "=")) {
+                return item.asText().substring(variable.length() + 1);
+            }
+        }
+        return null;
     }
 
     /**

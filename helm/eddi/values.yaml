@@ -289,6 +289,16 @@ mongodb:
   # the database first (db.changeUserPassword in the admin db), then upgrade.
   rootUsername: eddi
   rootPassword: ""
+  # EDDI's own MongoDB user: readWrite + dbAdmin on the `eddi` database and no
+  # role anywhere else. EDDI connects as this user, never as root; the
+  # Deployment's ensure-mongodb-user init container creates it with the root
+  # credentials on every start, so an existing volume needs no manual step and
+  # changing appPassword rotates it. appPassword empty = derived from
+  # rootPassword (sha256: stable across renders, not the root password itself).
+  # Unused with existingSecret, where eddi.existingSecret carries EDDI's
+  # connection string and you manage the users.
+  appUsername: eddi_app
+  appPassword: ""
   # Bring your own Secret instead of <release>-mongodb: it must carry the keys
   # MONGO_INITDB_ROOT_USERNAME and MONGO_INITDB_ROOT_PASSWORD, which the mongo
   # container reads at first init. rootPassword is then ignored — and because

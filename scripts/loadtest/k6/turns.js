@@ -8,6 +8,11 @@
 //   TURNS      turns per VU (steady, long-conversation, same-conversation)
 //   THINK_MS   pause between a VU's turns
 //   RAMP       burst: ramp-up duration (default 30s); HOLD: time at peak (default 60s)
+//   DELAY_MS   the mock LLM's delay for this run; turn_overhead = turn latency minus it
+//   RETRY_503  0 (default): a 503 ends the iteration. N > 0: on 503 sleep Retry-After (capped at
+//              RETRY_CAP_MS, default 10000, ±RETRY_JITTER, default 0.2) and resend the same turn,
+//              at most N attempts in all; then the turn counts as abandoned. Conversation starts
+//              back off the same way (starts_refused)
 //   OUT        summary file name under /results
 //   NODE_ADDRS cluster runs: comma-separated ip:port of every replica behind the load balancer.
 //              The balancer names the replica that answered in X-Loadtest-Upstream; each turn
@@ -30,7 +35,16 @@ const THINK_MS = parseInt(__ENV.THINK_MS || '0', 10);
 const TIMEOUT = __ENV.HTTP_TIMEOUT || '180s';
 const NODE_ADDRS = (__ENV.NODE_ADDRS || '').split(',').filter((a) => a);
 
+const DELAY_MS = parseInt(__ENV.DELAY_MS || '0', 10);
+const RETRY_503 = parseInt(__ENV.RETRY_503 || '0', 10);
+const RETRY_CAP_MS = parseInt(__ENV.RETRY_CAP_MS || '10000', 10);
+const RETRY_DEFAULT_MS = parseInt(__ENV.RETRY_DEFAULT_MS || '1000', 10);
+const RETRY_JITTER = parseFloat(__ENV.RETRY_JITTER || '0.2');
+
 const turnDuration = new Trend('turn_duration', true);
+// EDDI's own share of a turn: its latency minus the time the mock LLM was told to wait. One turn
+// is one LLM call here, so this is everything the platform adds (HTTP, pipeline, persistence).
+const turnOverhead = new Trend('turn_overhead', true);
 const turnsOk = new Counter('turns_ok');
 const turns503 = new Counter('turns_503');
 const turns429 = new Counter('turns_429');
@@ -43,6 +57,34 @@ const turnsNoResponse = new Counter('turns_no_response');
 // fallback, so it is neither a successful turn nor part of its latency.
 const turnsAppError = new Counter('turns_app_error');
 const startFailed = new Counter('start_failed');
+// Retry mode (RETRY_503 > 0): a client that honours 503 + Retry-After, as a well-behaved SDK does.
+// Without it, load shedding reads as collapsed goodput: each refused VU fires again at once.
+const turnTotalDuration = new Trend('turn_total_duration', true);
+const turnAttempts = new Trend('turn_attempts');
+const turnsAbandoned = new Counter('turns_abandoned');
+const startsRefused = new Counter('starts_refused');
+
+// The replica that answered (cluster runs); untagged when there is no balancer in front.
+function nodeTags(res) {
+  const upstream = res.headers['X-Loadtest-Upstream'] || res.headers['x-loadtest-upstream'];
+  return upstream ? { node: upstream.split(',').pop().trim() } : {};
+}
+
+// Retry-After (RFC 9110: delta-seconds or an HTTP-date), capped, with ±JITTER so that refused VUs
+// do not come back in lockstep. EDDI sends delta-seconds; a proxy in front may send a date. Missing,
+// unparsable or a date already past: RETRY_DEFAULT_MS.
+function retryAfterMs(header) {
+  const text = header === undefined || header === null ? '' : String(header).trim();
+  if (/^\d+$/.test(text)) return parseInt(text, 10) * 1000;  // strictly digits: "5abc" is not 5 s
+  const at = Date.parse(text);
+  return Number.isFinite(at) && at > Date.now() ? at - Date.now() : RETRY_DEFAULT_MS;
+}
+
+function backoffMs(res) {
+  const base = retryAfterMs(res.headers['Retry-After'] || res.headers['retry-after']);
+  const capped = Math.min(base, RETRY_CAP_MS);
+  return Math.max(0, capped * (1 + RETRY_JITTER * (2 * Math.random() - 1)));
+}
 
 function executor() {
   switch (SCENARIO) {
@@ -87,7 +129,15 @@ export const options = {
 };
 
 function startConversation(tag) {
-  const res = http.post(`${BASE}/agents/${AGENT}/start?userId=loadtest-${tag}`, null, { timeout: TIMEOUT, tags: { kind: 'start' } });
+  let res;
+  // Starts are admitted like turns, so in retry mode a refused start backs off the same way.
+  for (let attempt = 1; ; attempt++) {
+    res = http.post(`${BASE}/agents/${AGENT}/start?userId=loadtest-${tag}`, null, { timeout: TIMEOUT, tags: { kind: 'start' } });
+    if (res.status !== 503 || RETRY_503 === 0) break;
+    startsRefused.add(1);  // every refusal, the last one of an abandoned start included
+    if (attempt >= RETRY_503) break;
+    sleep(backoffMs(res) / 1000);
+  }
   const loc = res.headers['Location'] || res.headers['location'] || '';
   const m = /conversations\/([0-9a-f-]+)/.exec(loc);
   if (!m) {
@@ -119,15 +169,30 @@ export default function (data) {
     }
   }
   const body = JSON.stringify({ input: `turn ${exec.vu.iterationInScenario} from vu ${exec.vu.idInTest}` });
-  const res = http.post(`${BASE}/agents/${conv}?returnCurrentStepOnly=true`, body, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: TIMEOUT,
-    tags: { kind: 'turn' },
-  });
+  const started = Date.now();
+  let res;
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    res = http.post(`${BASE}/agents/${conv}?returnCurrentStepOnly=true`, body, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: TIMEOUT,
+      tags: { kind: 'turn' },
+    });
+    // Off by default (RETRY_503=0): a refusal used the iteration up, as in every earlier result.
+    if (res.status !== 503 || RETRY_503 === 0) break;
+    turns503.add(1, nodeTags(res));
+    if (attempt >= RETRY_503) {
+      turnsAbandoned.add(1);
+      turnAttempts.add(attempt);
+      if (THINK_MS > 0) sleep(THINK_MS / 1000);
+      return;
+    }
+    sleep(backoffMs(res) / 1000);
+  }
   const s = res.status;
-  // The replica that answered (cluster runs); untagged when there is no balancer in front.
-  const upstream = res.headers['X-Loadtest-Upstream'] || res.headers['x-loadtest-upstream'];
-  const tags = upstream ? { node: upstream.split(',').pop().trim() } : {};
+  if (RETRY_503 > 0) turnAttempts.add(attempt);
+  const tags = nodeTags(res);
   if (s === 200) {
     let error = null;
     try {
@@ -140,6 +205,9 @@ export default function (data) {
     } else {
       turnsOk.add(1, tags);
       turnDuration.add(res.timings.duration, tags);
+      turnOverhead.add(res.timings.duration - DELAY_MS);
+      // What the user waited, refusals and backoff included; equals turn_duration without retries.
+      turnTotalDuration.add(RETRY_503 > 0 ? Date.now() - started : res.timings.duration);
     }
   } else if (s === 503) turns503.add(1, tags);
   else if (s === 429) turns429.add(1);

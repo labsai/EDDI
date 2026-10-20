@@ -86,7 +86,7 @@ See [Architecture](architecture.md) and the [Configuration Reference](configurat
 
 - **Symptom:** Startup hangs or fails on the first database access, and the MongoDB readiness check in `/q/health/ready` is DOWN.
 - **Cause:** The connection string is read from the `mongodb.connectionString` property (environment variable `MONGODB_CONNECTIONSTRING`). Outside dev mode its default is `mongodb://mongodb:27017/eddi?...`, which only resolves inside Docker Compose where the database service is called `mongodb`. Setting `quarkus.mongodb.connection-string` has no effect: EDDI does not read it.
-- **Fix:** Set `MONGODB_CONNECTIONSTRING` to your server. With a root user created by the Mongo image (as in `docker-compose.yml`), add credentials and `authSource=admin`, for example `mongodb://eddi:<password>@mongodb:27017/eddi?authSource=admin`. The database name comes from `mongodb.database` (default `eddi`). In dev mode the default is `mongodb://localhost:27017/eddi`.
+- **Fix:** Set `MONGODB_CONNECTIONSTRING` to your server. The compose files and the Helm chart connect EDDI as a least-privilege user defined in the `eddi` database, so the credentials go with `authSource=eddi`, for example `mongodb://eddi_app:<password>@mongodb:27017/eddi?authSource=eddi`; a user created in `admin` (such as the image's root user) needs `authSource=admin`. A password with `/`, `+`, `@` or `:` must be percent-encoded. The database name comes from `mongodb.database` (default `eddi`). In dev mode the default is `mongodb://localhost:27017/eddi`.
 
 ### PostgreSQL profile does not take effect
 

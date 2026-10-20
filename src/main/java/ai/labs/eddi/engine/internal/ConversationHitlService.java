@@ -29,6 +29,8 @@ import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
 import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -294,7 +296,8 @@ class ConversationHitlService {
         // common plain-verdict resume incurs no extra load.
         boolean hasToolDecisions = decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty();
         boolean namesPause = decision.getPauseId() != null && !decision.getPauseId().isBlank();
-        if (hasToolDecisions || namesPause) {
+        boolean hasResumeContext = decision.getContext() != null && !decision.getContext().isEmpty();
+        if (hasToolDecisions || namesPause || hasResumeContext) {
             var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (preCasSnapshot != null) {
                 // A decision made for an earlier pause must not consume this one.
@@ -310,6 +313,9 @@ class ConversationHitlService {
                 }
                 if (hasToolDecisions) {
                     validateToolDecisions(decision, preCasSnapshot);
+                }
+                if (hasResumeContext && preCasSnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    validateResumeContext(decision, preCasSnapshot);
                 }
             }
         }
@@ -764,6 +770,62 @@ class ConversationHitlService {
         }
         return principalContext.withPrincipal(
                 new ResolutionPrincipal(memory.getUserId(), memory.getResolutionProvenance()), work);
+    }
+
+    /**
+     * Validates {@link HitlDecision#getContext()} BEFORE the resume CAS (a
+     * violation is a 400 that leaves the pause untouched). An approval must not
+     * inject new data into the turn it approves, so an entry is accepted only if it
+     * is marked {@code secret: true} AND the paused turn stored that key as a
+     * secret — its stored value is {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER}.
+     * Messages name the key, never a value.
+     */
+    void validateResumeContext(HitlDecision decision, ConversationMemorySnapshot snapshot) {
+        for (var entry : decision.getContext().entrySet()) {
+            String key = entry.getKey();
+            Context supplied = entry.getValue();
+            if (supplied == null || !Boolean.TRUE.equals(supplied.getSecret())) {
+                throw new IllegalArgumentException("context['" + sanitize(key) + "'] must be marked secret: true — "
+                        + "a resume accepts only secret context values");
+            }
+            if (!wasSecretContextWhenPaused(snapshot, key)) {
+                throw new IllegalArgumentException("context['" + sanitize(key) + "'] was not a secret context value in the paused turn — "
+                        + "a resume can only re-supply a secret the paused turn carried");
+            }
+        }
+    }
+
+    private static boolean wasSecretContextWhenPaused(ConversationMemorySnapshot snapshot, String key) {
+        var steps = snapshot.getConversationSteps();
+        if (steps == null || steps.isEmpty()) {
+            return false;
+        }
+        String dataKey = "context:" + key;
+        Object stored = null;
+        boolean found = false;
+        for (var run : steps.get(steps.size() - 1).getWorkflows()) {
+            for (var result : run.getLifecycleTasks()) {
+                if (dataKey.equals(result.getKey())) {
+                    stored = result.getResult();
+                    found = true;
+                }
+            }
+        }
+        if (!found) {
+            return false;
+        }
+        // Both the flag and the placeholder: the scrub always writes the placeholder
+        // with
+        // secret=true, while a non-secret entry that happens to carry the placeholder
+        // text
+        // was never a secret and must not be re-supplied.
+        if (stored instanceof Context context) {
+            return Boolean.TRUE.equals(context.getSecret()) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(context.getValue());
+        }
+        if (stored instanceof Map<?, ?> map) {
+            return Boolean.TRUE.equals(map.get("secret")) && MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(map.get("value"));
+        }
+        return false;
     }
 
     /**

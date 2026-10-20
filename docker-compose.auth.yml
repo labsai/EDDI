@@ -73,15 +73,111 @@ services:
     depends_on:
       keycloak:
         condition: service_healthy
+      keycloak-admin-rotate:
+        condition: service_completed_successfully
+
+  # One-shot guard, the same pattern as docker-compose.yml's bind-guard: it exits
+  # 0 when Keycloak stays on loopback or has a real bootstrap admin password, and
+  # exits 1 — so `keycloak` never starts — when KEYCLOAK_BIND publishes it on
+  # another interface while KC_BOOTSTRAP_ADMIN_PASSWORD is unset (the `admin`
+  # fallback below) or literally "admin". The loopback quick start needs no .env;
+  # the installers and gcp/provision-vm.sh generate a password, so they pass.
+  # Both values are compose interpolation of the .env / shell value with the same
+  # defaults the keycloak service uses; `$$` is compose's escape for the shell.
+  keycloak-guard:
+    # The Keycloak image itself, which this overlay pulls anyway — so the guard
+    # costs no extra image on either base stack (MongoDB or PostgreSQL).
+    image: quay.io/keycloak/keycloak:26.8.0
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      KEYCLOAK_BIND: "${KEYCLOAK_BIND:-127.0.0.1}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+    volumes:
+      - keycloak-data:/kc-data:ro
+    command:
+      - |
+        case "$$KEYCLOAK_BIND" in
+          ""|127.0.0.1|localhost|::1|"[::1]") exit 0 ;;
+        esac
+        if [ -z "$$KC_BOOTSTRAP_ADMIN_PASSWORD" ] || [ "$$KC_BOOTSTRAP_ADMIN_PASSWORD" = "admin" ]; then
+        echo "" >&2
+        echo "[SECURITY] Refusing to start: KEYCLOAK_BIND=$$KEYCLOAK_BIND would publish Keycloak on a" >&2
+        echo "  non-loopback interface while its bootstrap admin is still admin/admin, so anyone" >&2
+        echo "  who can reach the port could administer the identity provider EDDI trusts." >&2
+        echo "" >&2
+        echo "  Set a real password first (in .env, before the first start of the keycloak-data volume):" >&2
+        echo "    KC_BOOTSTRAP_ADMIN_PASSWORD=<generated, e.g. openssl rand -base64 24>" >&2
+        echo "  If the volume already exists and you changed the admin password in the console," >&2
+        echo "  put that password there — Keycloak only reads it on first boot." >&2
+        echo "  Or keep Keycloak on loopback (KEYCLOAK_BIND=127.0.0.1, the default)." >&2
+        exit 1
+        fi
+        # An EXISTING volume keeps whatever admin password it was created with, so
+        # the value above proves nothing for it. keycloak-admin-rotate leaves the
+        # marker once it has seen `admin` refused (rotating it if needed); until
+        # then the volume may only be served on loopback, so the default login is
+        # never published, not even for the seconds before the rotation runs.
+        data="$${KC_DATA_DIR:-/kc-data}"
+        if [ -d "$$data/h2" ] && [ ! -f "$$data/.eddi-admin-verified" ]; then
+          echo "" >&2
+          echo "[SECURITY] Refusing to start: this keycloak-data volume predates the admin-password check," >&2
+          echo "  and Keycloak reads KC_BOOTSTRAP_ADMIN_PASSWORD only when it creates the volume, so its" >&2
+          echo "  admin may still be admin/admin. Start it once on loopback (KEYCLOAK_BIND=127.0.0.1):" >&2
+          echo "  keycloak-admin-rotate then checks the login, rotates it to KC_BOOTSTRAP_ADMIN_PASSWORD if" >&2
+          echo "  needed and records that, after which KEYCLOAK_BIND=$$KEYCLOAK_BIND is accepted." >&2
+          exit 1
+        fi
+        exit 0
+
+  # keycloak-guard can only judge the configured value: Keycloak reads
+  # KC_BOOTSTRAP_ADMIN_PASSWORD only when it first creates the master realm, so a
+  # keycloak-data volume first started with admin/admin keeps that login however
+  # .env changes later. This one-shot runs once Keycloak is up, before EDDI starts.
+  # If a password other than `admin` is configured and the stored admin account
+  # still accepts `admin`, it sets the account's password to the configured one
+  # through the admin API (what install.sh / install.ps1 do on a re-run). The new
+  # password goes to kcadm on stdin, never on its command line. With the dev
+  # default there is nothing to rotate to, and keycloak-guard already keeps that
+  # case on loopback.
+  keycloak-admin-rotate:
+    image: quay.io/keycloak/keycloak:26.8.0
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    environment:
+      KC_ADMIN_USER: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+      KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+    command:
+      - |
+        [ -z "$$KC_BOOTSTRAP_ADMIN_PASSWORD" ] || [ "$$KC_BOOTSTRAP_ADMIN_PASSWORD" = "admin" ] && exit 0
+        kcadm=/opt/keycloak/bin/kcadm.sh; cfg=/tmp/kcadm.config
+        marker=/opt/keycloak/data/.eddi-admin-verified
+        if ! "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
+            --user "$$KC_ADMIN_USER" --password admin >/dev/null 2>&1; then
+          touch "$$marker"   # the default no longer works: keycloak-guard may now allow a wider bind
+          exit 0
+        fi
+        id=$$("$$kcadm" get users --config "$$cfg" -r master -q exact=true -q "username=$$KC_ADMIN_USER" --fields id --format csv --noquotes) || exit 1
+        pw=$${KC_BOOTSTRAP_ADMIN_PASSWORD//\\/\\\\}; pw=$${pw//\"/\\\"}
+        printf '{"type":"password","temporary":false,"value":"%s"}' "$$pw" \
+          | "$$kcadm" update "users/$$id/reset-password" --config "$$cfg" -r master -n -f - || exit 1
+        touch "$$marker"
+        echo "[SECURITY] Keycloak's admin account still accepted the default password 'admin'; it now uses KC_BOOTSTRAP_ADMIN_PASSWORD."
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0
     command: start-dev --import-realm
+    depends_on:
+      keycloak-guard:
+        condition: service_completed_successfully
     environment:
       # admin/admin is the DEV default for the local docker-compose quick start,
       # where Keycloak is only reachable on 127.0.0.1 (see `ports:` below — the
       # bind is loopback unless KEYCLOAK_BIND says otherwise). Any deployment that exposes
-      # Keycloak off-box must override these — the GCP provisioner
+      # Keycloak off-box must override these (keycloak-guard enforces it) — the GCP provisioner
       # (gcp/provision-vm.sh) generates a random KC_BOOTSTRAP_ADMIN_PASSWORD per VM
       # and exports it before `docker compose up`, so this default is never what a
       # public instance runs with. Override locally too:
@@ -110,7 +206,8 @@ services:
     # Nothing off-box needs this port — EDDI reaches Keycloak over the compose
     # network (keycloak:8080), KC_HOSTNAME above is a localhost URL, and the GCP
     # VM's HTTPS path proxies https://auth.<ip>.sslip.io to localhost:8180 via
-    # nginx. Set KEYCLOAK_BIND=0.0.0.0 only after changing the admin password.
+    # nginx. Set KEYCLOAK_BIND=0.0.0.0 only after changing the admin password —
+    # keycloak-guard above refuses to start Keycloak otherwise.
     ports:
       - "${KEYCLOAK_BIND:-127.0.0.1}:${KEYCLOAK_PORT:-8180}:8080"
     volumes:

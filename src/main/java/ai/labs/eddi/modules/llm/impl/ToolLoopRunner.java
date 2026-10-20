@@ -553,6 +553,18 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                if (memory.isCancelled()) {
+                                    throw new LifecycleException("Agent execution cancelled before tool: " + allowedReq.name());
+                                }
+                                // An interrupted (abandoned) thread must not start another
+                                // side-effectful tool either. Checked without clearing the flag,
+                                // and with the same exception, as the abandoned-thread guard
+                                // after this loop: this branch must end without committing a pause.
+                                if (Thread.currentThread().isInterrupted()) {
+                                    throw new LifecycleException.LifecycleInterruptedException(
+                                            "Tool-approval batch abandoned: executing thread was interrupted before tool: "
+                                                    + allowedReq.name());
+                                }
                                 // Same absolute rule as the main allowed() loop below.
                                 // This branch runs BEFORE the pause is thrown, and its
                                 // results are frozen into the batch the resume replays

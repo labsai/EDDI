@@ -243,8 +243,14 @@ public class NatsConnectionManager {
     /** Runs {@code hook} after every CONNECTED/RECONNECTED, off the NATS thread. */
     public void onConnected(Runnable hook) {
         connectedHooks.add(hook);
-        if (isConnected() && scheduler != null) {
-            scheduler.execute(() -> runHook(hook));
+        if (isConnected()) {
+            // Same executor as the connection listener: a hook registered after the
+            // connection is up must not take a scheduler thread either.
+            try {
+                hookExecutor.execute(() -> runHook(hook));
+            } catch (RejectedExecutionException e) {
+                LOGGER.debugf("On-connect hook not run (shutting down): %s", e.getMessage());
+            }
         }
     }
 
@@ -434,6 +440,22 @@ public class NatsConnectionManager {
             throw new IllegalStateException("NatsConnectionManager not started");
         }
         return s;
+    }
+
+    /**
+     * A JetStream management context whose calls wait at most
+     * {@code requestTimeout}, for a caller with a budget smaller than the default
+     * request timeout.
+     *
+     * @throws ClusterUnavailableException
+     *             while disconnected
+     */
+    public JetStreamManagement jetStreamManagement(Duration requestTimeout) {
+        try {
+            return requireConnected().jetStreamManagement(JetStreamOptions.builder().requestTimeout(requestTimeout).build());
+        } catch (IOException e) {
+            throw new ClusterUnavailableException("Cannot create a JetStream management context: " + e.getMessage(), e);
+        }
     }
 
     /**
