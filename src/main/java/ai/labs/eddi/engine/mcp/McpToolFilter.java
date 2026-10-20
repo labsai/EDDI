@@ -49,7 +49,8 @@ public class McpToolFilter implements ToolFilter {
             // Build identity (McpVersionTools) — which EDDI is running
             "get_eddi_version",
             // Admin tools
-            "deploy_agent", "undeploy_agent", "get_deployment_status", "list_workflows", "create_agent", "delete_agent", "update_agent",
+            "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent", "delete_agent",
+            "update_agent",
             "read_workflow", "read_resource",
             // Setup tools
             "setup_agent", "create_api_agent",

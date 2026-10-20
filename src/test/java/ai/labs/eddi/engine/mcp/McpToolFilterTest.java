@@ -38,7 +38,7 @@ class McpToolFilterTest {
             "list_agents", "create_conversation", "talk_to_agent",
             "chat_with_agent", "read_conversation", "read_conversation_log",
             "list_conversations", "get_agent", "deploy_agent",
-            "undeploy_agent", "get_deployment_status", "list_workflows",
+            "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows",
             "create_agent", "delete_agent", "update_agent",
             "read_workflow", "read_resource", "setup_agent",
             "create_api_agent", "update_resource", "create_resource",

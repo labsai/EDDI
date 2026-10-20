@@ -858,6 +858,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "agent version switch"
+            },
+            {
+              "refId": "I",
+              "expr": "sum(rate(eddi_conversation_generation_upgrade_count_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "generation upgrade"
             }
           ],
           "fieldConfig": {

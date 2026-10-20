@@ -66,6 +66,43 @@ public interface IRestAgentAdministration {
                            @QueryParam("undeployThisAndAllPreviousAgentVersions")
                            @DefaultValue("false") Boolean undeployThisAndAllPreviousAgentVersions);
 
+    // @formatter:off
+    @POST
+    @Path("/{environment}/upgradeconversations/{agentId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Move running conversations on older compatibility generations onto the current one",
+               description = "The operator's declaration that this agent's conversations on an older compatibility generation (or "
+                       + "on none) are compatible with its CURRENT version — for the saves that did not say so themselves: a breaking save, "
+                       + "or a ZIP import or agent sync made without compatible=true, which pins every running conversation to the old one. "
+                       + "Only the conversation's generation is written; each conversation then moves to the newest READY version of "
+                       + "the target generation on its next turn, as for any compatible save. The target generation is the generation "
+                       + "of the agent's latest version, and a version of it must be READY in the environment. Never lowers a "
+                       + "generation. Moved: READY, ERROR and EXECUTION_INTERRUPTED conversations. Skipped and counted: ENDED, "
+                       + "AWAITING_HUMAN (a resume must finish on the version that paused it) and IN_PROGRESS. Each write waits its "
+                       + "turn in the conversation's own queue, so it never overlaps a running turn. DRY RUN BY DEFAULT: pass "
+                       + "dryRun=false to write. Idempotent. Ended conversations are only counted. Each call looks at a bounded number of conversations "
+                       + "(limit); when the response is truncated, continue with after=<nextAfter>.")
+    @APIResponse(responseCode = "200", description = "The per-version counts: matched, eligible, upgraded and skipped by reason. "
+            + "For a dry run, eligible is what a real run would upgrade.")
+    @APIResponse(responseCode = "400", description = "fromVersion is not a version of the agent, or limit is out of range.")
+    @APIResponse(responseCode = "404", description = "Agent not found.")
+    @APIResponse(responseCode = "409", description = "The agent's current version has no compatibility generation, or no version of "
+            + "its generation is READY in the environment: deploy the current version first.")
+    Response upgradeConversations(@PathParam("environment") Environment environment, @PathParam("agentId") String agentId,
+            @Parameter(description = "true (default): only report what would happen. false: write.")
+            @QueryParam("dryRun") @DefaultValue("true") Boolean dryRun,
+            @Parameter(description = "Only conversations stored on this agent version; repeat the parameter for several. "
+                    + "Default: every version whose conversations are on an older generation than the target.")
+            @QueryParam("fromVersion") List<Integer> fromVersions,
+            @Parameter(description = "The most conversations one call looks at (default 5000, max 1000000). A call is synchronous, "
+                    + "so a large limit can outlast a proxy or load-balancer timeout (the client sees a 504 while the server carries on). "
+                    + "The response says when it stopped there: call again with after=<nextAfter>.")
+            @QueryParam("limit") Integer limit,
+            @Parameter(description = "Continue after this conversation id: the nextAfter of the previous response when it was truncated. "
+                    + "Default: from the beginning.")
+            @QueryParam("after") String after);
+    // @formatter:on
+
     @GET
     @NoCache
     @Path("/{environment}/deploymentimpact/{agentId}")

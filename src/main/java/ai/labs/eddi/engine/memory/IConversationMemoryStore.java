@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
+import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -162,6 +164,85 @@ public interface IConversationMemoryStore {
      * @return the summary, or {@code null} when the conversation does not exist
      */
     ConversationActivitySummary loadConversationActivity(String conversationId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * One keyset-paged batch of the conversations of an agent whose compatibility
+     * generation is absent or lower than {@code belowGeneration} — the candidates
+     * of a generation upgrade — as a projection (id, state, version, generation),
+     * never the steps. <strong>Ended conversations are excluded</strong>: they are
+     * never written, so they would stay candidates forever and crowd out the ones
+     * that can move; count them with
+     * {@link #countEndedGenerationUpgradeCandidates}. The generation filter runs in
+     * the database, so only candidates are read. Ascending id order, so a sweep
+     * neither skips nor repeats a conversation while it pages.
+     *
+     * @param agentId
+     *            the agent
+     * @param agentVersions
+     *            restrict to these stored versions, or {@code null}/empty for every
+     *            version
+     * @param belowGeneration
+     *            only conversations with no generation, or one lower than this
+     * @param afterConversationId
+     *            the last id of the previous batch, or {@code null} for the first
+     * @param limit
+     *            the largest batch to return
+     * @return at most {@code limit} candidates; an empty list ends the paging
+     */
+    List<ConversationGenerationCandidate> loadGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration,
+                                                                          String afterConversationId, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Whether {@code id} can name a conversation in this store at all (an ObjectId
+     * for MongoDB, a UUID for PostgreSQL). Lets a caller refuse a user-supplied id,
+     * such as a paging cursor, before it reaches a query.
+     */
+    boolean isValidConversationId(String id);
+
+    /**
+     * How many ended conversations of the agent would be candidates but for being
+     * ended — same filters as {@link #loadGenerationUpgradeCandidates}, grouped by
+     * stored agent version, in one count query.
+     *
+     * @return count per stored version; versions with none are absent
+     */
+    Map<Integer, Long> countEndedGenerationUpgradeCandidates(String agentId, Collection<Integer> agentVersions, int belowGeneration)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Moves one conversation onto {@code targetGeneration} — the <em>only</em>
+     * field this writes, besides the revision markers below. Nothing is loaded and
+     * no step is touched.
+     * <p>
+     * <strong>One atomic conditional write.</strong> It matches only a conversation
+     * of {@code agentId}, in one of
+     * {@link GenerationUpgradeOutcome#UPGRADABLE_STATES}, whose generation is
+     * absent or lower than the target — so a generation is never lowered, an ended
+     * or paused conversation is never touched, and a conversation that changed
+     * since it was listed is reported instead of overwritten.
+     * <p>
+     * <strong>It moves the revision and the history revision.</strong> That is what
+     * keeps a turn that loaded the conversation <em>before</em> this write from
+     * putting the old generation back: such a turn's full-document write is refused
+     * on the revision guard, its append is refused because the history revision
+     * moved past the one it loaded, and a turn still waiting in the coordinator
+     * sees the newer revision when it starts and is rebuilt over the current
+     * document (see {@code ConversationStepRunner.reloadIfSuperseded}). Every one
+     * of them is a detectable outcome and none is a silent revert. Callers still
+     * serialise this write with the conversation's turns through the coordinator,
+     * so in practice no turn is in flight to be refused.
+     *
+     * @param conversationId
+     *            the conversation
+     * @param agentId
+     *            the agent it must belong to
+     * @param targetGeneration
+     *            the generation to write
+     * @return {@link GenerationUpgradeOutcome#UPGRADED}, or why nothing was written
+     */
+    GenerationUpgradeOutcome upgradeCompatibilityGeneration(String conversationId, String agentId, int targetGeneration)
+            throws IResourceStore.ResourceStoreException;
 
     /**
      * Ends idle conversations in the database, in one pass: every {@code READY}
