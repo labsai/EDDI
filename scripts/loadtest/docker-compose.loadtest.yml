@@ -1,30 +1,27 @@
 # Load-test stack for the throughput work (planning/throughput-optimization-plan.md, WS0).
 # Driven by loadtest.py; see README.md. Everything binds to 127.0.0.1 only: EDDI runs
 # unauthenticated here, exactly like the README quick start.
+#
+# This file holds what every topology shares: the mock LLM, EDDI and the load generators. The
+# database comes from docker-compose.mongo.yml or docker-compose.postgres.yml, a local build from
+# docker-compose.app.yml; loadtest.py picks the files (`up --db`, `--no-app`). The N-replica cluster is
+# its own stack, docker-compose.cluster.yml (`cluster-*` commands).
+#
+# COMPOSE_PROJECT_NAME overrides `name`, so two stacks on one machine stay apart when each sets
+# its own project name and its own LOADTEST_*_PORT values.
 name: eddi-loadtest
 
 services:
-  mongodb:
-    image: mongo:7.0.43
-    environment:
-      - "MONGO_INITDB_ROOT_USERNAME=eddi"
-      - "MONGO_INITDB_ROOT_PASSWORD=changeme"
-    ports:
-      - "127.0.0.1:${LOADTEST_MONGO_PORT:-27370}:27017"
-    healthcheck:
-      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   # Mock OpenAI-compatible LLM. The delay is not set here: WireMock cannot read it from the
-  # environment, so loadtest.py sets it per run through PUT /__admin/settings {"fixedDelay": ms}.
+  # environment, so loadtest.py sets it per run through POST /__admin/settings {"fixedDelay": ms},
+  # and installs the streaming stub (stream=true) with its first-chunk delay through the admin API.
   # Async responses keep a delayed answer from holding a Jetty thread, so the mock is not the
-  # bottleneck at 1000 concurrent calls; the request journal is off so it does not grow unbounded.
+  # bottleneck at 1000 concurrent calls; a streamed answer does hold one while it dribbles its
+  # chunks, hence the larger container pool. The request journal is off so it does not grow.
   wiremock:
     image: wiremock/wiremock:3.9.1
     command: ["--port", "8080", "--async-response-enabled", "true", "--async-response-threads", "64",
-              "--container-threads", "400", "--no-request-journal", "--disable-banner"]
+              "--container-threads", "${LOADTEST_WIREMOCK_THREADS:-800}", "--no-request-journal", "--disable-banner"]
     volumes:
       - "./wiremock/mappings:/home/wiremock/mappings:ro"
     ports:
@@ -35,9 +32,6 @@ services:
   # this branch inside the shipped runtime — the same approach as scripts/cluster-demo.
   eddi:
     image: ${LOADTEST_EDDI_IMAGE:-labsai/eddi:6.5.0}
-    depends_on:
-      mongodb:
-        condition: service_healthy
     environment:
       # Boot guards refuse to start without these while OIDC is off (see docker-compose.yml).
       - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
@@ -46,11 +40,19 @@ services:
       - "QUARKUS_OIDC_TENANT_ENABLED=false"
       - "QUARKUS_ANALYTICS_DISABLED=true"
       - "EDDI_VAULT_MASTER_KEY=loadtest-master-key-0123456789abcdef"
-      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin"
+      # With authentication off EDDI answers only localhost, IPs and these Host names (421 otherwise);
+      # k6 and the SSE driver address it as eddi:7070 inside the compose network.
+      - "EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS=${EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS:-eddi}"
       - "JAVA_OPTS_APPEND=${LOADTEST_JAVA_OPTS:--Xmx2g}"
-      # Off by default in EDDI; on here so a /v1 scenario can be added without a restart.
+      # The OpenAI-compatible /v1 API, off by default in EDDI. The stream scenario drives it with
+      # this key; the adapter's own concurrency cap (default 64) is lifted so that the benchmark
+      # measures turns, not the cap.
       - "EDDI_OPENAI_COMPAT_ENABLED=true"
+      - "EDDI_OPENAI_COMPAT_API_KEY=sk-loadtest-openai-compat-0123456789"
+      - "EDDI_OPENAI_COMPAT_MAX_CONCURRENT_REQUESTS=${LOADTEST_OPENAI_MAX_CONCURRENT:-2000}"
     mem_limit: ${LOADTEST_EDDI_MEMORY:-3g}
+    # 0 = no CPU limit.
+    cpus: ${LOADTEST_EDDI_CPUS:-0}
     ports:
       - "127.0.0.1:${LOADTEST_EDDI_PORT:-7370}:7070"
 
@@ -60,4 +62,14 @@ services:
     profiles: ["k6"]
     volumes:
       - "./k6:/scripts:ro"
+      - "./results:/results"
+
+  # One-shot SSE driver (k6 has no SSE client): drivers/stream_driver.py on the standard library,
+  # inside the compose network like k6, so EDDI and the mock are measured over the same hop.
+  stream:
+    image: python:3.12.7-alpine3.20
+    profiles: ["stream"]
+    entrypoint: ["python", "-I", "/drivers/stream_driver.py"]
+    volumes:
+      - "./drivers:/drivers:ro"
       - "./results:/results"

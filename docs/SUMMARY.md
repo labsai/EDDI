@@ -59,6 +59,7 @@
 - [A2A Protocol](a2a-protocol.md)
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
+- [Webhook Triggers (CloudEvents)](webhook-triggers.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
 

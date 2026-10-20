@@ -955,7 +955,7 @@ public class McpAdminTools {
     // ── Schedule Management ───────────────────────────────────────────────
 
     @Tool(name = "create_schedule", description = "Create a new scheduled Agent trigger (cron job or heartbeat). "
-            + "For CRON: provide cronExpression. For HEARTBEAT: provide heartbeatIntervalSeconds. "
+            + "For CRON: provide cron (a cron expression). For HEARTBEAT: provide heartbeatIntervalSeconds. "
             + "Returns the created schedule with human-readable description and next fire time.")
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON, or HEARTBEAT when only heartbeatIntervalSeconds is given)",
@@ -1254,8 +1254,8 @@ public class McpAdminTools {
 
     // ==================== Channel Integration Tools ====================
 
-    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations. "
-            + "Returns descriptors with name, channelType, and target count.")
+    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations (Slack and signed "
+            + "inbound webhooks). Returns descriptors with name, channelType, and target count.")
     public String listChannelIntegrations(
                                           @ToolArg(description = "Filter string (optional)", required = false) String filter,
                                           @ToolArg(description = "Maximum number of results (default: 20)", required = false,
@@ -1301,7 +1301,12 @@ public class McpAdminTools {
 
     @Tool(name = "create_channel_integration", description = "Create a new channel integration configuration. "
             + "Requires JSON body with name, channelType, platformConfig, targets[], and defaultTargetName. "
-            + "Returns the new resource ID and URI.")
+            + "channelType is 'slack' (platformConfig: channelId, botToken, signingSecret) or 'webhook' — a signed inbound "
+            + "webhook (CloudEvents or plain JSON over HTTP) whose platformConfig.signingSecret must be a ${vault:...} reference; "
+            + "optional keys: signatureScheme (eddi-v1 default | github | generic-hmac), signatureHeader, signatureEncoding, "
+            + "signaturePrefix, eventTypeHeader, eventTypePath, eventIdHeader, inputTemplate, conversationStrategy (new | correlate), "
+            + "correlationKeyPath. For webhook, targets[].triggers are event types (exact, or a 'prefix*'). "
+            + "Returns the new resource ID and URI, and for a webhook its endpoint path POST /integrations/webhook/{resourceId}.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
@@ -1319,13 +1324,17 @@ public class McpAdminTools {
             String location = response.getHeaderString("Location");
             String newId = extractIdFromLocation(location);
 
-            return resultJson("created", Map.of(
-                    "resourceId", newId != null ? newId : "unknown",
-                    "name", channelConfig.getName() != null ? channelConfig.getName() : "",
-                    "channelType", channelConfig.getChannelType() != null ? channelConfig.getChannelType() : "",
-                    "targetCount", channelConfig.getTargets() != null ? channelConfig.getTargets().size() : 0,
-                    "location", location != null ? location : "unknown",
-                    "status", response.getStatus()));
+            var created = new LinkedHashMap<String, Object>();
+            created.put("resourceId", newId != null ? newId : "unknown");
+            created.put("name", channelConfig.getName() != null ? channelConfig.getName() : "");
+            created.put("channelType", channelConfig.getChannelType() != null ? channelConfig.getChannelType() : "");
+            created.put("targetCount", channelConfig.getTargets() != null ? channelConfig.getTargets().size() : 0);
+            created.put("location", location != null ? location : "unknown");
+            created.put("status", response.getStatus());
+            if (newId != null && "webhook".equalsIgnoreCase(channelConfig.getChannelType())) {
+                created.put("webhookEndpoint", "/integrations/webhook/" + newId);
+            }
+            return resultJson("created", created);
         } catch (Exception e) {
             LOGGER.error("MCP create_channel_integration failed", e);
             return errorJson("Failed to create channel integration", e);

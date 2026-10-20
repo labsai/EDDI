@@ -1,0 +1,21 @@
+# MongoDB for the load-test stack (`loadtest.py up`, the default `--db mongo`).
+services:
+  mongodb:
+    image: mongo:7.0.43
+    environment:
+      - "MONGO_INITDB_ROOT_USERNAME=eddi"
+      - "MONGO_INITDB_ROOT_PASSWORD=changeme"
+    ports:
+      - "127.0.0.1:${LOADTEST_MONGO_PORT:-27370}:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "-u", "eddi", "-p", "changeme", "--authenticationDatabase", "admin", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  eddi:
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - "MONGODB_CONNECTIONSTRING=mongodb://eddi:changeme@mongodb:27017/eddi?authSource=admin"

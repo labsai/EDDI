@@ -217,7 +217,7 @@ Every agent version carries a `compatibilityGeneration`, assigned by the server 
 | --- | --- |
 | New agent (create, duplicate, import of a new agent) | `1` |
 | Update with `compatible=true` | the previous version's |
-| Update without it (the default), and every import or sync of an existing agent | the previous version's + 1 — a breaking change |
+| Update without it (the default), and every import or sync of an existing agent unless it declares `compatible=true` | the previous version's + 1 — a breaking change |
 | Any update of a version stored before generations existed | `1` — a new chain starts |
 
 Versions with the same generation are compatible. A value for the field in the request body is
@@ -235,6 +235,45 @@ PUT /agentstore/agents/{id}/updateResourceUri?version=4&compatible=true
 In the Manager, the save dialogs that write a new agent version offer the same choice as a
 checkbox, unticked by default. Over MCP, `apply_agent_changes` takes a `compatible` argument
 (default `false`).
+
+### Promoting an agent by import or sync
+
+A ZIP import onto an existing agent (`strategy=upgrade` or `strategy=merge`) and an agent sync
+(`/backup/import/sync` and `/backup/import/sync/batch`) write a new version of the target the
+same way a save does, and they take the same declaration: `compatible=true` (the batch endpoint
+takes `"compatible": true` per request). Without it the new version is **breaking** and every
+conversation running in production stays on the version it started on, which is the safe
+default for a configuration that was developed elsewhere and judged against nothing running here.
+
+Tick **compatible** on a promotion when the change is one of the compatible kinds in the table
+below (prompt wording, a different model, new tools, output text) and you want conversations that
+are already running to pick it up on their next turn — a promoted fix reaches everyone, not only
+new conversations. Leave it unticked when properties, actions or workflow steps were renamed or
+removed, or the new version needs conversation state older conversations lack.
+
+The import and sync previews carry a `conversationImpact`, so the choice is made with the
+numbers in front of you. It answers for both declarations at once: the target's current version
+and generation, the generation each declaration would produce (`generationIfCompatible`,
+`generationIfBreaking`), the agent's open conversations (`activeConversations`) grouped by their
+own compatibility generation (`generations`), and how many of them would follow if the version is
+declared compatible (`followingIfCompatible`: those of the generation a compatible save would
+carry). Declared breaking, none follow. Conversations are counted by generation, not by the
+version they last ran on, because a conversation follows the newest ready version of its own
+generation: after a few compatible saves many idle ones are stored on versions that are no longer
+deployed and still follow. It is one grouped count, never the conversations themselves. It is
+absent when the preview writes nothing, the target does not exist yet, or the caller may not edit
+the target.
+
+After the write, the answer says what the declaration did: an upgrade or sync result carries
+`compatible` and the `compatibilityGeneration` of the version it wrote, and a merge import answers
+with the headers `X-Agent-Compatible` and `X-Agent-Compatibility-Generation`.
+
+If the target's current version predates generations (`startsNewChain: true`), a compatible
+import still starts generation `1`, and the conversations already running on the old version stay
+on it; from the next compatible promotion on they follow. Also, a failed merge puts the
+pre-import content back as a new version with the same declaration, so a compatible merge that is
+rolled back leaves generations unchanged and conversations that had already moved follow on to
+the restored content.
 
 ### What a conversation does on its next turn
 

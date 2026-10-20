@@ -268,7 +268,7 @@ class WorkflowTraversalTest {
         private static final String MCP_URI = "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/mc-1?version=1";
 
         @Test
-        @DisplayName("hit: a repeat lookup inside the TTL reuses the traversal and re-reads nothing")
+        @DisplayName("hit: a repeat lookup reuses the traversal and re-reads nothing")
         void repeatLookupIsServedFromCache() throws Exception {
             wireAgent("agent-1", 1, step(HTTPCALLS, HC_URI));
             when(resourceClientLibrary.getResource(any(URI.class), eq(String.class))).thenReturn("hc");
@@ -284,22 +284,24 @@ class WorkflowTraversalTest {
         }
 
         @Test
-        @DisplayName("miss: once the TTL has elapsed the agent is traversed again")
-        void expiredEntryIsReTraversed() throws Exception {
+        @DisplayName("an hour later the traversal is still served from memory; a redeploy drops it")
+        void entryOutlivesTimeButNotARedeploy() throws Exception {
             wireAgent("agent-1", 1, step(HTTPCALLS, HC_URI));
             when(resourceClientLibrary.getResource(any(URI.class), eq(String.class))).thenReturn("hc");
 
             long t0 = 1_000_000L;
             WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore, resourceClientLibrary, t0);
             WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore, resourceClientLibrary,
-                    t0 + WorkflowTraversal.CACHE_TTL_MILLIS - 1);
+                    t0 + 3_600_000L);
+            // The agent version and everything it names are immutable: no TTL (WS1).
             verify(agentStore, times(1)).read("agent-1", 1);
 
-            var afterExpiry = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore,
-                    resourceClientLibrary, t0 + WorkflowTraversal.CACHE_TTL_MILLIS);
+            WorkflowTraversal.invalidateAgent("agent-1");
+            var afterRedeploy = WorkflowTraversal.discoverConfigs(memory, HTTPCALLS, String.class, agentStore, workflowStore,
+                    resourceClientLibrary, t0 + 3_600_001L);
 
             verify(agentStore, times(2)).read("agent-1", 1);
-            assertEquals(1, afterExpiry.size());
+            assertEquals(1, afterRedeploy.size());
         }
 
         @Test
@@ -366,7 +368,7 @@ class WorkflowTraversalTest {
             var retry = discover(HTTPCALLS, String.class);
 
             assertEquals(1, retry.size(),
-                    "caching a failed traversal strips the agent of its configs for the whole TTL window");
+                    "caching a failed traversal strips the agent of its configs until its next redeploy");
         }
 
         @Test

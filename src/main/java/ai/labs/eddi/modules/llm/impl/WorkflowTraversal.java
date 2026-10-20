@@ -11,6 +11,8 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -19,7 +21,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Shared logic for traversing agent workflows and discovering extension
@@ -28,10 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Finding F12: a single conversation turn traverses the SAME agent and the SAME
  * workflows three to four times — httpcall tools, mcpcall tools, vector RAG and
- * httpCall RAG each call {@link #discoverConfigs} independently. A very short
- * TTL cache collapses those into one traversal per (agent, version, step type,
- * config type) without materially delaying a config edit: the window is
- * {@value #CACHE_TTL_MILLIS} ms, far shorter than a turn-to-turn gap.
+ * httpCall RAG each call {@link #discoverConfigs} independently. A cache
+ * collapses those into one traversal per (agent, version, step type, config
+ * type) — and, since a config edit always creates a new version, keeps it for
+ * every later turn too (see {@link #CACHE}).
  * <p>
  * Only <em>complete</em> traversals are cached. A traversal that could not read
  * a workflow or a step's configuration is returned but never memoized —
@@ -39,7 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * result and replayed to the rest of the turn, silently stripping the agent of
  * its httpcalls/mcpcalls/RAG configuration.
  */
-class WorkflowTraversal {
+public final class WorkflowTraversal {
     private static final Logger LOGGER = Logger.getLogger(WorkflowTraversal.class);
 
     /**
@@ -52,19 +53,27 @@ class WorkflowTraversal {
     private static final Pattern VERSION_PARAM = Pattern.compile("(?:^|&)version=(\\d+)(?:&|$)");
 
     /**
-     * Cache lifetime. Deliberately tiny — long enough to dedupe the several
-     * traversals of one turn, short enough that an agent redeployed between turns
-     * is picked up immediately.
+     * Bound on cached traversals, least-recently-used evicted first. One entry per
+     * (agent version, step type, config type) — a deployment needs a few per agent
+     * version it runs.
      */
-    static final long CACHE_TTL_MILLIS = 2_000L;
+    static final int CACHE_MAX_ENTRIES = 1_000;
 
-    /** Entry eviction threshold — keeps the cache from growing without bound. */
-    private static final int CACHE_MAX_ENTRIES = 512;
-
-    private record CacheEntry(List<?> configs, long timestamp) {
-    }
-
-    private static final Map<String, CacheEntry> CACHE = new ConcurrentHashMap<>();
+    /**
+     * Complete traversals, keyed by agent id, agent version, step type and config
+     * type.
+     * <p>
+     * <b>No TTL, because nothing it holds can change.</b> An agent version, the
+     * workflow versions it names and the extension versions those name are
+     * immutable once stored — the only in-place writers are the descriptor store
+     * and startup migrations, which run before traffic. This used to expire after 2
+     * s, which deduplicated the traversals of one turn but re-read the agent, its
+     * workflows and their extensions on practically every turn (turns of one
+     * conversation are rarely 2 s apart) — about one agent read per LLM turn.
+     * Entries are dropped when the agent is deployed or undeployed
+     * ({@link #invalidateAgent}), so a deleted version does not linger.
+     */
+    private static final Cache<String, List<?>> CACHE = Caffeine.newBuilder().maximumSize(CACHE_MAX_ENTRIES).build();
 
     private WorkflowTraversal() {
         // static utility class
@@ -73,8 +82,20 @@ class WorkflowTraversal {
     /**
      * Drop every cached traversal. Exposed for tests and config-change handling.
      */
-    static void clearCache() {
-        CACHE.clear();
+    public static void clearCache() {
+        CACHE.invalidateAll();
+    }
+
+    /**
+     * Drop the cached traversals of every version of {@code agentId} — called when
+     * the agent is deployed or undeployed.
+     */
+    public static void invalidateAgent(String agentId) {
+        if (agentId == null) {
+            return;
+        }
+        String prefix = agentId + '|';
+        CACHE.asMap().keySet().removeIf(key -> key.startsWith(prefix));
     }
 
     /**
@@ -122,11 +143,11 @@ class WorkflowTraversal {
     /**
      * As
      * {@link #discoverConfigs(IConversationMemory, String, Class, IAgentStore, IWorkflowStore, IResourceClientLibrary)},
-     * with an explicit clock reading so TTL expiry is deterministically testable
-     * instead of requiring a real {@value #CACHE_TTL_MILLIS} ms sleep.
+     * with an explicit clock reading. Entries no longer expire, so the clock is
+     * unused; the overload is kept for the callers and tests that pass one.
      *
      * @param nowMillis
-     *            the current time in milliseconds
+     *            the current time in milliseconds (ignored)
      */
     static <T> List<StepConfig<T>> discoverConfigs(IConversationMemory memory, String stepTypeUri, Class<T> configClass,
                                                    IAgentStore agentStore, IWorkflowStore workflowStore,
@@ -147,10 +168,10 @@ class WorkflowTraversal {
         // same step type but a different target class would share an entry and the
         // second one would get a ClassCastException out of an unrelated cache hit.
         String cacheKey = agentId + '|' + agentVersion + '|' + stepTypeUri + '|' + configClass.getName();
-        CacheEntry cached = CACHE.get(cacheKey);
-        if (cached != null && (nowMillis - cached.timestamp()) < CACHE_TTL_MILLIS) {
+        List<?> cached = CACHE.getIfPresent(cacheKey);
+        if (cached != null) {
             @SuppressWarnings("unchecked") // configClass is part of the key, so the element type matches
-            List<StepConfig<T>> hit = (List<StepConfig<T>>) cached.configs();
+            List<StepConfig<T>> hit = (List<StepConfig<T>>) cached;
             LOGGER.debugf("Reusing cached %s traversal for agent %s v%d (%d config(s))", stepTypeUri, agentId, agentVersion, hit.size());
             return new ArrayList<>(hit);
         }
@@ -159,7 +180,7 @@ class WorkflowTraversal {
         // A degraded traversal produces an incomplete picture, and memoizing that would
         // turn one transient store blip into an agent that silently loses its
         // httpcalls/mcpcalls/RAG configuration for the rest of the turn (and every turn
-        // started inside the TTL window). Only a complete traversal is cacheable.
+        // after it). Only a complete traversal is cacheable.
         boolean degraded = false;
 
         AgentConfiguration agentConfig;
@@ -237,14 +258,7 @@ class WorkflowTraversal {
             return results;
         }
 
-        if (CACHE.size() >= CACHE_MAX_ENTRIES) {
-            long cutoff = nowMillis - CACHE_TTL_MILLIS;
-            CACHE.values().removeIf(entry -> entry.timestamp() < cutoff);
-            if (CACHE.size() >= CACHE_MAX_ENTRIES) {
-                CACHE.clear();
-            }
-        }
-        CACHE.put(cacheKey, new CacheEntry(List.copyOf(results), nowMillis));
+        CACHE.put(cacheKey, List.copyOf(results));
 
         return results;
     }

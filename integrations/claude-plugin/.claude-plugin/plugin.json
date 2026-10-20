@@ -1,0 +1,13 @@
+{
+  "name": "eddi",
+  "displayName": "EDDI",
+  "description": "Use an EDDI server from Claude through its MCP tools: talk to its agents, run group discussions and approvals (eddi skill), and build, change, test, debug and operate agents (eddi-admin skill).",
+  "author": {
+    "name": "EDDI contributors",
+    "url": "https://github.com/labsai/EDDI"
+  },
+  "homepage": "https://docs.labs.ai",
+  "repository": "https://github.com/labsai/EDDI",
+  "license": "Apache-2.0",
+  "keywords": ["eddi", "mcp", "agents", "multi-agent", "orchestration"]
+}

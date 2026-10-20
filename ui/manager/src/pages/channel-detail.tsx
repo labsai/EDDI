@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { isImeComposing } from "@/lib/ime";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { parseChannelResourceUri } from "@/lib/api/channels";
+import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
 import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -22,6 +22,7 @@ import { AgentPicker } from "@/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
+import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import {
   CHANNEL_TYPES,
   type ChannelIntegrationConfiguration, type ChannelTarget,
@@ -41,10 +42,12 @@ function nextTargetKey(): string {
 }
 
 function TargetCard({
-  target, index, isDefault, onUpdate, onRemove, onSetDefault,
+  target, index, isDefault, onUpdate, onRemove, onSetDefault, eventTriggers = false,
 }: {
   target: ChannelTarget; index: number; isDefault: boolean;
   onUpdate: (t: ChannelTarget) => void; onRemove: () => void; onSetDefault: () => void;
+  /** Webhook integrations route by event type: triggers are event types, not "keyword:" prefixes. */
+  eventTriggers?: boolean;
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -140,11 +143,11 @@ function TargetCard({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
-            <p className="text-xs text-muted-foreground">{t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
+            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{eventTriggers ? t("webhook.triggerLabel", "Event types") : t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
+            <p className="text-xs text-muted-foreground">{eventTriggers ? t("webhook.triggerHint", 'Event types routed to this target — exact, or a prefix ending in "*" (e.g. com.github.*)') : t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
             <div className="flex gap-1.5 flex-wrap">
               {target.triggers.map((tr) => (
-                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}:<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
+                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}{eventTriggers ? "" : ":"}<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
               ))}
             </div>
             <div className="flex gap-1">
@@ -274,7 +277,10 @@ export function ChannelDetailPage() {
     }
   }, [config, id, version]);
 
-  const webhookUrl = `${window.location.origin}/integrations/slack/events`;
+  const isWebhook = draft?.channelType === "webhook";
+  const webhookUrl = isWebhook && id
+    ? webhookEndpointUrl(window.location.origin, id)
+    : `${window.location.origin}/integrations/slack/events`;
 
   const handleSave = async () => {
     if (!draft || !id) return;
@@ -481,6 +487,9 @@ export function ChannelDetailPage() {
       {/* Platform Config */}
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
+        {isWebhook ? (
+          <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+        ) : (
         <div className="space-y-3">
           <div className="space-y-1">
             <label htmlFor={`${uid}-channelid`} className="text-xs font-medium">{t("channelDetail.channelId", "Slack Channel ID")}</label>
@@ -523,12 +532,13 @@ export function ChannelDetailPage() {
             </div>
           </div>
         </div>
+        )}
       </section>
 
       {/* Webhook URL */}
       <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3">
         <h2 className="text-sm font-semibold flex items-center gap-2"><ExternalLink className="h-4 w-4 text-primary" />{t("channelDetail.webhookUrl", "Webhook URL")}</h2>
-        <p className="text-xs text-muted-foreground">{t("channelDetail.webhookHint", "Paste this URL into your Slack App's Event Subscriptions → Request URL field.")}</p>
+        <p className="text-xs text-muted-foreground">{isWebhook ? t("webhook.endpointHint", "Send signed events to this URL with POST.") : t("channelDetail.webhookHint", "Paste this URL into your Slack App's Event Subscriptions → Request URL field.")}</p>
         <div className="flex items-center gap-2">
           <code className="flex-1 rounded-lg bg-background border border-border px-3 py-2 text-xs font-mono truncate">{webhookUrl}</code>
           <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={copyWebhookUrl}>
@@ -536,6 +546,9 @@ export function ChannelDetailPage() {
             {copied ? t("common.copied") : t("common.copy")}
           </Button>
         </div>
+        {isWebhook ? (
+          <WebhookSigningInstructions scheme={draft.platformConfig.signatureScheme || "eddi-v1"} platformConfig={draft.platformConfig} />
+        ) : (
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium">{t("channelDetail.requiredScopes", "Required Bot Token Scopes:")}</p>
           <div className="flex flex-wrap gap-1">
@@ -550,6 +563,7 @@ export function ChannelDetailPage() {
             ))}
           </div>
         </div>
+        )}
       </section>
 
       {/* Targets */}
@@ -563,7 +577,7 @@ export function ChannelDetailPage() {
         <div className="space-y-3">
           {draft.targets.map((target, i) => (
             <TargetCard key={targetKeys[i] ?? `index-${i}`} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
-              onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} />
+              onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} eventTriggers={isWebhook} />
           ))}
         </div>
       </section>

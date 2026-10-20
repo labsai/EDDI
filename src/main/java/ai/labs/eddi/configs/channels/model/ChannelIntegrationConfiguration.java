@@ -49,7 +49,8 @@ public class ChannelIntegrationConfiguration {
 
     /**
      * Platform type. Validated server-side against registered adapters. Currently
-     * supported: {@code "slack"}. Future: {@code "teams"}, {@code "discord"}.
+     * supported: {@code "slack"}, {@code "webhook"}. Future: {@code "teams"},
+     * {@code "discord"}.
      * <p>
      * Deliberately a String (not an enum) so downstream forks can register custom
      * adapters without recompiling core.
@@ -72,6 +73,13 @@ public class ChannelIntegrationConfiguration {
      * {@code serviceUrl}</li>
      * <li><b>discord:</b> {@code guildId}, {@code channelId}, {@code botToken},
      * {@code publicKey}</li>
+     * <li><b>webhook:</b> {@code signingSecret} (required, a vault reference),
+     * {@code signatureScheme}, {@code signatureHeader}, {@code signatureEncoding},
+     * {@code signaturePrefix}, {@code eventTypeHeader}, {@code eventTypePath},
+     * {@code eventIdHeader}, {@code inputTemplate}, {@code conversationStrategy},
+     * {@code correlationKeyPath} — see {@link WebhookChannelSettings}. No
+     * {@code channelId}: a webhook integration is addressed by its resource
+     * id.</li>
      * </ul>
      * Secret values should use vault references: {@code ${vault:key-name}}.
      * <p>

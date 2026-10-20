@@ -146,6 +146,25 @@ The listing has no offset parameter, so a caller sees at most `limit` entries. T
 
 On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback.
 
+### Secret context on resume
+
+A client that sends a per-turn credential as a **secret context** value (`"secret": true`, e.g. `userToken` used as `Bearer {context.userToken}` in an httpcalls header) loses it when the turn pauses: it is replaced by the placeholder `<secret context>` before anything is stored. A task that runs after the pause and needs the credential, such as an approved HTTP tool call acting as the user, would otherwise send the placeholder. Re-supply the value in the resume body, in the same shape as a `say` request's `context`:
+
+```json
+{
+  "verdict": "APPROVED",
+  "context": {
+    "userToken": { "type": "string", "value": "eyJ...", "secret": true }
+  }
+}
+```
+
+Two restrictions, both enforced with a **400 before the pause is consumed** (so the same pause can be decided again): an entry must be marked `secret: true`, and the paused turn must have carried that key as a secret. An approval cannot inject new or non-secret data into the turn it approves. The values are visible to the resumed tasks only and get the same treatment as on `say`: never persisted, returned or audited; after the turn the stored step holds the placeholder again.
+
+Only the REST `POST /agents/{conversationId}/resume` body can carry it. Timeout auto-resolution, Slack approvals, the MCP `resume_conversation` tool (tool arguments are logged and audited) and group-conversation resumes pass no context, so a call that needs the credential still fails there with the "secret context expired" error, and the approver should resume over REST instead.
+
+**Fingerprint behaviour.** Before this feature an approved, pinned `http` call was refused on resume ("the request changed after it was approved"): re-resolving the request met the placeholder and failed, which the pin check treats as fail-closed; an unpinned call failed at execution with the same expired-secret error. With the value re-supplied, the re-resolved request is compared against the pin as usual and nothing else is relaxed. Headers are fingerprinted in redacted form, so an identical re-supplied token matches, and so does a rotated token in a header the redactor recognises as a credential (such as `Authorization`). A different token that lands in the URI, a query parameter, the body, or a header the redactor does not treat as a credential changes the fingerprint and the call is refused: fail closed.
+
 ### A pause and a new agent version
 
 Conversations can follow compatible versions of their agent

@@ -88,6 +88,11 @@ EDDI supports three import strategies:
 | **Merge**            | Updates existing resources by matching origin IDs               | Syncing changes across environments |
 | **Upgrade**          | Updates existing agent by structural matching (no origin IDs needed) | Syncing independently created agents |
 
+Merge and Upgrade write a new version over an existing agent. That version is a breaking
+change unless the request says `compatible=true`; a breaking version leaves the conversations
+running on the agent where they are, a compatible one lets them follow. See
+[Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync).
+
 ### Export/Import Workflow
 
 **First-time import (Create):**

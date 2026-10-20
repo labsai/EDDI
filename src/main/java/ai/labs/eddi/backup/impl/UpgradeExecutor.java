@@ -151,6 +151,31 @@ public class UpgradeExecutor {
                                         String targetAgentId,
                                         Set<String> selectedSourceIds,
                                         List<String> workflowOrder) {
+        return executeUpgrade(source, targetAgentId, selectedSourceIds, workflowOrder, false);
+    }
+
+    /**
+     * Execute an upgrade, declaring whether the agent version it writes is
+     * compatible with the one it replaces.
+     * <p>
+     * {@code compatible=false} is the default for every caller: a promoted
+     * configuration comes from elsewhere and nobody has judged it against the
+     * conversations running here, so it is a breaking version and those
+     * conversations stay on the version they started on. The operator who has
+     * judged it passes {@code true}, exactly as for a normal save, and
+     * conversations on the previous version switch to the new one on their next
+     * turn. Nothing is written when the source changes nothing, so the flag then
+     * has no effect.
+     *
+     * @param compatible
+     *            whether the new agent version continues the previous one's
+     *            compatibility generation
+     */
+    public UpgradeResult executeUpgrade(IResourceSource source,
+                                        String targetAgentId,
+                                        Set<String> selectedSourceIds,
+                                        List<String> workflowOrder,
+                                        boolean compatible) {
         var outcome = new Outcome();
         metrics.upgradeAttempted();
         try {
@@ -327,7 +352,7 @@ public class UpgradeExecutor {
             int failuresBeforeAgent = outcome.failures.size();
             URI writtenAgentUri = agentMayChange
                     ? updateAgentConfig(targetAgentId, updatedWorkflowUris, newWorkflowUris, removedWorkflowIds,
-                            agentSettings, workflowOrder, outcome)
+                            agentSettings, workflowOrder, compatible, outcome)
                     : null;
             boolean agentUpdated = writtenAgentUri != null;
             URI agentUri = agentUpdated ? writtenAgentUri : currentAgentUri(targetAgentId);
@@ -380,6 +405,9 @@ public class UpgradeExecutor {
         private int updated;
         private int created;
         private int skipped;
+        /** What the agent write was declared and the generation it landed on. */
+        private Boolean compatible;
+        private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
 
         void failed(String sourceId, String resourceType, String name, Throwable cause) {
@@ -394,7 +422,8 @@ public class UpgradeExecutor {
         }
 
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
-            return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures));
+            return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null);
         }
     }
 
@@ -1463,6 +1492,7 @@ public class UpgradeExecutor {
                                   Set<String> removedWorkflowIds,
                                   String adoptedSettings,
                                   List<String> workflowOrder,
+                                  boolean compatible,
                                   Outcome outcome) {
         try {
             Integer resolved = resolveLatestVersion(agentId);
@@ -1521,12 +1551,15 @@ public class UpgradeExecutor {
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
-            // Never compatible: a synced configuration comes from another instance, and
-            // nobody has judged it against the conversations running here.
-            Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig, false);
+            // Breaking unless the operator declared otherwise: a synced configuration
+            // comes from another instance, and nobody has judged it against the
+            // conversations running here until the operator says so.
+            Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig, compatible);
             if (resp != null && resp.getStatus() == 200) {
                 bumpDescriptorOrFail(agentId, currentVersion, "agent", agentId, null, outcome);
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
+                outcome.compatible = compatible;
+                outcome.compatibilityGeneration = generationOfWritten(agentId, currentVersion + 1);
                 LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", LogSanitizer.sanitize(agentId), currentVersion,
                         currentVersion + 1);
                 return updatedUri;
@@ -1542,6 +1575,21 @@ public class UpgradeExecutor {
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The generation the store gave the agent version just written, or null when it
+     * cannot be read back — reporting it is best effort and never fails the run.
+     */
+    private Integer generationOfWritten(String agentId, int version) {
+        try {
+            AgentConfiguration written = agentStore.readAgent(agentId, version);
+            return written != null ? written.getCompatibilityGeneration() : null;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not read back the generation of agent %s v%d: %s", LogSanitizer.sanitize(agentId), version,
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
         }
     }
 

@@ -150,6 +150,87 @@ spec:
           emptyDir: {}
         - name: eddi-data
           emptyDir: {}
+      {{- if and .Values.mongodb.enabled (not .Values.mongodb.existingSecret) }}
+      # EDDI connects to the in-chart MongoDB as mongodb.appUsername, not as root.
+      # This creates that user, or resets its password and roles, before every
+      # start, using the root credentials from the <release>-mongodb Secret, which
+      # the eddi container itself never sees. Idempotent on purpose: the mongo
+      # image's /docker-entrypoint-initdb.d runs only on an EMPTY volume, so an
+      # init script would leave every existing release without the user. With
+      # mongodb.existingSecret the operator owns both the users and EDDI's
+      # connection string, and this is not rendered.
+      initContainers:
+        - name: ensure-mongodb-user
+          image: "{{ .Values.mongodb.image.repository }}:{{ .Values.mongodb.image.tag }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 185
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            # mongosh keeps state under $HOME; the root filesystem is read-only.
+            - name: HOME
+              value: /tmp
+            - name: MONGO_HOST
+              value: {{ include "eddi.fullname" . }}-mongodb
+            - name: MONGO_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_INITDB_ROOT_PASSWORD
+            - name: MONGO_APP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_APP_USERNAME
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "eddi.fullname" . }}-mongodb
+                  key: MONGO_APP_PASSWORD
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=0
+              until mongosh --quiet --host "$MONGO_HOST" --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
+                i=$((i + 1)); [ "$i" -ge 90 ] && { echo "MongoDB at $MONGO_HOST is not reachable" >&2; exit 1; }
+                sleep 2
+              done
+              exec mongosh --quiet --host "$MONGO_HOST" --eval '
+                // The root credentials are read here, from the environment, so they never
+                // appear on the mongosh command line (/proc/<pid>/cmdline, ps).
+                db.getSiblingDB("admin").auth(process.env.MONGO_ROOT_USERNAME, process.env.MONGO_ROOT_PASSWORD);
+                const user = process.env.MONGO_APP_USERNAME, pwd = process.env.MONGO_APP_PASSWORD;
+                const roles = [{ role: "readWrite", db: "eddi" }, { role: "dbAdmin", db: "eddi" }];
+                const eddi = db.getSiblingDB("eddi");
+                // 51003: another starter created the user between getUser and createUser
+                // (several replicas at once); update it instead of failing.
+                let created = false;
+                if (!eddi.getUser(user)) {
+                  try { eddi.createUser({ user: user, pwd: pwd, roles: roles }); created = true; print("created MongoDB user " + user); }
+                  catch (e) { if (e.code !== 51003) { throw e; } }
+                }
+                if (!created) { eddi.updateUser(user, { pwd: pwd, roles: roles }); print("updated MongoDB user " + user); }'
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      {{- end }}
       containers:
         - name: eddi
           # Prefer a digest: set eddi.image.digest so the running bits are the

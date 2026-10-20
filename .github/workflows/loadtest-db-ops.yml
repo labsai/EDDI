@@ -1,0 +1,94 @@
+name: Load Test DB Ops
+
+# Per-turn database operations as a regression gate (scripts/loadtest/README.md#regression-gate).
+#
+# Boots the load-test stack on the runner (this commit's build inside the published runtime image,
+# MongoDB, the WireMock LLM), runs the fixed scenario of scripts/loadtest/thresholds/db-ops-mongo.json
+# and fails when MongoDB operations per turn rise above the ceilings committed there. Operations
+# per turn do not depend on how fast the runner is, so they can gate; throughput and latency on a
+# shared runner cannot, and are recorded as artifacts only.
+#
+# The ceilings live in git, never in the Actions cache: the repository's cache sits at its size cap
+# and evicts entries, and a baseline that silently disappears turns the gate off.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Nightly, 03:40 UTC
+    - cron: "40 3 * * *"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/loadtest/**"
+      - ".github/workflows/loadtest-db-ops.yml"
+
+concurrency:
+  group: loadtest-db-ops-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "25"
+  COMPOSE_PROJECT_NAME: eddi-loadtest-ci
+
+jobs:
+  db-ops:
+    name: DB ops per turn
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build
+        run: ./mvnw package -DskipTests -DskipUi=true -Dquarkus.analytics.disabled=true -B -q
+
+      - name: Start the load-test stack
+        run: python3 scripts/loadtest/loadtest.py up
+
+      - name: Gate on database operations per turn
+        run: python3 scripts/loadtest/loadtest.py gate --label ci --no-wait
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f scripts/loadtest/results/gate-summary.md ]; then
+            cat scripts/loadtest/results/gate-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The gate wrote no summary; see the logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: EDDI log tail
+        if: failure()
+        run: |
+          docker compose -f scripts/loadtest/docker-compose.loadtest.yml -f scripts/loadtest/docker-compose.mongo.yml \
+            -f scripts/loadtest/docker-compose.app.yml logs --tail 200 eddi || true
+        env:
+          EDDI_APP: ${{ github.workspace }}/target/quarkus-app
+
+      - name: Upload results (throughput and latency are not gated)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: loadtest-db-ops
+          path: |
+            scripts/loadtest/results/*.json
+            scripts/loadtest/results/gate-summary.md
+            !scripts/loadtest/results/.state.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Stop the stack
+        if: always()
+        run: python3 scripts/loadtest/loadtest.py down

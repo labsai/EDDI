@@ -16,6 +16,8 @@ import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
 import { PreviewNotices } from "@/components/agents/import-steps/preview-step";
+import { PromotionCompatibilityPanel } from "@/components/agents/promotion-compatibility-panel";
+import { writesOverExistingAgent } from "@/lib/promotion-impact";
 import {
   usePreviewSyncBatch,
   useExecuteSyncBatch,
@@ -47,6 +49,12 @@ interface AgentMapping {
   preview: ImportPreview | null;
   /** CONFLICT rows the operator chose to overwrite; every other one is left alone. */
   overwrite: string[];
+  /**
+   * The operator declared this sync compatible with the target's current version,
+   * so conversations running on it follow. Unticked by default, and reset after
+   * every run: it is a judgement about one specific change.
+   */
+  compatible: boolean;
 }
 
 
@@ -132,6 +140,7 @@ export function SyncPage() {
         checked: true,
         preview: null,
         overwrite: [],
+        compatible: false,
       };
     });
     setMappings(newMappings);
@@ -202,6 +211,7 @@ export function SyncPage() {
                   ...m,
                   preview: missingPreview(m.remoteId, noPreviewMessage),
                   overwrite: [],
+                  compatible: false,
                 };
               }
               // With no target named, the backend previews onto the agent an earlier
@@ -209,7 +219,7 @@ export function SyncPage() {
               // will be written and the sync names the same one.
               const localTargetId =
                 m.localTargetId ?? (m.createNew ? null : p.targetAgentId ?? null);
-              return { ...m, preview: p, localTargetId, overwrite: [] };
+              return { ...m, preview: p, localTargetId, overwrite: [], compatible: false };
             })
           );
         },
@@ -235,6 +245,7 @@ export function SyncPage() {
           : null,
       workflowOrder: null,
       createNew: m.createNew,
+      compatible: m.compatible,
     }));
 
     executeBatchMutation.mutate(
@@ -264,6 +275,7 @@ export function SyncPage() {
                 createNew: adopted ? false : m.createNew,
                 preview: null,
                 overwrite: [],
+                compatible: false,
               };
             })
           );
@@ -405,6 +417,7 @@ export function SyncPage() {
                           createNew: !e.target.value,
                           preview: null,
                           overwrite: [],
+                          compatible: false,
                         })
                       }
                       className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -458,6 +471,9 @@ export function SyncPage() {
                   <AgentSyncDetail
                     preview={m.preview}
                     overwrite={m.overwrite}
+                    compatible={m.compatible}
+                    onCompatibleChange={(compatible) => updateMapping(idx, { compatible })}
+                    remoteId={m.remoteId}
                     onToggleOverwrite={(sourceId) =>
                       updateMapping(idx, {
                         overwrite: m.overwrite.includes(sourceId)
@@ -629,10 +645,16 @@ function SyncOutcome({
 function AgentSyncDetail({
   preview,
   overwrite,
+  compatible,
+  onCompatibleChange,
+  remoteId,
   onToggleOverwrite,
 }: {
   preview: ImportPreview;
   overwrite: string[];
+  compatible: boolean;
+  onCompatibleChange: (compatible: boolean) => void;
+  remoteId: string;
   onToggleOverwrite: (sourceId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -641,6 +663,14 @@ function AgentSyncDetail({
   return (
     <div className="space-y-2 bg-secondary/20 px-5 pb-4">
       <PreviewNotices preview={preview} />
+      {writesOverExistingAgent(preview) && (
+        <PromotionCompatibilityPanel
+          impact={preview.conversationImpact}
+          compatible={compatible}
+          onCompatibleChange={onCompatibleChange}
+          data-testid={`sync-compatibility-${remoteId}`}
+        />
+      )}
       <div className="overflow-auto rounded-lg border max-h-64">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm">

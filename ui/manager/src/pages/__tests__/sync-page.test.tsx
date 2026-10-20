@@ -533,6 +533,41 @@ describe("SyncPage", () => {
     expect(sentTargets[sentTargets.length - 1]).toBe("created-locally-1");
   });
 
+  // ─── Declaring a promotion compatible ──────────────────────────────────
+
+  it("a sync is breaking unless compatible is ticked for that agent, and the choice is per agent", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    server.use(
+      http.post("*/backup/import/sync/batch", async ({ request }) => {
+        const requests = (await request.json()) as Array<Record<string, unknown>>;
+        sent.push(...requests);
+        return HttpResponse.json([]);
+      }),
+    );
+    renderPage();
+    const user = await connectAndWaitForMapping();
+
+    await user.click(screen.getByTestId("sync-preview-all"));
+    await waitFor(() => {
+      expect(screen.getAllByText(/changes/).length).toBeGreaterThanOrEqual(2);
+    });
+    // Open the first agent's detail and tick compatible there; the second stays as it was.
+    await user.click(screen.getAllByText(/changes/)[0]!);
+    const box = await screen.findByTestId(/^sync-compatibility-.*-checkbox$/);
+    expect(box).not.toBeChecked();
+    expect(screen.getByTestId(/^sync-compatibility-.*-impact$/)).toHaveAttribute("data-outcome", "STAY");
+    await user.click(box);
+    expect(screen.getByTestId(/^sync-compatibility-.*-impact$/)).toHaveAttribute("data-outcome", "FOLLOW");
+
+    await user.click(screen.getByTestId("sync-execute-btn"));
+    await waitFor(() => {
+      expect(sent.length).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(sent[0]!.compatible).toBe(true);
+    expect(sent.slice(1).every((r) => r.compatible === false)).toBe(true);
+  });
+
   // ─── Auto-match badge ──────────────────────────────────────────────────
 
   it("shows auto-matched badge when remote agent matches local by name", async () => {

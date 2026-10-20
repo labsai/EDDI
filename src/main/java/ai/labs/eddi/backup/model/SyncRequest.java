@@ -28,6 +28,11 @@ import java.util.Set;
  * @param createNew
  *            true to create a new agent even when one was promoted from this
  *            source before; null and false both mean "find it first"
+ * @param compatible
+ *            true to declare the agent version this writes compatible with the
+ *            one it replaces, so running conversations follow it; null and
+ *            false both mean a breaking version, which is the default. No
+ *            effect when a new agent is created
  * @since 6.0.0
  */
 public record SyncRequest(
@@ -36,11 +41,18 @@ public record SyncRequest(
         String targetAgentId,
         Set<String> selectedResources,
         List<String> workflowOrder,
-        Boolean createNew) {
+        Boolean createNew,
+        Boolean compatible) {
+
+    /** A breaking request. */
+    public SyncRequest(String sourceAgentId, Integer sourceAgentVersion, String targetAgentId,
+            Set<String> selectedResources, List<String> workflowOrder, Boolean createNew) {
+        this(sourceAgentId, sourceAgentVersion, targetAgentId, selectedResources, workflowOrder, createNew, null);
+    }
 
     /** A request that finds an earlier promotion before creating one. */
     public SyncRequest(String sourceAgentId, Integer sourceAgentVersion, String targetAgentId,
             Set<String> selectedResources, List<String> workflowOrder) {
-        this(sourceAgentId, sourceAgentVersion, targetAgentId, selectedResources, workflowOrder, null);
+        this(sourceAgentId, sourceAgentVersion, targetAgentId, selectedResources, workflowOrder, null, null);
     }
 }

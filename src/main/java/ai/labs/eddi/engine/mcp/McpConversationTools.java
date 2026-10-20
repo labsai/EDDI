@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -609,7 +610,7 @@ public class McpConversationTools {
 
     @Tool(name = "read_audit_trail", description = "Read the audit trail for a conversation. "
             + "Returns per-task execution records including: taskId, taskType, input/output data, "
-            + "LLM details (model, prompt, tokens, cost), tool calls, actions emitted, and timing. "
+            + "LLM details (model, prompt — only with VIEW on the agent —, tokens, cost), tool calls, actions emitted, and timing. "
             + "This shows EXACTLY what happened at each workflow step — essential for optimizing Agent behavior.")
     public String readAuditTrail(@ToolArg(description = "Conversation ID (required)") String conversationId,
                                  @ToolArg(description = "Maximum number of entries to return (default: 20)", required = false,
@@ -628,7 +629,7 @@ public class McpConversationTools {
             var result = new LinkedHashMap<String, Object>();
             result.put("conversationId", conversationId);
             result.put("count", entries.size());
-            result.put("entries", entries);
+            result.put("entries", withPromptsVisibleToCaller(entries));
             return jsonSerialization.serialize(result);
         } catch (ForbiddenException e) {
             return accessDenied("read_audit_trail", conversationId);
@@ -638,6 +639,46 @@ public class McpConversationTools {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
             return errorJson("Failed to read audit trail", e);
         }
+    }
+
+    /**
+     * The {@code llmDetail} key LifecycleManager records the compiled prompt under.
+     */
+    static final String COMPILED_PROMPT = "compiledPrompt";
+
+    static final String REDACTED_PROMPT = "[redacted: the compiled prompt is shown only to callers with VIEW on the agent]";
+
+    /**
+     * {@code llmDetail.compiledPrompt} is the agent's full system message plus its
+     * prompt template, as LlmTask compiled them. Owning the conversation is not
+     * enough to see that: under enforced workspaces an agent shared with
+     * {@code USE} lets the recipient chat with it but not read its configuration,
+     * and the prompt IS its configuration. Sharing materialises the agent's level
+     * onto its LLM configs (ConfigGraphResolver), so VIEW on the agent is the same
+     * decision without a graph walk per entry. Everything else in the entry —
+     * model, tokens, cost, the model's reply to this caller — stays. With
+     * workspaces off, or for an admin, {@code hasAccess} answers OWN and nothing
+     * changes.
+     */
+    private List<AuditEntry> withPromptsVisibleToCaller(List<AuditEntry> entries) {
+        Map<String, Boolean> mayView = new HashMap<>();
+        List<AuditEntry> visible = new ArrayList<>(entries.size());
+        for (AuditEntry entry : entries) {
+            Map<String, Object> llmDetail = entry.llmDetail();
+            if (llmDetail == null || !llmDetail.containsKey(COMPILED_PROMPT)
+                    || mayView.computeIfAbsent(entry.agentId(), agentId -> resourceAccessGuard.hasAccess(agentId, AccessLevel.VIEW))) {
+                visible.add(entry);
+                continue;
+            }
+            Map<String, Object> redacted = new LinkedHashMap<>(llmDetail);
+            redacted.put(COMPILED_PROMPT, REDACTED_PROMPT);
+            // A presentation copy, not the ledger row: the HMAC and agent signature
+            // cover the original payload, so keeping them would make an intact
+            // entry look tampered to anyone who verifies it. The marker says why.
+            visible.add(entry.withPayload(entry.input(), entry.output(), redacted, entry.toolCalls()).withHmac(null)
+                    .withAgentSignature(null));
+        }
+        return visible;
     }
 
     @Tool(name = "discover_agents", description = "Discover deployed agents with their capabilities. "

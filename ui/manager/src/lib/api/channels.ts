@@ -4,7 +4,15 @@ import { seg } from "./path-segment";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export const CHANNEL_TYPES = ["slack"] as const;
+export const CHANNEL_TYPES = ["slack", "webhook"] as const;
+
+/** Signature schemes of a `webhook` channel integration (backend default: eddi-v1). */
+export const WEBHOOK_SIGNATURE_SCHEMES = ["eddi-v1", "github", "generic-hmac"] as const;
+
+/** The endpoint a `webhook` channel integration receives events on. */
+export function webhookEndpointUrl(origin: string, integrationId: string): string {
+  return `${origin}/integrations/webhook/${integrationId}`;
+}
 export type ChannelType = (typeof CHANNEL_TYPES)[number];
 
 export type TargetType = "AGENT" | "GROUP";

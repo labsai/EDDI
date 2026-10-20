@@ -35,9 +35,8 @@ import java.util.Objects;
  * The returned object is shared between conversations: read it, never modify
  * it.
  * <p>
- * {@code WorkflowTraversal} (in {@code modules.llm.impl}) keeps its own,
- * short-lived cache of whole traversals; making that one long-lived as well
- * (throughput plan WS1) should hang its invalidation off the same deployment
+ * {@code WorkflowTraversal} (in {@code modules.llm.impl}) keeps its own cache
+ * of whole traversals under the same rule, dropped by the same deployment
  * hooks.
  */
 @ApplicationScoped

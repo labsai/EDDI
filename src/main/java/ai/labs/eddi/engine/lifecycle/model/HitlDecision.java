@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.lifecycle.model;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
+import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Human decision on a paused conversation or group discussion.
@@ -63,6 +65,23 @@ public class HitlDecision {
      * behaviour).
      */
     private String pauseId;
+    /**
+     * Optional secret context for the resumed turn only — the same shape as a say
+     * request's {@code context}. A client whose paused turn carried a credential as
+     * a {@code "secret": true} context entry (replaced by a placeholder when the
+     * turn paused) sends it again here so tasks that run after the pause can use
+     * it.
+     * <p>
+     * Only entries that are themselves {@code secret: true} AND were secret in the
+     * paused turn are accepted (anything else is a 400 before the resume consumes
+     * the pause): an approval must not inject new data into the turn it approves.
+     * The values live for this resume only and are scrubbed exactly like a say
+     * turn's. Write-only: never serialized, so it cannot leak through an event, a
+     * log of the decision or a response. Timeout, Slack, MCP and group resumes
+     * leave it {@code null}.
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private Map<String, Context> context;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -129,5 +148,13 @@ public class HitlDecision {
 
     public void setPauseId(String pauseId) {
         this.pauseId = pauseId;
+    }
+
+    public Map<String, Context> getContext() {
+        return context;
+    }
+
+    public void setContext(Map<String, Context> context) {
+        this.context = context;
     }
 }
