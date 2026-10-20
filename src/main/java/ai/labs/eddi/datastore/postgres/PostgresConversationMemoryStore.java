@@ -1418,6 +1418,11 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         if (result instanceof LinkedHashMap) {
                             var map = (LinkedHashMap<String, Object>) result;
                             var context = new Context(valueOf(map.get("type").toString()), map.get("value"));
+                            // Keep the secret flag, as the MongoDB store does: a HITL resume may
+                            // re-supply a secret only for a key the paused turn stored as one.
+                            if (map.get("secret") instanceof Boolean secret) {
+                                context.setSecret(secret);
+                            }
                             lifecycleTask.setResult(context);
                         }
                     }

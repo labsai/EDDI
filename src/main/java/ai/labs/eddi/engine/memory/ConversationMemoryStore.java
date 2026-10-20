@@ -70,6 +70,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_CONTEXT = "context";
     private static final String KEY_TYPE = "type";
     private static final String KEY_VALUE = "value";
+    private static final String KEY_SECRET = "secret";
     private static final String KEY_AGENT_ID = "agentId";
     private static final String KEY_AGENT_VERSION = "agentVersion";
     private static final String KEY_COMPATIBILITY_GENERATION = "compatibilityGeneration";
@@ -557,7 +558,15 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                                 continue;
                             }
                             try {
-                                lifecycleTask.setResult(new Context(valueOf(rawType.toString()), map.get(KEY_VALUE)));
+                                var context = new Context(valueOf(rawType.toString()), map.get(KEY_VALUE));
+                                // Keep the secret flag. A HITL resume may re-supply a secret only
+                                // for a key the paused turn stored as one, and both the check
+                                // (ConversationHitlService#validateResumeContext) and the injection
+                                // (Conversation#injectResumeSecretContext) read it from this snapshot.
+                                if (map.get(KEY_SECRET) instanceof Boolean secret) {
+                                    context.setSecret(secret);
+                                }
+                                lifecycleTask.setResult(context);
                             } catch (IllegalArgumentException e) {
                                 LOGGER.warnf("Conversation '%s': context entry '%s' has unknown %s '%s' — left unconverted.",
                                         LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(lifecycleTask.getKey()), KEY_TYPE,
