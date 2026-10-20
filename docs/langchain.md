@@ -1079,7 +1079,7 @@ A block message is served the way an [`onError` fallback](#fallback-answers-and-
 | `closed` | Treated as a finding that blocks: the turn is answered with the guardrail's `blockMessage` (an earlier history message is withheld). | `block`, `reprompt` — a guardrail that exists to keep something out must not let it through because it could not look (a `reprompt` cannot verify any answer either, so it blocks without re-asking) |
 | `open` | Recorded as a `warn`; the text passes. | `redact`, `warn` |
 
-Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`). Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
+Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) that could not decide, `classifier_unavailable` / `classifier_unparseable`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
 
 A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
 
@@ -1097,9 +1097,107 @@ For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `
 
 Patterns in `parameters` are author configuration evaluated against untrusted text. Keep them free of nested quantifiers (`(a+)+`); an invalid pattern is ignored with a WARN.
 
+### The `classifier` type: a safety-classifier model
+
+`classifier` (input and output) asks a **safety-classifier model** for a verdict — Granite Guardian, ShieldGemma, a hosted moderation model, a detector served behind an OpenAI-compatible API. Which model, how to prompt it and how to read its answer are all configuration: EDDI ships no classifier model and endorses none. Check the licence and acceptable-use terms of the model you deploy yourself.
+
+```json
+"inputGuardrails": [ {
+  "type": "classifier",
+  "action": "block",
+  "blockMessage": "I can't help with that request.",
+  "parameters": {
+    "provider": "ollama",
+    "baseUrl": "http://ollama.guardrails.svc:11434",
+    "model": "shieldgemma:2b",
+    "unsafeLabel": "yes",
+    "safeLabel": "no",
+    "timeoutMs": "3000"
+  }
+} ]
+```
+
+The classifier is called the way an LLM task calls its model: `provider` is an EDDI provider type (`openai` for any OpenAI-compatible server such as vLLM, `ollama`, `azure-openai`, …), and **every parameter that is not one of the classifier's own is passed to that provider unchanged**, in the same vocabulary as a task's `parameters` — `baseUrl`, `apiKey`, `modelName` (`openai`) or `model` (`ollama`), `maxTokens`, `customParameters`, and so on. `apiKey` should be a `${vault:…}` reference; vault and `${vars.…}` references are resolved as they are for a task, and the vault grant check covers them. The endpoint is reached through the provider client, not through EDDI's SSRF-guarded HTTP client, because a classifier is normally an in-cluster service on a private address: it is the same trust class as a task's own `baseUrl`, so only people who may edit agent configuration can point it anywhere.
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `provider` | The EDDI provider type to call. Required — without it the guardrail cannot decide (see `failMode`). | — |
+| `promptTemplate` | A Qute template rendered and sent as one user message. Without it the text is sent as the model's own conversation — input: the user's message; output: the user's question and the answer as an assistant message — and the model's chat template builds its classification prompt, which is what most safety models expect. | — |
+| `risk` | Free text available to the template as `{risk}` (a risk name, or a whole policy). A short plain name (`jailbreak`, `harm`) is also appended to the audit reason. | — |
+| `unsafeLabel` | The label that means "flag it". Compared case-insensitively. | `yes` |
+| `safeLabel` | The label that means "fine". A text passes **only when the answer positively matches it**; any answer that is neither label — a refusal, an error page, `maybe`, a truncated reply — counts as **could not decide**. Required when `unsafeLabel` is anything but `yes`: the deploy is refused without it. | `no` when `unsafeLabel` is `yes` |
+| `labelPattern` | A regular expression; the label is its first capture group in the **last** match within the last 4 KB of the answer (a reasoning trace before the verdict may mention a label itself). Without it, the label is the first word of the answer, punctuation trimmed (`Yes,` and `**No**` work). | — |
+| `timeoutMs` | How long the call may take; the provider client is built with the same timeout. The turn's [deadline](#turn-deadline) wins when it is closer, and a turn already out of time does not call the classifier at all. Capped at 60000. | `3000` |
+| `failMode` | `closed` or `open` — what *could not decide* does; see below. | `closed` for `block`/`reprompt` |
+| `includeRetrievedContext` | Output phase: make this turn's retrieved RAG context (vector store and `httpCallRag`) available to the template as `{context}`, for a groundedness check. Without a `promptTemplate` it has no effect. | `false` |
+| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the classifier reports. | unpriced (free) |
+
+**Template data, never template source.** `promptTemplate` is your configuration. The text being screened reaches it only as data — `{input}` (the user's message; in the output phase, the user message the model answered), `{output}` (the answer, output phase), `{context}` and `{risk}` — so a user who types `{risk}` or `{#for …}` sends exactly those characters to the classifier; they are never evaluated.
+
+**Could not decide.** Safe is a positive finding, never a default (Pillar 4). A classifier that names an unsupported provider, cannot be reached, times out, has a `promptTemplate` that does not render, or answers something that is not a label has not checked the text. Its `failMode` decides, exactly as for a failing built-in guardrail — but the audit reason says why: `classifier_unavailable` (no answer) or `classifier_unparseable` (an answer that is neither label). A flagged text carries reason `classifier_flagged` (or `classifier_flagged:<risk>`).
+
+**Cost and latency.** Each screened text is one classifier call — on the input side before the main model, so it adds its latency to every turn; keep `timeoutMs` short and the classifier close. The call's price is added to the turn's cost (`audit:cost`), so it is metered and counted against cost ceilings like any other model call — including the call whose answer could not be parsed. The classifier does **not** screen the earlier user messages of the history window (each was classified on its own turn): one model call per history message on every turn would multiply its cost by the window size. It is timed by `eddi.guardrail.classifier.duration{provider, outcome}` (outcome `safe`, `unsafe`, `unparseable`, `unavailable` or `timeout`), and its provider calls appear in the LLM telemetry like a task's.
+
+#### Example: Granite Guardian 3.3 on vLLM
+
+[Granite Guardian 3.3](https://huggingface.co/ibm-granite/granite-guardian-3.3-8b) (Apache 2.0) takes the risk to check as a chat-template argument and answers in a `<score> yes </score>` / `<score> no </score>` tag (`yes` = the risk is present). Served with `vllm serve ibm-granite/granite-guardian-3.3-8b`, it is reached through the `openai` provider; the risk goes in through vLLM's `chat_template_kwargs` request field, set with `customParameters`, and no `promptTemplate` is needed:
+
+```json
+{
+  "type": "classifier",
+  "action": "block",
+  "blockMessage": "I can't help with that request.",
+  "parameters": {
+    "provider": "openai",
+    "baseUrl": "http://vllm.guardrails.svc:8000/v1",
+    "modelName": "ibm-granite/granite-guardian-3.3-8b",
+    "customParameters": "{\"chat_template_kwargs\": {\"guardian_config\": {\"criteria_id\": \"jailbreak\"}, \"think\": false}}",
+    "maxTokens": "20",
+    "labelPattern": "<score>\\s*(\\w+)\\s*</score>",
+    "unsafeLabel": "yes",
+    "safeLabel": "no",
+    "risk": "jailbreak",
+    "timeoutMs": "3000",
+    "inputPricePer1M": "0.10"
+  }
+}
+```
+
+The example sends no `apiKey` because an in-cluster vLLM is typically unauthenticated. If your server needs one, add `"apiKey": "${vault:<name>}"` and serve the endpoint over `https://`: the key travels in an `Authorization` header, and over plain `http://` it is readable on the network.
+
+Use other `criteria_id` values (or `custom_criteria` with your own description) from the model card for other risks. With `"think": true` the model writes a reasoning trace before the score — raise `maxTokens` and `timeoutMs` accordingly; `labelPattern` still finds the final score.
+
+#### Example: ShieldGemma on Ollama
+
+[ShieldGemma](https://ollama.com/library/shieldgemma) (Gemma terms of use, with Google's prohibited-use policy) answers `Yes` (violates the policy) or `No`. Ollama's chat template builds the classification prompt from the conversation, so the native mode works as-is — as an input guardrail it judges the user's message, as an output guardrail the answer:
+
+```json
+{
+  "type": "classifier",
+  "action": "block",
+  "parameters": {
+    "provider": "ollama",
+    "baseUrl": "http://ollama.guardrails.svc:11434",
+    "model": "shieldgemma:2b",
+    "unsafeLabel": "yes",
+    "safeLabel": "no",
+    "timeoutMs": "2000"
+  }
+}
+```
+
+To check against your own policy instead of the model's default one, write the prompt yourself in the format the [model card](https://huggingface.co/google/shieldgemma-2b) describes, with the policy in `risk`:
+
+```json
+"promptTemplate": "Policy:\n{risk}\n\nUser message:\n{input}\n\nDoes the user message violate the policy? Your answer must start with 'Yes' or 'No'.",
+"risk": "No instructions for building weapons."
+```
+
+> **Llama Guard.** Llama Guard 3 (`llama-guard3` on Ollama) works the same way with `"unsafeLabel": "unsafe"` and `"safeLabel": "safe"` (both required — the deploy refuses a custom `unsafeLabel` alone) (it answers `safe`, or `unsafe` followed by category codes on the next line). Its licence needs checking before you deploy it: Meta's Llama 3.2, 3.3 and 4 acceptable-use policies withhold the licence rights for their **multimodal** models from individuals domiciled in, and companies with their principal place of business in, the European Union — which covers Llama Guard 4 and Llama Guard 3 Vision. EDDI documents no Llama Guard example for that reason; whether a model's terms allow your deployment is your call, not EDDI's.
+
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **last user message** the model would see is checked again only if it differs from what the user typed (a `prompt` template, attachment extracts); otherwise the first result is reused, so a finding is recorded once. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **last user message** the model would see is checked again only if it differs from what the user typed (a `prompt` template, attachment extracts); otherwise the first result is reused, so a finding is recorded once. The **earlier user messages** in the history window are screened again too, silently: conversation memory keeps every message as the user sent it, so without this a message blocked or redacted on its own turn would reach the model unscreened on the next one. A message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. The one exception is the [`classifier`](#the-classifier-type-a-safety-classifier-model), which does not re-screen history (one model call per history message on every turn would multiply its cost by the window size); each of those messages was classified on its own turn, so a classifier that was added later, or a message it let through, is not caught on a later turn.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.)
 - An `onError` fallback is the author's own text and is not screened.
 
@@ -1115,7 +1213,7 @@ Every guardrail that fires produces:
 - an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
-Reprompts are model calls: their tokens are added to the turn's token usage and cost.
+Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` call (`audit:cost`).
 
 ### Compatibility
 

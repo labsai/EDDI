@@ -15399,6 +15399,83 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 209,
+          "type": "timeseries",
+          "title": "Classifier guardrail latency and outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean `eddi_guardrail_classifier_duration_seconds` by `provider` and `outcome` (safe, unsafe, unparseable, unavailable, timeout). An input classifier runs before the main model and an output classifier screens its answer afterwards; only turns whose agent configures a classifier guardrail record samples. Empty (\"no samples yet\") when there is no classifier traffic, because a mean latency has no honest value without calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 26
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, outcome) (rate(eddi_guardrail_classifier_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (provider, outcome) (rate(eddi_guardrail_classifier_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     }

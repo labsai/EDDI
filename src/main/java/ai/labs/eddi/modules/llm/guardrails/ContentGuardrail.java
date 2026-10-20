@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -19,10 +20,12 @@ import java.util.Set;
  * <li>Report, do not act: return a {@link GuardrailVerdict}; the configured
  * action decides what happens.</li>
  * <li>Never copy the screened text into the verdict's {@code reason}.</li>
- * <li>Do not throw. A {@link RuntimeException} is caught, logged and recorded
- * as a {@code warn} outcome — a broken guardrail must not take a conversation
- * down, nor put its message on a path that classifies exceptions for
- * retry.</li>
+ * <li>Do not throw, except {@link GuardrailUndecidedException} to report "could
+ * not decide" (a backing service unreachable or answering nonsense) with an
+ * audit reason and the cost already incurred. Any {@link RuntimeException} is
+ * caught and logged, and the guardrail's {@code failMode} decides — block or
+ * warn — so a broken guardrail neither takes a conversation down nor puts its
+ * message on a path that classifies exceptions for retry.</li>
  * </ul>
  */
 public interface ContentGuardrail {
@@ -46,5 +49,15 @@ public interface ContentGuardrail {
      */
     default boolean screensHistory() {
         return true;
+    }
+
+    /**
+     * Checks this guardrail's {@code parameters} when the task is deployed: a
+     * message naming the problem, or null when the configuration is usable. A
+     * configuration that cannot work at all (rather than one that is merely
+     * unusual) is worth refusing up front instead of failing every turn.
+     */
+    default String validate(Map<String, String> parameters) {
+        return null;
     }
 }

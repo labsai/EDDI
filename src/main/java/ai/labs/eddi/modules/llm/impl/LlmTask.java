@@ -415,6 +415,9 @@ public class LlmTask implements ILifecycleTask {
         // nothing bounded the RAG blocks appended to it. Both appends below are capped
         // by the task's maxRagContextChars.
         int maxRagContextChars = RagContextProvider.resolveMaxChars(task);
+        // What retrieval returned this turn, for an output guardrail that checks the
+        // answer's groundedness (classifier, includeRetrievedContext).
+        StringBuilder retrievedContext = new StringBuilder();
 
         // Phase 8c-0: Zero-infrastructure RAG via named httpCall
         String httpCallRag = task.getHttpCallRag();
@@ -423,6 +426,7 @@ public class LlmTask implements ILifecycleTask {
                 String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
                         "httpCall RAG '" + httpCallRag + "'");
                 if (httpCallContext != null) {
+                    retrievedContext.append(httpCallContext);
                     systemMessage += "\n\n## Search Results:\n" + markRetrievedContext(task, "httpcall:" + httpCallRag, httpCallContext);
                     LOGGER.debugf("httpCall RAG context injected for task '%s': %d chars", taskId, httpCallContext.length());
                     var traceData = dataFactory.createData("rag:httpcall:trace:" + taskId,
@@ -440,6 +444,10 @@ public class LlmTask implements ILifecycleTask {
                 String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
                         "vector RAG for task '" + taskId + "'");
                 if (ragContext != null) {
+                    if (!retrievedContext.isEmpty()) {
+                        retrievedContext.append("\n\n");
+                    }
+                    retrievedContext.append(ragContext);
                     systemMessage += "\n\n## Relevant Context:\n" + markRetrievedContext(task, "knowledge-base", ragContext);
                     LOGGER.debugf("RAG context injected for task '%s': %d chars", taskId, ragContext.length());
                 }
@@ -550,6 +558,7 @@ public class LlmTask implements ILifecycleTask {
         }
         final List<ChatMessage> requestMessages = messages;
         final GuardrailService.InputResult screenedInput = inputScreening;
+        final String retrievedContextText = retrievedContext.toString();
 
         // R5: the same-model recovery policy of the plain (non-cascade) paths, and the
         // way to rebuild a smaller prompt for onContextTooLong. The cascade derives its
@@ -899,7 +908,8 @@ public class LlmTask implements ILifecycleTask {
                 // stored, parsed or delivered. Not on a fallback: that is the author's text.
                 if (fallbackServed == null && outputGuarded && responseContent != null) {
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, outputReprompter,
-                            guardrailContext(memory, task, requestMessages), outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+                            guardrailContext(memory, task, requestMessages, retrievedContextText),
+                            outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
                     responseContent = screened.text();
@@ -2502,7 +2512,17 @@ public class LlmTask implements ILifecycleTask {
     // === Guardrails (WS4) ===
 
     private static GuardrailContext guardrailContext(IConversationMemory memory, Task task, List<ChatMessage> messages) {
-        return new GuardrailContext(null, task.getId(), memory.getConversationId(), memory.getAgentId(), null, messages);
+        return guardrailContext(memory, task, messages, null);
+    }
+
+    /**
+     * The guardrail context of this turn: its messages, the context retrieval
+     * returned (output phase; null when none or unknown, e.g. a resumed turn) and
+     * the turn deadline, which a model-backed guardrail must not outlive.
+     */
+    private static GuardrailContext guardrailContext(IConversationMemory memory, Task task, List<ChatMessage> messages, String retrievedContext) {
+        return new GuardrailContext(null, task.getId(), memory.getConversationId(), memory.getAgentId(), null, messages,
+                retrievedContext != null && !retrievedContext.isEmpty() ? retrievedContext : null, memory.getTurnDeadline());
     }
 
     /**
@@ -2927,6 +2947,7 @@ public class LlmTask implements ILifecycleTask {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
                 CascadeConfigValidator.validate(llmConfiguration);
+                validateGuardrails(llmConfiguration);
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
@@ -2938,6 +2959,30 @@ public class LlmTask implements ILifecycleTask {
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Fails the deploy on a guardrail configuration that cannot work at all (each
+     * type decides, {@code ContentGuardrail.validate}) — e.g. a classifier with a
+     * custom unsafe label but no safe label, which could never let a turn through.
+     */
+    void validateGuardrails(LlmConfiguration llmConfiguration) throws WorkflowConfigurationException {
+        if (guardrailService == null || llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (var task : llmConfiguration.tasks()) {
+            String taskId = task.getId() != null ? task.getId() : "<unnamed>";
+            for (String problem : guardrailService.validate("inputGuardrails", task.getInputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+            for (String problem : guardrailService.validate("outputGuardrails", task.getOutputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new WorkflowConfigurationException("Invalid guardrail configuration: " + String.join("; ", problems));
+        }
     }
 
     /**

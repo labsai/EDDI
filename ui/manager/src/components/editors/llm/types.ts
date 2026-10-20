@@ -248,8 +248,10 @@ export type GuardrailActionName = "block" | "redact" | "reprompt" | "warn";
 /**
  * One input or output guardrail of an LLM task. Mirrors the backend
  * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
- * (input), `pii-redaction`, `regex-filter`, `max-length` (both), `json-object`
- * (output); an unknown type is skipped by the engine with a WARN.
+ * (input), `pii-redaction`, `regex-filter`, `max-length`, `classifier` (both),
+ * `json-object` (output); an unknown type is skipped by the engine with a WARN.
+ * `classifier` calls an author-configured safety-classifier model; its
+ * `parameters` take `provider` plus that provider's own model parameters.
  */
 export interface GuardrailConfig {
   type: string;

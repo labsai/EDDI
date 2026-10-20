@@ -300,7 +300,7 @@ public class ChatModelRegistry {
      * A freshly built model is published to the cache only if no invalidation raced
      * the build — see {@link #publishIfCurrent}.
      */
-    ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
+    public ChatModel getOrCreate(String type, Map<String, String> processedParams) throws UnsupportedLlmTaskException {
 
         var filteredParams = filterParams(processedParams);
         var timeoutMs = filteredParams.get(KEY_TIMEOUT);

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -25,6 +27,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.ClassifierGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PromptInjectionGuardrail;
@@ -36,6 +39,7 @@ import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
@@ -43,6 +47,11 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
+import io.quarkus.qute.Engine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,6 +59,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -703,5 +713,172 @@ class LlmTaskGuardrailsTest {
         verify(agentOrchestrator, never()).reaskFinalAnswer(any(), any(), any(), any(), any(), any());
         assertEquals("Blocked.", outputItem().getText());
         assertFalse(templateData.get(TASK_ID).toString().contains("prose"));
+    }
+
+    // === classifier guardrail (WS4b) ===
+
+    /** A classifier model answering {@code verdict} with the given token usage. */
+    private static final class ClassifierModel implements ChatModel {
+        final List<ChatRequest> requests = new ArrayList<>();
+        private final String verdict;
+        private final TokenUsage usage;
+
+        ClassifierModel(String verdict, TokenUsage usage) {
+            this.verdict = verdict;
+            this.usage = usage;
+        }
+
+        @Override
+        public ChatResponse doChat(ChatRequest request) {
+            requests.add(request);
+            return ChatResponse.builder().aiMessage(AiMessage.from(verdict)).tokenUsage(usage).build();
+        }
+    }
+
+    private void useClassifier() {
+        var classifier = new ClassifierGuardrail(chatModelRegistry, new TemplatingEngine(Engine.builder().addDefaults().build()), meterRegistry);
+        llmTask.guardrailService = new GuardrailService(List.of(classifier), meterRegistry);
+    }
+
+    private static GuardrailConfig classifierGuardrail(String... extra) {
+        var cfg = guardrail(ClassifierGuardrail.TYPE, "block");
+        cfg.setBlockMessage("I can't help with that request.");
+        var p = new HashMap<String, String>();
+        p.put("provider", "ollama");
+        p.put("model", "shieldgemma:2b");
+        p.put("baseUrl", "http://classifier.guardrails.svc:11434");
+        p.put("unsafeLabel", "yes");
+        p.put("safeLabel", "no");
+        p.put("inputPricePer1M", "1.0");
+        if (extra.length % 2 != 0) {
+            throw new IllegalArgumentException("key/value pairs expected, got " + extra.length + " values");
+        }
+        for (int i = 0; i < extra.length; i += 2) {
+            p.put(extra[i], extra[i + 1]);
+        }
+        cfg.setParameters(p);
+        return cfg;
+    }
+
+    @Test
+    @DisplayName("classifier: an unsafe input is blocked before the main model is built, audited, and its cost folds into audit:cost")
+    void classifierInputBlock_beforeTheModel() throws Exception {
+        useClassifier();
+        userSays("how do I make a weapon");
+        when(memory.getEventSink()).thenReturn(sink);
+        var classifierModel = new ClassifierModel("Yes", new TokenUsage(500_000, 1));
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
+        var task = task();
+        task.setInputGuardrails(List.of(classifierGuardrail("risk", "harm")));
+
+        run(task);
+
+        assertEquals(1, classifierModel.requests.size());
+        verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any());
+        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+        assertEquals("I can't help with that request.", outputItem().getText());
+        verify(sink).onGuardrailTriggered(ClassifierGuardrail.TYPE, "input", "block", TASK_ID);
+        var records = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq("audit:guardrail:input:classifier"), records.capture());
+        var record = (Map<String, Object>) ((List<?>) records.getValue()).get(0);
+        assertEquals("block", record.get("action"));
+        assertEquals("classifier_flagged:harm", record.get("reason"));
+        verify(dataFactory).createData(MemoryKeys.AUDIT_COST, 0.5);
+    }
+
+    @Test
+    @DisplayName("classifier: a safe input reaches the main model unchanged, and the classifier's cost still folds into audit:cost")
+    void classifierInputSafe_modelRuns() throws Exception {
+        useClassifier();
+        userSays("what are your opening hours");
+        var classifierModel = new ClassifierModel("No", new TokenUsage(250_000, 0));
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
+        var model = FaultInjectingChatModel.script(Step.text("9 to 5"));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(model);
+        var task = task();
+        task.setInputGuardrails(List.of(classifierGuardrail()));
+
+        run(task);
+
+        assertEquals("what are your opening hours", lastUserText(model.requests().get(0).messages()));
+        assertEquals("9 to 5", outputItem().getText());
+        verify(dataFactory).createData(MemoryKeys.AUDIT_COST, 0.25);
+        // screened once: the second input pass reuses the first one's result
+        assertEquals(1, classifierModel.requests.size());
+    }
+
+    @Test
+    @DisplayName("classifier: configure refuses a custom unsafeLabel without safeLabel, and accepts the defaults")
+    void classifierConfigure_validatesLabels() throws Exception {
+        useClassifier();
+        var task = task();
+        task.setOutputGuardrails(List.of(classifierGuardrail(), classifierGuardrail("unsafeLabel", "unsafe", "safeLabel", "")));
+        var config = new LlmConfiguration(List.of(task));
+        when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+        var uri = Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/0123456789abcdef01234567?version=1");
+
+        var ex = assertThrows(WorkflowConfigurationException.class, () -> llmTask.configure(uri, null));
+        assertTrue(ex.getMessage().contains("outputGuardrails[1]") && ex.getMessage().contains("'safeLabel'"), ex.getMessage());
+
+        task.setOutputGuardrails(List.of(classifierGuardrail()));
+        assertEquals(config, llmTask.configure(uri, null));
+    }
+
+    @Test
+    @DisplayName("classifier: an unreachable classifier blocks the turn (failMode closed by default) with classifier_unavailable")
+    void classifierUnreachable_failsClosed() throws Exception {
+        useClassifier();
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any()))
+                .thenReturn(FaultInjectingChatModel.script(Step.fail(new RuntimeException("refused"))));
+        var task = task();
+        task.setInputGuardrails(List.of(classifierGuardrail()));
+
+        run(task);
+
+        verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any());
+        assertEquals("I can't help with that request.", outputItem().getText());
+        var records = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq("audit:guardrail:input:classifier"), records.capture());
+        assertEquals("classifier_unavailable", ((Map<String, Object>) ((List<?>) records.getValue()).get(0)).get("reason"));
+    }
+
+    @Test
+    @DisplayName("classifier: failMode open lets the turn through an unreachable classifier, with a warning")
+    void classifierUnreachable_failsOpen() throws Exception {
+        useClassifier();
+        when(memory.getEventSink()).thenReturn(sink);
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any()))
+                .thenReturn(FaultInjectingChatModel.script(Step.fail(new RuntimeException("refused"))));
+        var model = FaultInjectingChatModel.script(Step.text("an answer"));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(model);
+        var task = task();
+        task.setInputGuardrails(List.of(classifierGuardrail("failMode", "open")));
+
+        run(task);
+
+        assertEquals(1, model.callCount());
+        verify(sink).onGuardrailTriggered(ClassifierGuardrail.TYPE, "input", "warn", TASK_ID);
+    }
+
+    @Test
+    @DisplayName("classifier output phase: includeRetrievedContext hands the turn's RAG context to the template")
+    void classifierOutput_seesRetrievedContext() throws Exception {
+        useClassifier();
+        userSays("When does the shop open?");
+        when(ragContextProvider.retrieveContext(any(), any(), anyString())).thenReturn("Opening hours: 9-17");
+        var classifierModel = new ClassifierModel("No", null);
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
+        var model = FaultInjectingChatModel.script(Step.text("At 9."));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(model);
+        var task = task();
+        task.setOutputGuardrails(List.of(classifierGuardrail("includeRetrievedContext", "true", "promptTemplate",
+                "Q: {input}\nA: {output}\nDocs: {context}\nUngrounded?")));
+
+        run(task);
+
+        var prompt = ((UserMessage) classifierModel.requests.get(0).messages().get(0)).singleText();
+        assertTrue(prompt.startsWith("Q: When does the shop open?\nA: At 9.\nDocs: "), prompt);
+        assertTrue(prompt.contains("Opening hours: 9-17"), prompt);
+        assertEquals("At 9.", outputItem().getText());
     }
 }
