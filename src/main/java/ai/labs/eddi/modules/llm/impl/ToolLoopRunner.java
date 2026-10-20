@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -1127,6 +1128,23 @@ class ToolLoopRunner {
         // echoed through every surface that renders the trace.
         callStep.put("arguments", SecretRedactionFilter.redact(toolRequest.arguments()));
         trace.add(callStep);
+
+        // Agent test harness: a test conversation's tool call is answered by its
+        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
+        // for
+        // every other conversation. Self-contained early return — keep it that way.
+        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                toolSources == null ? null : toolSources.get(toolRequest.name()));
+        if (mockedResult != null) {
+            Map<String, Object> mockedStep = new HashMap<>();
+            mockedStep.put("type", "tool_result");
+            mockedStep.put("tool", toolRequest.name());
+            mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
+            mockedStep.put("mocked", true);
+            trace.add(mockedStep);
+            // A mock stands in for the tool's own answer; a refusal means it never ran.
+            return new ToolCallResult(mockedResult, mockedResult, ToolMockRegistry.isRefusal(mockedResult));
+        }
 
         // Check per-conversation TOOL budget before executing tool.
         //

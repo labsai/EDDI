@@ -204,6 +204,7 @@ describe("tool-scopes", () => {
         "PATCH /descriptorstore/descriptors/{id}",
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",
+        "POST /agenttests/runs",
         "POST /schedulestore/schedules/{scheduleId}/disable",
         "POST /groupstore/groups",
         "POST /administration/agents/setup",
