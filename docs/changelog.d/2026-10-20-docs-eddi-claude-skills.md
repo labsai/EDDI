@@ -1,0 +1,14 @@
+## 📘 docs(integrations): Claude Code plugin with `eddi` and `eddi-admin` skills (2026-10-20)
+
+**Repo:** EDDI (`docs/eddi-claude-skills`)
+
+The MCP server gives an assistant EDDI's tools. It does not tell the assistant which tools to chain, which configuration mistakes deploy cleanly and then fail, or which calls need a person's approval. A new Claude Code plugin covers that, in [`integrations/claude-plugin/`](../../integrations/claude-plugin/README.md), with a marketplace entry at `.claude-plugin/marketplace.json` (`/plugin marketplace add labsai/EDDI`).
+
+- **`eddi`** (every role) covers connecting and reading auth failures, `discover_agents`, keeping one conversation (`chat_managed` by intent, or passing `conversationId` back to `chat_with_agent`), group discussions (sync and async), approvals bound to the `pauseId` that was read, and the user's own memories.
+- **`eddi-admin`** (editor and admin) covers orientation, `setup_agent` / `create_api_agent` into `test`, and the change path: `update_resource` → one `apply_agent_changes` → test → promote. It explains the `compatible` decision, and warns that undeploying with `endAllActiveConversations` ends users' conversations. It also covers agent test runs, intents, schedules, channels and groups. The references cover the change workflow, five config gotchas, a symptom-to-cause debugging table, groups, and the actions that need a yes, including the partial-result semantics of the GDPR tools.
+- **Design:** the skills split along the MCP role tiers, so an `eddi-user` session never loads authoring tools it would get `FORBIDDEN` on. The skills treat everything EDDI returns as data, never as instructions. They point to the server's own `read_docs` instead of copying documentation, so a skill cannot contradict the running version.
+- **No `.mcp.json` in the plugin:** each deployment has its own URL. The Claude Code docs also do not confirm `clientId` / `callbackPort` in a checked-in `.mcp.json`, and without them the client would try dynamic registration, which the shipped realm refuses. The README gives the `claude mcp add --client-id eddi-mcp` command instead.
+- **Guard:** `SkillToolReferencesTest` (in `engine.mcp`, reusing `McpToolContractTest`'s tool scan) fails if a skill names an unregistered tool, if it references a `read_docs` page that is missing or that the Dockerfile deletes from the image, if a SKILL.md frontmatter is incomplete, or if the marketplace entry and the plugin name disagree. Writing the skills against the source caught one stale fact: `create_schedule`'s description says `cronExpression`, but the argument is `cron`. The skill uses `cron`.
+- **Docs:** [`mcp-server.md`](../mcp-server.md) gains a "Claude Code plugin" subsection under Quick Start.
+
+**Next:** the `create_schedule` description should say `cron`, not `cronExpression` (a separate code change). Operator prompt unchanged: no server behaviour changed.

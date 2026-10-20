@@ -322,6 +322,10 @@ Use [`mcp-remote`](https://github.com/geelen/mcp-remote) to bridge the gap. It r
 
 > **What is `mcp-remote`?** An open-source npm package ([github.com/geelen/mcp-remote](https://github.com/geelen/mcp-remote)) that acts as an invisible bridge between stdio-only MCP clients and HTTP-based MCP servers. It handles protocol translation, session management, and authentication. Requires Node.js 18+.
 
+### Claude Code plugin
+
+Connecting gives an assistant EDDI's tools. It does not tell the assistant which tools to chain, which configuration mistakes deploy cleanly and then fail, or which actions need a person's yes. The [EDDI plugin for Claude Code](../integrations/claude-plugin/README.md) adds that as two skills: `eddi` for anyone who talks to EDDI's agents (discovery, conversations, group discussions, approvals) and `eddi-admin` for editors and administrators (create, change → test → promote, agent tests, debugging, operations). Install it with `/plugin marketplace add labsai/EDDI`, then `/plugin install eddi@eddi`. For anything version-specific the skills read this deployment's own docs through `list_docs` / `read_docs`. A build test fails if a skill names a tool that is not registered here.
+
 ### Example Workflow
 
 ```

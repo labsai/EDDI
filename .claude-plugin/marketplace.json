@@ -1,0 +1,15 @@
+{
+  "name": "eddi",
+  "description": "Claude Code plugins for working with an EDDI server.",
+  "owner": {
+    "name": "EDDI contributors",
+    "url": "https://github.com/labsai/EDDI"
+  },
+  "plugins": [
+    {
+      "name": "eddi",
+      "source": "./integrations/claude-plugin",
+      "description": "Skills for using and administering an EDDI server through its MCP tools."
+    }
+  ]
+}
