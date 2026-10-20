@@ -1265,6 +1265,49 @@ public class Conversation implements IConversation {
         return (Map<String, Object>) map;
     }
 
+    /**
+     * Marks {@code key} as a secret context entry of this turn: its stored copy is
+     * replaced wholesale and every string form of its value is scrubbed when the
+     * turn stops. Shared by the say path and a HITL resume that re-supplies the
+     * value, so both redact through exactly the same lists.
+     */
+    private void registerSecretContext(String key, Context entry) {
+        secretContextKeys.add(key);
+        SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
+        if (entry.getValue() instanceof String text) {
+            secretContextStrings.add(text);
+        }
+    }
+
+    /**
+     * Puts the secret context a HITL resume re-supplied back in front of the
+     * resumed tasks. The paused turn stored each such entry as
+     * {@link MemoryKeys#SECRET_CONTEXT_PLACEHOLDER}; here the live value replaces
+     * it in the step datum that templates, rules and httpcalls read, and the key is
+     * registered so the turn's end scrubs it like a say turn's. The request layer
+     * already refused entries that are not secret or were not secret when paused;
+     * this re-checks and skips anything else rather than inject it.
+     */
+    private void injectResumeSecretContext(Map<String, Context> supplied) {
+        if (supplied == null || supplied.isEmpty()) {
+            return;
+        }
+        var step = conversationMemory.getCurrentStep();
+        for (var entry : supplied.entrySet()) {
+            Context live = entry.getValue();
+            if (live == null || !Boolean.TRUE.equals(live.getSecret())) {
+                continue;
+            }
+            IData<Context> stored = step.getLatestData(KEY_CONTEXT + ":" + entry.getKey());
+            if (stored == null || stored.getResult() == null
+                    || !MemoryKeys.SECRET_CONTEXT_PLACEHOLDER.equals(stored.getResult().getValue())) {
+                continue;
+            }
+            stored.setResult(live);
+            registerSecretContext(entry.getKey(), live);
+        }
+    }
+
     private List<IData<Context>> createContextData(Map<String, Context> context) {
         List<IData<Context>> contextData = new LinkedList<>();
         secretContextKeys.clear();
@@ -1274,11 +1317,7 @@ public class Conversation implements IConversation {
             for (String key : context.keySet()) {
                 Context entry = context.get(key);
                 if (entry != null && Boolean.TRUE.equals(entry.getSecret())) {
-                    secretContextKeys.add(key);
-                    SecretValueScrubber.collectPlaintexts(entry.getValue(), secretContextValues);
-                    if (entry.getValue() instanceof String text) {
-                        secretContextStrings.add(text);
-                    }
+                    registerSecretContext(key, entry);
                 }
                 // Persisted copy is scrubbed of inline base64 payloads; the live payload
                 // has already been captured into ATTACHMENTS memory for this turn.
@@ -1605,8 +1644,13 @@ public class Conversation implements IConversation {
             throw new ConversationNotReadyException("Not in AWAITING_HUMAN state");
         }
         TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
+        // Taken off the decision at once: the decision is stashed on memory and handed
+        // to events, and the values must live only in this turn's secret lists.
+        Map<String, Context> resumeSecretContext = decision.getContext();
+        decision.setContext(null);
         try {
             setConversationState(ConversationState.IN_PROGRESS);
+            injectResumeSecretContext(resumeSecretContext);
 
             // Store decision in step data (internal — not template-visible via colon keys)
             conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_verdict", decision.getVerdict().name()));
@@ -1724,8 +1768,11 @@ public class Conversation implements IConversation {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         } finally {
+            // First, as on the say path: nothing below — the audit flush, the longTerm
+            // write, the stored snapshot, the rendered output — may see the value.
+            scrubSecretContextValues();
             if (auditBuffer != null) {
-                auditBuffer.flush(conversationMemory);
+                auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
             }
             checkActionsForConversationEnd();
             ConversationState finalState = getConversationState();

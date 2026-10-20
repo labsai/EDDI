@@ -217,7 +217,9 @@ public interface IRestAgentEngine {
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Resume a paused conversation",
-               description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state.")
+               description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state. "
+                       + "The optional body field context may re-supply secret context values (secret: true) that the paused turn carried, "
+                       + "for the resumed turn only; any other entry is a 400.")
     @APIResponse(responseCode = "200", description = "Conversation resumed.")
     @APIResponse(responseCode = "400", description = "Missing or invalid decision body.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
