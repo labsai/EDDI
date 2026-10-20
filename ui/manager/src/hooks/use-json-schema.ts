@@ -16,7 +16,7 @@ export function useJsonSchema(typeSlug: string | undefined) {
       if (!rt) throw new Error(`Unknown resource type: ${typeSlug}`);
       return getJsonSchema(rt);
     },
-    enabled: !!typeSlug,
+    enabled: !!typeSlug && getResourceType(typeSlug)?.jsonSchema !== false,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 1,

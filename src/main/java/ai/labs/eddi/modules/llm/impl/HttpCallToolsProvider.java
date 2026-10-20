@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -258,6 +259,9 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
                         try {
                             Map<String, Object> templateData = templateDataFor(memory, toolRequest);
+                            // ToolLoopRunner already ran the agent-test interception for this call;
+                            // tell the executor not to intercept (and count) it again as a rule call.
+                            templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
 
                             // Checked before the wire, not after. A body the model wrote as
                             // broken JSON cannot bind at any API, so sending it spends a round
