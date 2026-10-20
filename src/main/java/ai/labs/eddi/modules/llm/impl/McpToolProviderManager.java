@@ -11,6 +11,7 @@ import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -25,6 +26,7 @@ import dev.langchain4j.mcp.client.DefaultMcpClient;
 import dev.langchain4j.mcp.client.McpBlobResourceContents;
 import dev.langchain4j.mcp.client.McpCallContext;
 import dev.langchain4j.mcp.client.McpClient;
+import dev.langchain4j.mcp.client.McpMetaSupplier;
 import dev.langchain4j.mcp.client.McpReadResourceResult;
 import dev.langchain4j.mcp.client.McpResource;
 import dev.langchain4j.mcp.client.McpResourceContents;
@@ -32,6 +34,7 @@ import dev.langchain4j.mcp.client.McpResourceTemplate;
 import dev.langchain4j.mcp.client.McpTextResourceContents;
 import dev.langchain4j.mcp.client.transport.McpTransport;
 import dev.langchain4j.mcp.client.transport.http.StreamableHttpMcpTransport;
+import dev.langchain4j.mcp.protocol.McpClientRequest;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -158,6 +161,13 @@ public class McpToolProviderManager {
      */
     @Inject
     MeterRegistry meterRegistry;
+
+    /**
+     * Outbound W3C trace propagation into MCP requests. Field-injected and
+     * null-tolerant like {@link #meterRegistry}: null means no propagation.
+     */
+    @Inject
+    TracePropagation tracePropagation;
 
     /**
      * Count an MCP discovery outcome.
@@ -931,7 +941,15 @@ public class McpToolProviderManager {
 
             McpTransport transport = createTransport(config, timeout);
 
-            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client").build();
+            // The trace context goes into params._meta (SEP-414) through the meta
+            // supplier, which DefaultMcpClient invokes on the calling thread —
+            // where the execute_tool span is current — just before handing the
+            // message to the transport. The transport then mirrors it into the
+            // HTTP headers from the message itself (see createTransport). The
+            // supplier reads the context per request, never at build time: this
+            // client is cached and shared across conversations.
+            return new DefaultMcpClient.Builder().transport(transport).clientName("eddi-mcp-client")
+                    .metaSupplier(traceMetaSupplier()).build();
         });
     }
 
@@ -1239,10 +1257,74 @@ public class McpToolProviderManager {
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(callContext -> authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext));
+            transportBuilder.customHeaders(callContext -> withTraceHeaders(
+                    authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext));
+        } else {
+            // No credential configured: the server decides whether it needs one.
+            // The trace context still goes out, mirrored from params._meta.
+            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
         }
 
         return transportBuilder.build();
+    }
+
+    /**
+     * The {@code params._meta} entries for one MCP message: {@code traceparent} and
+     * {@code tracestate} of the current span (SEP-414 reserves exactly these keys,
+     * plus {@code baggage}, which is never sent). Empty — so langchain4j adds
+     * nothing — when propagation is off or no valid span is current.
+     * <p>
+     * Must run on the thread that issues the request, which it does: the client
+     * calls its meta supplier synchronously before the transport is involved.
+     */
+    McpMetaSupplier traceMetaSupplier() {
+        return callContext -> traceMeta(tracePropagation);
+    }
+
+    static Map<String, Object> traceMeta(TracePropagation propagation) {
+        if (propagation == null) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(propagation.currentHeaders());
+    }
+
+    /**
+     * {@code headers} plus the trace headers this message carries in its
+     * {@code params._meta}.
+     * <p>
+     * Read from the message rather than from {@code Context.current()} on purpose.
+     * The transport usually builds the request on the calling thread, but its
+     * session-expiry retry rebuilds it from a completion callback on an HTTP client
+     * thread, where the current context is empty. The message is the same object on
+     * both paths, and its {@code _meta} was written on the calling thread, so
+     * header and {@code _meta} cannot disagree and neither depends on which thread
+     * the transport happens to use.
+     */
+    static Map<String, String> withTraceHeaders(Map<String, String> headers, McpCallContext callContext) {
+        if (callContext == null || !(callContext.message() instanceof McpClientRequest request) || request.getParams() == null
+                || request.getParams().getMeta() == null) {
+            return headers;
+        }
+        Map<String, Object> meta = request.getParams().getMeta();
+        Map<String, String> merged = null;
+        for (String name : TracePropagation.HEADERS) {
+            if (meta.get(name) instanceof String value && !value.isBlank() && !containsIgnoreCase(headers, name)) {
+                if (merged == null) {
+                    merged = new LinkedHashMap<>(headers);
+                }
+                merged.put(name, value);
+            }
+        }
+        return merged != null ? merged : headers;
+    }
+
+    private static boolean containsIgnoreCase(Map<String, String> headers, String name) {
+        for (String key : headers.keySet()) {
+            if (key.equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

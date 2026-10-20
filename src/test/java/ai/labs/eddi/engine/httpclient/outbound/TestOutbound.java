@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.httpclient.outbound;
 
+import ai.labs.eddi.engine.tracing.TracePropagation;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.net.URI;
@@ -35,6 +36,17 @@ public final class TestOutbound {
      */
     public static OutboundHttp facade(OutboundEngine engine) {
         return new OutboundHttp(OutboundSettings.defaults(Duration.ofSeconds(10)), engine, false, new SimpleMeterRegistry());
+    }
+
+    /**
+     * As {@link #facade(OutboundEngine)}, with {@code propagation} installed the
+     * way CDI injects it — for asserting the W3C trace context a caller's request
+     * carries.
+     */
+    public static OutboundHttp facade(OutboundEngine engine, TracePropagation propagation) {
+        OutboundHttp facade = facade(engine);
+        facade.tracePropagation = propagation;
+        return facade;
     }
 
     /**
