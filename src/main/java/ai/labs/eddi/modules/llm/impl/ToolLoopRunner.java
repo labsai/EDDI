@@ -57,6 +57,7 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -395,7 +396,34 @@ class ToolLoopRunner {
                 }
             }
 
+            // The agent's per-conversation cost ceiling, checked between rounds: the
+            // spend before this loop (every step's audit:cost) plus what this loop has
+            // spent so far — its tokens at the task's prices and its tool cost. Without
+            // it one tool-heavy turn could run far past the ceiling, since the task-level
+            // gate only sees a loop's cost once the whole loop has finished.
+            OptionalDouble costCeiling = memory.getConversationCostCeilingUsd();
+            boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
+            double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
+            double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;
+
             for (int i = startIteration; i < maxIterations; i++) {
+                if (ceilingApplies && modelAnswered) {
+                    double spent = costBeforeLoop
+                            + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                                    tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
+                            + toolCostDelta(conversationId, toolCostAtLoopStart);
+                    if (spent >= costCeiling.getAsDouble()) {
+                        String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
+                                spent);
+                        LlmSpendGate.countMidLoop(conversationId, detail);
+                        Map<String, Object> ceilingStep = new HashMap<>();
+                        ceilingStep.put("type", "cost_ceiling");
+                        ceilingStep.put("error", detail);
+                        trace.add(ceilingStep);
+                        return finish(currentMessages, transcriptOut, costCeilingReachedMessage());
+                    }
+                }
+
                 // Cooperative cancellation: if this step was interrupted (e.g. a cascade
                 // per-step timeout called future.cancel(true)), stop before issuing another
                 // model call — avoids launching further side-effectful tools on a step whose
@@ -525,6 +553,18 @@ class ToolLoopRunner {
                         } else {
                             // 1) execute the ungated calls of this batch normally
                             for (ToolExecutionRequest allowedReq : gateResult.allowed()) {
+                                if (memory.isCancelled()) {
+                                    throw new LifecycleException("Agent execution cancelled before tool: " + allowedReq.name());
+                                }
+                                // An interrupted (abandoned) thread must not start another
+                                // side-effectful tool either. Checked without clearing the flag,
+                                // and with the same exception, as the abandoned-thread guard
+                                // after this loop: this branch must end without committing a pause.
+                                if (Thread.currentThread().isInterrupted()) {
+                                    throw new LifecycleException.LifecycleInterruptedException(
+                                            "Tool-approval batch abandoned: executing thread was interrupted before tool: "
+                                                    + allowedReq.name());
+                                }
                                 // Same absolute rule as the main allowed() loop below.
                                 // This branch runs BEFORE the pause is thrown, and its
                                 // results are frozen into the batch the resume replays
@@ -939,6 +979,16 @@ class ToolLoopRunner {
      */
     private static LifecycleException wrapLoopFailure(Exception e) {
         return new LifecycleException("Agent execution failed: " + e.getMessage(), e);
+    }
+
+    /**
+     * The answer of a tool loop stopped by the conversation's cost ceiling. Like
+     * {@link #iterationBudgetSpentMessage}, it says that what already ran has taken
+     * effect.
+     */
+    static String costCeilingReachedMessage() {
+        return "I stopped before finishing because this conversation reached its cost limit. Everything I already did has "
+                + "taken effect — completed calls are not rolled back.";
     }
 
     /**

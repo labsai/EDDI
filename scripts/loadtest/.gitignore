@@ -1,2 +1,3 @@
 results/*.json
 results/.state.json
+results/gate-summary.md

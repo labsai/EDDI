@@ -89,7 +89,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
      * only with itself, so there is no chain to continue: the new version starts
      * one, whatever was declared, and the old version's conversations stay pinned.
      */
-    static int nextCompatibilityGeneration(AgentConfiguration previous, boolean compatible) {
+    public static int nextCompatibilityGeneration(AgentConfiguration previous, boolean compatible) {
         Integer previousGeneration = previous != null ? previous.getCompatibilityGeneration() : null;
         if (previousGeneration == null) {
             return FIRST_COMPATIBILITY_GENERATION;

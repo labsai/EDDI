@@ -831,9 +831,58 @@ $script:MonitoringFiles = @(
 # Same contract as install.sh: when $EddiBranch is a release tag, every downloaded
 # file is checked against the SHA256SUMS asset the release job publishes, and a
 # mismatch is refused. A ref without one (main, a branch, an older release) is
-# installed as before, with a warning that only TLS vouches for it.
+# installed as before, with a warning that only TLS vouches for it. The list is
+# itself cosign-signed (SHA256SUMS.sigstore.json); with cosign on PATH it is
+# verified against this repository's release workflow at this tag before any hash
+# in it is trusted, and without cosign one warning line says it was not.
 $script:ReleaseChecksums = $null
 $script:ReleaseChecksumsLoaded = $false
+$script:ReleaseSignerIdentityPrefix = "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/"
+# The first release whose SHA256SUMS is signed; from it on a missing bundle is refused.
+$script:FirstSignedRelease = [version]"6.6.0"
+$script:ReleaseSignerIssuer = "https://token.actions.githubusercontent.com"
+
+# Verifies the release's cosign bundle for the SHA256SUMS bytes when cosign is
+# installed; throws (Write-Fail) when the signature does not verify, or when a
+# release from FirstSignedRelease on has no bundle. An older release has none and
+# is used unsigned, with a warning.
+function Confirm-ReleaseChecksumsSignature {
+    param([byte[]]$Bytes)
+    if (-not (Get-Command cosign -ErrorAction SilentlyContinue)) {
+        Write-Warn "cosign is not installed -- the SHA256SUMS of release $EddiBranch is used without checking its signature."
+        return
+    }
+    $sumsFile = [System.IO.Path]::GetTempFileName()
+    $bundleFile = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllBytes($sumsFile, $Bytes)
+        try {
+            Invoke-WebRequest -Uri "https://github.com/labsai/EDDI/releases/download/$EddiBranch/SHA256SUMS.sigstore.json" -OutFile $bundleFile -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose "SHA256SUMS.sigstore.json for release $EddiBranch could not be fetched: $($_.Exception.Message)"
+        }
+        if ((Get-Item $bundleFile).Length -eq 0) {
+            # A pre-release suffix is ignored: 6.6.0-RC1 counts as 6.6.0.
+            if ([version]($EddiBranch -replace '-.*$', '') -ge $script:FirstSignedRelease) {
+                Write-Fail "Release $EddiBranch should carry SHA256SUMS.sigstore.json (every release from $($script:FirstSignedRelease) on is signed), but it could not be fetched. Nothing was downloaded. Retry later; if it persists, report it."
+            }
+            Write-Warn "Release $EddiBranch predates signed checksums -- its SHA256SUMS is used unsigned."
+            return
+        }
+        & cosign verify-blob --bundle $bundleFile `
+            --certificate-identity "$($script:ReleaseSignerIdentityPrefix)$EddiBranch" `
+            --certificate-oidc-issuer $script:ReleaseSignerIssuer `
+            $sumsFile *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "The SHA256SUMS of release $EddiBranch is not signed by the EDDI release workflow at that tag (cosign verify-blob failed). Nothing was downloaded. Retry later; if it persists, report it."
+        }
+        Write-Information -MessageData "  SHA256SUMS signature verified: signed by the EDDI release workflow at $EddiBranch"
+    }
+    finally {
+        Remove-Item -Path $sumsFile, $bundleFile -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Initialize-ReleaseChecksums {
     if ($script:ReleaseChecksumsLoaded) { return }
@@ -856,7 +905,9 @@ function Initialize-ReleaseChecksums {
         Write-Verbose "SHA256SUMS for release $EddiBranch could not be fetched: $($_.Exception.Message)"
     }
     if ($response -and $response.Content) {
-        $content = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+        $bytes = if ($response.Content -is [byte[]]) { [byte[]]$response.Content } else { [System.Text.Encoding]::UTF8.GetBytes([string]$response.Content) }
+        Confirm-ReleaseChecksumsSignature -Bytes $bytes
+        $content = [System.Text.Encoding]::UTF8.GetString($bytes)
         $table = @{}
         foreach ($line in ($content -split "`n")) {
             if ($line -match '^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$') { $table[$Matches[2]] = $Matches[1].ToLowerInvariant() }
@@ -866,6 +917,11 @@ function Initialize-ReleaseChecksums {
             Write-Information -MessageData "  Verifying downloads against the SHA256SUMS of release $EddiBranch"
             return
         }
+    }
+    # Every release from FirstSignedRelease on publishes the list; without it the
+    # downloads would go unchecked, so a missing one is refused, not skipped.
+    if ([version]($EddiBranch -replace '-.*$', '') -ge $script:FirstSignedRelease) {
+        Write-Fail "Release $EddiBranch should publish SHA256SUMS (every release from $($script:FirstSignedRelease) on does), but it could not be fetched. Nothing was downloaded. Retry later; if it persists, report it."
     }
     if ($fetchErrors.Count -gt 0) {
         $reason = $fetchErrors[0].Exception.Message

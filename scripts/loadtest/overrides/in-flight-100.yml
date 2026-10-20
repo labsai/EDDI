@@ -1,0 +1,6 @@
+# Example LOADTEST_COMPOSE_EXTRA file: caps EDDI at 100 in-flight turns so that a few hundred
+# conversations are enough to make it shed load with 503 + Retry-After (see README, --retry-503).
+services:
+  eddi:
+    environment:
+      - "EDDI_CONVERSATION_MAX_IN_FLIGHT_TURNS=100"

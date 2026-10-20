@@ -430,7 +430,7 @@ class RestImportServiceExtendedTest {
         void upgradeWithOptions() throws Exception {
             URI resultUri = URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=2");
             when(upgradeExecutor.executeUpgrade(any(), eq("target-1"),
-                    eq(Set.of("res1", "res2")), eq(List.of("wf1", "wf2"))))
+                    eq(Set.of("res1", "res2")), eq(List.of("wf1", "wf2")), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             doAnswer(inv -> {
@@ -772,7 +772,7 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull(), anyBoolean()))
                     .thenReturn(new UpgradeResult(resultUri, true, 1, 0, 0, List.of()));
 
             Response response = importService.importAgent(
@@ -781,7 +781,7 @@ class RestImportServiceExtendedTest {
             assertNotNull(response);
             assertEquals(201, response.getStatus());
             assertEquals(resultUri.toString(), response.getHeaderString("Location"));
-            verify(upgradeExecutor).executeUpgrade(any(), eq(targetAgentId), isNull(), isNull());
+            verify(upgradeExecutor).executeUpgrade(any(), eq(targetAgentId), isNull(), isNull(), anyBoolean());
         }
 
         @Test
@@ -795,7 +795,7 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq(targetAgentId), isNull(), isNull(), anyBoolean()))
                     .thenThrow(new RuntimeException("Upgrade explosion"));
 
             assertThrows(InternalServerErrorException.class,
@@ -1091,7 +1091,7 @@ class RestImportServiceExtendedTest {
                 return null;
             }).when(zipArchive).unzip(any(InputStream.class), any(File.class));
 
-            when(upgradeExecutor.executeUpgrade(any(), eq("target-x"), isNull(), isNull()))
+            when(upgradeExecutor.executeUpgrade(any(), eq("target-x"), isNull(), isNull(), anyBoolean()))
                     .thenThrow(new RuntimeException("upgrade error"));
 
             assertThrows(InternalServerErrorException.class,

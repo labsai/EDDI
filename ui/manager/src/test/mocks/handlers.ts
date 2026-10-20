@@ -5214,11 +5214,31 @@ const MOCK_UPGRADE_RESULT = {
   }>,
 };
 
+/**
+ * What `RestAgentAdministration.previewNextVersion` answers: the impact of the
+ * next version under BOTH declarations. 12 conversations are open; 9 would follow
+ * a compatible version, none a breaking one.
+ */
+const MOCK_CONVERSATION_IMPACT = {
+  currentVersion: 4,
+  currentGeneration: 2,
+  generationIfCompatible: 2,
+  generationIfBreaking: 3,
+  startsNewChain: false,
+  activeConversations: 12,
+  followingIfCompatible: 9,
+  generations: [
+    { generation: 2, activeConversations: 9, followsIfCompatible: true },
+    { generation: 1, activeConversations: 3, followsIfCompatible: false },
+  ],
+};
+
 const MOCK_IMPORT_PREVIEW = {
   sourceAgentId: "agent1",
   sourceAgentName: "Support Agent",
   targetAgentId: "agent1",
   targetAgentName: "Support Agent",
+  conversationImpact: MOCK_CONVERSATION_IMPACT as typeof MOCK_CONVERSATION_IMPACT | null,
   resources: [
     { sourceId: "beh1", resourceType: "behavior", name: "Support Rules", action: "UPDATE", targetId: "beh1-local", targetVersion: 1, matchStrategy: "type", sourceContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["greet"]}]}]}', targetContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["hello"]}]}]}', workflowIndex: 0 },
     { sourceId: "llm1", resourceType: "langchain", name: "GPT-4 Task", action: "SKIP", targetId: "llm1-local", targetVersion: 1, matchStrategy: "type", sourceContent: null, targetContent: null, workflowIndex: 1 },
@@ -5269,6 +5289,7 @@ export const backupSyncHandlers = [
       ...MOCK_IMPORT_PREVIEW,
       targetAgentId: null,
       targetAgentName: null,
+      conversationImpact: null,
     });
   }),
 
@@ -5424,12 +5445,47 @@ export const backupSyncHandlers = [
         createdOn: Date.now() - 2 * 86400000,
         lastModifiedOn: Date.now() - 1800000,
       },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch4?version=1",
+        name: "Billing Webhook",
+        description: "Signed inbound events from the billing system",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now() - 900000,
+      },
     ]);
   }),
 
   http.get("*/channelstore/channels/:id", ({ params }) => {
     const channelId = params.id as string;
     const configs: Record<string, object> = {
+      ch4: {
+        name: "Billing Webhook",
+        channelType: "webhook",
+        platformConfig: {
+          signingSecret: "${vault:billing-webhook-secret}",
+          signatureScheme: "eddi-v1",
+          conversationStrategy: "new",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "invoices",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["com.billing.invoice.*"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
       ch1: {
         name: "Engineering Slack",
         channelType: "slack",

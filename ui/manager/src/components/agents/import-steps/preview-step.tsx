@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
+import { PromotionCompatibilityPanel } from "@/components/agents/promotion-compatibility-panel";
+import { writesOverExistingAgent } from "@/lib/promotion-impact";
 import type { ImportPreview } from "@/lib/api/backup";
 
 type Strategy = "create" | "merge" | "upgrade" | "sync";
@@ -28,6 +30,9 @@ interface PreviewStepProps {
   workflowOrder: string[];
   isLoading: boolean;
   error: string | null;
+  /** Declare the agent version this writes compatible with the one it replaces. */
+  compatible: boolean;
+  onCompatibleChange: (compatible: boolean) => void;
   onToggleResource: (sourceId: string) => void;
   onToggleAll: () => void;
   onExpandDiff: (sourceId: string | null) => void;
@@ -44,6 +49,8 @@ export function PreviewStep({
   workflowOrder,
   isLoading,
   error,
+  compatible,
+  onCompatibleChange,
   onToggleResource,
   onToggleAll,
   onExpandDiff,
@@ -71,6 +78,15 @@ export function PreviewStep({
 
       <PreviewNotices preview={preview} />
       {strategy === "merge" && <MergeScopeNotice />}
+      {writesOverExistingAgent(preview) && (
+        <PromotionCompatibilityPanel
+          impact={preview.conversationImpact}
+          compatible={compatible}
+          onCompatibleChange={onCompatibleChange}
+          disabled={isLoading}
+          data-testid="import-compatibility"
+        />
+      )}
 
       {/* Resource table */}
       <div className="flex-1 overflow-auto rounded-lg border min-h-0">

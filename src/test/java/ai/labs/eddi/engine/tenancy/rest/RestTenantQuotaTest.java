@@ -23,9 +23,6 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
 
 /**
  * Unit tests for the tenant quota REST API.
@@ -210,29 +207,21 @@ class RestTenantQuotaTest {
     }
 
     /**
-     * A budget that is accepted, stored and shown in the UI but never enforced is
-     * the kind of thing an operator only discovers from the bill.
-     * {@code TenantQuotaService.checkCostBudget} reads an accumulator only
-     * {@code recordCost} writes, and {@code recordCost} has no production caller,
-     * so the recorded cost is always 0 and the gate always allows. The value is
-     * still stored — it is configuration a later release will enforce — so the WARN
-     * is the only thing that tells anyone, which makes it worth a test rather than
-     * a hope.
+     * The monthly cost budget is enforced now (TurnCostMeter charges settled turns,
+     * the pre-call gates refuse once it is spent), so storing one no longer logs
+     * the "NOT enforced" warning this endpoint used to emit — a warning that would
+     * now tell an operator the opposite of the truth.
      * <p>
      * Captured through a JUL handler on the class logger, the same way
      * {@code ConnectionStartupGuardTest} asserts its startup findings.
-     * {@code src/test/resources/logging.properties} silences the whole
-     * {@code ai.labs.eddi} namespace, so the level has to be raised for the records
-     * to reach a handler at all.
      */
     @Test
-    void shouldWarnThatAMonthlyCostBudgetIsNotEnforcedYet() {
+    void shouldStoreAMonthlyCostBudgetWithoutCallingItUnenforced() {
         var records = new ArrayList<String>();
         Logger restLogger = Logger.getLogger(RestTenantQuota.class.getName());
         Handler handler = new Handler() {
             @Override
             public void publish(LogRecord record) {
-                // warnf keeps its arguments out of the message, so both halves are kept.
                 records.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
             }
 
@@ -252,91 +241,12 @@ class RestTenantQuotaTest {
         restLogger.setUseParentHandlers(false);
         restLogger.addHandler(handler);
         try {
-            // Enabled, with a real (non-sentinel) budget — the combination that is
-            // silently unenforceable.
             try (Response response = restTenantQuota.updateQuota(TENANT_ID,
                     new TenantQuota(TENANT_ID, -1, -1, -1, 250.0, true))) {
                 assertEquals(200, response.getStatus());
             }
-            assertTrue(records.stream().anyMatch(r -> r.contains("maxMonthlyCostUsd") && r.contains("NOT enforced")),
-                    "an admin who sets a budget must be told nothing records cost against it, was: " + records);
-            assertEquals(250.0, quotaStore.getQuota(TENANT_ID).maxMonthlyCostUsd(),
-                    "the value is still stored — it is configuration, not a rejected input");
-
-            records.clear();
-            // The sentinel means "no budget", so there is nothing to warn about.
-            try (Response response = restTenantQuota.updateQuota(TENANT_ID,
-                    new TenantQuota(TENANT_ID, -1, -1, -1, -1, true))) {
-                assertEquals(200, response.getStatus());
-            }
-            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
-                    "an unlimited budget must not produce the warning, was: " + records);
-
-            records.clear();
-            // A budget on a tenant whose enforcement is switched off entirely. Nothing
-            // about it is enforced, budget included, so the specific "cost is not
-            // recorded" warning would be noise — and noise is how the case above stops
-            // being read.
-            try (Response response = restTenantQuota.updateQuota(TENANT_ID,
-                    new TenantQuota(TENANT_ID, -1, -1, -1, 250.0, false))) {
-                assertEquals(200, response.getStatus());
-            }
-            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
-                    "a disabled tenant must not produce the warning, was: " + records);
-            assertEquals(250.0, quotaStore.getQuota(TENANT_ID).maxMonthlyCostUsd(),
-                    "and the value is still stored, exactly as in the enabled case");
-        } finally {
-            restLogger.removeHandler(handler);
-            restLogger.setLevel(previousLevel);
-            restLogger.setUseParentHandlers(previousUseParentHandlers);
-        }
-    }
-
-    /**
-     * The warning above asserts that the limit <em>is</em> stored and will apply
-     * once cost recording is wired. It used to be emitted before {@code setQuota}
-     * was called at all, so a store that then threw left that claim standing in the
-     * log with nothing written behind it — and that one line is the only signal
-     * this feature has, so an operator reading it goes looking for a row that does
-     * not exist.
-     */
-    @Test
-    void shouldNotClaimAStoredBudgetWhenTheQuotaWriteFailed() {
-        var failingService = mock(TenantQuotaService.class);
-        doThrow(new IllegalStateException("quota store unreachable")).when(failingService).setQuota(any());
-        var restWithFailingStore = new RestTenantQuota(quotaStore, failingService);
-
-        var records = new ArrayList<String>();
-        Logger restLogger = Logger.getLogger(RestTenantQuota.class.getName());
-        Handler handler = new Handler() {
-            @Override
-            public void publish(LogRecord record) {
-                records.add(record.getMessage() + " " + Arrays.toString(record.getParameters()));
-            }
-
-            @Override
-            public void flush() {
-                // nothing is buffered
-            }
-
-            @Override
-            public void close() {
-                // nothing to release
-            }
-        };
-        Level previousLevel = restLogger.getLevel();
-        boolean previousUseParentHandlers = restLogger.getUseParentHandlers();
-        restLogger.setLevel(Level.ALL);
-        restLogger.setUseParentHandlers(false);
-        restLogger.addHandler(handler);
-        try {
-            // Enabled, with a real budget: the exact combination that warns, so the
-            // only thing keeping the line out of the log is the failed write.
-            assertThrows(IllegalStateException.class, () -> restWithFailingStore.updateQuota(TENANT_ID,
-                    new TenantQuota(TENANT_ID, -1, -1, -1, 250.0, true)));
-
-            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")),
-                    "the warning asserts a stored limit, so it must not outlive a write that never landed, was: " + records);
+            assertEquals(250.0, quotaStore.getQuota(TENANT_ID).maxMonthlyCostUsd());
+            assertTrue(records.stream().noneMatch(r -> r.contains("NOT enforced")), "was: " + records);
         } finally {
             restLogger.removeHandler(handler);
             restLogger.setLevel(previousLevel);

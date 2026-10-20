@@ -277,6 +277,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
 | `selectedResources` | No (execute only) | Comma-separated ids of the preview rows to apply (the row's `sourceId`; for a `REMOVE` row that is the target's id). Omit to apply everything; an empty value is a `400`. A `CONFLICT` row is applied only when named here |
 | `workflowOrder` | No (execute only) | Desired workflow order after sync |
+| `compatible` | No (execute only; default `false`) | Declare the agent version this sync writes **compatible** with the one it replaces, so conversations running on the target switch to it on their next turn. By default the version is a breaking change and they stay where they are. A `SyncRequest` takes `"compatible": true` per agent. No effect when the sync creates a new agent or writes nothing. See [Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync) |
 
 > **Note:** `sourceUrl` and agent parameters are query parameters. Batch endpoints accept `SyncMapping[]` / `SyncRequest[]` as a JSON request body for the per-agent mappings; both take an optional `createNew`, and a `SyncRequest` whose `selectedResources` is an empty list fails that entry the same way.
 
@@ -429,6 +430,11 @@ curl -X POST -H "Content-Type: application/zip" \
 ```
 
 This is the same pipeline as Live Sync — the only difference is the transport (ZIP file vs HTTP).
+
+Add `&compatible=true` to the upgrade (or to a `strategy=merge` import) when the promotion cannot
+break a conversation in progress and you want those running on the target to follow it; the
+default writes a breaking version and pins them. The preview's `conversationImpact` shows how
+many open conversations would follow and how many would stay.
 
 ## Selective Export
 

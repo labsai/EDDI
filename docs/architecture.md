@@ -663,7 +663,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 
 ## Performance Characteristics
 
-EDDI publishes no benchmark figures, so measure on your own hardware and agents. What can be said from the design:
+EDDI publishes no benchmark figures, so measure on your own hardware and agents. The [load-test harness](../scripts/loadtest/README.md) does that reproducibly against a mock LLM: turns per second, EDDI's own latency on top of the model, time to first token over SSE and `/v1`, multi-node scaling, group discussions and database operations per turn, rendered as one report. What can be said from the design:
 
 ### Startup Time
 

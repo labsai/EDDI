@@ -29,6 +29,7 @@ Severity: **High** = a legitimate low-privilege account reaches another account'
 | M9 | Medium | Outbound-HTTP gaps an editor can use: group-artifact JSON-schema `$ref`s are fetched with no SSRF policy and load `file:` URLs; pgvector `storeParameters.host` is spliced unencoded into the JDBC URL (connection-property injection, multi-host guard bypass); httpCall redirect hops get only the metadata check with protection off, so any open redirect reaches loopback and private ranges | Reviewer-verified with harnesses / code |
 | M10 | Medium | Template `str:fmt`/`str:format` allocate before the output cap is checked (a `%2000000000d` width is an OOM), and the render wall-clock timeout is ineffective because the render runs synchronously before `get(timeout)` starts; a loop of under-cap `fmt` calls pins a CPU for minutes. Editor/admin-authored templates and the preview endpoint | **Reproduced** (30 M-char `fmt` allocated, then refused by the cap) |
 | M11 | Medium | PDF attachments (20 MB, any `eddi-user`) and the PDF tool bypass the `PdfDecodeBudget`/`PdfStreamBudget` the RAG ingestion path has; the page-range extractor applies no `maxPages` | Code-verified (no bomb built) |
+| M12 | Medium | MCP `read_audit_trail` returned the compiled system prompt (`llmDetail.compiledPrompt`) to any owner of a conversation, so under enforced workspaces a USE-only user could read a private agent's prompt | Fixed in `48ff1f582` (`fix/security-review-leftovers`) |
 | M8 | Medium-Low | Export scrubber misses keys in path query strings, request bodies, `Cookie` headers and free text; instance sync validates the peer host by a separate DNS lookup, then connects with `SsrfPolicy.NONE` | Reviewer-tested against `target/classes` / code |
 | L1–L16 | Low | See below | — |
 
@@ -102,6 +103,12 @@ FENCE = Pattern.compile("^```(?:json)?[ \\t]*\\r?\\n?(.*?)\\s*```$", DOTALL | CA
 `modules/llm/tools/impl/AttachmentTextExtractor.java:79` (`loadPdf`) and `:176` (page-range `extractPdfText`) use plain PDFBox with a temp-file stream cache; RAG ingestion wraps PDFBox in `PdfDecodeBudget`/`PdfStreamBudget`, this path does not. A FlateDecode bomb (~1000:1) inside a 20 MB upload (`eddi.attachments.max-size-bytes`, any `eddi-user`), a `PdfReaderTool` URL (25 MB) or `ReadAttachmentTool` inflates to gigabytes of temp file and heap (`PDFStreamParser` builds a token list per page). `maxPages` (500) applies only to the whole-document variant; the `(startPage, endPage)` variant used by `extractTextFromPdfPages` and `ReadAttachmentTool` reads to `totalPages`. Not exercised with a crafted file.
 
 **Fix:** reuse `PdfDecodeBudget` in the extractor and apply `maxPages` to the range variant.
+
+### M12 — MCP `read_audit_trail` exposes the agent's compiled prompt
+
+Found while closing the "not verified" item below. `LlmTask` stores `audit:compiled_prompt` as the compiled system message, `---` and the processed prompt template; `LifecycleManager.buildAuditEntry` copies it into `AuditEntry.llmDetail.compiledPrompt`. `engine/mcp/McpConversationTools.readAuditTrail` checks only `McpRoles.OBSERVE` (`eddi-admin`, `eddi-viewer`) and conversation ownership, then returned the entries as stored. Under `eddi.workspaces.enabled=true`, an agent shared with `USE` lets the recipient chat with it but not read its configuration; any such recipient holding `eddi-viewer` could read the private agent's full system prompt from the audit trail of their own conversation. `/auditstore` over REST and the GDPR export are `eddi-admin` only and were not affected. Code-verified; covered by a unit test, not exercised live.
+
+**Fix (`48ff1f582`):** `read_audit_trail` replaces `compiledPrompt` with a redaction marker unless `ResourceAccessGuard.hasAccess(agentId, VIEW)` holds — true for an admin and whenever workspaces are not enforced. VIEW on the agent stands for VIEW on its LLM configs because sharing materialises the agent's level onto its config graph. Model, token usage, cost and the model's reply stay.
 
 ### M1 — Plaintext credentials readable by editors in config types the redaction fix did not reach
 
@@ -273,10 +280,11 @@ Every finding above has a fix on an open pull request, each reviewed by the coor
 | #1084 | `fix/security-review-data-lifecycle` | M4, L9 | Overlaps #1081 |
 | #1088 | `fix/security-review-runtime` | M6, M7, L7 (part), L8 (part), L12, L13 | Codacy reports a stale "empty catch" anchored to a line that no longer holds one; not a required check |
 | #1094 | `fix/security-review-secrets-redaction` | M1, H1 residual, L6, L10, L11 | Overlaps #1079/#1080 (vault files) and #1083; Secret Scanning red on a historical fixture commit, clears on merge |
+| — | `fix/security-review-leftovers` | M12; the `admin/admin` Keycloak fallback off loopback (`keycloak-guard`); EDDI's MongoDB root credentials (least-privilege `eddi_app` user in compose, Helm and kustomize); the cosign signature on `SHA256SUMS`, verified by both installers | Stacked on #1088 and not pushed: CI runs only for pull requests into `main`, so the PR opens against `main` after #1088 merges |
 
-Deliberately left for later, as the PRs' descriptions state: Keycloak `start-dev` and the `admin/admin` compose fallback, MongoDB root credentials, plaintext intra-service traffic, NATS/MongoDB authentication in the kustomize quickstart, installer self-verification and a cosign signature on `SHA256SUMS`, the MCP transport and Azure/Jlama response caps (L13), the "unverified / open" items below.
+Deliberately left for later, as the PRs' descriptions state: Keycloak `start-dev`, plaintext intra-service traffic, NATS/MongoDB authentication in the kustomize quickstart, installer self-verification, the MCP transport and Azure/Jlama response caps (L13), the "unverified / open" items below.
 
 ## Not verified / open
 
 - H2 was proven at the parser level (guard vs client) and against the shipped Vert.x bytecode, not against a live metadata service; M9.1/M9.2, M10's OOM, M11 and L14 rest on the reviewers' harnesses against `target/classes` and were not run against the deployed image.
-- ObjectId guessability (M3 precondition), Keycloak username character policy (L3), existence of unowned group-conversation records (L2), whether `AuditEntry.llmDetail` carries the full system prompt (would let MCP `eddi-viewer` read a USE-only agent's prompt from its own audit trail), MCP transport session binding, Postgres `authorize` parity for attachments, and M8's rebinding were traced in code but not exercised.
+- ObjectId guessability (M3 precondition), Keycloak username character policy (L3), existence of unowned group-conversation records (L2), MCP transport session binding, Postgres `authorize` parity for attachments, and M8's rebinding were traced in code but not exercised.

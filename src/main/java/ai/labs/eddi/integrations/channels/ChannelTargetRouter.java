@@ -39,8 +39,8 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * (colon-required syntax: {@code keyword: message}).
  * <p>
  * Platform-agnostic: signing-secret aggregation and target resolution are keyed
- * by {@code channelType} so multiple platform adapters can coexist. Currently,
- * only {@code slack} is registered/validated (see
+ * by {@code channelType} so multiple platform adapters can coexist. Currently
+ * {@code slack} and {@code webhook} are registered/validated (see
  * {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
  * Platform-specific adapters provide their own webhook and event-handler
  * classes.
@@ -58,6 +58,7 @@ public class ChannelTargetRouter {
     private static final Logger LOGGER = Logger.getLogger(ChannelTargetRouter.class);
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
     private static final String CHANNEL_TYPE_SLACK = "slack";
+    private static final String CHANNEL_TYPE_WEBHOOK = "webhook";
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -456,6 +457,81 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The webhook integration with resource id {@code integrationId}, with its
+     * platform secrets resolved. Treat the result as sensitive: never log or
+     * serialize it.
+     *
+     * @return the integration, or empty when no webhook integration has that id (or
+     *         it was created less than a refresh interval ago)
+     */
+    public Optional<ChannelIntegrationConfiguration> getWebhookIntegration(String integrationId) {
+        if (integrationId == null || integrationId.isBlank()) {
+            return Optional.empty();
+        }
+        return getIntegration(CHANNEL_TYPE_WEBHOOK, integrationId);
+    }
+
+    /**
+     * Route an inbound event by its type.
+     * <p>
+     * The counterpart of {@link #resolveFromIntegration} for channels whose traffic
+     * is events rather than chat: there is no {@code trigger: message} syntax to
+     * parse, the event type IS the trigger. A target matches when one of its
+     * triggers equals the type (case-insensitive) or, for a trigger ending in
+     * {@code *}, when the type starts with what precedes the star
+     * ({@code com.github.*}). An exact match wins over a prefix match, and a longer
+     * prefix over a shorter one, so a specific route can carve an exception out of
+     * a broad one. No match falls back to the default target. Observers are never
+     * routed to, for the same reasons as on the chat path.
+     *
+     * @return the target, with {@code strippedMessage} left null; {@code null} when
+     *         nothing matches and there is no usable default
+     */
+    public ResolvedTarget resolveEventTarget(ChannelIntegrationConfiguration integration, String eventType) {
+        if (integration == null) {
+            return null;
+        }
+        String type = eventType != null ? eventType.trim().toLowerCase(Locale.ROOT) : "";
+        ChannelTarget best = null;
+        int bestScore = -1;
+        if (integration.getTargets() != null && !type.isEmpty()) {
+            for (ChannelTarget target : integration.getTargets()) {
+                if (target == null || target.isObserveMode() || target.getTriggers() == null) {
+                    continue;
+                }
+                for (String trigger : target.getTriggers()) {
+                    int score = triggerScore(trigger, type);
+                    if (score > bestScore) {
+                        best = target;
+                        bestScore = score;
+                    }
+                }
+            }
+        }
+        if (best == null) {
+            best = findDefaultTarget(integration);
+        }
+        return best != null ? new ResolvedTarget(best, null, integration, null, null) : null;
+    }
+
+    /**
+     * How specifically {@code trigger} matches {@code type}: -1 for no match, the
+     * prefix length for a {@code prefix*} match, {@code Integer.MAX_VALUE} for an
+     * exact match.
+     */
+    private static int triggerScore(String trigger, String type) {
+        if (trigger == null || trigger.isBlank()) {
+            return -1;
+        }
+        String normalized = trigger.trim().toLowerCase(Locale.ROOT);
+        if (normalized.endsWith("*")) {
+            String prefix = normalized.substring(0, normalized.length() - 1);
+            return type.startsWith(prefix) ? prefix.length() : -1;
+        }
+        return normalized.equals(type) ? Integer.MAX_VALUE : -1;
+    }
+
+    /**
      * Find the integration whose {@code hitlApprovalChannel} equals
      * {@code approvalChannelId}. Used by the interactivity endpoint to resolve
      * which integration owns an approval message (and thus which approver list and
@@ -780,6 +856,12 @@ public class ChannelTargetRouter {
                         // Deep-copy before resolving secrets so the store's
                         // cached instance keeps vault references intact
                         String channelId = config.getPlatformConfig().get("channelId");
+                        if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
+                            // A webhook has no platform channel: it is addressed by its
+                            // own resource id (POST /integrations/webhook/{id}), which is
+                            // unique by construction — no channelId to collide on.
+                            channelId = resId.getId();
+                        }
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
                             resolvePlatformSecrets(copy);

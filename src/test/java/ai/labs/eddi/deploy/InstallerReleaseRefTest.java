@@ -316,9 +316,149 @@ class InstallerReleaseRefTest {
                 + "Move-Item -Path \\$temporary -Destination \\$Target").matcher(saveVerified).find(),
                 "Save-VerifiedDownload must download to the temporary path, verify that path, then move it to the target");
 
-        String ci = Files.readString(Path.of(".github", "workflows", "ci.yml"), StandardCharsets.UTF_8);
-        assertTrue(ci.contains("> SHA256SUMS") && ci.contains("files: SHA256SUMS"),
+        String ci = Files.readString(Path.of(".github", "workflows", "ci.yml"), StandardCharsets.UTF_8).replace("\r\n", "\n");
+        assertTrue(ci.contains("> SHA256SUMS") && ci.contains("files: |\n            SHA256SUMS\n"),
                 "the release job must generate SHA256SUMS and attach it to the GitHub release");
+    }
+
+    private static final String SIGNER_IDENTITY_PREFIX = "https://github.com/labsai/EDDI/.github/workflows/ci.yml@refs/tags/";
+    private static final String SIGNER_ISSUER = "https://token.actions.githubusercontent.com";
+
+    /**
+     * Security review 2026-10-17, leftover 3: SHA256SUMS only proves the downloads
+     * match whatever list the release carries, so it is signed. The release job
+     * signs it keyless (the image's identity setup: OIDC token, Fulcio, Rekor),
+     * verifies the bundle against the identity the installers will demand, and
+     * attaches it; both installers check it — before trusting any hash in the list
+     * — whenever cosign is installed.
+     */
+    @Test
+    @DisplayName("the release signs SHA256SUMS with cosign keyless and both installers verify it against the release workflow")
+    void checksumListIsSignedAndVerified() throws IOException {
+        String ci = Files.readString(Path.of(".github", "workflows", "ci.yml"), StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String release = ci.substring(ci.indexOf("\n  release:\n"), ci.indexOf("body: |", ci.indexOf("\n  release:\n")));
+        assertTrue(release.contains("id-token: write"), "the release job needs id-token: write to sign keyless");
+        assertTrue(release.contains("uses: sigstore/cosign-installer@"), "the release job must install cosign");
+        assertTrue(release.contains("cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS"),
+                "the release job must sign SHA256SUMS into a Sigstore bundle");
+        assertTrue(release.contains("SIGNER_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/ci.yml@${{ github.ref }}")
+                && release.contains("cosign verify-blob --bundle SHA256SUMS.sigstore.json")
+                && release.contains("--certificate-oidc-issuer " + SIGNER_ISSUER),
+                "the release job must verify the bundle against the identity the installers demand before publishing it");
+        assertTrue(release.contains("files: |\n            SHA256SUMS\n            SHA256SUMS.sigstore.json\n"),
+                "the bundle must be attached to the GitHub release next to SHA256SUMS");
+
+        String shell = Files.readString(INSTALL_SH, StandardCharsets.UTF_8).replace("\r\n", "\n");
+        assertTrue(shell.contains("RELEASE_SIGNER_IDENTITY_PREFIX=\"" + SIGNER_IDENTITY_PREFIX + "\"")
+                && shell.contains("RELEASE_SIGNER_ISSUER=\"" + SIGNER_ISSUER + "\""),
+                "install.sh must pin the release workflow identity and the GitHub Actions issuer");
+        String load = shell.substring(shell.indexOf("load_release_checksums() {"));
+        assertTrue(load.indexOf("verify_release_checksums_signature \"$sums\"") > 0
+                && load.indexOf("verify_release_checksums_signature \"$sums\"") < load.indexOf("RELEASE_CHECKSUMS=\"$sums\""),
+                "install.sh must verify the signature BEFORE it trusts the list");
+
+        String ps = Files.readString(INSTALL_PS1, StandardCharsets.UTF_8).replace("\r\n", "\n");
+        assertTrue(ps.contains("$script:ReleaseSignerIdentityPrefix = \"" + SIGNER_IDENTITY_PREFIX + "\"")
+                && ps.contains("$script:ReleaseSignerIssuer = \"" + SIGNER_ISSUER + "\""),
+                "install.ps1 must pin the release workflow identity and the GitHub Actions issuer");
+        String init = ps.substring(ps.indexOf("function Initialize-ReleaseChecksums {"));
+        assertTrue(init.indexOf("Confirm-ReleaseChecksumsSignature -Bytes $bytes") > 0
+                && init.indexOf("Confirm-ReleaseChecksumsSignature -Bytes $bytes") < init.indexOf("$script:ReleaseChecksums = $table"),
+                "install.ps1 must verify the signature BEFORE it trusts the list");
+        String confirm = ps.substring(ps.indexOf("function Confirm-ReleaseChecksumsSignature {"),
+                ps.indexOf("\n}\n", ps.indexOf("function Confirm-ReleaseChecksumsSignature {")));
+        assertTrue(confirm.contains("& cosign verify-blob --bundle $bundleFile") && confirm.contains("Write-Fail"),
+                "install.ps1 must run cosign verify-blob and refuse a list that does not verify");
+    }
+
+    /**
+     * The shell half, executed: install.sh's own functions with a stub curl and a
+     * stub cosign. Without cosign exactly one warning; with cosign the exact
+     * identity and issuer are demanded, a verified list is used, and a list that
+     * fails verification stops the install.
+     */
+    @Test
+    @DisplayName("install.sh checks the SHA256SUMS signature only when cosign is installed, and refuses a bad one")
+    void shellVerifiesTheChecksumSignature() throws Exception {
+        Path bash = locateBash();
+        assumeTrue(bash != null, "no non-WSL bash available; CI's ubuntu-latest runner has one");
+        Path dir = sandbox("sums-signature");
+        writeCurlStub(dir);
+        Path cosignDir = Files.createDirectories(dir.resolve("cosign"));
+        Path cosign = cosignDir.resolve("cosign");
+        Files.writeString(cosign, """
+                #!/usr/bin/env bash
+                printf '%s\\n' "$@" > "$(dirname "$0")/cosign.args"
+                exit "${STUB_COSIGN_EXIT:-0}"
+                """, StandardCharsets.US_ASCII);
+        cosign.toFile().setExecutable(true, false);
+        Path driver = dir.resolve("driver.sh");
+        Files.writeString(driver, """
+                set -u
+                warn() { echo "WARN: $*"; }
+                info() { echo "INFO: $*"; }
+                fail() { echo "FAIL: $*"; exit 1; }
+                EDDI_BRANCH="${STUB_BRANCH:-9.8.7}"
+                export PATH="$(pwd)/stub${WITH_COSIGN:+:$(pwd)/cosign}:/usr/bin:/bin"
+                if [[ -z "${WITH_COSIGN:-}" ]] && command -v cosign >/dev/null; then echo REAL_COSIGN; exit 0; fi
+                eval "$(sed -n -e '/^RELEASE_CHECKSUMS=""$/,/^RELEASE_SIGNER_ISSUER=/p' \\
+                  -e '/^sha256_of() {$/,/^}$/p' \\
+                  -e '/^release_is_signed() {$/,/^}$/p' \\
+                  -e '/^verify_release_checksums_signature() {$/,/^}$/p' \\
+                  -e '/^load_release_checksums() {$/,/^}$/p' "$INSTALL_SH")"
+                load_release_checksums
+                echo "LOADED=${RELEASE_CHECKSUMS:+yes}"
+                """, StandardCharsets.US_ASCII);
+        String base = "cd \"" + slashed(dir) + "\" && INSTALL_SH=\"" + slashed(INSTALL_SH.toAbsolutePath()) + "\" ";
+
+        Run without = execute(bash, base + "bash driver.sh", dir, null);
+        assumeTrue(!without.output().contains("REAL_COSIGN"), "a real cosign is installed system-wide");
+        assertEquals(0, without.exit(), without.output());
+        assertEquals(1, without.output().lines().filter(line -> line.contains("cosign is not installed")).count(),
+                "without cosign there must be exactly one warning line: " + without.output());
+        assertTrue(without.output().contains("LOADED=yes"), "the checksums are still used: " + without.output());
+
+        String withCosign = base + "WITH_COSIGN=1 ";
+        Run verified = execute(bash, withCosign + "bash driver.sh", dir, null);
+        assertEquals(0, verified.exit(), verified.output());
+        assertTrue(verified.output().contains("SHA256SUMS signature verified") && verified.output().contains("LOADED=yes"),
+                verified.output());
+        assertTrue(verified.output().contains("/releases/download/9.8.7/SHA256SUMS.sigstore.json"),
+                "the bundle must be fetched from the same release: " + verified.output());
+        List<String> args = Files.readAllLines(cosignDir.resolve("cosign.args"), StandardCharsets.UTF_8);
+        assertEquals("verify-blob", args.getFirst());
+        assertEquals(SIGNER_IDENTITY_PREFIX + "9.8.7", args.get(args.indexOf("--certificate-identity") + 1),
+                "the certificate must name the release workflow at exactly this tag: " + args);
+        assertEquals(SIGNER_ISSUER, args.get(args.indexOf("--certificate-oidc-issuer") + 1));
+
+        Run refused = execute(bash, withCosign + "STUB_COSIGN_EXIT=1 bash driver.sh", dir, null);
+        assertNotEquals(0, refused.exit(), refused.output());
+        assertTrue(refused.output().contains("FAIL: The SHA256SUMS of release 9.8.7 is not signed")
+                && !refused.output().contains("LOADED="), "a list that fails verification must stop the install: " + refused.output());
+
+        Run missing = execute(bash, withCosign + "STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh", dir, null);
+        assertNotEquals(0, missing.exit(), missing.output());
+        assertTrue(missing.output().contains("should carry SHA256SUMS.sigstore.json") && !missing.output().contains("LOADED="),
+                "a release from the first signed one on with no bundle must be refused, not taken for an old"
+                        + " unsigned one: " + missing.output());
+
+        Run unsigned = execute(bash, withCosign + "STUB_BRANCH=6.5.0 STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh", dir,
+                null);
+        assertEquals(0, unsigned.exit(), unsigned.output());
+        assertTrue(unsigned.output().contains("predates signed checksums") && unsigned.output().contains("LOADED=yes"),
+                "a release from before the first signed one is used unsigned, with a warning: " + unsigned.output());
+
+        Run noSums = execute(bash, base + "STUB_FAIL_URL=SHA256SUMS bash driver.sh", dir, null);
+        assertNotEquals(0, noSums.exit(), noSums.output());
+        assertTrue(noSums.output().contains("should publish SHA256SUMS") && !noSums.output().contains("LOADED="),
+                "a signed release without its checksum list must be refused even without cosign: " + noSums.output());
+        Run oldNoSums = execute(bash, base + "STUB_BRANCH=6.5.0 STUB_FAIL_URL=SHA256SUMS bash driver.sh", dir, null);
+        assertEquals(0, oldNoSums.exit(), oldNoSums.output());
+        assertTrue(oldNoSums.output().contains("publishes no SHA256SUMS"), oldNoSums.output());
+
+        Run candidate = execute(bash, withCosign + "STUB_BRANCH=6.6.0-RC1 STUB_FAIL_URL=SHA256SUMS.sigstore.json bash driver.sh",
+                dir, null);
+        assertNotEquals(0, candidate.exit(), "a pre-release of the first signed version is signed too: " + candidate.output());
     }
 
     /**
@@ -341,6 +481,9 @@ class InstallerReleaseRefTest {
                   shift
                 done
                 echo "$url" >> "$(dirname "$0")/curl.log"
+                if [[ -n "${STUB_FAIL_URL:-}" && "$url" == *"$STUB_FAIL_URL"* ]]; then
+                  echo "curl: (22) The requested URL returned error: 404" >&2; exit 22
+                fi
                 case "$url" in
                   *api.github.com*)
                     if [[ "$STUB_API_FAIL" == "1" ]]; then echo "curl: (6) Could not resolve host" >&2; exit 6; fi
