@@ -146,8 +146,8 @@ class AgentSetupServiceTest {
     class LocalLlmProviderTests {
 
         @ParameterizedTest
-        @ValueSource(strings = {"ollama", "jlama", "bedrock", "oracle-genai",
-                "OLLAMA", "Jlama", "BEDROCK", "Oracle-GenAI"})
+        @ValueSource(strings = {"ollama", "jlama", "bedrock", "oracle-genai", "openai-compatible",
+                "OLLAMA", "Jlama", "BEDROCK", "Oracle-GenAI", "OpenAI-Compatible"})
         @DisplayName("returns true for local/keyless providers")
         void localProviders(String provider) {
             assertTrue(AgentSetupService.isLocalLlmProvider(provider));

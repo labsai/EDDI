@@ -38,10 +38,13 @@ public class LlmModule {
     public static final String LLM_TYPE_AZURE_OPENAI = "azure-openai";
     public static final String LLM_TYPE_BEDROCK = "bedrock";
     public static final String LLM_TYPE_ORACLE_GENAI = "oracle-genai";
+    /** A self-hosted OpenAI-compatible server (vLLM, llama-server, TGI, ...). */
+    public static final String LLM_TYPE_OPENAI_COMPATIBLE = OpenAiCompatibleEndpoint.TYPE;
 
     /** The types backed by a dedicated builder; catalog ids may not reuse them. */
     static final Set<String> BUILT_IN_TYPES = Set.of(LLM_TYPE_OPENAI, LLM_TYPE_HUGGING_FACE, LLM_TYPE_ANTHROPIC, LLM_TYPE_GEMINI_VERTEX,
-            LLM_TYPE_GEMINI, LLM_TYPE_OLLAMA, LLM_TYPE_JLAMA, LLM_TYPE_MISTRAL, LLM_TYPE_AZURE_OPENAI, LLM_TYPE_BEDROCK, LLM_TYPE_ORACLE_GENAI);
+            LLM_TYPE_GEMINI, LLM_TYPE_OLLAMA, LLM_TYPE_JLAMA, LLM_TYPE_MISTRAL, LLM_TYPE_AZURE_OPENAI, LLM_TYPE_BEDROCK, LLM_TYPE_ORACLE_GENAI,
+            LLM_TYPE_OPENAI_COMPATIBLE);
 
     private final Map<String, Provider<ILifecycleTask>> lifecycleTaskProviders;
     private final Instance<ILifecycleTask> lifecycleTaskInstance;
@@ -80,6 +83,11 @@ public class LlmModule {
         languageModelApiConnectorBuilders.put(LLM_TYPE_BEDROCK, () -> langModelBuilderInstance.select(BedrockLanguageModelBuilder.class).get());
         languageModelApiConnectorBuilders.put(LLM_TYPE_ORACLE_GENAI,
                 () -> langModelBuilderInstance.select(OracleGenAiLanguageModelBuilder.class).get());
+
+        // A self-hosted OpenAI-compatible endpoint: no fixed URL or model, so it is
+        // not a catalog row; its capabilities come from its own parameters.
+        languageModelApiConnectorBuilders.put(LLM_TYPE_OPENAI_COMPATIBLE,
+                () -> new SelfHostedOpenAiLanguageModelBuilder(langModelBuilderInstance.select(OpenAILanguageModelBuilder.class).get()));
 
         // Named OpenAI-compatible providers (xAI, DeepSeek, ...) share one builder
         // class, parameterised by their catalog preset.

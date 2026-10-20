@@ -36,6 +36,14 @@ describe("ProviderSelect", () => {
     expect(onChange).toHaveBeenCalledWith("groq");
   });
 
+  it("offers the self-hosted OpenAI-compatible type in the local group", () => {
+    renderWithProviders(<ProviderSelect value="openai-compatible" onChange={vi.fn()} testId="ps" />);
+    const select = screen.getByTestId("ps") as HTMLSelectElement;
+    const option = select.selectedOptions[0]!;
+    expect(option.text).toBe("Self-hosted (OpenAI-compatible)");
+    expect((option.parentElement as HTMLOptGroupElement).label).toBe("Local / self-hosted");
+  });
+
   it("names the control through ariaLabel", () => {
     renderWithProviders(<ProviderSelect value="openai" onChange={vi.fn()} ariaLabel="Model type" />);
     expect(screen.getByRole("combobox", { name: "Model type" })).toBeInTheDocument();

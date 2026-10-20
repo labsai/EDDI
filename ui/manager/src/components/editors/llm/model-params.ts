@@ -40,6 +40,9 @@ const SPECS: Record<string, ModelParamSpec> = {
   "oracle-genai": { modelKey: "modelName", credentialKey: null },
   // JlamaLanguageModelBuilder: modelName, optional `authToken` for gated repos.
   jlama: { modelKey: "modelName", credentialKey: "authToken", credentialOptional: true },
+  // SelfHostedOpenAiLanguageModelBuilder: the OpenAI keys; a self-hosted server
+  // often takes no key, and a blank one sends no Authorization header.
+  "openai-compatible": { modelKey: "modelName", credentialKey: "apiKey", credentialOptional: true },
 };
 
 export function modelParamSpec(type: string | undefined): ModelParamSpec {

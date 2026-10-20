@@ -50,6 +50,11 @@ class ObservableStreamingChatModel implements StreamingChatModel {
 
     ObservableStreamingChatModel(StreamingChatModel delegate, String modelType, boolean logRequests, boolean logResponses,
             ChatModelListener telemetryListener) {
+        this(delegate, modelType, logRequests, logResponses, telemetryListener, null);
+    }
+
+    ObservableStreamingChatModel(StreamingChatModel delegate, String modelType, boolean logRequests, boolean logResponses,
+            ChatModelListener telemetryListener, String telemetryProvider) {
         this.delegate = delegate;
         this.modelType = modelType;
         this.logRequests = logRequests;
@@ -57,7 +62,9 @@ class ObservableStreamingChatModel implements StreamingChatModel {
 
         // EDDI's listener only, for the same reason as ObservableChatModel: doChat
         // forwards to delegate.chat(), so the delegate dispatches its own listeners.
-        this.listeners = telemetryListener == null ? List.of() : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType));
+        this.listeners = telemetryListener == null
+                ? List.of()
+                : List.of(LlmTelemetryListener.forModelType(telemetryListener, modelType, telemetryProvider));
     }
 
     /**
@@ -184,9 +191,19 @@ class ObservableStreamingChatModel implements StreamingChatModel {
      */
     static StreamingChatModel wrap(StreamingChatModel model, String modelType, String logReq, String logResp,
                                    ChatModelListener telemetryListener) {
+        return wrap(model, modelType, logReq, logResp, telemetryListener, null);
+    }
+
+    /**
+     * As
+     * {@link #wrap(StreamingChatModel, String, String, String, ChatModelListener)},
+     * reporting {@code telemetryProvider} (when non-null) as the provider name.
+     */
+    static StreamingChatModel wrap(StreamingChatModel model, String modelType, String logReq, String logResp,
+                                   ChatModelListener telemetryListener, String telemetryProvider) {
         boolean logRequests = Boolean.parseBoolean(logReq);
         boolean logResponses = Boolean.parseBoolean(logResp);
 
-        return new ObservableStreamingChatModel(model, modelType, logRequests, logResponses, telemetryListener);
+        return new ObservableStreamingChatModel(model, modelType, logRequests, logResponses, telemetryListener, telemetryProvider);
     }
 }
