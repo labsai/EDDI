@@ -330,6 +330,7 @@
     "POST /groupstore/templates/{templateId}/instantiate",
     "POST /integrations/slack/events",
     "POST /integrations/slack/interactive",
+    "POST /integrations/webhook/{integrationId}",
     "POST /llm/tools/costs/reset",
     "POST /llm/tools/ratelimit/{toolName}/reset",
     "POST /llmstore/llms",
