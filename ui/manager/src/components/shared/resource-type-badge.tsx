@@ -18,6 +18,7 @@ const colors: Record<string, string> = {
   rag: "bg-violet-500/10 text-violet-500",
   snippet: "bg-rose-500/10 text-rose-500",
   snippets: "bg-rose-500/10 text-rose-500",
+  testsuite: "bg-lime-500/10 text-lime-600",
 };
 
 export function ResourceTypeBadge({ type }: { type: string }) {

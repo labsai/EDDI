@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -2136,7 +2137,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * undo itself stands.
      */
     void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
-        if (userMemoryStore == null || step == null) {
+        // Agent-test conversations never wrote user memory, so an undo has nothing to
+        // revert.
+        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())) {
             return;
         }
         var changes = ConversationMemory.propertyChanges(step);
@@ -2275,10 +2278,15 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     IPropertiesHandler createPropertiesHandler(final String userId, final AgentConfiguration.UserMemoryConfig memoryConfig,
                                                final boolean memoryToolsEnabled) {
+        // An agent-test conversation neither reads nor writes long-term user memory:
+        // without a store, Conversation skips loadUserProperties at init and
+        // storePropertiesPermanently at every turn end. A test must not change what
+        // real users have stored, nor pass or fail because of it.
+        final IUserMemoryStore memoryStore = AgentTestConversations.isTestUserId(userId) ? null : userMemoryStore;
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
-                return userMemoryStore;
+                return memoryStore;
             }
 
             @Override

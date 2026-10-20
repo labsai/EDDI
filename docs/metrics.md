@@ -335,6 +335,18 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### Agent Test Metrics
+
+```text
+eddi_agent_tests_runs_total{status}         # Finished agent test runs, by PASSED / FAILED / ERROR
+eddi_agent_tests_turns_total                # Turns the runs executed (each a real test-environment turn)
+eddi_agent_tests_run_duration_seconds       # Wall time of a run (timer)
+```
+
+A run drives real conversations in the `test` environment, so its model and
+tool cost also appear in the conversation and cost metrics. See
+[Agent Testing](agent-testing.md).
+
 ### Tenant Quota Metrics
 
 ```text
