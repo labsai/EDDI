@@ -143,6 +143,14 @@ public class LlmTask implements ILifecycleTask {
      * gets.
      */
     private LlmCircuitBreakers circuitBreakers;
+
+    /**
+     * The pre-model-call spend gate (the agent's per-conversation cost ceiling and
+     * the tenant monthly budget). Field-injected, so the many direct-construction
+     * unit tests are unaffected; null leaves every task ungated.
+     */
+    @Inject
+    LlmSpendGate spendGate;
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
@@ -634,9 +642,14 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // Spend gate: asked once, before any model request of this task (plain, tool
+        // loop or cascade). A refusal skips the whole model phase below and serves the
+        // task's fallback answer — see the SpendRefusedException catch.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
         // R8: the circuit of the task's single model. A cascade guards each of its
-        // steps itself, so this is only for the non-cascade paths.
-        boolean circuitGuarded = !cascadeActive && circuitBreakers != null && task.getCircuitBreaker() != null
+        // steps itself, so this is only for the non-cascade paths. Not acquired when
+        // the model will not be called: an unsettled half-open probe would block it.
+        boolean circuitGuarded = spendRefusal == null && !cascadeActive && circuitBreakers != null && task.getCircuitBreaker() != null
                 && task.getCircuitBreaker().isEnabled();
         var circuitKey = circuitGuarded
                 ? new LlmCircuitBreakers.Key(memory.getAgentId(), memory.getAgentVersion(), resolvedType,
@@ -652,6 +665,9 @@ public class LlmTask implements ILifecycleTask {
                 ? new RepromptCircuit(() -> circuitBreakers.acquire(circuitKey, task.getCircuitBreaker()), processedParams, convertObject)
                 : RepromptCircuit.NONE;
         try {
+            if (spendRefusal != null) {
+                throw new LlmSpendGate.SpendRefusedException(spendRefusal);
+            }
             if (!circuitTicket.allowed()) {
                 recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", circuitTicket.denial().failure().label(), 0L);
                 // Nothing else can serve this task: onError=fallback absorbs it below, the
@@ -834,6 +850,16 @@ public class LlmTask implements ILifecycleTask {
             }
             settleCircuit(circuitTicket, responseContent, convertObject, processedParams, task);
 
+        } catch (LlmSpendGate.SpendRefusedException refused) {
+            // Not a failure of the model phase — it never started — so neither onError
+            // nor the circuit is involved: the fallback answer is served unconditionally,
+            // where the model's answer would have gone.
+            fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
+            responseContent = fallbackServed.content();
+            responseMetadata = new HashMap<>();
+            toolTrace = new ArrayList<>();
+            usedToolMode = task.isAgentMode();
+            cascadeAuditModel = null;
         } catch (Exception e) {
             settleCircuit(circuitTicket, e);
             if (!cascadeActive) {
@@ -959,11 +985,12 @@ public class LlmTask implements ILifecycleTask {
             currentStep.storeData(modelNameData);
 
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
-        } else if (responseMetadata != null && responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+        } else {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1
-            // adapter reports them as `usage`. Recorded without the rest of the audit
-            // evidence when the ledger is off (eddi.audit.enabled=false).
-            accumulateTokenUsage(currentStep, tokenUsage);
+            // adapter reports them as `usage`; and its cost is the tenant's — it is what
+            // TurnCostMeter charges to the monthly budget. Both are recorded without the
+            // rest of the audit evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateUsageAndCost(currentStep, responseMetadata, task);
         }
 
         // Store tool trace if available
@@ -1014,7 +1041,8 @@ public class LlmTask implements ILifecycleTask {
         // so totalSteps correctly includes this turn when computing
         // summarizeThroughStep.
         // Moving this earlier would cause the summary boundary to be off by 1.
-        if (summaryConfig != null && summaryConfig.isEnabled()) {
+        // Not after a spend refusal: the summarizer is a model call too.
+        if (summaryConfig != null && summaryConfig.isEnabled() && spendRefusal == null) {
             try {
                 String propertiesContext = null;
                 if (summaryConfig.isExcludePropertiesFromSummary()) {
@@ -1278,17 +1306,28 @@ public class LlmTask implements ILifecycleTask {
      */
     private void accumulateAuditEvidence(IWritableConversationStep currentStep, Map<String, Object> responseMetadata,
                                          List<Map<String, Object>> toolTrace, Task task) {
-        if (responseMetadata != null) {
-            Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
-            if (tokenUsage != null) {
-                accumulateTokenUsage(currentStep, tokenUsage);
-            }
-            double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
-                    ? asDouble(responseMetadata.get("cascadeCostUsd"))
-                    : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
-            accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
-        }
+        accumulateUsageAndCost(currentStep, responseMetadata, task);
         accumulateToolCalls(currentStep, toolTrace, task.getId());
+    }
+
+    /**
+     * The token-usage and dollar-cost half of {@link #accumulateAuditEvidence} —
+     * the part that is recorded whether or not the audit ledger is on, because the
+     * {@code /v1} adapter reports the tokens and the tenant cost budget charges the
+     * cost.
+     */
+    private void accumulateUsageAndCost(IWritableConversationStep currentStep, Map<String, Object> responseMetadata, Task task) {
+        if (responseMetadata == null) {
+            return;
+        }
+        Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
+        if (tokenUsage != null) {
+            accumulateTokenUsage(currentStep, tokenUsage);
+        }
+        double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
+                ? asDouble(responseMetadata.get("cascadeCostUsd"))
+                : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
+        accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
     }
 
     /**
@@ -1370,6 +1409,24 @@ public class LlmTask implements ILifecycleTask {
         Map<String, Object> toolCalls = new LinkedHashMap<>();
         toolCalls.put("calls", calls);
         currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_TOOL_CALLS, toolCalls));
+    }
+
+    /**
+     * Serves the task's fallback answer in place of a model call the spend gate
+     * refused, and records why under {@code llm:spend_refused:<taskId>}. The
+     * fallback flags the step {@code llm:fallback:<taskId>}, so the history builder
+     * never shows the model this reply.
+     */
+    private LlmFallbackHandler.Fallback serveSpendRefusal(Task task, Map<String, Object> templateDataObjects,
+                                                          IWritableConversationStep currentStep, LlmSpendGate.Refusal refusal,
+                                                          boolean convertObject, IConversationMemory memory) {
+        String taskId = task.getId() != null ? task.getId() : "default";
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("reason", refusal.reason());
+        record.put("detail", refusal.detail());
+        currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_SPEND_REFUSED_PREFIX + taskId, record));
+        return fallbackHandler.serve(task, templateDataObjects, currentStep, "spend_refused", null, convertObject, memory.getConversationId(),
+                memory.getAgentId(), refusal.reason());
     }
 
     private void accumulateCost(IWritableConversationStep currentStep, double delta) {
@@ -1937,11 +1994,12 @@ public class LlmTask implements ILifecycleTask {
             // calls (see the comment above) — the pre-pause segment is not recoverable
             // here, so a paused turn's ledger entry under-reports by that segment.
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
-        } else if (responseMetadata.get("tokenUsage") instanceof Map<?, ?> tokenUsage) {
+        } else {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1
-            // adapter reports them as `usage`. Recorded without the rest of the audit
-            // evidence when the ledger is off (eddi.audit.enabled=false).
-            accumulateTokenUsage(currentStep, tokenUsage);
+            // adapter reports them as `usage`; and its cost is the tenant's — it is what
+            // TurnCostMeter charges to the monthly budget. Both are recorded without the
+            // rest of the audit evidence when the ledger is off (eddi.audit.enabled=false).
+            accumulateUsageAndCost(currentStep, responseMetadata, task);
         }
 
         // Tool trace (mirror executeTask)
@@ -2685,7 +2743,7 @@ public class LlmTask implements ILifecycleTask {
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
             var stepPolicy = JsonResponseFormatPolicy.of(jsonMode, stepModel.modelType(), task.getJsonResponseFormat(),
-                    stepModel.params().get(KEY_RESPONSE_SCHEMA));
+                    stepModel.params().get(KEY_RESPONSE_SCHEMA), capabilityParams(stepModel.modelType(), stepModel.params()));
             String text;
             Map<String, Object> metadata;
             if (agentResult != null) {

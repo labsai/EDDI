@@ -73,6 +73,15 @@ public interface IAgent {
     }
 
     /**
+     * The agent's {@code maxCostPerConversationUsd}; {@code null} when unlimited.
+     *
+     * @since 6.6.0
+     */
+    default Double getMaxCostPerConversationUsd() {
+        return null;
+    }
+
+    /**
      * Memory policy from agent deployment. {@code null} when no policy is
      * configured.
      *

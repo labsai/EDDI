@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -1782,5 +1784,67 @@ class DreamServiceTest {
                 return version;
             }
         };
+    }
+
+    // === Tenant monthly cost budget (WS2 A2) ===
+
+    private TenantQuotaService tenantQuotaWithBudget(boolean allowed) {
+        TenantQuotaService quota = mock(TenantQuotaService.class);
+        when(quota.getDefaultTenantId()).thenReturn("default");
+        when(quota.checkCostBudget("default")).thenReturn(allowed ? QuotaCheckResult.OK : QuotaCheckResult.denied("Monthly cost budget spent"));
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK);
+        dreamService.tenantQuotaService = quota;
+        return quota;
+    }
+
+    @Test
+    void tenantCost_pricedConsolidationCallIsCharged() throws Exception {
+        enableSummarization();
+        dreamConfig.setInputPricePer1M(1.0);
+        dreamConfig.setOutputPricePer1M(2.0);
+        TenantQuotaService quota = tenantQuotaWithBudget(true);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s1\", \"value\": \"v1\"}]", 1000, 500));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        // 1000 x $1/1M + 500 x $2/1M
+        verify(quota).recordCost(eq("default"), doubleThat(d -> Math.abs(d - 0.002) < 1e-12));
+    }
+
+    @Test
+    void tenantCost_unpricedConsolidationMetersNothing() throws Exception {
+        enableSummarization();
+        TenantQuotaService quota = tenantQuotaWithBudget(true);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s1\", \"value\": \"v1\"}]", 1000, 500));
+
+        dreamService.process("user-1", "agent-1", dreamConfig);
+
+        verify(summarizationService).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(quota, never()).recordCost(anyString(), anyDouble());
+    }
+
+    @Test
+    void tenantCost_spentBudgetStopsConsolidationWithoutFailingTheCycle() throws Exception {
+        enableSummarization();
+        tenantQuotaWithBudget(false);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+
+        var result = dreamService.process("user-1", "agent-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        verifyNoInteractions(summarizationService);
+    }
+
+    @Test
+    void pricedCost_countsOnlyConfiguredPrices() {
+        var usage = llmResult("x", 1_000_000, 1_000_000);
+        assertEquals(0.0, DreamService.pricedCost(usage, 0, null, null));
+        assertEquals(3.0, DreamService.pricedCost(usage, 0, 3.0, null), 1e-12);
+        assertEquals(5.0, DreamService.pricedCost(usage, 0, null, 5.0), 1e-12);
+        assertEquals(0.0, DreamService.pricedCost(usage, 0, -1.0, -1.0));
     }
 }
