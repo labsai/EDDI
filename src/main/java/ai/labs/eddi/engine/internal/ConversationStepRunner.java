@@ -414,7 +414,10 @@ class ConversationStepRunner {
         // interrupt executed normally. Skipping it would strand the conversation's
         // input forever, since nothing else transitions EXECUTION_INTERRUPTED back
         // to READY.
-        ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
+        // State and revision in one read (the stale-snapshot guard below needs the
+        // revision); a store that cannot answer both at once is asked twice, as before.
+        IConversationMemoryStore.StateAndRevision persisted = conversationMemoryStore.getStateAndRevision(conversationId);
+        ConversationState persistedState = persisted != null ? persisted.state() : conversationMemoryStore.getConversationState(conversationId);
         if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
                 || persistedState == ConversationState.ENDED) {
             submittedMemory.setConversationState(persistedState);
@@ -437,7 +440,8 @@ class ConversationStepRunner {
         // discarded. Rebuild the turn over the current document instead.
         IConversationMemory conversationMemory = submittedMemory;
         Callable<Void> executeConversation = submittedExecution;
-        IConversationMemory reloaded = reloadIfSuperseded(conversationId, submittedMemory, loggingContext);
+        IConversationMemory reloaded = reloadIfSuperseded(conversationId, submittedMemory, loggingContext,
+                persisted != null ? persisted.revision() : null, persisted != null);
         if (reloaded != null && rebuildTurn == null) {
             conversationService.contextLogger.setLoggingContext(loggingContext);
             LOGGER.infof("Skipping queued rerun of conversation %s: another turn committed while it was queued, so the step "
@@ -846,7 +850,10 @@ class ConversationStepRunner {
                             // was not committed is reported with the state the store holds.
                             // Runs on every exit (returns, conflicts, store errors); a no-op
                             // for turns that delivered immediately.
-                            if (processingTurn != null) {
+                            // Only a deferred (paused) delivery needs the committed state: for
+                            // every other turn the delivery is a no-op, and evaluating the
+                            // argument eagerly cost one store read per turn for nothing.
+                            if (processingTurn != null && processingTurn.deferredDelivery.isPending()) {
                                 processingTurn.deferredDelivery
                                         .deliver(pauseCommitted ? ConversationState.AWAITING_HUMAN : committedStateOrError(conversationId));
                             }
@@ -1147,8 +1154,20 @@ class ConversationStepRunner {
      * has, as it always did).
      */
     IConversationMemory reloadIfSuperseded(String conversationId, IConversationMemory memory, Map<String, String> loggingContext) {
+        return reloadIfSuperseded(conversationId, memory, loggingContext, null, false);
+    }
+
+    /**
+     * @param knownRevision
+     *            the stored revision when the caller has already read it
+     * @param revisionKnown
+     *            whether {@code knownRevision} was read (it may legitimately be
+     *            {@code null}: "unknown"); when {@code false} it is read here
+     */
+    IConversationMemory reloadIfSuperseded(String conversationId, IConversationMemory memory, Map<String, String> loggingContext,
+                                           Long knownRevision, boolean revisionKnown) {
         try {
-            Long storedRevision = conversationMemoryStore.getRevision(conversationId);
+            Long storedRevision = revisionKnown ? knownRevision : conversationMemoryStore.getRevision(conversationId);
             if (storedRevision == null || storedRevision == memory.getRevision()) {
                 return null;
             }

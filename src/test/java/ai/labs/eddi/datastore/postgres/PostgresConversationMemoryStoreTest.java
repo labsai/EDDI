@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
@@ -1389,6 +1390,29 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertEquals(12, store.endIdleConversations(Instant.now().minus(30, ChronoUnit.DAYS), SWEEP_AGENT, "idle", false));
             assertEquals(0, store.loadOpenConversationActivity(SWEEP_AGENT, null, null, 100).size());
         }
+    }
+
+    /**
+     * The turn-start read: state and revision in one round trip. It must agree with
+     * the two reads it replaces, also after a write moved the revision on.
+     */
+    @Test
+    @DisplayName("getStateAndRevision agrees with getConversationState and getRevision")
+    void stateAndRevisionAgreeWithTheSeparateReads() throws Exception {
+        var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.READY);
+        String id = store.storeConversationMemorySnapshot(snapshot);
+
+        var first = store.getStateAndRevision(id);
+        assertEquals(new IConversationMemoryStore.StateAndRevision(store.getConversationState(id), store.getRevision(id)), first);
+        assertEquals(ConversationState.READY, first.state());
+
+        var reloaded = store.loadConversationMemorySnapshot(id);
+        reloaded.setConversationState(ConversationState.ENDED);
+        store.storeConversationMemorySnapshot(reloaded);
+
+        var second = store.getStateAndRevision(id);
+        assertEquals(new IConversationMemoryStore.StateAndRevision(ConversationState.ENDED, store.getRevision(id)), second);
+        assertTrue(second.revision() > first.revision(), "a write moves the revision on, and the combined read sees it");
     }
 
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,

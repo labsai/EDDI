@@ -223,6 +223,34 @@ public interface IConversationMemoryStore {
      */
     Long getRevision(String conversationId);
 
+    /**
+     * The persisted state and revision of a conversation, in ONE projection read.
+     *
+     * @param state
+     *            the stored state, or {@code null} when the conversation does not
+     *            exist
+     * @param revision
+     *            as {@link #getRevision}: {@code null} means "unknown", never
+     *            "changed"
+     */
+    record StateAndRevision(ConversationState state, Long revision) {
+    }
+
+    /**
+     * {@link #getConversationState} and {@link #getRevision} together, as one round
+     * trip instead of two. A queued turn needs both when it starts (the queued-say
+     * guard and the stale-snapshot guard); asking twice cost a second wait for a
+     * database connection on every turn.
+     *
+     * @return both values; {@code null} when this store cannot answer them in one
+     *         read, in which case the caller asks the two methods separately — so a
+     *         store (or a test double) that predates this method behaves exactly as
+     *         before
+     */
+    default StateAndRevision getStateAndRevision(String conversationId) {
+        return null;
+    }
+
     Long getActiveConversationCount(String agentId, Integer agentVersion);
 
     /**

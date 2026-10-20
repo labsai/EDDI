@@ -53,6 +53,9 @@ class AuditLedgerServiceTest {
         // "position 0 is taken" and turns into a first sequence of 1. Tests that
         // care about the seed override this.
         when(auditStore.maxSequence(anyString())).thenReturn(AuditEntry.UNSEQUENCED);
+        // The batched read the flush-time collision check uses is the interface's
+        // per-conversation default here, so every maxSequence stub below applies.
+        when(auditStore.maxSequences(anyCollection())).thenCallRealMethod();
     }
 
     /**
@@ -1502,6 +1505,32 @@ class AuditLedgerServiceTest {
         List<AuditEntry> secondBatch = (List<AuditEntry>) captor.getValue();
         assertEquals(5L, secondBatch.getFirst().sequence(),
                 "the next entry must resume above the foreign rows, not duplicate them");
+    }
+
+    /**
+     * The collision check runs after every flush, and it used to ask the store once
+     * per conversation in the batch — about one read per turn under load, waiting
+     * for the same connections as the turns. One batched read per flush now answers
+     * for all of them.
+     */
+    @Test
+    @DisplayName("the flush-time collision check reads the store once per flush, not once per conversation")
+    void theCollisionCheckIsOneReadPerFlush() {
+        when(auditStore.supportsSequence()).thenReturn(true);
+        // A store that answers the batch in one query, as both real backends do.
+        when(auditStore.maxSequences(anyCollection())).thenReturn(Map.of("conv-a", 0L, "conv-b", 0L, "conv-c", 0L));
+        service = createService(true, "master-key-1234567890");
+
+        service.submit(entry("id-1", "conv-a", "agent-1"));
+        service.submit(entry("id-2", "conv-b", "agent-1"));
+        service.submit(entry("id-3", "conv-c", "agent-1"));
+        service.flush();
+
+        verify(auditStore, times(1)).maxSequences(anyCollection());
+        // The three seeds of the new conversations, nothing more: the check itself
+        // no longer asks per conversation.
+        verify(auditStore, times(3)).maxSequence(anyString());
+        assertEquals(0.0, meterRegistry.counter("eddi_audit_sequence_collisions_total").count());
     }
 
     /**

@@ -225,6 +225,29 @@ class MongoAuditStoreTest extends MongoTestBase {
         assertEquals("hmac_val", found.hmac());
     }
 
+    /**
+     * The batched read behind the ledger's flush-time collision check: the highest
+     * stored position of each conversation asked about, in one query, and
+     * UNSEQUENCED for one with no sequenced row — never a missing key.
+     */
+    @Test
+    @DisplayName("maxSequences answers every conversation asked about, in one query")
+    void maxSequencesAnswersEveryConversation() {
+        store.appendEntry(createEntry("conv_a", "agent1", 1, "user1", "parser", "input", 0, 0, 10L).withSequence(0L));
+        store.appendEntry(createEntry("conv_a", "agent1", 1, "user1", "llm", "langchain", 0, 1, 10L).withSequence(4L));
+        store.appendEntry(createEntry("conv_a", "agent1", 1, "user1", "behavior", "rules", 0, 2, 10L).withSequence(2L));
+        store.appendEntry(createEntry("conv_b", "agent1", 1, "user1", "parser", "input", 0, 0, 10L).withSequence(0L));
+        store.appendEntry(createEntry("conv_legacy", "agent1", 1, "user1", "parser", "input", 0, 0, 10L));
+
+        var maxima = store.maxSequences(List.of("conv_a", "conv_b", "conv_legacy", "conv_none"));
+
+        assertEquals(Map.of("conv_a", 4L, "conv_b", 0L, "conv_legacy", AuditEntry.UNSEQUENCED, "conv_none", AuditEntry.UNSEQUENCED), maxima);
+        for (String id : List.of("conv_a", "conv_b", "conv_legacy", "conv_none")) {
+            assertEquals(store.maxSequence(id), maxima.get(id), "agrees with maxSequence for " + id);
+        }
+        assertTrue(store.maxSequences(List.of()).isEmpty());
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private static AuditEntry createEntry(String convId, String agentId, int version,

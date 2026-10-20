@@ -52,11 +52,19 @@ class ConversationMemoryCurrentStepConversionTest {
     private static final String CREDENTIAL_VALUE = String.join("", "sk-live-", "Zq8rT2vX", "9mKp4LwN", "7bYc3HdF");
     private static final String HIDDEN_INPUT = String.join("-", "hunter2", "correct", "horse", "battery");
 
+    /**
+     * The "cost" scenario's {@code audit:cost} per turn, oldest first (newest first
+     * it reads 3, -1.0, 0.2, NaN, 0.1): an integer value, a negative and a NaN that
+     * the total must skip, and fractions whose sum depends on the order it is taken
+     * in — so both paths must sum the same steps in the same order.
+     */
+    private static final Number[] COST_PER_TURN = {0.1, Double.NaN, 0.2, -1.0, 3};
+
     static Stream<Arguments> combinations() {
         List<List<String>> fieldSets = Arrays.asList(null, List.of(), List.of(""), List.of("conversationSteps"), List.of("conversationOutputs"),
                 List.of("conversationProperties"), List.of("conversationSteps", "conversationOutputs"));
         List<Arguments> args = new ArrayList<>();
-        for (var memory : List.of("plain", "secretLast", "secretEarlier", "error", "redo", "single")) {
+        for (var memory : List.of("plain", "secretLast", "secretEarlier", "error", "redo", "single", "cost")) {
             for (boolean detailed : new boolean[]{true, false}) {
                 for (boolean currentOnly : new boolean[]{true, false}) {
                     for (var fields : fieldSets) {
@@ -79,6 +87,8 @@ class ConversationMemoryCurrentStepConversionTest {
         var actual = ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, detailed, currentOnly, fields);
 
         assertEquals(MAPPER.writeValueAsString(expected), MAPPER.writeValueAsString(actual));
+        // @JsonIgnore, so the JSON above cannot see it.
+        assertEquals(expected.getConversationCost(), actual.getConversationCost());
     }
 
     @Test
@@ -133,13 +143,16 @@ class ConversationMemoryCurrentStepConversionTest {
     private static ConversationMemory memory(String scenario) {
         var memory = new ConversationMemory("6612b6e5c9e77c0a1b2c3d4e", "6612b6e5c9e77c0a1b2c3d4f", 3, "user-42");
         memory.getConversationProperties().put("name", new Property("name", "Ada", Property.Scope.conversation));
-        int turns = "single".equals(scenario) ? 1 : 4;
+        int turns = "single".equals(scenario) ? 1 : "cost".equals(scenario) ? COST_PER_TURN.length : 4;
         for (int turn = 0; turn < turns; turn++) {
             if (turn > 0) {
                 memory.startNextStep();
             }
             boolean secret = "secretLast".equals(scenario) && turn == turns - 1 || "secretEarlier".equals(scenario) && turn == 1;
             fillTurn(memory, turn, secret);
+            if ("cost".equals(scenario)) {
+                memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, COST_PER_TURN[turn]));
+            }
         }
         if ("error".equals(scenario)) {
             memory.setConversationState(ConversationState.ERROR);

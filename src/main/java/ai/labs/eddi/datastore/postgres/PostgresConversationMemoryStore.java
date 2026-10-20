@@ -856,6 +856,26 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public StateAndRevision getStateAndRevision(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return new StateAndRevision(null, null);
+        }
+        ensureSchema();
+        String sql = "SELECT conversation_state, COALESCE((data->>'_rev')::bigint, 0) AS rev FROM conversation_memories WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return new StateAndRevision(null, null);
+                }
+                return new StateAndRevision(ConversationState.valueOf(rs.getString("conversation_state")), rs.getLong("rev"));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to get conversation state and revision", e);
+        }
+    }
+
+    @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         ensureSchema();
         // Plan §10(a): AWAITING_HUMAN does not count as active (mirrors the Mongo
