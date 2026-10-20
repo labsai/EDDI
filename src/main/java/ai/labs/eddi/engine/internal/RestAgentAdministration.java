@@ -699,7 +699,15 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // compatible saves many idle conversations are stored on versions that are no
         // longer deployed, and a count per deployed version would leave them out. One
         // grouped count, never the conversations.
-        Map<Integer, Long> byGeneration = conversationMemoryStore.getActiveConversationCountsByGeneration(agentId);
+        Map<Integer, Long> byGeneration;
+        try {
+            byGeneration = conversationMemoryStore.getActiveConversationCountsByGeneration(agentId);
+        } catch (RuntimeException e) {
+            // The counts are a courtesy on the preview, not part of it: without them the
+            // preview still answers, just with no conversation impact.
+            log.debugf("No promotion impact for Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return null;
+        }
         boolean startsNewChain = currentGeneration == null;
         List<PromotionImpact.GenerationCount> generations = new ArrayList<>();
         long total = 0;

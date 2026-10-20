@@ -171,6 +171,15 @@ class RestAgentAdministrationPromotionImpactTest {
         assertNull(admin.previewNextVersion(AGENT));
     }
 
+    @Test
+    @DisplayName("a failing conversation count leaves the preview without an impact instead of failing it")
+    void failingCountHasNoImpact() throws Exception {
+        currentVersion(4, 2);
+        when(conversationMemoryStore.getActiveConversationCountsByGeneration(AGENT)).thenThrow(new IllegalStateException("db down"));
+
+        assertNull(admin.previewNextVersion(AGENT));
+    }
+
     private void currentVersion(int version, Integer generation) throws Exception {
         IResourceId id = new IResourceId() {
             @Override
