@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -351,6 +352,43 @@ public class RestAgentEngine implements IRestAgentEngine {
         return Response.status(Response.Status.REQUEST_TIMEOUT).build();
     }
 
+    /**
+     * The answer for a turn that was dropped without consuming its input (say) or a
+     * resume that was dropped without being applied: 410 when the conversation has
+     * ended, otherwise 409 naming why. One mapping for both, so they cannot drift.
+     */
+    private static Response skippedResponse(String conversationId, SimpleConversationMemorySnapshot snapshot, boolean resume) {
+        ConversationState state = snapshot.getConversationState();
+        if (state == ConversationState.ENDED) {
+            // Ended while the message was queued — the same answer as ending first.
+            return Response.status(Response.Status.GONE).entity("Conversation has ended").build();
+        }
+        String reason;
+        if (state == ConversationState.AWAITING_HUMAN) {
+            reason = resume
+                    ? "Conversation is awaiting human approval — your decision was not applied;"
+                            + " decide again via POST /agents/" + conversationId + "/resume (or cancel)"
+                    : "Conversation is awaiting human approval — your message was not processed;"
+                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
+        } else if (state == ConversationState.IN_PROGRESS) {
+            reason = "Conversation is processing another turn — your " + (resume ? "decision was not applied" : "message was not processed")
+                    + "; retry shortly";
+        } else {
+            // Idle, yet skipped: the conversation changed while the message was
+            // queued (a superseded rerun, or a turn that could not be rebuilt over
+            // the current conversation). Retrying blindly is not necessarily right.
+            reason = "The conversation changed while your " + (resume ? "decision" : "message") + " was queued — it was not "
+                    + (resume ? "applied" : "processed") + "; reload the conversation before sending it again";
+        }
+        var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
+        if (state == ConversationState.IN_PROGRESS) {
+            // Busy: another turn (in a cluster, possibly on another node) holds the
+            // conversation. Retrying shortly is exactly right, so say when.
+            conflict.header("Retry-After", "2");
+        }
+        return conflict.build();
+    }
+
     private void sayInternal(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, boolean rerunOnly, AsyncResponse response) {
 
@@ -400,32 +438,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
             @Override
             public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                ConversationState state = snapshot.getConversationState();
-                if (state == ConversationState.ENDED) {
-                    // Ended while the message was queued — the same answer as ending first.
-                    response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
-                    return;
-                }
-                String reason;
-                if (state == ConversationState.AWAITING_HUMAN) {
-                    reason = "Conversation is awaiting human approval — your message was not processed;"
-                            + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)";
-                } else if (state == ConversationState.IN_PROGRESS) {
-                    reason = "Conversation is processing another turn — your message was not processed; retry shortly";
-                } else {
-                    // Idle, yet skipped: the conversation changed while the message was
-                    // queued (a superseded rerun, or a turn that could not be rebuilt over
-                    // the current conversation). Retrying blindly is not necessarily right.
-                    reason = "The conversation changed while your message was queued — it was not processed;"
-                            + " reload the conversation before sending it again";
-                }
-                var conflict = Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason);
-                if (state == ConversationState.IN_PROGRESS) {
-                    // Busy: another turn (in a cluster, possibly on another node) holds the
-                    // conversation. Retrying shortly is exactly right, so say when.
-                    conflict.header("Retry-After", "2");
-                }
-                response.resume(conflict.build());
+                response.resume(skippedResponse(conversationId, snapshot, false));
             }
         };
 
@@ -654,7 +667,88 @@ public class RestAgentEngine implements IRestAgentEngine {
     private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
 
     @Override
+    public void resumeConversation(String conversationId, HitlDecision decision, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                   List<String> returningFields, AsyncResponse response) {
+        // Same budget and timeout answer as say. The resumed turn keeps running past a
+        // timeout, exactly as a say turn does; only this request stops waiting.
+        response.setTimeout(agentTimeout, TimeUnit.SECONDS);
+        response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+
+        // Opt-in: without any of the say flags the answer is the empty 200 it has
+        // always been, and the service is called without a handler.
+        boolean wantsReply = returnDetailed != null || returnCurrentStepOnly != null
+                || (returningFields != null && !returningFields.isEmpty());
+        ConversationResponseHandler handler = null;
+        if (wantsReply) {
+            handler = new ConversationResponseHandler() {
+                @Override
+                public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                    TurnError error = snapshot.getError();
+                    Long retryAfterSeconds = error != null ? error.retryAfterSeconds() : null;
+                    if (retryAfterSeconds != null) {
+                        response.resume(Response.ok(snapshot).header("Retry-After", retryAfterSeconds).build());
+                    } else {
+                        response.resume(snapshot);
+                    }
+                }
+
+                @Override
+                public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                    response.resume(skippedResponse(conversationId, snapshot, true));
+                }
+            };
+        }
+        try {
+            Response immediate = resume(conversationId, decision, handler,
+                    returnDetailed != null ? returnDetailed : Boolean.FALSE,
+                    returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
+                    returningFields != null ? returningFields : List.of());
+            if (immediate != null) {
+                response.resume(immediate);
+            }
+        } catch (RuntimeException e) {
+            // Ownership/permission exceptions reach the mappers through the AsyncResponse.
+            response.resume(e);
+        }
+    }
+
+    /**
+     * Resume without a reply: the empty 200 (or the error) as ever. The plain,
+     * synchronous form of the endpoint.
+     */
     public Response resumeConversation(String conversationId, HitlDecision decision) {
+        return resume(conversationId, decision, null, false, true, List.of());
+    }
+
+    /** Maximum length of an unverified approver claim recorded from the body. */
+    private static final int MAX_UNVERIFIED_APPROVER_LENGTH = 128;
+
+    /**
+     * The approver to record. An authenticated principal always wins and the body
+     * is ignored. Only when nobody is authenticated is a body {@code decidedBy}
+     * kept, prefixed {@code unverified:}: it is a claim the caller made about
+     * itself, not an identity, and is restricted to a safe character set.
+     */
+    static String resolveApprover(String principalName, boolean anonymous, String claimed) {
+        if (principalName != null && !principalName.isBlank() && !anonymous) {
+            return principalName;
+        }
+        if (claimed == null || claimed.isBlank()) {
+            return null;
+        }
+        String trimmed = claimed.trim();
+        if (trimmed.length() > MAX_UNVERIFIED_APPROVER_LENGTH) {
+            trimmed = trimmed.substring(0, MAX_UNVERIFIED_APPROVER_LENGTH);
+        }
+        return ReservedPrincipals.UNVERIFIED_APPROVER_PREFIX + trimmed.replaceAll("[^A-Za-z0-9._@:+-]", "_");
+    }
+
+    /**
+     * @return the response to send now, or {@code null} when {@code handler} will
+     *         answer once the resumed turn has run
+     */
+    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler, Boolean returnDetailed,
+                            Boolean returnCurrentStepOnly, List<String> returningFields) {
         if (decision == null || decision.getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
@@ -666,13 +760,25 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .build();
         }
         validateConversationOwnership(conversationId, true);
+        if (handler != null) {
+            // A reply is a read of the conversation, and resume admits approver-only
+            // callers: the approver role decides a pause, it does not license reading
+            // the conversation (approval-status limits an approver to the paused turn).
+            // So a reply takes the owner-or-admin access say takes. Checked before the
+            // resume runs, so a refused request leaves the pause untouched.
+            validateConversationOwnership(conversationId);
+        }
         // Null-safe principal (parity with the cancel/end paths): an anonymous caller
-        // must not NPE — the decision is attributed to "unknown" downstream.
-        String userId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-        decision.setDecidedBy(userId);
+        // must not NPE; see resolveApprover for what is recorded instead.
+        String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        decision.setDecidedBy(resolveApprover(principalName, identity.isAnonymous(), decision.getDecidedBy()));
         try {
-            conversationService.resumeConversation(conversationId, decision, null);
-            return Response.ok().build();
+            if (handler == null) {
+                conversationService.resumeConversation(conversationId, decision, null);
+            } else {
+                conversationService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+            }
+            return handler == null ? Response.ok().build() : null;
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();

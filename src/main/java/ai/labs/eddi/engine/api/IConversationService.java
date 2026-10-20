@@ -446,6 +446,21 @@ public interface IConversationService {
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
+     * As
+     * {@link #resumeConversation(String, HitlDecision, ConversationResponseHandler)},
+     * with the snapshot flags {@code say} takes, applied to the snapshot handed to
+     * {@code responseHandler}. The three-argument form is this with
+     * {@code (false, true, [])}.
+     */
+    void resumeConversation(String conversationId,
+                            HitlDecision decision,
+                            ConversationResponseHandler responseHandler,
+                            Boolean returnDetailed,
+                            Boolean returnCurrentStepOnly,
+                            List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
      * Load the full conversation memory snapshot for a given conversationId.
      *
      * @throws ResourceStoreException
