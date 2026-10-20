@@ -29,7 +29,7 @@ anything until you can point at the cause.
 
 | Symptom | Likely cause | Check / fix |
 | --- | --- | --- |
-| Reply shows `{properties.x}` or other raw braces | No templating step, or not last | `read_workflow`; `eddi://ai.labs.templating` must be the last step |
+| Reply shows `{properties.x}` or other raw braces | No templating step, or not last | `read_workflow`; `eddi://ai.labs.templating` must be the last step — adding it is a workflow edit, done in the Manager or over REST |
 | A rule fires on the wrong turn, or on every turn | Rule has only an `inputmatcher` | Add an `actionmatcher` on `lastStep` ([config-gotchas.md](config-gotchas.md)) |
 | A rule never fires | Comma list in `actionmatcher` (AND), or an earlier rule in the same group matched first | Audit trail's emitted actions; split groups or use an `OR` connector |
 | Template error mentioning `valueString` | `{properties.x.valueString}` | Use `{properties.x}` |

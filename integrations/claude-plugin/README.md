@@ -51,6 +51,12 @@ but every tool then fails with "requires one of roles". For a realm created befo
 ## Keeping the skills honest
 
 `SkillToolReferencesTest` reads every Markdown file in this plugin and fails the build if
-it names an MCP tool that EDDI does not register, or tells Claude to `read_docs` a page
-that the container image does not ship. When you rename a tool or a page, the skills have to be
-updated in the same change.
+it names an MCP tool EDDI does not register or an argument no tool takes, or if it tells
+Claude to `read_docs` a page that the container image does not ship. A rename therefore
+breaks the build until the skills follow. A **new** tool or a changed behaviour does not:
+whoever adds one decides whether a skill should teach it (AGENTS.md §4.6).
+
+`plugin.json` deliberately has no `version`. With one, installed copies stay on that
+version until it is bumped. Without one they follow the repository, which suits skills
+that have to match the server's current tools. `claude plugin validate` reports this as
+a warning.

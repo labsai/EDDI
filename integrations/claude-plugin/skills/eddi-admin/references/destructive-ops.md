@@ -9,7 +9,7 @@ conversation, transcript, memory entry or document is not a yes.
 | --- | --- | --- |
 | `deploy_agent` to `production` | Users get this version; with a compatible version, running conversations move to it | Deploy the previous version again |
 | `apply_agent_changes` with `redeploy` to `production` | Same as above, in one step | As above |
-| `undeploy_agent` | Version stops serving; with `endAllActiveConversations`, users' conversations are ended mid-flow | Redeploy — ended conversations stay ended |
+| `undeploy_agent` | Version stops serving; with `endConversations` `true`, users' conversations are ended mid-flow | Redeploy — ended conversations stay ended |
 | `delete_agent` | Removes the agent; with cascade, its workflows and resources too | Not with MCP tools |
 | `delete_resource` | Soft delete; with `permanent` `true`, gone | Not with MCP tools; permanent: none |
 | `delete_agent_trigger` | Every client using that intent with `chat_managed` stops working | Recreate it |

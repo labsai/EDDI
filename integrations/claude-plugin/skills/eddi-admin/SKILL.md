@@ -49,8 +49,10 @@ A `FORBIDDEN` result means the role is missing — say which, do not route aroun
 ## Create an agent
 
 - **From a description**: `setup_agent` (admin) creates rules, LLM config, output,
-  workflow and agent in one call. Set `environment` to `test`. The provider's API key goes
-  in as a `${vault:…}` reference (rule 4).
+  workflow and agent in one call. Set `environment` to `test`. For the provider's API key,
+  prefer an existing `${vault:…}` reference. The tool also accepts a plain key and stores
+  it in the vault itself, but a key typed into this chat has already passed through the
+  model provider — say so before using one.
 - **From an API**: `create_api_agent` (admin) turns an OpenAPI 3.x spec (inline or URL)
   into HTTP-call tools grouped by tag. Narrow it with `endpoints` (e.g.
   `GET /orders,POST /orders`) — an agent with every endpoint of a large API is slow and
@@ -63,7 +65,9 @@ A `FORBIDDEN` result means the role is missing — say which, do not route aroun
 Follow [change-workflow.md](references/change-workflow.md) exactly: read →
 `update_resource` for each changed document → **one** `apply_agent_changes` → test →
 promote. The decision that needs the user is `compatible`: whether conversations
-already running move to the new version. Before hand-writing any configuration JSON,
+already running move to the new version. MCP edits the documents a workflow points at,
+not the workflow itself — adding a step (HTTP calls, MCP calls, a knowledge base) is a
+Manager or REST change. Before hand-writing any configuration JSON,
 read [config-gotchas.md](references/config-gotchas.md) — each gotcha saves and deploys
 cleanly and then misbehaves at runtime.
 
@@ -71,7 +75,8 @@ cleanly and then misbehaves at runtime.
 
 An agent test suite is a set of scripted conversations with expectations per turn
 (actions fired, properties set, tools called, output, cost). Suites are written in the
-Manager or over REST; over MCP you run them:
+Manager or over REST; over MCP you run them. No MCP tool lists suites: take the suite
+id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 
 1. `run_agent_tests` with the suite and agent ids — it deploys the version to `test`
    (never production) and returns a run id at once.

@@ -37,7 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * skill that names {@code cronExpression} or a tool that was renamed sends
  * every user's assistant to a call EDDI refuses, and nothing else in the build
  * reads those files. So this test resolves every tool name the skills mention
- * against the {@code @Tool} methods EDDI registers, and every
+ * against the {@code @Tool} methods EDDI registers, every camelCase argument
+ * name against the {@code @ToolArg} parameters, and every
  * {@code read_docs("page")} against the pages the container image actually
  * serves — the image copies only top-level {@code docs/*.md} and then deletes a
  * few, so a page that exists in the repository can still be absent at runtime.
@@ -66,6 +67,23 @@ class SkillToolReferencesTest {
     private static final Set<String> NOT_TOOLS = Set.of(
             "get_started", // config-gotchas.md: an example quick-reply expression
             "partially_completed" // destructive-ops.md: a delete_user_data status value
+    );
+
+    /**
+     * An inline code span that is a whole camelCase identifier — in a skill, almost
+     * always a tool argument, which is where {@code endAllActiveConversations} (the
+     * REST name; the MCP argument is {@code endConversations}) slipped through.
+     */
+    private static final Pattern CAMEL_CASE_SPAN = Pattern.compile("`([a-z]+[A-Z][A-Za-z]*)`");
+
+    /**
+     * CamelCase identifiers the skills mention that are config fields or result
+     * fields, not tool arguments.
+     */
+    private static final Set<String> NOT_ARGUMENTS = Set.of(
+            "defaultToolTimeoutMs", "toolTimeoutsMs", // LLM task config fields
+            "executeUntilFirstSuccess", "lastStep", "valueString", // behavior-rule and template terms
+            "failedSteps", "omittedCategories" // GDPR tool result fields
     );
 
     private static Path repoRoot() {
@@ -97,38 +115,67 @@ class SkillToolReferencesTest {
         return McpToolContractTest.tools().stream().map(McpToolContractTest::toolName).collect(Collectors.toCollection(TreeSet::new));
     }
 
-    @Test
-    @DisplayName("every snake_case identifier in a skill is a registered MCP tool")
-    void everyMentionedToolExists() {
-        Set<String> tools = registeredTools();
+    private static Set<String> registeredArguments() {
+        return McpToolContractTest.args().stream().map(McpToolContractTest.Arg::name).collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    /**
+     * Every identifier the pattern finds in the skills' prose (outside code fences)
+     * that is neither exempt nor known, by file; and how many it checked.
+     */
+    private static Map<String, Set<String>> unknownSpans(Pattern span, Set<String> known, Set<String> exempt, int[] checked) {
         Map<String, Set<String>> unknown = new TreeMap<>();
-        int mentioned = 0;
         for (Path file : pluginMarkdown()) {
-            String prose = FENCE.matcher(read(file)).replaceAll("");
-            Matcher m = SNAKE_CASE_SPAN.matcher(prose);
+            Matcher m = span.matcher(FENCE.matcher(read(file)).replaceAll(""));
             while (m.find()) {
                 String name = m.group(1);
-                if (NOT_TOOLS.contains(name)) {
+                if (exempt.contains(name)) {
                     continue;
                 }
-                mentioned++;
-                if (!tools.contains(name)) {
+                checked[0]++;
+                if (!known.contains(name)) {
                     unknown.computeIfAbsent(repoRoot().relativize(file).toString(), k -> new TreeSet<>()).add(name);
                 }
             }
         }
-        assertTrue(mentioned > 50, "the guard found only " + mentioned + " tool mentions — has the pattern stopped matching?");
+        return unknown;
+    }
+
+    @Test
+    @DisplayName("every snake_case identifier in a skill is a registered MCP tool")
+    void everyMentionedToolExists() {
+        Set<String> tools = registeredTools();
+        int[] checked = {0};
+        Map<String, Set<String>> unknown = unknownSpans(SNAKE_CASE_SPAN, tools, NOT_TOOLS, checked);
+        assertTrue(checked[0] > 50, "the guard found only " + checked[0] + " tool mentions — has the pattern stopped matching?");
         assertEquals(Map.of(), unknown, "skills name MCP tools EDDI does not register (renamed or removed?). Registered: " + tools);
     }
 
     @Test
-    @DisplayName("every exempted identifier is still mentioned and still not a tool")
+    @DisplayName("every camelCase identifier in a skill is an argument some MCP tool takes")
+    void everyMentionedArgumentExists() {
+        Set<String> arguments = registeredArguments();
+        int[] checked = {0};
+        Map<String, Set<String>> unknown = unknownSpans(CAMEL_CASE_SPAN, arguments, NOT_ARGUMENTS, checked);
+        assertTrue(checked[0] > 10, "the guard found only " + checked[0] + " argument mentions — has the pattern stopped matching?");
+        assertEquals(Map.of(), unknown,
+                "skills name MCP tool arguments no tool takes (a REST parameter name, or a renamed argument?). Exempt config/result fields in NOT_ARGUMENTS. Registered: "
+                        + arguments);
+    }
+
+    @Test
+    @DisplayName("every exempted identifier is still mentioned and still not a tool or argument")
     void exemptionsAreCurrent() {
         String all = pluginMarkdown().stream().map(SkillToolReferencesTest::read).collect(Collectors.joining("\n"));
         Set<String> tools = registeredTools();
         for (String name : NOT_TOOLS) {
             assertTrue(all.contains("`" + name + "`"), "NOT_TOOLS lists '" + name + "', which no skill mentions any more — remove it");
             assertFalse(tools.contains(name), "NOT_TOOLS lists '" + name + "', which is now a real tool — remove the exemption");
+        }
+        Set<String> arguments = registeredArguments();
+        for (String name : NOT_ARGUMENTS) {
+            assertTrue(all.contains("`" + name + "`"), "NOT_ARGUMENTS lists '" + name + "', which no skill mentions any more — remove it");
+            assertFalse(arguments.contains(name), "NOT_ARGUMENTS lists '" + name + "', which is now a real argument — remove the exemption");
         }
     }
 

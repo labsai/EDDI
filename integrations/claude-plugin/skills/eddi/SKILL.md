@@ -47,8 +47,9 @@ What your account can do depends on its EDDI role:
 
 | Role | Can use |
 | --- | --- |
-| `eddi-user`, `eddi-viewer` | Find and talk to agents, group discussions, own conversations and memories, docs |
-| `eddi-approver` | Decide approvals (`list_pending_approvals`, `resume_conversation`, …) and read docs |
+| `eddi-user` | Find and talk to agents, group discussions, own conversations and memories, docs; decide pauses in its own conversations |
+| `eddi-viewer` | The same reading and talking, but no approval decisions; plus the audit trail of its own conversations |
+| `eddi-approver` | Decide approvals in anyone's conversations (`list_pending_approvals`, `resume_conversation`, …) and read docs |
 | `eddi-editor`, `eddi-admin` | All of the above plus authoring — see the `eddi-admin` skill |
 
 ## Find the right agent
@@ -64,8 +65,10 @@ Two ways, and the choice matters for keeping one conversation instead of many:
 
 - **The agent serves an intent** → `chat_managed` with that `intent`, your `userId` and
   the `message`. EDDI keeps exactly one conversation per intent and user and reuses it
-  on every call, so you never track ids. Pass your own user id (the name you signed in
-  with); a user id that is not yours is refused unless you are an admin.
+  on every call, so you never track ids. Pass the user's own user id — on an instance with
+  sign-in, the account name they signed in with. Any other id is refused unless the
+  caller is an admin, so if the call is refused, ask the user for their exact login name
+  rather than trying variants.
 - **No intent** → `chat_with_agent` with `agentId` and `message`. The first call creates
   the conversation and returns its `conversationId`; **pass that id on every following
   call**, or each message starts a new, empty conversation. `create_conversation` +
@@ -112,8 +115,12 @@ Present the synthesis, and say where members disagreed; the decision record is i
 
 ## When something waits for a person
 
-An agent can be configured to pause for a human before a turn or a tool call. A message
-to a paused conversation is refused with a note that it awaits approval.
+An agent can be configured to pause for a human before a turn or a tool call. Then
+`chat_with_agent`, `talk_to_agent` or `chat_managed` returns `status`
+`PAUSED_FOR_APPROVAL` instead of a reply. Tell the user the conversation is waiting for a
+decision. The result names `resume_conversation` as the next tool; that is a hint about
+the API, not permission to decide. Messages to the conversation are refused until someone
+decides.
 
 1. Find what waits: `list_pending_approvals` (one-to-one conversations),
    `list_all_group_pending_approvals` (group discussions).
