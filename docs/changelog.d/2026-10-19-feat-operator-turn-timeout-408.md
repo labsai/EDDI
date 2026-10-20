@@ -19,7 +19,8 @@ behaviour, or none. AGENTS.md §4.6 asks for this check whenever behaviour chang
     input unconsumed (`eddi_turn_skipped_total{reason="caller_timed_out"}`,
     `eddi.conversation.skip-turns-of-timed-out-callers`; only then is a retry exactly-once, and with
     the setting off the queued turn still runs), or already started, whose outcome is unknown at the
-    `408` because the execution watchdog times from the turn's start, not the request's arrival.
+    `408` because the execution watchdog times from the turn's submission to the executor (queue wait
+    included), not the request's arrival.
   - What a rising `caller_timed_out` means: the node is overloaded. The fix is more nodes or a lower
     `max-in-flight-turns`, which turns a 60 s wait into a fast `503`. Raising the timeout does not
     help. Flat counters do not prove health: a turn that queued until just before its deadline and

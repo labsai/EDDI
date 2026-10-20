@@ -293,10 +293,11 @@ const BODY_CAPACITY = `Turn capacity — "why was my turn refused?", "why do my 
      With \`false\` the queued turn still runs after its caller got the 408, so
      a retry can run the same input twice.
   3. It had already started: its outcome is UNKNOWN at the moment of the 408.
-     The execution watchdog counts \`agentTimeoutInSeconds\` from when the turn
-     started, not from when the request arrived, so a turn that started late
-     can still finish and store its result after the 408. One that runs past
-     the watchdog is abandoned (the conversation becomes
+     The execution watchdog is a separate \`agentTimeoutInSeconds\` that starts
+     when the turn is handed to the executor, not when the request arrived, and
+     includes any wait in the executor's queue. So a turn can still finish and
+     store its result after the 408, or be abandoned before it ever ran. One
+     that runs past the watchdog is abandoned (the conversation becomes
      \`EXECUTION_INTERRUPTED\`), but a model call already in flight still runs
      and is billed. Check the conversation (its last step and state) before
      advising a retry; an HTTP call or other side effect may already have

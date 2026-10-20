@@ -514,9 +514,11 @@ describe("turn capacity — 503 capacity_exceeded and node sizing", () => {
   });
 
   it.each(bodies)("%s: calls a started turn's outcome unknown, the watchdog timing from its start", (_label, body) => {
-    // ConversationStepRunner arms future.get(agentTimeout) at execution, not arrival.
+    // ConversationStepRunner calls future.get(agentTimeout) right after submitting the
+    // turn, so the watchdog runs from submission (executor queue time included).
     expect(body).toContain("its outcome is UNKNOWN at the moment of the 408");
-    expect(body).toMatch(/counts `agentTimeoutInSeconds` from when the turn\s+started, not from when the request arrived/);
+    expect(body).toMatch(/starts\s+when the turn is handed to the executor, not when the request arrived/);
+    expect(body).toMatch(/includes any wait in the executor's queue/);
   });
 
   it.each(bodies)("%s: reads rising caller_timed_out as overload, not a reason to raise the timeout", (_label, body) => {
