@@ -4896,7 +4896,16 @@
       "skillPlaceholder": "مثال: التلخيص",
       "systemPrompt": "مطالبة النظام",
       "systemPromptPlaceholder": "تعليمات تحدّد سلوك هذا الوكيل وشخصيته وخبرته…",
-      "title": "تعديل الوكيل"
+      "title": "تعديل الوكيل",
+      "toolGroups": {
+        "features": "مفعّل أيضًا",
+        "resources": "موارد أخرى"
+      },
+      "toolFeatures": {
+        "httpCalls": "استدعاءات HTTP في سير العمل",
+        "mcpCalls": "استدعاءات MCP في سير العمل",
+        "memory": "ذاكرة دائمة"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "تتحكم هذه الإعدادات في كيفية عمل الموافقة. أما نقاط المناقشة التي تتطلب موافقة فيتم تكوينها لكل مرحلة في الـ Manager.",

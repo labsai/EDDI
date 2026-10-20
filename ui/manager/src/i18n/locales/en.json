@@ -4684,7 +4684,16 @@
       "skillPlaceholder": "e.g. summarization",
       "systemPrompt": "System Prompt",
       "systemPromptPlaceholder": "Instructions that define this agent's behavior, personality, and expertise...",
-      "title": "Edit Agent"
+      "title": "Edit Agent",
+      "toolGroups": {
+        "features": "Also enabled",
+        "resources": "Other resources"
+      },
+      "toolFeatures": {
+        "httpCalls": "Workflow HTTP calls",
+        "mcpCalls": "Workflow MCP calls",
+        "memory": "Persistent memory"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "These settings control how an approval behaves. Which points in a discussion require approval is configured per phase in the Manager.",

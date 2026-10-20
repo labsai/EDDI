@@ -4737,7 +4737,16 @@
       "skillPlaceholder": "p. ej., resumen",
       "systemPrompt": "Prompt del sistema",
       "systemPromptPlaceholder": "Instrucciones que definen el comportamiento, la personalidad y la especialidad de este agente…",
-      "title": "Editar agente"
+      "title": "Editar agente",
+      "toolGroups": {
+        "features": "También activado",
+        "resources": "Otros recursos"
+      },
+      "toolFeatures": {
+        "httpCalls": "Llamadas HTTP del flujo",
+        "mcpCalls": "Llamadas MCP del flujo",
+        "memory": "Memoria persistente"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "Estos ajustes controlan cómo se comporta una aprobación. Qué puntos de una discusión la requieren se configura por fase en el Manager.",

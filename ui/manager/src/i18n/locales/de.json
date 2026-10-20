@@ -4684,7 +4684,16 @@
       "skillPlaceholder": "z. B. Zusammenfassung",
       "systemPrompt": "System-Prompt",
       "systemPromptPlaceholder": "Anweisungen, die Verhalten, Persönlichkeit und Expertise dieses Agenten festlegen …",
-      "title": "Agent bearbeiten"
+      "title": "Agent bearbeiten",
+      "toolGroups": {
+        "features": "Ebenfalls aktiviert",
+        "resources": "Weitere Ressourcen"
+      },
+      "toolFeatures": {
+        "httpCalls": "Workflow-HTTP-Aufrufe",
+        "mcpCalls": "Workflow-MCP-Aufrufe",
+        "memory": "Persistenter Speicher"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "Diese Einstellungen bestimmen, wie eine Genehmigung abläuft. Welche Punkte einer Diskussion eine Genehmigung erfordern, wird pro Phase im Manager konfiguriert.",

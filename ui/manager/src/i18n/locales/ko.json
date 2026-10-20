@@ -4684,7 +4684,16 @@
       "skillPlaceholder": "예: 요약",
       "systemPrompt": "시스템 프롬프트",
       "systemPromptPlaceholder": "이 에이전트의 행동, 성격, 전문성을 정의하는 지침…",
-      "title": "에이전트 편집"
+      "title": "에이전트 편집",
+      "toolGroups": {
+        "features": "함께 활성화됨",
+        "resources": "기타 리소스"
+      },
+      "toolFeatures": {
+        "httpCalls": "워크플로 HTTP 호출",
+        "mcpCalls": "워크플로 MCP 호출",
+        "memory": "영구 메모리"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "이 설정은 승인 동작 방식을 제어합니다. 토론의 어느 지점에서 승인이 필요한지는 Manager에서 단계별로 구성합니다.",

@@ -4684,7 +4684,16 @@
       "skillPlaceholder": "例如 摘要",
       "systemPrompt": "系统提示",
       "systemPromptPlaceholder": "定义此代理行为、个性和专长的指令…",
-      "title": "编辑代理"
+      "title": "编辑代理",
+      "toolGroups": {
+        "features": "同时启用",
+        "resources": "其他资源"
+      },
+      "toolFeatures": {
+        "httpCalls": "工作流 HTTP 调用",
+        "mcpCalls": "工作流 MCP 调用",
+        "memory": "持久记忆"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "这些设置控制审批的行为方式。讨论中哪些环节需要审批，是在 Manager 中按阶段配置的。",

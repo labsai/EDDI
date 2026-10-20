@@ -1,11 +1,20 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useLayoutEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { agentKeys } from "@/lib/query-keys";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { getAgent, getAgentDescriptors, parseResourceUri } from "@/lib/api/agents";
 import { getResource, RESOURCE_TYPES } from "@/lib/api/resources";
 import { getWorkflow } from "@/lib/api/workflows";
+import { getDescriptor } from "@/lib/api/descriptors";
+import {
+  buildToolGroups,
+  collapseToolGroups,
+  distinctToolUris,
+  type ActiveTool,
+  type ToolFeature,
+  type ToolKind,
+} from "@/components/workforce/active-tools";
 import { useDeployedAgents, useChatStore } from "@/hooks/use-chat";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +44,36 @@ import {
   ChevronUp,
   Terminal,
   Wrench,
+  Globe,
+  Plug,
+  Boxes,
+  Puzzle,
+  ToggleRight,
 } from "lucide-react";
+
+/** Active tools shown before the list collapses behind "Show more". */
+const MAX_VISIBLE_TOOLS = 8;
+
+/** Per-kind icon and tint; the resource tints match `ResourceTypeBadge`. */
+const TOOL_KIND_STYLE: Record<ToolKind, { icon: typeof Globe; chip: string; iconClass: string }> = {
+  apicalls: {
+    icon: Globe,
+    chip: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
+    iconClass: "text-green-500",
+  },
+  mcpcalls: {
+    icon: Plug,
+    chip: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
+    iconClass: "text-indigo-500",
+  },
+  resource: { icon: Boxes, chip: "bg-secondary text-foreground border-border", iconClass: "text-muted-foreground" },
+  builtin: {
+    icon: Puzzle,
+    chip: "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+    iconClass: "text-sky-500",
+  },
+  feature: { icon: ToggleRight, chip: "bg-muted text-muted-foreground border-border", iconClass: "text-muted-foreground" },
+};
 
 interface AgentDetailsPanelProps {
   agentId: string | null;
@@ -53,7 +91,11 @@ export function AgentDetailsPanel({
   const { t } = useTranslation();
   const [copiedId, setCopiedId] = useState(false);
   const [copiedPersona, setCopiedPersona] = useState(false);
+  const [showAllTools, setShowAllTools] = useState(false);
   const [personaExpanded, setPersonaExpanded] = useState(false);
+  // Whether the clamped persona is cut off: the expand control is offered only then.
+  const [personaOverflows, setPersonaOverflows] = useState(false);
+  const personaRef = useRef<HTMLDivElement>(null);
 
   // Read deployed agents to resolve display name, description & real resource ID
   const { data: deployedAgents } = useDeployedAgents();
@@ -142,22 +184,114 @@ export function AgentDetailsPanel({
         ? null // -1 means unlimited, omit
         : null;
 
-  // Build comprehensive list of active tool names
-  const activeTools: string[] = [];
-  if (firstTask?.tools?.length) {
-    activeTools.push(...firstTask.tools);
-  }
-  if (firstTask?.builtInToolsWhitelist?.length) {
-    activeTools.push(...firstTask.builtInToolsWhitelist);
-  }
-  if (firstTask?.enableHttpCallTools) activeTools.push("HTTP Calls");
-  if (firstTask?.enableMcpCallTools) activeTools.push("MCP Tools");
-  if (agentData?.enableMemoryTools) activeTools.push("Memory");
-  if (agentData?.capabilities?.length) {
-    for (const cap of agentData.capabilities) {
-      if (!activeTools.includes(cap.skill)) activeTools.push(cap.skill);
+  // `tools` holds resource URIs (eddi://ai.labs.apicalls/…?version=N). Shown
+  // raw they were unreadable, overflowed the card and repeated once per entry,
+  // so each distinct URI is named from its own descriptor, the way the parser
+  // editor names its dictionaries: one cached read per reference rather than a
+  // paginated store listing a resource can fall outside of. An unreadable
+  // descriptor falls back to a short id, and the full URI stays in the tooltip.
+  const toolUris = distinctToolUris(firstTask?.tools);
+  const toolDescriptorQueries = useQueries({
+    queries: toolUris.map((uri) => {
+      const { id, version } = parseResourceUri(uri);
+      return {
+        queryKey: ["descriptor", id, version],
+        queryFn: () => getDescriptor(id, version),
+        enabled: Boolean(id),
+        staleTime: 5 * 60_000,
+        retry: false,
+      };
+    }),
+  });
+
+  const toolGroups = buildToolGroups({
+    toolUris,
+    nameOf: (uri) => toolDescriptorQueries[toolUris.indexOf(uri)]?.data?.name,
+    isLoading: (uri) => toolDescriptorQueries[toolUris.indexOf(uri)]?.isLoading ?? false,
+    builtIns: firstTask?.builtInToolsWhitelist,
+    httpCallTools: firstTask?.enableHttpCallTools,
+    mcpCallTools: firstTask?.enableMcpCallTools,
+    memoryTools: agentData?.enableMemoryTools,
+  });
+  const toolTotal = toolGroups.reduce((sum, group) => sum + group.tools.length, 0);
+  const toolCountByKind = new Map(toolGroups.map((group) => [group.kind, group.tools.length]));
+  const collapsedTools = collapseToolGroups(toolGroups, MAX_VISIBLE_TOOLS);
+  const shownToolGroups = showAllTools ? toolGroups : collapsedTools.groups;
+  const canToggleTools = toolTotal > MAX_VISIBLE_TOOLS;
+
+  const toolGroupLabel = (kind: ToolKind): string => {
+    switch (kind) {
+      case "apicalls":
+        return t("resources.types.apicalls.name", "API Calls");
+      case "mcpcalls":
+        return t("resources.types.mcpcalls.name", "MCP Calls");
+      case "builtin":
+        return t("setupWizard.builtInTools", "Built-in Tools");
+      case "feature":
+        return t("Workforce.agentEditor.toolGroups.features", "Also enabled");
+      default:
+        return t("Workforce.agentEditor.toolGroups.resources", "Other resources");
     }
-  }
+  };
+  const toolFeatureLabel = (feature: ToolFeature): string => {
+    switch (feature) {
+      case "httpCalls":
+        return t("Workforce.agentEditor.toolFeatures.httpCalls", "Workflow HTTP calls");
+      case "mcpCalls":
+        return t("Workforce.agentEditor.toolFeatures.mcpCalls", "Workflow MCP calls");
+      default:
+        return t("Workforce.agentEditor.toolFeatures.memory", "Persistent memory");
+    }
+  };
+  const renderTool = (tool: ActiveTool) => {
+    if (tool.loading) {
+      return <Skeleton key={tool.key} className="h-5 w-24 rounded-full" data-testid="workforce-active-tool-loading" />;
+    }
+    const label = tool.feature ? toolFeatureLabel(tool.feature) : tool.label;
+    const badge = (
+      <Badge
+        variant="outline"
+        title={tool.title || label}
+        className={cn(
+          "max-w-full min-w-0 text-[10px] font-medium",
+          TOOL_KIND_STYLE[tool.kind].chip,
+          tool.href && "transition-colors hover:border-primary/40"
+        )}
+      >
+        <span className="truncate">{label}</span>
+      </Badge>
+    );
+    return tool.href ? (
+      <Link
+        key={tool.key}
+        to={tool.href}
+        className="max-w-full min-w-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="workforce-active-tool"
+      >
+        {badge}
+      </Link>
+    ) : (
+      <span key={tool.key} className="max-w-full min-w-0" data-testid="workforce-active-tool">
+        {badge}
+      </span>
+    );
+  };
+
+  // The same text the persona card renders (`description` below is derived after
+  // the early return, which a hook may not follow).
+  const personaText = agentData?.description || resolvedDescriptor?.description;
+  // Measured while clamped: the expand control appears only when the persona is
+  // longer than its three lines. Re-measured when the text or the panel width changes.
+  useLayoutEffect(() => {
+    const element = personaRef.current;
+    if (!element || personaExpanded) return;
+    const measure = () => setPersonaOverflows(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [personaText, personaExpanded]);
 
   const handleCopyId = useCallback(async () => {
     if (!realAgentId) return;
@@ -329,14 +463,19 @@ export function AgentDetailsPanel({
 
           {/* Model & LLM Configuration Card */}
           <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5 shrink-0 whitespace-nowrap">
                 <Cpu className="h-3.5 w-3.5 text-purple-400" />
                 {t("Workforce.agentEditor.llmConfig", "Model & LLM Engine")}
               </h5>
               {displayModel && (
-                <Badge variant="outline" className="text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono">
-                  {displayModel}
+                <Badge
+                  variant="outline"
+                  title={displayModel}
+                  className="min-w-0 max-w-full text-[10px] border-purple-500/30 text-purple-400 bg-purple-500/5 font-mono"
+                  data-testid="workforce-model-badge"
+                >
+                  <span className="truncate">{displayModel}</span>
                 </Badge>
               )}
             </div>
@@ -374,29 +513,59 @@ export function AgentDetailsPanel({
                 </>
               )}
 
-              {/* Specific Active Tools List */}
-              <div className="space-y-1 pt-1 border-t border-border/40">
-                <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
-                  <Wrench className="h-3 w-3 text-sky-400" />
-                  {t("Workforce.agentEditor.activeTools", "Active Tools")}
-                </span>
-                <div className="flex flex-wrap gap-1 pt-0.5">
-                  {activeTools.length > 0 ? (
-                    activeTools.map((tool, idx) => (
-                      <Badge
-                        key={`${tool}-${idx}`}
-                        variant="secondary"
-                        className="text-[10px] bg-sky-500/10 text-sky-400 border-sky-500/20"
-                      >
-                        {tool}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground italic">
-                      {t("Workforce.agentEditor.noTools", "None configured")}
+              {/* Active tools, grouped by kind, each a link to its resource */}
+              <div className="space-y-2 pt-1 border-t border-border/40" data-testid="workforce-active-tools">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+                    <Wrench className="h-3 w-3 text-sky-400" />
+                    {t("Workforce.agentEditor.activeTools", "Active Tools")}
+                  </span>
+                  {toolTotal > 0 && (
+                    <span className="text-[10px] font-medium text-muted-foreground rounded-full bg-muted px-1.5 py-0.5">
+                      {toolTotal}
                     </span>
                   )}
                 </div>
+                {toolTotal === 0 ? (
+                  <span className="text-[11px] text-muted-foreground italic">
+                    {t("Workforce.agentEditor.noTools", "None configured")}
+                  </span>
+                ) : (
+                  <>
+                    {shownToolGroups.map((group) => {
+                      const GroupIcon = TOOL_KIND_STYLE[group.kind].icon;
+                      return (
+                        <div key={group.kind} className="space-y-1" data-testid={`workforce-tool-group-${group.kind}`}>
+                          <div className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                            <GroupIcon className={cn("h-3 w-3 shrink-0", TOOL_KIND_STYLE[group.kind].iconClass)} />
+                            <span className="truncate">{toolGroupLabel(group.kind)}</span>
+                            <span className="text-muted-foreground/70">· {toolCountByKind.get(group.kind) ?? 0}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">{group.tools.map(renderTool)}</div>
+                        </div>
+                      );
+                    })}
+                    {canToggleTools && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllTools((value) => !value)}
+                        aria-expanded={showAllTools}
+                        className="flex items-center gap-1 text-[10px] text-primary hover:underline font-medium"
+                        data-testid="workforce-active-tools-toggle"
+                      >
+                        {showAllTools ? (
+                          <>
+                            <ChevronUp className="h-3 w-3" /> {t("common.showLess", "Show less")}
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="h-3 w-3" /> {t("common.showMore", "Show more")} ({collapsedTools.hidden})
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -423,28 +592,34 @@ export function AgentDetailsPanel({
                 </button>
               </div>
               <div
+                ref={personaRef}
                 className={cn(
                   "text-[11px] font-mono text-muted-foreground bg-muted/30 rounded-md p-2 border border-border/30 transition-all overflow-hidden",
                   !personaExpanded && "line-clamp-3"
                 )}
+                data-testid="workforce-persona-text"
               >
                 {description}
               </div>
+              {(personaOverflows || personaExpanded) && (
               <button
                 type="button"
                 onClick={() => setPersonaExpanded((v) => !v)}
+                aria-expanded={personaExpanded}
                 className="flex items-center gap-1 text-[10px] text-primary hover:underline font-medium pt-0.5"
+                data-testid="workforce-persona-toggle"
               >
                 {personaExpanded ? (
                   <>
-                    <ChevronUp className="h-3 w-3" /> {t("common.showLess", "Show Less")}
+                    <ChevronUp className="h-3 w-3" /> {t("common.showLess", "Show less")}
                   </>
                 ) : (
                   <>
-                    <ChevronDown className="h-3 w-3" /> {t("common.showMore", "Expand Persona")}
+                    <ChevronDown className="h-3 w-3" /> {t("common.showMore", "Show more")}
                   </>
                 )}
               </button>
+              )}
             </div>
           )}
 

@@ -4684,7 +4684,16 @@
       "skillPlaceholder": "例: 要約",
       "systemPrompt": "システムプロンプト",
       "systemPromptPlaceholder": "このエージェントの振る舞い、性格、専門分野を定義する指示…",
-      "title": "エージェントを編集"
+      "title": "エージェントを編集",
+      "toolGroups": {
+        "features": "その他の有効な機能",
+        "resources": "その他のリソース"
+      },
+      "toolFeatures": {
+        "httpCalls": "ワークフローの HTTP 呼び出し",
+        "mcpCalls": "ワークフローの MCP 呼び出し",
+        "memory": "永続メモリ"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "これらの設定は承認の挙動を制御します。ディスカッションのどの時点で承認が必要かは、Manager でフェーズごとに設定します。",

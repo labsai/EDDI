@@ -4737,7 +4737,16 @@
       "skillPlaceholder": "ex. synthèse",
       "systemPrompt": "Prompt système",
       "systemPromptPlaceholder": "Instructions définissant le comportement, la personnalité et l'expertise de cet agent…",
-      "title": "Modifier l'agent"
+      "title": "Modifier l'agent",
+      "toolGroups": {
+        "features": "Également activé",
+        "resources": "Autres ressources"
+      },
+      "toolFeatures": {
+        "httpCalls": "Appels HTTP du workflow",
+        "mcpCalls": "Appels MCP du workflow",
+        "memory": "Mémoire persistante"
+      }
     },
     "settings": {
       "hitlApprovalPointsNote": "Ces paramètres définissent le comportement d'une approbation. Les points d'une discussion qui en requièrent une se configurent par phase dans le Manager.",
