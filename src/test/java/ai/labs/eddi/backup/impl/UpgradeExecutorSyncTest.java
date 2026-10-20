@@ -256,6 +256,44 @@ class UpgradeExecutorSyncTest {
     }
 
     @Test
+    @DisplayName("a sync is a breaking version unless the operator declares it compatible")
+    void agentVersionIsBreakingByDefaultAndCompatibleWhenDeclared() {
+        targetAgent.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2), uri("workflow", WF2, 1))));
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
+        givenPreview(agentRow(DiffAction.UPDATE, null),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0),
+                row(WF2, "workflow", DiffAction.REMOVE, WF2, 1, 1));
+
+        // The four-argument form every existing caller uses must not change meaning.
+        inCdi(() -> executor.executeUpgrade(source, AGENT, null, null));
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), any(), eq(false));
+        verify(agentStore, never()).updateAgent(eq(AGENT), eq(5), any(), eq(true));
+    }
+
+    @Test
+    @DisplayName("a sync declared compatible writes the agent version as compatible")
+    void declaredCompatibleReachesTheAgentWrite() {
+        targetAgent.setWorkflows(new ArrayList<>(List.of(uri("workflow", WF, 2), uri("workflow", WF2, 1))));
+        var source = source(workflowData(SRC_WF, 0, workflow(step("llm", uri("llm", SRC_LLM, 1))), Map.of()));
+        givenPreview(agentRow(DiffAction.UPDATE, null),
+                row(SRC_WF, "workflow", DiffAction.SKIP, WF, 2, 0),
+                row(WF2, "workflow", DiffAction.REMOVE, WF2, 1, 1));
+
+        var written = new AgentConfiguration();
+        written.setCompatibilityGeneration(7);
+        when(agentStore.readAgent(AGENT, 6)).thenReturn(written);
+
+        UpgradeResult result = inCdi(() -> executor.executeUpgrade(source, AGENT, null, null, true));
+
+        assertTrue(result.agentUpdated());
+        // the result says what the declaration did, so a script can verify it
+        assertEquals(Boolean.TRUE, result.compatible());
+        assertEquals(7, result.compatibilityGeneration());
+        verify(agentStore).updateAgent(eq(AGENT), eq(5), any(), eq(true));
+        verify(agentStore, never()).updateAgent(eq(AGENT), eq(5), any(), eq(false));
+    }
+
+    @Test
     @DisplayName("agent-level settings travel; the target's identity stays")
     void agentSettingsTravelIdentityStays() throws Exception {
         var targetIdentity = new AgentConfiguration.AgentIdentity("did:target", "target-key");

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.backup.model;
 
+import ai.labs.eddi.engine.model.PromotionImpact;
+
 import java.util.List;
 
 /**
@@ -37,6 +39,12 @@ import java.util.List;
  *            what the operator should know before approving, that is not a
  *            failure — e.g. two source snippets sharing a name, of which only
  *            one can travel. Never null
+ * @param conversationImpact
+ *            what writing the next agent version would do to the conversations
+ *            running on the target, given the {@code compatible} declaration
+ *            the preview was asked for; null when there is no existing target
+ *            agent, nothing would be written, or the caller may not see the
+ *            counts
  * @since 6.0.0
  */
 public record ImportPreview(
@@ -46,10 +54,27 @@ public record ImportPreview(
         String targetAgentName,
         List<ResourceDiff> resources,
         String error,
-        List<String> warnings) {
+        List<String> warnings,
+        PromotionImpact conversationImpact) {
 
     public ImportPreview {
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /** A preview without a conversation impact. */
+    public ImportPreview(String sourceAgentId,
+            String sourceAgentName,
+            String targetAgentId,
+            String targetAgentName,
+            List<ResourceDiff> resources,
+            String error,
+            List<String> warnings) {
+        this(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, error, warnings, null);
+    }
+
+    /** This preview with the impact on running conversations attached. */
+    public ImportPreview withConversationImpact(PromotionImpact impact) {
+        return new ImportPreview(sourceAgentId, sourceAgentName, targetAgentId, targetAgentName, resources, error, warnings, impact);
     }
 
     /** A preview that was produced successfully — {@code error} is null. */

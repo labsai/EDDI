@@ -6035,6 +6035,8 @@
   "agentVersioning": {
     "compatibleLabel": "이전 버전과 호환 — 진행 중인 대화가 이 버전으로 전환될 수 있습니다",
     "compatibleHint": "진행 중인 대화를 깨뜨릴 수 없는 변경(예: 프롬프트 문구나 다른 모델)에만 사용하세요. 속성, 액션 또는 워크플로 단계의 이름을 바꾸거나 삭제했다면 선택하지 마세요.",
+    "promotionImpactCompatible": "다음 턴부터 새 버전에서 계속되는 진행 중인 대화: {{total}}개 중 {{following}}개. 나머지는 시작한 버전에 머뭅니다.",
+    "promotionImpactBreaking": "시작한 버전에 머무는 진행 중인 대화: {{total}}개. 위 확인란을 선택하면 새 버전에서 계속됩니다.",
     "compatibleLegacyNote": "현재 버전은 버전 추종 기능 이전의 버전이므로 이미 실행 중인 대화는 그대로 유지됩니다. 다음 호환 저장부터 체인이 연결됩니다.",
     "compatibleUnknownNote": "버전 추종 기능 이전 버전의 대화는 그 버전에 그대로 유지됩니다.",
     "generationBadge": "세대 {{generation}}",

@@ -6103,6 +6103,8 @@
   "agentVersioning": {
     "compatibleLabel": "Compatível com a versão anterior — conversas em andamento podem mudar para ela",
     "compatibleHint": "Apenas para alterações que não podem quebrar uma conversa em andamento, p. ex. a redação do prompt ou outro modelo. Deixe desmarcado se propriedades, ações ou etapas do workflow foram renomeadas ou removidas.",
+    "promotionImpactCompatible": "Conversas em andamento que continuarão na nova versão no próximo turno: {{following}} de {{total}}. As demais permanecem na versão com que começaram.",
+    "promotionImpactBreaking": "Conversas em andamento que permanecerão na versão com que começaram: {{total}}. Marque a caixa acima para que continuem na nova versão.",
     "compatibleLegacyNote": "A versão atual é anterior ao acompanhamento de versões, então as conversas que já a usam permanecem nela. O próximo salvamento compatível liga a cadeia.",
     "compatibleUnknownNote": "Conversas em uma versão anterior ao acompanhamento de versões permanecem nela.",
     "generationBadge": "Geração {{generation}}",

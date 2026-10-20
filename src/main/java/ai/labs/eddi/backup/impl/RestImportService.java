@@ -11,6 +11,8 @@ import ai.labs.eddi.backup.impl.SourceUrlValidator.SyncSourcePolicy;
 import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
+import ai.labs.eddi.engine.api.IPromotionImpactReader;
+import ai.labs.eddi.engine.model.PromotionImpact;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
@@ -183,6 +185,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private static final Logger LOGGER = Logger.getLogger(RestImportService.class);
     private static final String QUERY_SELECTED_RESOURCES = "selectedResources";
+    /** Whether the agent version a merge wrote was declared compatible. */
+    static final String HEADER_AGENT_COMPATIBLE = "X-Agent-Compatible";
+    /** The compatibility generation of the agent version a merge wrote. */
+    static final String HEADER_AGENT_COMPATIBILITY_GENERATION = "X-Agent-Compatibility-Generation";
 
     /** The container's configured scrubber, replacing the fail-safe default. */
     @Inject
@@ -200,6 +206,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * Counts the conversations a promotion would let follow or pin. Null when built
+     * outside the container, where previews carry no conversation impact.
+     */
+    private IPromotionImpactReader promotionImpactReader;
+
+    @Inject
+    void usePromotionImpactReader(IPromotionImpactReader reader) {
+        this.promotionImpactReader = reader;
     }
 
     /**
@@ -294,7 +311,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private ImportPreview buildImportPreview(InputStream zippedAgentConfigFiles, String targetAgentId) {
         // When targetAgentId is provided, use the new structural matching pipeline
         if (targetAgentId != null && !targetAgentId.isBlank()) {
-            return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
+            return withConversationImpact(previewUpgrade(zippedAgentConfigFiles, targetAgentId));
         }
         // Legacy merge preview path
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
@@ -344,7 +361,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // schedule can be matched against by name.
                 addScheduleDiffs(diffs, Paths.get(targetDirPath), agentDiff.targetId());
 
-                return new ImportPreview(agentOriginId, agentName, null, null, diffs);
+                // A merge writes the agent it matched, so the same impact question
+                // applies; without a match it creates one and there is nothing running.
+                PromotionImpact impact = agentDiff.targetId() != null && promotionImpactReader != null
+                        ? promotionImpactReader.previewNextVersion(agentDiff.targetId())
+                        : null;
+                return new ImportPreview(agentOriginId, agentName, null, null, diffs).withConversationImpact(impact);
             }
 
             throw noAgentFileFound();
@@ -694,7 +716,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
-                                String targetAgentId, String workflowOrder) {
+                                String targetAgentId, String workflowOrder, Boolean compatible) {
+        boolean declaredCompatible = Boolean.TRUE.equals(compatible);
         metrics.importAttempted();
         try {
             String requestedStrategy = isNullOrEmpty(strategy) ? STRATEGY_CREATE : strategy.toLowerCase(Locale.ROOT);
@@ -711,14 +734,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // silently doubled the deployment's agent list.
                     throw new BadRequestException("strategy=upgrade requires targetAgentId.");
                 }
-                return executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder);
+                return executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder,
+                        declaredCompatible);
             }
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
 
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
             boolean isMerge = STRATEGY_MERGE.equals(requestedStrategy);
 
-            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, declaredCompatible);
         } catch (WebApplicationException e) {
             // 400/404 raised deliberately above (or by the upgrade path) must not be
             // repackaged as a 500 by the catch-all below.
@@ -804,12 +828,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * extensions permanently in the database.
      */
     private Response importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
-                                        Set<String> selectedSet)
+                                        Set<String> selectedSet, boolean compatible)
             throws IOException {
 
         var transaction = new ImportTransaction();
         try {
-            return unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, transaction);
+            return unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, compatible, transaction);
         } catch (Throwable failure) {
             rollbackCreatedResources(transaction);
             throw failure;
@@ -819,7 +843,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private Response unpackAndImportAgent(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
-                                          Set<String> selectedSet, ImportTransaction transaction)
+                                          Set<String> selectedSet, boolean compatible, ImportTransaction transaction)
             throws IOException {
 
         unzipArchive(zippedAgentConfigFiles, targetDir);
@@ -836,6 +860,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         int connectionsNotImported = importConnections(Paths.get(targetDirPath), transaction);
 
         URI lastAgentUri = null;
+        // The generation of the agent version a merge wrote, so a script can verify
+        // what
+        // the declaration did without a second call.
+        Integer writtenGeneration = null;
         int schedulesNotImported = 0;
         for (var agentFilePath : singleAgentFileIn(Paths.get(targetDirPath))) {
             try {
@@ -860,7 +888,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 URI newAgentUri;
                 if (isMerge && isSelected(selectedSet, agentOriginId)) {
-                    newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, transaction);
+                    // Looked up before the write: afterwards a newly created agent could match.
+                    URI matched = findLocalUriByOriginId(agentOriginId);
+                    newAgentUri = createOrUpdateAgent(agentConfig, agentOriginId, compatible, transaction);
+                    // Only an update of the matched agent wrote a version the declaration
+                    // applies to; a creation (no match, or the update was refused) did not.
+                    if (sameAgent(matched, newAgentUri)) {
+                        writtenGeneration = generationOf(newAgentUri);
+                    }
                 } else {
                     newAgentUri = createNewAgent(agentConfig, transaction);
                 }
@@ -896,6 +931,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // log, so the count travels with the answer it gets.
                 created.header(HEADER_SCHEDULES_SKIPPED, schedulesNotImported);
             }
+            if (writtenGeneration != null) {
+                created.header(HEADER_AGENT_COMPATIBLE, compatible);
+                created.header(HEADER_AGENT_COMPATIBILITY_GENERATION, writtenGeneration);
+            }
             if (connectionsNotImported > 0) {
                 // Same reasoning: a connection that already existed, or that this
                 // deployment refused, is a decision the caller should learn from the
@@ -907,6 +946,36 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Nothing was imported. Answering 200 with an empty resourceUri is how a
         // whole class of broken archives went unnoticed.
         throw noAgentFileFound();
+    }
+
+    /**
+     * The compatibility generation of the agent version at {@code agentUri}, or
+     * null when it cannot be read — reporting it is best effort and never fails the
+     * import.
+     */
+    private static boolean sameAgent(URI a, URI b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        IResourceId left = RestUtilities.extractResourceId(a);
+        IResourceId right = RestUtilities.extractResourceId(b);
+        return left != null && right != null && left.getId() != null && left.getId().equals(right.getId());
+    }
+
+    private Integer generationOf(URI agentUri) {
+        try {
+            IResourceId id = RestUtilities.extractResourceId(agentUri);
+            if (id == null) {
+                return null;
+            }
+            IResourceStore<AgentConfiguration> store = resolveStore(IAgentStore.class);
+            AgentConfiguration written = store.read(id.getId(), id.getVersion());
+            return written != null ? written.getCompatibilityGeneration() : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read back the generation of %s: %s", LogSanitizer.sanitize(String.valueOf(agentUri)),
+                    LogSanitizer.sanitize(e.getMessage()));
+            return null;
+        }
     }
 
     private URI buildOldAgentUri(Path agentPath) {
@@ -1239,22 +1308,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return targetSpace == null || space == null || space.isBlank() || targetSpace.equals(space);
     }
 
-    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, ImportTransaction transaction) {
+    private URI createOrUpdateAgent(AgentConfiguration agentConfiguration, String agentOriginId, boolean compatible,
+                                    ImportTransaction transaction) {
         URI existingUri = findLocalUriByOriginId(agentOriginId);
         if (existingUri != null) {
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
-                // Never compatible: an imported configuration comes from elsewhere, and
-                // nobody has judged it against the conversations running here. A failed
-                // merge's rollback writes through this too, so the restored version is a
-                // new generation as well: conversations on the original stay pinned to it,
-                // as after any breaking save. Reusing the original generation would give the
-                // latest version a lower generation than the aborted import's, and the next
-                // breaking save would then share a generation with that aborted version.
+                // Breaking unless the operator declared the import compatible: an imported
+                // configuration comes from elsewhere, and nobody has judged it against the
+                // conversations running here until they say so.
+                //
+                // A failed merge's rollback writes through this same lambda, so it carries
+                // the same declaration, and that is what keeps the generations consistent:
+                // - breaking import: the aborted version took generation G+1 and the
+                // restore takes G+2. Conversations on the original stay pinned to it, as
+                // after any breaking save, and the next breaking save cannot share a
+                // generation with the aborted version. Reusing G would give the latest
+                // version a lower generation than the aborted import's.
+                // - compatible import: nothing bumped, so the aborted version and the
+                // restore both keep G. Conversations that had already followed onto the
+                // aborted version follow on to the restored content; a breaking restore
+                // would instead pin them to the aborted import's content.
+                // Either way generations never decrease along the version chain.
                 URI updated = updateTracked(IAgentStore.class, IRestAgentStore.resourceURI, localResId.getId(),
                         localResId.getVersion(), agentConfiguration,
-                        (id, version, config) -> restAgentStore.updateAgent(id, version, config, false), transaction);
+                        (id, version, config) -> restAgentStore.updateAgent(id, version, config, compatible), transaction);
                 if (updated != null) {
                     return updated;
                 }
@@ -3312,7 +3391,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private Response executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
-                                           String selectedOriginIds, String workflowOrderString) {
+                                           String selectedOriginIds, String workflowOrderString, boolean compatible) {
         // See previewUpgrade: the tree must be removable even if unzip throws.
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
@@ -3335,7 +3414,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 UpgradeResult result;
                 try {
                     connectionsNotImported = importConnections(targetDir.toPath(), transaction);
-                    result = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+                    result = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder, compatible);
                 } catch (RuntimeException e) {
                     rollbackCreatedResources(transaction);
                     throw e;
@@ -3505,7 +3584,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
                                 String targetAgentId, String selectedResources, String workflowOrder,
-                                String sourceAuth, Boolean createNew) {
+                                String sourceAuth, Boolean createNew, Boolean compatible) {
         validateSourceUrl(sourceUrl);
         Set<String> selectedSet = parseSelectedResources(selectedResources);
 
@@ -3524,7 +3603,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
             List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
-            return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder));
+            return upgradeResponse(upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder,
+                    Boolean.TRUE.equals(compatible)));
         } catch (WebApplicationException e) {
             throw withErrorBody(e);
         } catch (Exception e) {
@@ -3579,7 +3659,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet);
+            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet, false);
             URI createdAgentUri = locationOf(imported);
             LOGGER.infof("Sync created agent %s from %s", LogSanitizer.sanitize(String.valueOf(createdAgentUri)),
                     LogSanitizer.sanitize(sourceUrl));
@@ -3745,7 +3825,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
                 sourceAuth, jsonSerialization, remoteSecretScrubber, outbound(), peerSsrf(sourceUrl))) {
             return upgradeExecutor.executeUpgrade(source, targetAgentId,
-                    request.selectedResources(), request.workflowOrder());
+                    request.selectedResources(), request.workflowOrder(), Boolean.TRUE.equals(request.compatible()));
         }
     }
 
@@ -3761,7 +3841,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         String resolved = resolveTarget(targetAgentId, sourceAgentId, createNew);
         ImportPreview preview = structuralMatcher.buildPreview(source, resolved, true);
         if (named || resolved == null) {
-            return preview;
+            return withConversationImpact(preview);
         }
         List<ResourceDiff> resources = preview.resources().stream()
                 .map(diff -> "agent".equals(diff.resourceType())
@@ -3770,8 +3850,39 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 diff.targetContent(), diff.workflowIndex())
                         : diff)
                 .toList();
-        return new ImportPreview(preview.sourceAgentId(), preview.sourceAgentName(), preview.targetAgentId(),
-                preview.targetAgentName(), resources, preview.error(), preview.warnings());
+        return withConversationImpact(new ImportPreview(preview.sourceAgentId(), preview.sourceAgentName(), preview.targetAgentId(),
+                preview.targetAgentName(), resources, preview.error(), preview.warnings()));
+    }
+
+    /**
+     * {@code preview} with what writing the next version of its target would do to
+     * the conversations running on it, whether the operator declares it compatible
+     * or not — the preview is read before that choice, so it carries both answers.
+     * <p>
+     * Only counts are read, per deployed version — never the conversations — so a
+     * preview stays cheap on an agent with many open ones. Left off when there is
+     * no existing target (a new agent has nothing running), when every row is a
+     * SKIP (nothing would be written, so no version is created), and when the
+     * caller may not see the counts.
+     */
+    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
+
+    private ImportPreview withConversationImpact(ImportPreview preview) {
+        if (promotionImpactReader == null || preview == null || preview.targetAgentId() == null) {
+            return preview;
+        }
+        // Snippets, schedules and connections are written on their own; only a change
+        // to
+        // the agent, a workflow or a workflow extension makes the import write a new
+        // agent
+        // version, which is what the impact describes.
+        boolean writesAgentVersion = preview.resources().stream()
+                .filter(diff -> !STANDALONE_TYPES.contains(diff.resourceType()))
+                .anyMatch(diff -> diff.action() != DiffAction.SKIP);
+        if (!writesAgentVersion) {
+            return preview;
+        }
+        return preview.withConversationImpact(promotionImpactReader.previewNextVersion(preview.targetAgentId()));
     }
 
     /**
