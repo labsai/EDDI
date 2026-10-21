@@ -2384,7 +2384,19 @@ jobs:
     # one — so a tag on a commit with failing tests still built, pushed, tagged
     # :latest, cosign-signed and SLSA-attested. Tag pushes are kept unskippable
     # by forcing detect-changes to report code=true for them instead.
+    #
+    # The needs are graded explicitly, not by the implicit success(). That one
+    # looks at every job UPSTREAM, not only at this list — so on a backend-only
+    # push the skipped ui-* jobs behind ui-gate (which passes them, by design)
+    # skipped this job too, and no -b image was published for any merge that did
+    # not touch ui/. !cancelled() is a status function, so GitHub adds no
+    # success(); the contains() checks keep the gate the NOTE above insists on:
+    # every job listed in needs must have succeeded, skipped ones included.
     if: >
+      !cancelled() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      !contains(needs.*.result, 'skipped') &&
       github.event_name == 'push' &&
       github.repository == 'labsai/EDDI' &&
       (startsWith(github.ref, 'refs/tags/') ||
@@ -2694,6 +2706,10 @@ jobs:
     name: Smoke Test
     runs-on: ubuntu-latest
     needs: docker
+    # Explicit, for the same reason as docker's: the implicit success() would also
+    # grade the skipped ui-* jobs upstream of it and skip this on every
+    # backend-only push.
+    if: ${{ !cancelled() && needs.docker.result == 'success' }}
 
     steps:
       - name: Install cosign
@@ -2973,7 +2989,9 @@ jobs:
     name: Preflight Verify (Pushed Image)
     runs-on: ubuntu-latest
     needs: docker
+    # !cancelled(): see smoke-test.
     if: >
+      !cancelled() &&
       github.event_name == 'push' &&
       needs.docker.result == 'success'
 
