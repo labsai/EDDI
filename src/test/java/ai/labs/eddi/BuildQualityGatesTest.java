@@ -1506,6 +1506,58 @@ class BuildQualityGatesTest {
     }
 
     /**
+     * A job condition without a status function gets GitHub's implicit
+     * {@code success()}, which grades every job upstream — not only the listed
+     * {@code needs}. {@code ui-gate} passes skipped ui-* jobs on purpose, so any
+     * job behind it that relies on the implicit {@code success()} is skipped on
+     * every push that does not touch {@code ui/}. That is how backend-only merges
+     * stopped publishing their {@code -b} image (2026-09-15 to 2026-10-21) with
+     * every test green. Tag-only jobs are exempt: detect-changes forces
+     * {@code ui=true} for a tag, so the ui-* jobs always run there.
+     */
+    @Test
+    @DisplayName("no job behind ui-gate that runs on a non-tag push relies on the implicit success()")
+    void jobsBehindUiGateGradeTheirNeedsExplicitly() throws Exception {
+        Map<String, String> jobs = ciJobBlocks();
+        assertTrue(jobs.containsKey("ui-gate") && jobs.containsKey("docker"),
+                CI_WORKFLOW + " no longer declares both ui-gate and docker, so this assertion grades nothing");
+
+        List<String> trapped = new ArrayList<>();
+        for (String job : jobs.keySet()) {
+            String condition = ciJobCondition(jobs.get(job));
+            boolean behindUiGate = !job.equals("ui-gate") && dependsOn(jobs, job, "ui-gate", new TreeSet<>());
+            boolean tagOnly = condition.startsWith("startsWith(github.ref, 'refs/tags/')");
+            boolean statusFunction = condition.matches(".*\\b(always|cancelled|failure|success)\\(\\).*");
+            if (behindUiGate && !tagOnly && !statusFunction) {
+                trapped.add(job);
+            }
+        }
+        assertEquals(List.of(), trapped, "these jobs in " + CI_WORKFLOW + " are skipped on every backend-only push, because"
+                + " their implicit success() also grades the skipped ui-* jobs behind ui-gate. Start the condition with"
+                + " !cancelled() and grade the needs explicitly, as docker does.");
+
+        String docker = ciJobCondition(jobs.get("docker"));
+        for (String gate : List.of("!cancelled()", "!contains(needs.*.result, 'failure')", "!contains(needs.*.result, 'cancelled')",
+                "!contains(needs.*.result, 'skipped')")) {
+            assertTrue(docker.contains(gate), "docker in " + CI_WORKFLOW + " must keep `" + gate + "`: without the implicit"
+                    + " success() it is what stops a failed or skipped need from publishing an image");
+        }
+        assertFalse(docker.contains("always()"), "docker must not use always(); see the NOTE above its condition");
+    }
+
+    private static boolean dependsOn(Map<String, String> jobs, String job, String target, TreeSet<String> visited) {
+        if (!visited.add(job) || !jobs.containsKey(job)) {
+            return false;
+        }
+        for (String need : ciJobNeeds(jobs.get(job))) {
+            if (need.equals(target) || dependsOn(jobs, need, target, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * One Node version, written three times: {@code pom.xml}'s {@code node.version}
      * (what the shipped UI is built with), ci.yml's {@code NODE_VERSION} (every
      * {@code setup-node}), and {@code mise.toml}. CI used a floating {@code 22}

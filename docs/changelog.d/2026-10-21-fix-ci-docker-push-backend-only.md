@@ -16,4 +16,6 @@ The tag-only jobs (release, Red Hat publish, post-release) are unchanged: on a t
 
 ### Verification
 
-The merge of this branch is itself the first test: it should publish a `-b` image. The history check behind the diagnosis — Docker push outcome against the ui-* jobs for the last 25 `main` pushes — lines up one to one.
+- The history check behind the diagnosis — Docker push outcome against the ui-* jobs for the last 25 `main` pushes — lines up one to one.
+- `BuildQualityGatesTest#jobsBehindUiGateGradeTheirNeedsExplicitly` fails on any job behind `ui-gate` that runs on a non-tag push without a status function, and on a docker condition that loses its explicit `needs` checks or gains `always()`. Against the old `ci.yml` it fails, naming docker, smoke-test and preflight-push.
+- The merge of this branch does **not** prove the fix: it changes `ci.yml`, which the `ui` path filter counts as a UI change, so its ui-* jobs run and it would publish anyway. The proof is the next backend-only push to `main` — it must publish a `-b` image and run Smoke Test.

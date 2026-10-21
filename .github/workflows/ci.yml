@@ -2391,7 +2391,8 @@ jobs:
     # skipped this job too, and no -b image was published for any merge that did
     # not touch ui/. !cancelled() is a status function, so GitHub adds no
     # success(); the contains() checks keep the gate the NOTE above insists on:
-    # every job listed in needs must have succeeded, skipped ones included.
+    # every job listed in needs must have succeeded — a failed, cancelled or
+    # skipped one blocks the push. BuildQualityGatesTest pins this.
     if: >
       !cancelled() &&
       !contains(needs.*.result, 'failure') &&
