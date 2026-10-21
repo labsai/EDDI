@@ -154,6 +154,34 @@ class ConversationMemoryStoreResilienceTest {
         var result = loaded.getConversationSteps().get(0).getWorkflows().get(0).getLifecycleTasks().get(0).getResult();
         assertInstanceOf(Context.class, result);
         assertEquals("de", ((Context) result).getValue());
+        assertNull(((Context) result).getSecret(), "an ordinary entry stays unmarked");
+    }
+
+    // ==================== secret context ====================
+
+    /**
+     * A HITL resume may re-supply a secret only for a key the paused turn stored as
+     * one, and reads that flag from the loaded snapshot. Rebuilding the entry from
+     * type and value alone dropped it, so every such resume was refused with 400.
+     */
+    @Test
+    @DisplayName("a secret context entry keeps its secret flag when the conversation is loaded")
+    void secretContextKeepsItsFlag() throws Exception {
+        var raw = new LinkedHashMap<String, Object>();
+        raw.put("type", Context.ContextType.string.name());
+        raw.put("value", MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        raw.put("secret", true);
+
+        var snapshot = snapshotWithContext(raw);
+        FindIterable<ConversationMemorySnapshot> iterable = mock(FindIterable.class);
+        when(objectCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(snapshot);
+
+        var loaded = store.loadConversationMemorySnapshot(VALID_ID);
+        var result = loaded.getConversationSteps().get(0).getWorkflows().get(0).getLifecycleTasks().get(0).getResult();
+        var context = assertInstanceOf(Context.class, result);
+        assertEquals(Boolean.TRUE, context.getSecret());
+        assertEquals(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER, context.getValue());
     }
 
     private void assertLoadsWith(LinkedHashMap<String, Object> rawContext) throws Exception {

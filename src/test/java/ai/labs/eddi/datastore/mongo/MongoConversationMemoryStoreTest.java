@@ -21,6 +21,8 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -161,6 +163,30 @@ class MongoConversationMemoryStoreTest {
         @DisplayName("load non-existent — returns null")
         void loadNonExistent() {
             assertNull(store.loadConversationMemorySnapshot("000000000000000000000000"));
+        }
+
+        /**
+         * A HITL resume may re-supply a secret only for a key the paused turn stored as
+         * one, and reads that flag from the loaded snapshot. The stored document always
+         * carried it; the load dropped it, so every such resume was refused with 400.
+         */
+        @Test
+        @DisplayName("a secret context entry keeps its secret flag through a round trip")
+        void secretContextEntryKeepsItsFlag() throws IResourceStore.ResourceStoreException {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1",
+                    ConversationState.AWAITING_HUMAN);
+            snapshot.getConversationSteps().add(stepWithSecretAndOrdinaryContext());
+
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            var results = store.loadConversationMemorySnapshot(id).getConversationSteps().get(0)
+                    .getWorkflows().get(0).getLifecycleTasks();
+            var token = assertInstanceOf(Context.class, results.get(0).getResult());
+            assertEquals(Boolean.TRUE, token.getSecret());
+            assertEquals(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER, token.getValue());
+            var language = assertInstanceOf(Context.class, results.get(1).getResult());
+            assertNull(language.getSecret(), "an ordinary entry stays unmarked");
+            assertEquals("de", language.getValue());
         }
 
         /**
@@ -1390,5 +1416,25 @@ class MongoConversationMemoryStoreTest {
         snapshot.setConversationState(state);
         snapshot.setEnvironment(Deployment.Environment.production);
         return snapshot;
+    }
+
+    /**
+     * A step as a paused turn stores it: a secret context entry, replaced by the
+     * placeholder and marked secret, next to an ordinary one.
+     */
+    private static ConversationMemorySnapshot.ConversationStepSnapshot stepWithSecretAndOrdinaryContext() {
+        var secret = new Context(Context.ContextType.string, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+        secret.setSecret(true);
+        var token = new ConversationMemorySnapshot.ResultSnapshot();
+        token.setKey("context:userToken");
+        token.setResult(secret);
+        var language = new ConversationMemorySnapshot.ResultSnapshot();
+        language.setKey("context:language");
+        language.setResult(new Context(Context.ContextType.string, "de"));
+        var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+        workflow.setLifecycleTasks(new ArrayList<>(List.of(token, language)));
+        var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+        step.setWorkflows(new ArrayList<>(List.of(workflow)));
+        return step;
     }
 }
