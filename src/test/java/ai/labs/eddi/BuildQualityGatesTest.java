@@ -1524,10 +1524,13 @@ class BuildQualityGatesTest {
 
         List<String> trapped = new ArrayList<>();
         for (String job : jobs.keySet()) {
-            String condition = ciJobCondition(jobs.get(job));
+            String condition = ciJobCondition(jobs.get(job)).replaceFirst("^\\$\\{\\{\\s*", "");
             boolean behindUiGate = !job.equals("ui-gate") && dependsOn(jobs, job, "ui-gate", new TreeSet<>());
             boolean tagOnly = condition.startsWith("startsWith(github.ref, 'refs/tags/')");
-            boolean statusFunction = condition.matches(".*\\b(always|cancelled|failure|success)\\(\\).*");
+            // Only always() and cancelled() lift the upstream-wide grading. An explicit
+            // success() grades the same ancestors as the implicit one, and failure()
+            // never runs on a green build.
+            boolean statusFunction = condition.matches(".*\\b(always|cancelled)\\(\\).*");
             if (behindUiGate && !tagOnly && !statusFunction) {
                 trapped.add(job);
             }
