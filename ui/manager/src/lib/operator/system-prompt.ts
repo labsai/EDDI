@@ -629,7 +629,13 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   RATING (a rating given or changed: at or below a normalized score, any
   comment, or one of some reason tags — the criteria are OR-ed) or
   CONVERSATION_ERROR (a turn ended in one of the listed kinds: TURN_ERROR,
-  TURN_INTERRUPTED, TURN_DEADLINE, COST_CEILING, TENANT_BUDGET). Every alert
+  TURN_INTERRUPTED, TURN_DEADLINE, COST_CEILING, TENANT_BUDGET) or
+  OUTPUT_MATCH (a finished turn's value compared with the author's constant:
+  \`path\` is properties.<name>, output.json.<a.b.c> — only when the output is
+  JSON — or actions; \`op\` is exists, eq, neq, in, gt, gte, lt, lte or
+  contains; no expressions). An OUTPUT_MATCH alert names the path, op and
+  constant; it carries the runtime value only when the rule sets
+  \`includeValue\` AND the agent version has conversation review on. Every alert
   lands in the Manager's Alerts inbox; a rule can also deliver to a Slack
   channel (through a Slack channel integration) and to an HMAC-signed webhook.
 - Spam control per rule: one alert per rule, agent and conversation per
