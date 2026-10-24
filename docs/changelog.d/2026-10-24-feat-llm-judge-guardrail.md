@@ -27,6 +27,10 @@ A well-formed but wrong answer passed every output guardrail EDDI had: the built
 - **`onExhausted`** is a select under Max retries on an output `reprompt` guardrail: `block` is stored as absent, `deliver-best` as set, and switching the action away from `reprompt` drops it (as it drops `maxRetries`). `deliver-best` on a `classifier` shows the same warning the deploy logs.
 - 28 new `llmEditor.*` keys in all 11 locales. Tests: `task-guardrails-section.test.tsx` (+11) and `guardrails-judge.test.ts` (5).
 
+### Platform Operator
+
+- `system-prompt.ts`: the guardrail bullet lists `judge` and `onExhausted` (what deliver-best delivers, that it is re-screened, what the deploy refuses and warns about); a new `judge` bullet covers its parameters, the `issues` format, the closed-vocabulary reprompt, the could-not-decide reasons and failMode, cost and the timer, and the self-judging note; the docs pointer names the new topics. No allow-list change: the operator already edits LLM configs through `PATCH`. `operator-revision.json` 36 → 37.
+
 ### Tests and checks
 
 `JudgeGuardrailTest` (47: parsing — fenced, prose-wrapped, undeclared codes, wrong shapes, oversized replies; closed-vocabulary hint and corrective message; template data; native schema enum, provider matrix and override; parameter pass-through; cost; unavailable/timeout/deadline; failMode both ways; validate bounds; warnings), `GuardrailServiceDeliverBestTest` (13: selection, ties, default block, re-screen with redaction, block and reprompt, deploy refusals and the classifier warning), `LlmTaskGuardrailsTest` (+5: acceptance reprompt with the author's fix text and judge cost in `audit:cost`; deliver-best in plain chat with PII redaction, SSE and audit records; tool loop; cascade; configure refusals), `GuardrailConfigDeserializationTest` (+1). Mutation-checked: free judge text in the hint, an undeclared code accepted, a missing `issues` field read as a pass, the re-screen removed, and a reprompt finding let through the re-screen — each fails the suite.
