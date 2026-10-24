@@ -27,6 +27,11 @@ A well-formed answer can still be wrong: an invoice whose `total` is not the sum
 - **Duplicate keys are unparseable**, so the check and a downstream reader of `convertToObject` cannot see two different totals.
 - **No new meter**; `eddi.guardrail.triggered` counts the action as for every type.
 
+### Manager and operator
+
+- The guardrail editor offers `expression` on the output side (`guardrails.ts`: type list, phases, no-rewrite set, list-row summary `ISSUE · expr`, type text). Its sheet has fields for `expr`, `issue` and `fix`, and `expressionProblems()` mirrors `validate()`'s refusals (required, length caps, the issue-code pattern) as warnings; the expression's syntax is left to the server, which names the position at deploy. 16 new `llmEditor.grExpr*`/`grTypeExpression*` keys in all 11 locales. Tests: `guardrails-expression.test.ts` and an `expression` block in `task-guardrails-section.test.tsx`.
+- The Platform Operator's prompt explains the type (parameters, the language, null rules, the reasons, closed-vocabulary feedback, deploy refusals with a position); `operator-revision.json` 36 → 37. #1121 also takes 37, so whichever merges second re-bumps.
+
 ### Next
 
-- When #1121 lands, `expression` can use `onExhausted: deliver-best` like any reprompting type; whichever of the two PRs merges second must re-bump `operator-revision.json`.
+- When #1121 lands, `expression` can use `onExhausted: deliver-best` like any reprompting type, and its `HINT_HEADER`/`HINT_FOOTER` can be shared with the judge's (same wording today).
