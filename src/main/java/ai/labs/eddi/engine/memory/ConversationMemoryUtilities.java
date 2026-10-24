@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -302,7 +303,11 @@ public class ConversationMemoryUtilities {
         if (MemoryKeys.AUDIT_TOKEN_USAGE.equals(key)) {
             return false;
         }
-        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
+        // The kept revision candidate is the frozen request of a model answer (system
+        // prompt, history, tool results) — resume machinery, like a tool pause's
+        // transcript, which never reaches this view either.
+        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error")
+                || key.equals(HitlRevisionCandidate.STEP_KEY);
     }
 
     /**
@@ -893,6 +898,7 @@ public class ConversationMemoryUtilities {
      */
     public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
         stripRequestFingerprintsForRead(snapshot);
+        stripRevisionCandidates(snapshot);
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
             return snapshot;
         }
@@ -925,6 +931,30 @@ public class ConversationMemoryUtilities {
             }
         }
         return snapshot;
+    }
+
+    /**
+     * Removes the revision candidate a RULE pause keeps ({@code onRejection:
+     * REVISE}) from every step of a snapshot served to an approver: it is the
+     * frozen request of the answer under review — the compiled system prompt and
+     * every tool result — which is resume machinery like
+     * {@code chatTranscriptJson}. The answer itself stays visible in the step's
+     * output.
+     */
+    private static void stripRevisionCandidates(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        for (var step : snapshot.getConversationSteps()) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow != null && workflow.getLifecycleTasks() != null) {
+                    workflow.getLifecycleTasks().removeIf(result -> result != null && HitlRevisionCandidate.STEP_KEY.equals(result.getKey()));
+                }
+            }
+        }
     }
 
     /**

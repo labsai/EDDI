@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.lifecycle;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 
 import java.util.List;
@@ -35,4 +36,18 @@ public interface ILifecycleManager {
             throws LifecycleException, ConversationStopException, ConversationPauseException;
 
     void addLifecycleTask(ILifecycleTask lifecycleTask);
+
+    /**
+     * Has the task at {@code absoluteIndex} revise its earlier answer after a human
+     * rejected it with a note ({@code hitlConfig.onRejection: REVISE}).
+     *
+     * @return whether a revision was stored; the default (a manager that cannot
+     *         revise) is {@code false}, which the caller treats as "apply the
+     *         rejection as before"
+     * @since 6.6.0
+     */
+    default boolean reviseAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, HitlRevisionRequest request)
+            throws LifecycleException, ConversationPauseException {
+        return false;
+    }
 }

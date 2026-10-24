@@ -13,8 +13,10 @@ import jakarta.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
@@ -78,6 +80,24 @@ public class AgentGroupConfiguration {
      * exists to prevent.
      */
     private boolean recordDissents;
+
+    /** Upper bound of {@link #maxReworks}, enforced at save time. */
+    public static final int MAX_REWORKS_LIMIT = 5;
+
+    /**
+     * How many times a task that fails VERIFY goes back to its member within the
+     * same run (E2): the task returns to {@code ASSIGNED} with the verifier's
+     * feedback, the preceding EXECUTE phase runs it again and VERIFY checks it
+     * again, up to this many times per task; then it stays {@code FAILED}.
+     * {@code 0} (default) is the behaviour before 6.6: a failed verification is
+     * final. Bounded by {@code protocol.maxTurns} and the cost ceiling like every
+     * turn, and not applied when the EXECUTE phase gates tasks for human approval
+     * ({@code hitlConfig.granularity: TASK}) — the human decides those.
+     * {@code 0}..{@value #MAX_REWORKS_LIMIT}.
+     *
+     * @since 6.6.0
+     */
+    private int maxReworks;
 
     /**
      * Whether and how far members may file their own tasks mid-discussion (I5).
@@ -1005,8 +1025,18 @@ public class AgentGroupConfiguration {
      *            the shared {@code SummarizationService} needs LLM provider/model
      *            coordinates and credentials that {@code AgentGroupConfiguration}
      *            does not carry, so wiring it needs config this item does not add
+     * @param mode
+     *            {@code "SIMILARITY"} (default, the behaviour before 6.6): the
+     *            judge scores agreement between this repeat and the previous one
+     *            against {@code threshold}. {@code "VERDICT"} (E2): the judge
+     *            reviews this repeat's result against the discussion's question and
+     *            the phase ends once it passes — {@code threshold} is not used, and
+     *            since nothing is compared, {@code minRepeats} may be 1 (absent =
+     *            1, the check runs after every repeat). Either way a verdict that
+     *            cannot be parsed never ends the phase. The all-abstained exit
+     *            applies in both modes
      */
-    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
+    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode) {
 
         /**
          * The lowest {@code minRepeats} that can mean anything — see the record
@@ -1016,23 +1046,40 @@ public class AgentGroupConfiguration {
         public static final double DEFAULT_THRESHOLD = 0.8;
         public static final String JUDGE_MODERATOR = "MODERATOR";
         public static final String JUDGE_SERVICE = "SERVICE";
+        /** Agreement between consecutive repeats (default). */
+        public static final String MODE_SIMILARITY = "SIMILARITY";
+        /** The judge's pass/fail review of the current repeat (E2). */
+        public static final String MODE_VERDICT = "VERDICT";
 
         /**
          * Normalizes at the one choke point every reader passes through, so no consumer
          * has to re-derive defaults from a partially-specified config (a JSON config
-         * naming only {@code enabled} is the common case).
+         * naming only {@code enabled} is the common case). An unknown {@code mode} is
+         * kept as written so save-time validation can name it.
          */
         public ConvergenceConfig {
-            minRepeats = Math.max(minRepeats, MIN_COMPARABLE_REPEATS);
+            mode = mode == null || mode.isBlank() ? MODE_SIMILARITY : mode.trim().toUpperCase(Locale.ROOT);
+            minRepeats = Math.max(minRepeats, MODE_VERDICT.equals(mode) ? 1 : MIN_COMPARABLE_REPEATS);
             if (threshold <= 0.0 || threshold > 1.0) {
                 threshold = DEFAULT_THRESHOLD;
             }
             judge = judge == null || judge.isBlank() ? JUDGE_MODERATOR : judge.trim().toUpperCase();
         }
 
+        /** Backward-compatible constructor without {@code mode}: SIMILARITY. */
+        public ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
+            this(enabled, minRepeats, threshold, judge, null);
+        }
+
         /** Convenience: enabled with every other setting defaulted. */
         public ConvergenceConfig(boolean enabled) {
             this(enabled, MIN_COMPARABLE_REPEATS, DEFAULT_THRESHOLD, JUDGE_MODERATOR);
+        }
+
+        /** Whether the phase ends on a passing verdict rather than on agreement. */
+        @JsonIgnore
+        public boolean isVerdictMode() {
+            return MODE_VERDICT.equals(mode);
         }
     }
 
@@ -1311,6 +1358,14 @@ public class AgentGroupConfiguration {
 
     public void setRecordDissents(boolean recordDissents) {
         this.recordDissents = recordDissents;
+    }
+
+    public int getMaxReworks() {
+        return maxReworks;
+    }
+
+    public void setMaxReworks(int maxReworks) {
+        this.maxReworks = maxReworks;
     }
 
     /**

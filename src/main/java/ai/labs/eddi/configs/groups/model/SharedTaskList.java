@@ -646,4 +646,46 @@ public class SharedTaskList {
             awardedBids.put(taskId, bid);
         }
     }
+
+    // ==================== E2 — reworks within a run ====================
+
+    /**
+     * taskId → how many times VERIFY sent the task back for rework in this run
+     * ({@code maxReworks}). Absent = 0. Persisted with the discussion, so the bound
+     * holds across a pause; a document written before 6.6 has none (identity hop,
+     * no schema bump: an older pod re-saving drops the counts, after which a task
+     * can at worst be reworked up to {@code maxReworks} more times, still inside
+     * {@code maxTurns} and the cost ceiling).
+     */
+    private Map<String, Integer> reworkCounts = new ConcurrentHashMap<>();
+
+    public Map<String, Integer> getReworkCounts() {
+        return reworkCounts;
+    }
+
+    public void setReworkCounts(Map<String, Integer> reworkCounts) {
+        this.reworkCounts = reworkCounts != null ? new ConcurrentHashMap<>(reworkCounts) : new ConcurrentHashMap<>();
+    }
+
+    /** Reworks the task has had in this run. */
+    public synchronized int reworkCount(String taskId) {
+        Integer count = taskId != null ? reworkCounts.get(taskId) : null;
+        return count != null ? count : 0;
+    }
+
+    /**
+     * FAILED → ASSIGNED for another attempt, with the verifier's feedback as the
+     * {@code verificationNote} the member's next input carries (the same transition
+     * and the same feedback channel as {@code onTaskRejection: RETRY}), and the
+     * rework counted.
+     *
+     * @return the task as reset, with the count already incremented
+     */
+    public synchronized TaskItem reworkTask(String taskId, String verifierFeedback) {
+        TaskItem existing = requireTask(taskId);
+        requireStatus(existing, TaskStatus.FAILED, "rework");
+        TaskItem reset = resetFromAnyToAssigned(taskId, verifierFeedback);
+        reworkCounts.merge(taskId, 1, Integer::sum);
+        return reset;
+    }
 }

@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
@@ -333,6 +335,27 @@ public interface IConversationMemory extends Serializable {
         return null;
     }
     default void setHitlResumeDecision(HitlDecision decision) {
+    }
+
+    /**
+     * The agent's {@code hitlConfig.onRejection} policy for this turn (NOT
+     * persisted); {@code null} = the default SKIP, and nothing is captured.
+     */
+    default HitlRevisionPolicy getHitlRevisionPolicy() {
+        return null;
+    }
+    default void setHitlRevisionPolicy(HitlRevisionPolicy policy) {
+    }
+
+    /**
+     * The latest model answer of this turn that a later RULE pause could have a
+     * human revise (NOT persisted here: the conversation copies it into the paused
+     * step, see {@link HitlRevisionCandidate#STEP_KEY}).
+     */
+    default HitlRevisionCandidate getHitlRevisionCandidate() {
+        return null;
+    }
+    default void setHitlRevisionCandidate(HitlRevisionCandidate candidate) {
     }
 
     // === Deferred user-memory writes ===
