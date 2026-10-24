@@ -498,7 +498,15 @@
     "yourChanges": "Suas alterações",
     "discardMessage": "Todas as alterações não salvas nesta página voltam ao que a versão {{version}} contém.",
     "deployed": "Agente implantado",
-    "deployFailedTitle": "A implantação falhou."
+    "deployFailedTitle": "A implantação falhou.",
+    "hitlNotifyEnable": "Avisar por e-mail quando este agente aguardar aprovação",
+    "hitlNotifyRecipients": "Destinatários (separados por vírgula ou um por linha)",
+    "hitlNotifyPlaceholder": "aprovadores@example.com, lider-ops@example.com",
+    "hitlNotifyHint": "Um e-mail por pausa, enviado pelo serviço de e-mail do sistema desta implantação (eddi.mail.smtp.*, definido pelo operador). Leva à página de Aprovações, não contém conteúdo da conversa e não pode aprovar nada.",
+    "hitlNotifyEmpty": "Adicione pelo menos um endereço ou desative as notificações por e-mail.",
+    "hitlNotifyTooMany": "No máximo {{max}} endereços — use uma lista de distribuição para mais.",
+    "hitlNotifyInvalid": "A entrada {{position}} não é um endereço simples como nome@example.com.",
+    "hitlNotifyDuplicate": "A entrada {{position}} repete um endereço anterior."
   },
   "wizard": {
     "title": "Assistente de Agent"

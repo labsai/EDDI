@@ -497,7 +497,15 @@
     "yourChanges": "आपके बदलाव",
     "discardMessage": "इस पेज के सभी बिना सहेजे बदलाव संस्करण {{version}} की सामग्री पर लौट आएंगे।",
     "deployed": "एजेंट डिप्लॉय हो गया",
-    "deployFailedTitle": "डिप्लॉयमेंट विफल रहा।"
+    "deployFailedTitle": "डिप्लॉयमेंट विफल रहा।",
+    "hitlNotifyEnable": "जब यह एजेंट स्वीकृति की प्रतीक्षा करे, तो लोगों को ईमेल भेजें",
+    "hitlNotifyRecipients": "प्राप्तकर्ता (अल्पविराम से अलग या प्रति पंक्ति एक)",
+    "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
+    "hitlNotifyHint": "हर विराम पर एक ईमेल, इस डिप्लॉयमेंट के सिस्टम मेलर (eddi.mail.smtp.*, ऑपरेटर द्वारा सेट) से भेजा जाता है। इसमें स्वीकृतियाँ पेज का लिंक होता है, बातचीत की कोई सामग्री नहीं होती, और यह कुछ भी स्वीकृत नहीं कर सकता।",
+    "hitlNotifyEmpty": "कम से कम एक पता जोड़ें, या ईमेल सूचनाएँ बंद करें।",
+    "hitlNotifyTooMany": "अधिकतम {{max}} पते — अधिक के लिए वितरण सूची का उपयोग करें।",
+    "hitlNotifyInvalid": "प्रविष्टि {{position}} name@example.com जैसा साधारण पता नहीं है।",
+    "hitlNotifyDuplicate": "प्रविष्टि {{position}} पहले के किसी पते को दोहराती है।"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"

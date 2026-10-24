@@ -497,7 +497,15 @@
     "yourChanges": "Ihre Änderungen",
     "discardMessage": "Alle ungespeicherten Änderungen auf dieser Seite werden auf den Stand von Version {{version}} zurückgesetzt.",
     "deployed": "Agent bereitgestellt",
-    "deployFailedTitle": "Bereitstellung fehlgeschlagen."
+    "deployFailedTitle": "Bereitstellung fehlgeschlagen.",
+    "hitlNotifyEnable": "Personen per E-Mail benachrichtigen, wenn dieser Agent auf eine Genehmigung wartet",
+    "hitlNotifyRecipients": "Empfänger (durch Komma getrennt oder einer pro Zeile)",
+    "hitlNotifyPlaceholder": "freigabe@example.com, ops-leitung@example.com",
+    "hitlNotifyHint": "Eine E-Mail pro Pause, versendet über den System-Mailer dieser Installation (eddi.mail.smtp.*, vom Betreiber konfiguriert). Sie verlinkt die Seite Genehmigungen, enthält keine Gesprächsinhalte und kann nichts genehmigen.",
+    "hitlNotifyEmpty": "Mindestens eine Adresse eintragen oder die E-Mail-Benachrichtigung ausschalten.",
+    "hitlNotifyTooMany": "Höchstens {{max}} Adressen — für mehr eine Verteilerliste verwenden.",
+    "hitlNotifyInvalid": "Eintrag {{position}} ist keine einfache Adresse wie name@example.com.",
+    "hitlNotifyDuplicate": "Eintrag {{position}} wiederholt eine frühere Adresse."
   },
   "wizard": {
     "title": "Agent-Assistent"

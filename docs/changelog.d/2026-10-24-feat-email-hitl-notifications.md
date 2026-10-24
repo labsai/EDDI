@@ -84,3 +84,35 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
   recipient as a SHA-256 hash plus domain (the audit ledger is write-once). **GDPR**: `EmailLedgerGdprParticipant`
   (`emailLedger`) erases/exports rows by the user id's address and the directory's recorded email;
   `IGdprParticipant.order()` makes the user directory run last so the address is still readable.
+
+### Manager and the Platform Operator
+
+- The agent's **Human-in-the-Loop** settings gain "Email people when this agent waits for approval" with a
+  recipients field (`agent-config-sections.tsx`, parser in `lib/hitl-notify.ts` mirroring the save-time rules: 1–20,
+  plain ASCII, no duplicates). As with the approval timeout, an unsavable list never enters the draft; the field shows
+  what is wrong. Eight new `agentDetail.hitlNotify*` keys in all 11 locales.
+- **Operator prompt** (`system-prompt.ts`): how email notifications are set up — the operator's
+  `eddi.mail.smtp.*`, the agent's `hitlConfig.notify.email.recipients` in the Manager (the operator cannot write
+  `hitlConfig`), what the mail contains, why there is no "all approvers" switch. No new endpoint, so `tool-scopes.ts`
+  is unchanged. **Operator revision 36 → 37.**
+- Docs: [`hitl.md` → Email notifications](../hitl.md#email-notifications) (with a sample config),
+  [`configuration-reference.md` → Email](../configuration-reference.md#email), [`metrics.md`](../metrics.md#hitl-metrics),
+  [`security.md` → the operator policy](../security.md#the-operator-policy--the-system-mailers-relay),
+  [`connections.md`](../connections.md), [`gdpr-compliance.md`](../gdpr-compliance.md),
+  [`compliance-data-flow.md`](../compliance-data-flow.md).
+
+### For Phase 2 and 3
+
+- The ledger API is the one they extend: add inbound states and a stranded-turn query to `IEmailMessageLedger`,
+  `Kind.REPLY` rows get their own worker (`claimDue` takes a kind), `sourceRef` carries the conversation step a
+  reply is rebuilt from. The unique `(integrationId, direction, messageId)` key is already the inbound dedup key.
+- The SMTP client is `SystemMailer` for operator relays only; a channel's author-configured SMTP must use
+  `SafeSocketConnector.resolve` (the author policy), not `resolveOperator`.
+- Group discussions (`AWAITING_APPROVAL`) are not notified yet; `GroupHitlCoordinator` commits group pauses in three
+  places and would need its own event.
+
+```decision-log
+| 2026-10-24 | HITL email notifications go to configured recipients only, not to "every approver" | EDDI's approvers are role holders in the identity provider, which EDDI cannot enumerate; a list built from past sign-ins would keep mailing a revoked approver indefinitely | Recording roles in the user directory at sign-in (stale and unrevokable); mailing the conversation owner (usually the end user, not an approver) |
+| 2026-10-24 | The audit entry of a notification records the recipient as SHA-256 + domain, not the address | The audit ledger is write-once and erasure only pseudonymises its userId, so a plain address would outlive an erasure; the hash still answers "was this address mailed?" for someone who has it | Plain address (unerasable personal data); no recipient at all (unauditable) |
+| 2026-10-24 | Operator-configured relays get their own socket policy instead of a bypass | An on-premises relay on a private address or port 25 is a normal deployment, but the pinning, metadata refusal and TLS verification are still worth having; a bypass would lose them | Allowing private addresses through eddi.email.allowed-hosts (would open them to channel authors too); opening a raw socket outside SafeSocketConnector |
+```

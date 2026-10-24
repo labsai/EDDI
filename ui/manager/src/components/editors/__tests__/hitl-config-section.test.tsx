@@ -148,4 +148,56 @@ describe("HitlConfigSection", () => {
           }));
     });
   });
+
+  describe("email notifications (hitlConfig.notify.email)", () => {
+    it("an agent without notify shows the switch off and no recipients field", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByTestId("hitl-notify-email-enabled")).not.toBeChecked();
+      expect(screen.queryByTestId("hitl-notify-email-recipients")).not.toBeInTheDocument();
+    });
+
+    it("a valid list is written as notify.email.recipients", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(mockOnChange).not.toHaveBeenCalled();
+
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), {
+        target: { value: "approvers@example.com, ops-lead@example.com" },
+      });
+
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({
+          notify: { email: { recipients: ["approvers@example.com", "ops-lead@example.com"] } },
+        }),
+      }));
+    });
+
+    it("an invalid list never reaches the draft and says what is wrong", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByTestId("hitl-notify-email-enabled")).toBeChecked();
+      expect(screen.getByTestId("hitl-notify-email-recipients")).toHaveValue("ops@example.com");
+
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "ops@example.com, not-an-address" } });
+
+      expect(mockOnChange).not.toHaveBeenCalled();
+      expect(screen.getByTestId("hitl-notify-email-hint")).toHaveClass("text-destructive");
+    });
+
+    it("switching it off removes notify", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ notify: null }),
+      }));
+    });
+  });
 });

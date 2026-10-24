@@ -498,7 +498,15 @@
     "yourChanges": "Vos modifications",
     "discardMessage": "Toutes les modifications non enregistrées de cette page reviennent à l’état de la version {{version}}.",
     "deployed": "Agent déployé",
-    "deployFailedTitle": "Échec du déploiement."
+    "deployFailedTitle": "Échec du déploiement.",
+    "hitlNotifyEnable": "Avertir par e-mail quand cet agent attend une approbation",
+    "hitlNotifyRecipients": "Destinataires (séparés par des virgules ou un par ligne)",
+    "hitlNotifyPlaceholder": "approbateurs@example.com, responsable-ops@example.com",
+    "hitlNotifyHint": "Un e-mail par pause, envoyé par le service d'envoi système de ce déploiement (eddi.mail.smtp.*, configuré par l'exploitant). Il renvoie vers la page Approbations, ne contient aucun contenu de conversation et ne peut rien approuver.",
+    "hitlNotifyEmpty": "Ajoutez au moins une adresse, ou désactivez les notifications par e-mail.",
+    "hitlNotifyTooMany": "{{max}} adresses au maximum — utilisez une liste de diffusion pour davantage.",
+    "hitlNotifyInvalid": "L'entrée {{position}} n'est pas une adresse simple comme nom@example.com.",
+    "hitlNotifyDuplicate": "L'entrée {{position}} répète une adresse précédente."
   },
   "wizard": {
     "title": "Assistant Agent"

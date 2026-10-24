@@ -25,7 +25,8 @@ import {
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import { MAX_NOTIFY_RECIPIENTS, MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
@@ -1108,6 +1109,63 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout, finite]);
   const invalid = finite && (!timeoutDraft.trim() || !isValidIsoDuration(timeoutDraft.trim()));
 
+  // Email notifications (hitlConfig.notify.email). Same rule as the timeout: an
+  // unsavable recipients list never enters the draft (the backend answers 400),
+  // the field shows what is typed and says what is wrong.
+  const savedRecipients = hitl.notify?.email?.recipients ?? [];
+  const [notifyOn, setNotifyOn] = useState(savedRecipients.length > 0);
+  const [recipientsDraft, setRecipientsDraft] = useState(savedRecipients.join(", "));
+  const savedRecipientsKey = savedRecipients.join(",");
+  useEffect(() => {
+    // Resync only when the stored list differs from what the draft says — a
+    // commit of the user's own typing must not reformat the field under them.
+    setRecipientsDraft((draft) =>
+      parseNotifyRecipients(draft).recipients.join(",") === savedRecipientsKey
+        ? draft
+        : savedRecipientsKey.split(",").filter(Boolean).join(", "),
+    );
+    if (savedRecipientsKey) setNotifyOn(true);
+  }, [savedRecipientsKey]);
+  const parsedRecipients = parseNotifyRecipients(recipientsDraft);
+
+  function commitRecipients(draft: string) {
+    setRecipientsDraft(draft);
+    const parsed = parseNotifyRecipients(draft);
+    if (parsed.error) return;
+    if (parsed.recipients.join(",") !== savedRecipientsKey) {
+      patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+    }
+  }
+
+  function setNotify(on: boolean) {
+    setNotifyOn(on);
+    if (!on) {
+      patchHitl({ notify: null });
+      return;
+    }
+    const parsed = parseNotifyRecipients(recipientsDraft);
+    if (!parsed.error) patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+  }
+
+  function recipientsProblem(): string | null {
+    const position = (parsedRecipients.index ?? 0) + 1;
+    switch (parsedRecipients.error) {
+      case "empty":
+        return t("agentDetail.hitlNotifyEmpty", "Add at least one address, or switch email notifications off.");
+      case "tooMany":
+        return t("agentDetail.hitlNotifyTooMany", "At most {{max}} addresses — use a distribution list for more.", {
+          max: MAX_NOTIFY_RECIPIENTS,
+        });
+      case "invalid":
+        return t("agentDetail.hitlNotifyInvalid", "Entry {{position}} is not a plain address like name@example.com.", { position });
+      case "duplicate":
+        return t("agentDetail.hitlNotifyDuplicate", "Entry {{position}} repeats an earlier address.", { position });
+      default:
+        return null;
+    }
+  }
+  const recipientsError = notifyOn ? recipientsProblem() : null;
+
   return (
     <EditorSection
       label={t("agentDetail.hitlConfig", "Human-in-the-Loop")}
@@ -1242,6 +1300,48 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                       })
                     }
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Email notifications — sent through the deployment's system mailer.
+                The mail links to the Approvals page and decides nothing. */}
+            <div className="border-t border-border pt-3">
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={notifyOn}
+                  onChange={(e) => setNotify(e.target.checked)}
+                  disabled={disabled}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="hitl-notify-email-enabled"
+                />
+                {t("agentDetail.hitlNotifyEnable", "Email people when this agent waits for approval")}
+              </label>
+              {notifyOn && (
+                <div className="mt-3">
+                  <label className="mb-1 block text-[10px] text-muted-foreground">
+                    {t("agentDetail.hitlNotifyRecipients", "Recipients (comma or one per line)")}
+                  </label>
+                  <textarea
+                    value={recipientsDraft}
+                    onChange={(e) => commitRecipients(e.target.value)}
+                    disabled={disabled}
+                    rows={2}
+                    placeholder={t("agentDetail.hitlNotifyPlaceholder", "approvers@example.com, ops-lead@example.com")}
+                    className={`w-full rounded-md border bg-background px-2 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${recipientsError ? "border-destructive" : "border-input"}`}
+                    data-testid="hitl-notify-email-recipients"
+                  />
+                  <p
+                    className={`mt-1 text-[10px] leading-relaxed ${recipientsError ? "text-destructive" : "text-muted-foreground"}`}
+                    data-testid="hitl-notify-email-hint"
+                  >
+                    {recipientsError ??
+                      t(
+                        "agentDetail.hitlNotifyHint",
+                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator). It links to the Approvals page, carries no conversation content, and cannot approve anything.",
+                      )}
+                  </p>
                 </div>
               )}
             </div>

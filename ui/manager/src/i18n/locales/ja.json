@@ -497,7 +497,15 @@
     "yourChanges": "あなたの変更",
     "discardMessage": "このページの未保存の変更はすべて、バージョン {{version}} の内容に戻ります。",
     "deployed": "エージェントをデプロイしました",
-    "deployFailedTitle": "デプロイに失敗しました。"
+    "deployFailedTitle": "デプロイに失敗しました。",
+    "hitlNotifyEnable": "このエージェントが承認待ちになったらメールで通知する",
+    "hitlNotifyRecipients": "宛先（カンマ区切り、または 1 行に 1 件）",
+    "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
+    "hitlNotifyHint": "一時停止ごとに 1 通、このデプロイのシステムメーラー（eddi.mail.smtp.*、運用者が設定）から送信されます。承認ページへのリンクを含み、会話の内容は含まず、何かを承認することはできません。",
+    "hitlNotifyEmpty": "アドレスを 1 件以上追加するか、メール通知をオフにしてください。",
+    "hitlNotifyTooMany": "アドレスは最大 {{max}} 件です。それ以上は配布リストを使ってください。",
+    "hitlNotifyInvalid": "{{position}} 件目は name@example.com のような通常のアドレスではありません。",
+    "hitlNotifyDuplicate": "{{position}} 件目は前のアドレスと重複しています。"
   },
   "wizard": {
     "title": "Agent ウィザード"
