@@ -26,6 +26,8 @@ import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
+import ai.labs.eddi.datastore.postgres.PostgresAlertEventStore;
+import ai.labs.eddi.datastore.postgres.PostgresAlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationRatingStore;
 import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
@@ -39,6 +41,10 @@ import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
+import ai.labs.eddi.engine.alerts.IAlertEventStore;
+import ai.labs.eddi.engine.alerts.IAlertRuleStore;
+import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
+import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -149,6 +155,18 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConversationRatingStore conversationRatingStore(Instance<ConversationRatingStore> mongo,
                                                             Instance<PostgresConversationRatingStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAlertRuleStore alertRuleStore(Instance<AlertRuleStore> mongo, Instance<PostgresAlertRuleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAlertEventStore alertEventStore(Instance<AlertEventStore> mongo, Instance<PostgresAlertEventStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

@@ -583,6 +583,24 @@ class RestScheduleStoreExpandedTest {
     class ValidationEdgeCases {
 
         @Test
+        @DisplayName("should refuse a schedule that claims the alert maintenance role, on create and update")
+        void alertMaintenanceIsServerMinted() throws Exception {
+            var s = new ScheduleConfiguration();
+            s.setAgentId("agent-1");
+            s.setCronExpression("0 9 * * *");
+            s.setMessage("hello");
+            s.setMetadata(Map.of("alertType", "alert_maintenance"));
+
+            Response create = sut.createSchedule(s);
+            Response update = sut.updateSchedule("s1", s);
+
+            assertEquals(400, create.getStatus());
+            assertEquals(400, update.getStatus());
+            assertTrue(String.valueOf(create.getEntity()).contains("alerts-maintenance"));
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
         @DisplayName("should reject both cronExpression and oneTimeAt")
         void cronAndOneTime() {
             var s = new ScheduleConfiguration();

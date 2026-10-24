@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.ratings.ConversationRatingMetrics;
 import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
+import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.RatingLimits;
 import ai.labs.eddi.engine.ratings.RatingScales;
@@ -30,6 +31,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
@@ -72,6 +74,14 @@ public class RestConversationRating implements IRestConversationRating {
     private final GdprComplianceService gdprComplianceService;
     private final ConversationRatingMetrics metrics;
     private final Clock clock;
+
+    /**
+     * The alert hook for ratings, observed by {@code AlertDispatcher} (which only
+     * enqueues). Field-injected so the constructor stays as it is; {@code null} in
+     * unit tests that build the resource by hand.
+     */
+    @Inject
+    Event<ConversationRatingSaved> ratingSaved;
 
     @Inject
     public RestConversationRating(ConversationAccessGuard conversationAccessGuard, OwnershipValidator ownershipValidator,
@@ -210,7 +220,21 @@ public class RestConversationRating implements IRestConversationRating {
                 RatingScales.normalize(scale, request.score()), tags, comment, null, null);
         ConversationRating stored = ratingStore.upsert(rating);
         metrics.recordRating(stored);
+        announce(stored);
         return stored.withoutReview();
+    }
+
+    /** Tells the alert hook; a failure there never fails the rating. */
+    private void announce(ConversationRating stored) {
+        Event<ConversationRatingSaved> event = ratingSaved;
+        if (event == null) {
+            return;
+        }
+        try {
+            event.fire(new ConversationRatingSaved(stored));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Alert hook for rating %s failed: %s", sanitize(stored.id()), e.getMessage());
+        }
     }
 
     private ConversationDescriptor liveDescriptor(String conversationId) {

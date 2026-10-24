@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -200,6 +201,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return ingestionGuard;
             }
 
+            Response alertGuard = rejectAlertBody(schedule, "create");
+            if (alertGuard != null) {
+                return alertGuard;
+            }
+
             Response cadenceGuard = rejectTeamCadenceBody(schedule, null, "create");
             if (cadenceGuard != null) {
                 return cadenceGuard;
@@ -283,6 +289,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response ingestionGuard = rejectIngestionBody(schedule, "update");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response alertGuard = rejectAlertBody(schedule, "update");
+            if (alertGuard != null) {
+                return alertGuard;
             }
 
             // ONE read of the stored row, shared by every guard below and by the
@@ -943,6 +954,24 @@ public class RestScheduleStore implements IRestScheduleStore {
                             + RagIngestionSchedules.METADATA_TYPE_KEY + "=true) cannot be created or updated via "
                             + "this API. They are managed automatically when a knowledge base is saved. "
                             + "Run a source via POST /ragstore/rags/{id}/sources/{sourceId}/run.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses a schedule body that claims an alert role ({@code alertType}). The
+     * {@code alerts-maintenance} schedule is created by the server itself; a second
+     * one made by hand would only run the same job twice.
+     */
+    private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && AlertSchedules.claimsAlertType(schedule.getMetadata())) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
+                    AlertSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as alert maintenance (metadata " + AlertSchedules.METADATA_TYPE_KEY
+                            + ") cannot be created or updated via this API. The server manages the " + AlertSchedules.SCHEDULE_NAME
+                            + " schedule itself.")
                     .build();
         }
         return null;
