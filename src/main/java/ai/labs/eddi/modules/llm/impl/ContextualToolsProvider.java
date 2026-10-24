@@ -331,7 +331,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
         if (thisTurn == 0 && earlierTurns == 0) {
             return;
         }
-        var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
+        var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId(),
+                AttachmentContextExtractor.withheldStorageRefs(memory));
         tools.add(tool);
         LOGGER.debugf(
                 "[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' (%d this turn, %d from earlier turns)",

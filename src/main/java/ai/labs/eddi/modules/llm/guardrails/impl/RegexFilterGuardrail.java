@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.utils.RegexDeadline;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -33,9 +34,11 @@ import java.util.regex.Pattern;
  * them free of nested quantifiers. All of them together get
  * {@link #MATCH_BUDGET_MS} per text; past it the text is undecided
  * ({@code pattern_timeout}) and the guardrail's {@code failMode} applies — a
- * {@code block} guardrail refuses the text, it never lets it pass unchecked. A
- * pattern that is not a valid regular expression fails the deploy
- * ({@link #validate}).
+ * {@code block} guardrail refuses the text, it never lets it pass unchecked.
+ * The rewrites of the patterns that finished are reported with it, so failing
+ * open a {@code redact} keeps them (and a {@code block} that already matched
+ * still blocks). A pattern that is not a valid regular expression fails the
+ * deploy ({@link #validate}).
  */
 @ApplicationScoped
 public class RegexFilterGuardrail implements ContentGuardrail {
@@ -79,19 +82,20 @@ public class RegexFilterGuardrail implements ContentGuardrail {
         String replacement = Matcher.quoteReplacement(context.parameter("replacement", DEFAULT_REPLACEMENT));
         String result = text;
         boolean matched = false;
-        long deadline = BoundedRegex.deadline(MATCH_BUDGET_MS);
+        long deadline = RegexDeadline.deadlineIn(MATCH_BUDGET_MS);
         try {
             for (Pattern pattern : patterns) {
-                Matcher matcher = BoundedRegex.matcher(pattern, result, deadline);
+                Matcher matcher = RegexDeadline.matcher(pattern, result, deadline);
                 if (matcher.find()) {
+                    String rewritten = matcher.replaceAll(replacement);
                     matched = true;
-                    result = matcher.replaceAll(replacement);
+                    result = rewritten;
                 }
             }
-        } catch (BoundedRegex.BudgetExceededException e) {
+        } catch (RegexDeadline.MatchDeadlineExceededException e) {
             LOGGER.warnf("regex-filter patterns of task '%s' exceeded their %d ms budget — the text is undecided", context.taskId(),
                     MATCH_BUDGET_MS);
-            throw new GuardrailUndecidedException(REASON_TIMEOUT, 0.0);
+            throw new GuardrailUndecidedException(REASON_TIMEOUT, 0.0, matched ? GuardrailVerdict.rewrite(result, REASON_TIMEOUT) : null);
         }
         return matched ? GuardrailVerdict.rewrite(result, "pattern_match") : GuardrailVerdict.allow();
     }

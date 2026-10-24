@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.utils.RegexDeadline;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -81,14 +82,14 @@ public class PromptInjectionGuardrail implements ContentGuardrail {
 
     @Override
     public GuardrailVerdict evaluate(String text, GuardrailContext context) {
-        long deadline = BoundedRegex.deadline(MATCH_BUDGET_MS);
+        long deadline = RegexDeadline.deadlineIn(MATCH_BUDGET_MS);
         try {
             for (Pattern pattern : patterns(context)) {
-                if (BoundedRegex.matcher(pattern, text, deadline).find()) {
+                if (RegexDeadline.matcher(pattern, text, deadline).find()) {
                     return GuardrailVerdict.violation("prompt_injection_pattern");
                 }
             }
-        } catch (BoundedRegex.BudgetExceededException e) {
+        } catch (RegexDeadline.MatchDeadlineExceededException e) {
             LOGGER.warnf("prompt-injection patterns of task '%s' exceeded their %d ms budget — the text is undecided", context.taskId(),
                     MATCH_BUDGET_MS);
             throw new GuardrailUndecidedException(RegexFilterGuardrail.REASON_TIMEOUT, 0.0);

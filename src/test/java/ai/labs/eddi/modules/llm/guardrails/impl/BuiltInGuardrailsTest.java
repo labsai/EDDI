@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
@@ -18,6 +19,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -225,6 +228,73 @@ class BuiltInGuardrailsTest {
 
             assertTrue(blocked.isBlocked());
             assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, blocked.blocked().reason());
+        }
+
+        private GuardrailConfig filter(String action, String failMode) {
+            var config = new GuardrailConfig();
+            config.setType(RegexFilterGuardrail.TYPE);
+            config.setAction(action);
+            var parameters = new HashMap<String, String>();
+            // the first pattern matches and finishes, the second one times out
+            parameters.put("patterns", "falcon\n" + EVIL_PATTERN);
+            if (failMode != null) {
+                parameters.put("failMode", failMode);
+            }
+            config.setParameters(parameters);
+            return config;
+        }
+
+        private static final String PARTLY_MATCHED = EVIL_INPUT + " project falcon";
+
+        @Test
+        @DisplayName("redact, failing open: the rewrites made before the timeout are kept, recorded as a redact with pattern_timeout")
+        void timeout_redactOpen_keepsPartialRewrite() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+            var outcomes = new ArrayList<GuardrailOutcome>();
+
+            var result = service.screenInput(List.of(filter("redact", null)), PARTLY_MATCHED, input(), outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertFalse(result.text().contains("falcon"), result.text());
+            assertTrue(result.text().endsWith("project [REDACTED]"), result.text());
+            assertEquals(1, outcomes.size());
+            assertEquals("redact", outcomes.get(0).action().label());
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, outcomes.get(0).reason());
+        }
+
+        @Test
+        @DisplayName("redact, failMode closed: a timeout blocks the text")
+        void timeout_redactClosed_blocks() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+
+            var result = service.screenInput(List.of(filter("redact", "closed")), PARTLY_MATCHED, input(), o -> {
+            });
+
+            assertTrue(result.isBlocked());
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, result.blocked().reason());
+        }
+
+        @Test
+        @DisplayName("block, failMode open: a pattern that did match before the timeout still blocks — a match is a finding")
+        void timeout_blockOpen_withAMatch_blocks() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+
+            var result = service.screenInput(List.of(filter("block", "open")), PARTLY_MATCHED, input(), o -> {
+            });
+
+            assertTrue(result.isBlocked());
+        }
+
+        @Test
+        @DisplayName("block, failMode open, nothing matched before the timeout: a warning, the text passes")
+        void timeout_blockOpen_noMatch_warns() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+            var outcomes = new ArrayList<GuardrailOutcome>();
+
+            var result = service.screenInput(List.of(filter("block", "open")), EVIL_INPUT, input(), outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertEquals("warn", outcomes.get(0).action().label());
         }
     }
 

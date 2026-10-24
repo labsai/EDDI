@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.RegexDeadline;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.TextContent;
@@ -408,13 +409,13 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 return null;
             }
             String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
-            Matcher matcher = BoundedRegex.matcher(pattern.get(), tail, BoundedRegex.deadline(LABEL_MATCH_BUDGET_MS));
+            Matcher matcher = RegexDeadline.matcher(pattern.get(), tail, RegexDeadline.deadlineIn(LABEL_MATCH_BUDGET_MS));
             String found = null;
             try {
                 while (matcher.find()) {
                     found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
                 }
-            } catch (BoundedRegex.BudgetExceededException e) {
+            } catch (RegexDeadline.MatchDeadlineExceededException e) {
                 LOGGER.warnf("Classifier labelPattern exceeded its %d ms match budget — the answer is undecided", LABEL_MATCH_BUDGET_MS);
                 return null;
             }

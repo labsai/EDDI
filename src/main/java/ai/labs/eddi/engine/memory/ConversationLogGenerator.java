@@ -130,9 +130,11 @@ public class ConversationLogGenerator {
                 if (input != null) {
                     var inputText = new Content();
                     inputText.setType(text);
-                    if (skipFallbackOutputs && isInputWithheldStep(allSteps, index)) {
+                    if (skipFallbackOutputs && index < conversationOutputs.size() - 1 && isInputWithheldStep(allSteps, index)) {
                         // An input guardrail refused this message: nothing of it — text,
-                        // extracts or files — reaches a model on a later turn.
+                        // extracts or files — reaches a model on a later turn. The current
+                        // turn is not "later": another task of this turn decides it with its
+                        // own guardrails.
                         contentList.clear();
                         inputText.setValue(WITHHELD_INPUT);
                     } else {
@@ -258,7 +260,14 @@ public class ConversationLogGenerator {
         if (allSteps == null || stepIndex < 0 || stepIndex >= allSteps.size()) {
             return false;
         }
-        IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
+        return isInputWithheld(allSteps.get(allSteps.size() - 1 - stepIndex));
+    }
+
+    /** {@link #isInputWithheldStep} for a step at hand. */
+    public static boolean isInputWithheld(IConversationMemory.IConversationStep step) {
+        if (step == null) {
+            return false;
+        }
         List<IData<Object>> flags = step.getAllData(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX);
         if (flags != null && flags.stream().anyMatch(flag -> Boolean.TRUE.equals(flag.getResult()))) {
             return true;

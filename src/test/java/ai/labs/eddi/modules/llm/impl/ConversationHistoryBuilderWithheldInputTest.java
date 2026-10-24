@@ -125,6 +125,18 @@ class ConversationHistoryBuilderWithheldInputTest {
     }
 
     @Test
+    @DisplayName("the current turn is not withheld by its own flag: another task of the same turn decides it with its own guardrails")
+    void currentTurn_isLeftToThisTasksGuardrails() {
+        var memory = memoryOf(List.of(turn("q0", "a0"), turn(INJECTION, BLOCK)), List.of(Map.of(), blockedStep()));
+
+        List<ChatMessage> live = builder.buildMessages(memory, null, null, -1, true);
+        List<ChatMessage> summarized = builder.buildMessages(memory, null, null, -1, true, "summary", 1);
+
+        assertEquals(INJECTION, text(live.getLast()));
+        assertEquals(INJECTION, text(summarized.getLast()));
+    }
+
+    @Test
     @DisplayName("a step written before the flag existed counts through its input-block audit record")
     void legacyAuditRecord_withholdsTheTurn() {
         var legacy = Map.<String, List<IData<Object>>>of("llm:fallback:", List.of(data(Boolean.TRUE)), "audit:guardrail:input:",

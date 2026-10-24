@@ -990,6 +990,42 @@ class LlmTaskGuardrailsTest {
         verify(ragContextProvider, never()).retrieveContext(any(), any(), any());
         verify(gate, times(1)).check(memory);
         assertEquals(Boolean.TRUE, outputItem().getFallback());
+        // never classified — and the classifier does not re-screen history: withheld
+        verify(dataFactory).createData("llm:input_withheld:" + TASK_ID, Boolean.TRUE);
+    }
+
+    @Test
+    @DisplayName("spend refused with only history-screening guardrails: the turn is not withheld (later turns screen it)")
+    void spendRefused_deterministicGuardrails_doNotWithhold() throws Exception {
+        var gate = mock(LlmSpendGate.class);
+        when(gate.check(memory)).thenReturn(new LlmSpendGate.Refusal("tenant_budget", "spent"));
+        llmTask.spendGate = gate;
+        var task = task();
+        task.setInputGuardrails(List.of(guardrail("pii-redaction", "redact"), guardrail("prompt-injection", "block")));
+
+        run(task);
+
+        verify(dataFactory, never()).createData(startsWith("llm:input_withheld:"), any());
+    }
+
+    @Test
+    @DisplayName("the classifier's own cost reaches the ceiling: the gate is asked again before the model, which is not called")
+    void spendGate_askedAgainAfterInputGuardrails() throws Exception {
+        useClassifier();
+        var gate = mock(LlmSpendGate.class);
+        when(gate.check(memory)).thenReturn(null, new LlmSpendGate.Refusal("conversation_ceiling", "reached"));
+        llmTask.spendGate = gate;
+        var classifier = new ClassifierModel("No", null);
+        when(chatModelRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifier);
+        var task = task();
+        task.setInputGuardrails(List.of(classifierGuardrail()));
+
+        run(task);
+
+        assertEquals(1, classifier.requests.size());
+        verify(chatModelRegistry, never()).getOrCreate(eq("openai"), any());
+        verify(gate, times(2)).check(memory);
+        assertEquals(Boolean.TRUE, outputItem().getFallback());
     }
 
     @Test

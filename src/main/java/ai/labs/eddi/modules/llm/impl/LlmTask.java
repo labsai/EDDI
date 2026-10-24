@@ -408,6 +408,11 @@ public class LlmTask implements ILifecycleTask {
         // assembled later; when it is still exactly this text the second pass below
         // reuses this result instead of evaluating again.
         boolean screenInput = spendRefusal == null && guardrailService != null && !isNullOrEmpty(task.getInputGuardrails());
+        if (spendRefusal != null && guardrailService != null && guardrailService.anySkipsHistory(task.getInputGuardrails())) {
+            // Never screened, so a guardrail that does not re-screen history (the
+            // classifier) would never see this message: withhold it from later turns.
+            markInputWithheld(currentStep, task);
+        }
         GuardrailService.TextResult inputPrescreen = null;
         if (screenInput && userInput != null) {
             inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
@@ -670,6 +675,12 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        // Asked again once the input guardrails have run: a classifier call is priced,
+        // and the model call that follows must not overshoot a conversation ceiling
+        // that call reached.
+        if (spendRefusal == null && screenInput && spendGate != null) {
+            spendRefusal = spendGate.check(memory);
+        }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
         // the model will not be called: an unsettled half-open probe would block it.

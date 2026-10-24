@@ -143,6 +143,25 @@ public class GuardrailService {
     }
 
     /**
+     * Whether any of these input guardrails is a known type that does not re-screen
+     * the history window ({@link ContentGuardrail#screensHistory()} false, e.g. the
+     * classifier): a message such a guardrail never saw on its own turn is never
+     * checked by it later.
+     */
+    public boolean anySkipsHistory(List<GuardrailConfig> configs) {
+        if (configs == null) {
+            return false;
+        }
+        for (GuardrailConfig config : configs) {
+            ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
+            if (guardrail != null && guardrail.phases().contains(GuardrailPhase.INPUT) && !guardrail.screensHistory()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether these output guardrails can change the answer — then the task must
      * buffer it: tokens already streamed to a client cannot be taken back.
      * {@code warn}-only guardrails do not force buffering.
@@ -339,6 +358,7 @@ public class GuardrailService {
             }
             GuardrailAction action = GuardrailAction.parse(config.getAction());
             Evaluation evaluation = evaluate(guardrail, text, context.with(GuardrailPhase.INPUT, config.getParameters(), context.messages()));
+            GuardrailVerdict verdict;
             if (evaluation.failed()) {
                 cost += evaluation.failureCostUsd();
                 // A block guardrail that cannot check the message refuses it (fail closed,
@@ -348,10 +368,16 @@ public class GuardrailService {
                     emit(onOutcome, outcome);
                     return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost, true);
                 }
-                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, evaluation.failureReason(), 0));
-                continue;
+                if (evaluation.partial() == null) {
+                    emit(onOutcome,
+                            new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, evaluation.failureReason(), 0));
+                    continue;
+                }
+                // Failing open, but it did find something before giving up: act on that.
+                verdict = evaluation.partial();
+            } else {
+                verdict = evaluation.verdict();
             }
-            GuardrailVerdict verdict = evaluation.verdict();
             cost += verdict.costUsd();
             if (!verdict.triggered()) {
                 continue;
@@ -448,7 +474,10 @@ public class GuardrailService {
                             screened = HISTORY_PLACEHOLDER;
                             break;
                         }
-                        continue;
+                        if (evaluation.partial() == null) {
+                            continue;
+                        }
+                        verdict = evaluation.partial();
                     }
                     // Paid for whether or not it fires.
                     cost += verdict.costUsd();
@@ -533,6 +562,7 @@ public class GuardrailService {
                 GuardrailAction action = GuardrailAction.parse(config.getAction());
                 Evaluation evaluation = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
                         context.messages()));
+                GuardrailVerdict verdict;
                 if (evaluation.failed()) {
                     cost += evaluation.failureCostUsd();
                     // A block or reprompt guardrail that cannot verify the answer withholds it
@@ -540,11 +570,17 @@ public class GuardrailService {
                     if (failsClosed(config, action)) {
                         return blocked(config, evaluation.failureReason(), attempts, reprompts, cost, onOutcome);
                     }
-                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
-                            attempts));
-                    continue;
+                    if (evaluation.partial() == null) {
+                        emit(onOutcome,
+                                new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
+                                        attempts));
+                        continue;
+                    }
+                    // Failing open, but it did find something before giving up: act on that.
+                    verdict = evaluation.partial();
+                } else {
+                    verdict = evaluation.verdict();
                 }
-                GuardrailVerdict verdict = evaluation.verdict();
                 cost += verdict.costUsd();
                 if (!verdict.triggered()) {
                     continue;
@@ -682,7 +718,7 @@ public class GuardrailService {
      * reported that it could not decide — the reason to record and what the failed
      * attempt cost.
      */
-    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd) {
+    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd, GuardrailVerdict partial) {
         boolean failed() {
             return verdict == null;
         }
@@ -698,19 +734,19 @@ public class GuardrailService {
             if (verdict == null) {
                 LOGGER.warnf("Guardrail '%s' returned no verdict on %s for task '%s' — treated as a guardrail error", guardrail.type(),
                         context.phase().label(), context.taskId());
-                return new Evaluation(null, REASON_ERROR, 0.0);
+                return new Evaluation(null, REASON_ERROR, 0.0, null);
             }
-            return new Evaluation(verdict, null, 0.0);
+            return new Evaluation(verdict, null, 0.0, null);
         } catch (GuardrailUndecidedException e) {
             String reason = e.reason() != null && !e.reason().isBlank() ? e.reason() : REASON_ERROR;
             LOGGER.infof("Guardrail '%s' could not decide on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
                     context.phase().label(), context.taskId(), reason);
             double cost = Double.isFinite(e.costUsd()) && e.costUsd() > 0.0 ? e.costUsd() : 0.0;
-            return new Evaluation(null, reason, cost);
+            return new Evaluation(null, reason, cost, e.partialFinding());
         } catch (RuntimeException e) {
             LOGGER.warnf("Guardrail '%s' failed on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
                     context.phase().label(), context.taskId(), e.getClass().getSimpleName());
-            return new Evaluation(null, REASON_ERROR, 0.0);
+            return new Evaluation(null, REASON_ERROR, 0.0, null);
         }
     }
 
