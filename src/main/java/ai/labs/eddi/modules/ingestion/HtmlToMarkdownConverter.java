@@ -138,10 +138,11 @@ public class HtmlToMarkdownConverter {
             return "";
         }
         Document doc = Jsoup.parse(html);
-        // Hidden content goes first, while the <style> blocks it reads are still
-        // there. Web pages get no assumed background: theirs usually comes from a
-        // stylesheet, and guessing white would delete the text of a dark page.
-        HiddenContentFilter.removeHidden(doc, false);
+        // Page mode is conservative: script reveals what a page hides with
+        // display:none, hidden or opacity (accordions, tabs, "read more"), and that
+        // is content a knowledge base wants. Only comments, 1px text, transparent
+        // text and explicitly same-coloured text go.
+        HiddenContentFilter.removeHidden(doc, HiddenContentFilter.Mode.PAGE);
         return convertDocument(doc, baseUrl, maxLength, true);
     }
 
@@ -151,11 +152,13 @@ public class HtmlToMarkdownConverter {
      * <p>
      * The same walk as {@link #convert(String, String, int)}, with three
      * differences that follow from mail being written by a stranger rather than
-     * published as a page: the hidden-content pass assumes the white background and
-     * black text every mail client renders on, so white-on-white text is dropped;
-     * the walk is not scoped to {@code main}/{@code article}, since a mail
-     * template's "content" wrapper does not make the greeting above it chrome; and
-     * the {@code <title>}, which mail clients never show, is not emitted.
+     * published as a page: the hidden-content pass runs in its strict
+     * {@link HiddenContentFilter.Mode#MAIL} mode — mail runs no script, so
+     * {@code display:none} and the like are never revealed, and the white
+     * background and black text every mail client renders on are assumed; the walk
+     * is not scoped to {@code main}/{@code article}, since a mail template's
+     * "content" wrapper does not make the greeting above it chrome; and the
+     * {@code <title>}, which mail clients never show, is not emitted.
      *
      * @param html
      *            the mail's HTML part, already stripped of quoted history if the
@@ -175,7 +178,7 @@ public class HtmlToMarkdownConverter {
      * modifies.
      */
     public String convertMail(Document doc, int maxLength) {
-        HiddenContentFilter.removeHidden(doc, true);
+        HiddenContentFilter.removeHidden(doc, HiddenContentFilter.Mode.MAIL);
         return convertDocument(doc, null, maxLength, false);
     }
 
