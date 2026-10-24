@@ -42,6 +42,73 @@ introduced or removes scope that bought little. The sections below are already u
 
 Decisions D1–D6 (§12) are taken as recommended, with D6 changed per R7.
 
+### 0.1 Second pass: end-to-end experience (added 2026-10-24)
+
+The first two passes produced a dashboard an admin has to remember to open. Feedback nobody
+notices is wasted, so the admin side gets a **triage loop** and **push alerts**, and the
+user side gets explicit UX rules.
+
+**Admin — triage (PR 1 model + API, PR 3 UI).**
+- Each rating carries `reviewStatus` (`NEW` | `REVIEWED`), `reviewedBy`, `reviewedAt`, optional `reviewNote` (≤ 2000 chars). A user re-rating resets it to `NEW`.
+- `PATCH /ratings/{id}` (same scoping as §5.2) sets status/note; `POST /ratings/review` marks a filtered set reviewed in bulk.
+- `GET /ratings/attention-count?agentId` → number of `NEW` ratings that are **low** (normalized ≤ 0.5) **or carry a comment**, scoped to what the caller may see. Cheap indexed count.
+- Manager: a **Feedback sidebar badge** with that count, exactly like the approvals badge in `components/layout/sidebar.tsx` (same polling/query-key approach). The Feedback page opens on an **"Needs attention"** tab (NEW + low-or-commented, newest first); each row has *Mark reviewed*, *add note*, *Open conversation*; bulk select. A dashboard tile "Feedback needing attention".
+
+**Admin — push alerts (PR 5, generalized in [§0.2](#02-third-pass-alert-rules-not-just-ratings)).**
+Rating alerts are one *source* of the general alert-rule system in §0.2, not a `ratingConfig.alerts` block.
+
+### 0.2 Third pass: alert rules, not just ratings (added 2026-10-24)
+
+Admins want to hear about more than bad ratings: **errors**, and **conditions on what an agent
+returns** (e.g. a field in the agent's JSON output, or a property the turn set). So PR 5 builds
+one alerting mechanism with several sources instead of a rating-only feature.
+
+**Why not just the existing pipeline route?** Today a designer *can* extract a field with
+`property.json`, match it in `behavior.json` and call a Slack webhook from `httpcalls.json`.
+That stays valid, but it is wiring per agent, runs inside the turn (latency, failure coupling),
+has no throttling, digest, retry or inbox, and **cannot report errors** — a pipeline that failed
+cannot run its own httpcall. Alerts are evaluated outside the pipeline, after the turn.
+
+**Model.**
+- **`AlertRule`** (new admin resource, store with Mongo/Postgres twins):
+  `{ name, enabled, scope: {agentIds[] | all}, source, condition, delivery[], throttle, digest }`.
+  Who may write: admins for `all`/multi-agent scope; editors for rules scoped to agents they hold EDIT on.
+- **Sources (v1):**
+  | `source` | Fires when | Condition fields |
+  | --- | --- | --- |
+  | `RATING` | a rating is created or changed | `maxNormalizedScore`, `onComment`, `tags[]` |
+  | `CONVERSATION_ERROR` | a turn ends in `ERROR` / `EXECUTION_INTERRUPTED`, a turn deadline is exceeded, or the cost ceiling stops a turn | `errorKinds[]` (allow-listed enum) |
+  | `OUTPUT_MATCH` | a turn completes and a value in the turn's result matches | `path`, `op`, `value` (below) |
+- **`OUTPUT_MATCH` condition** — a deliberately small, safe matcher, **no expression engine, no template evaluation of runtime data** (AGENTS.md §4.4):
+  - `path` addresses `properties.<name>` (conversation properties after the turn), `output.json.<a.b.c>` (the agent's output parsed as JSON when it is JSON), or `actions` (the turn's action list). Dot paths only, max depth 8, no wildcards.
+  - `op`: `exists`, `eq`, `neq`, `in`, `gt`, `gte`, `lt`, `lte`, `contains` (string/array). `value` is the rule author's constant.
+  - Example: `{ "path": "properties.escalate", "op": "eq", "value": true }`, `{ "path": "output.json.sentiment", "op": "in", "value": ["angry","frustrated"] }`, `{ "path": "actions", "op": "contains", "value": "handoff_requested" }`.
+- **`AlertEvent`** (outbox + log): `{ ruleId, source, agentId, agentVersion, conversationId, firedAt, summary, deliveryStatus per target, attempts, acknowledgedBy/At }`. Written **before** delivery, so nothing is lost on a crash; delivery retries with backoff; failures are visible.
+
+**Evaluation.**
+- One hook where a turn's outcome is final (the turn runner — locate in `ConversationStepRunner` / `Conversation` where the state is set; one place, not each error site), plus the rating write path. The hook only enqueues; matching and delivery run on a bounded executor off the turn thread. A full queue drops with a counter and a WARN, never blocks a turn.
+- Rules per agent cached (Caffeine, invalidated on rule save).
+
+**Delivery.** Slack via a channel integration (`ChannelIntegrationConfiguration` / `ChannelTargetRouter`), webhook via `OutboundHttp` (SSRF policy, body cap, timeout) with an **HMAC signature header** using the existing `HmacSignatures`, and always the **Manager Alerts inbox**.
+
+**Spam control (cluster-safe).** Dedupe key `(ruleId, agentId, conversationId)` within the throttle window; per-rule cap N per window counted from the `AlertEvent` store (shared DB, so it holds across replicas); overflow is recorded but delivered only in the next digest. Digests (`HOURLY`/`DAILY`) run on `ScheduleFireExecutor`.
+
+**Privacy.** Alert payloads never carry a user id or conversation text. They name the rule, the agent and version, the conversation id with a Manager link, and *what* matched (path + op + the rule's own constant), not the runtime value. Exceptions: a rating comment (the user addressed it to the team, disclosed in the card), truncated to 280 chars; and `includeValue: true` on an `OUTPUT_MATCH` rule, honoured only when the agent version has `conversationReview` enabled.
+
+**Manager.** An **Alerts** page: rules editor (source picker, condition builder with a path field and operator dropdown, delivery targets with a "Send test alert" button, throttle/digest), and an events inbox (filter by source/agent/rule, acknowledge, bulk acknowledge, delivery status with retry). Sidebar badge = unacknowledged events, like the approvals badge. The Feedback badge (§0.1) stays separate, since it is about review work, not incidents.
+
+**Also:** Grafana alert-rule examples on the Micrometer metrics in `docs/monitoring` (for ops teams who already run Grafana); MCP tools `list_alert_events` / `acknowledge_alert`, plus operator read access and the matching prompt text.
+
+**Split.** PR 5a: framework + `RATING` + `CONVERSATION_ERROR` sources + Slack/webhook/inbox delivery + Manager Alerts page. PR 5b: `OUTPUT_MATCH` source + condition builder. Then the cross-UI Playwright E2E.
+
+**User — UX rules (PR 2).**
+- Never nag: the card appears at most once per conversation unless the user opens it; dismissing it is remembered; never blocks input.
+- One tap to rate; comment and tags are optional and appear after the score; immediate "Thanks — your feedback goes to the team running this assistant" state; rating editable later and restored on reload.
+- Accessible (keyboard, screen-reader labels, `aria-pressed`), touch-sized targets, dark mode, all shipped locales.
+- Failure is visible but soft: optimistic UI, rollback with a toast on error.
+
+**End-to-end proof.** A Playwright test in the `Backend E2E` suite: rate in the Chat UI → the rating appears in the Manager "Needs attention" tab with the sidebar badge count → mark reviewed → badge clears.
+
 ---
 
 ## 1. Summary
@@ -251,6 +318,8 @@ Server-side checks: owner (`requireConversationOwner`), `ratingConfig` enabled o
 | **2. Chat UI** | `rating-api.ts`, thumbs in `MessageBubble`, `RatingCard`, header entry, restore on reload, i18n, tests. | Rating survives reload; disabled agents show nothing. |
 | **3. Manager** | Feedback page, agent detail KPI strip, config editor section, conversation-detail inline ratings, dashboard tile, Manager chat controls, i18n, MSW, tests. | Page works in MSW mode and against a live backend with seeded ratings. |
 | **4. MCP + Operator** | Two MCP tools, plugin skill check, operator prompt + allow-list + revision bump, docs. | Operator answers a ratings question in a live run. |
+| **5a. Alerts framework** | §0.2: `AlertRule` + `AlertEvent` stores, after-turn hook + rating hook, bounded executor, `RATING` and `CONVERSATION_ERROR` sources, Slack/webhook (HMAC-signed)/inbox delivery with retry, cluster-safe throttle + digests on `ScheduleFireExecutor`, Manager Alerts page + badge, MCP/operator, Grafana examples, docs. | A low rating with a comment and a forced turn error each produce exactly one Slack/webhook message and one inbox event; a burst folds into a digest; a turn is never slowed by alerting. |
+| **5b. Output match** | `OUTPUT_MATCH` source, safe path/op matcher, condition builder UI, `includeValue` gated on `conversationReview`; then the cross-UI Playwright E2E (§0.1). | `properties.escalate == true` set by an agent fires one alert without exposing conversation text. |
 | *Later* | Slack/Teams reaction capture; low-rating triggers (webhook or HITL takeover once WS7 lands); scheduled LLM theme clustering of comments via `ScheduleFireExecutor` with `maxCostPerRun`; group-conversation ratings. | — |
 
 PR 1 blocks the rest; PRs 2 and 3 can run in parallel against PR 1's API; PR 4 after 3 (operator PRs land serially anyway).
