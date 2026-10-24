@@ -10,9 +10,9 @@ configuration (`ratingConfig`). They live in a store of their own
 conversation memory: memory is loaded on every turn and must stay small, and
 ratings must be aggregated across conversations.
 
-> **Status.** The backend (REST API, storage, metrics, GDPR) and the Chat UI's
-> rating controls are in place. The Manager's Feedback page, MCP tools and push
-> alerts follow in later releases.
+> **Status.** The backend (REST API, storage, metrics, GDPR), the Chat UI's
+> rating controls and the Manager's Feedback page are in place. MCP tools, the
+> Platform Operator and push alerts follow in later releases.
 
 ## Switching ratings on
 
@@ -165,7 +165,9 @@ user wrote *to the team running the agent*, so it is visible to them.
 `environment`, `from`, `to` (ISO-8601 instant, or a date read as UTC; `to` is
 exclusive and a date there includes the whole day), `minScore` / `maxScore`
 (normalized, 0..1), `kind=conversation|message`, `tag`, `hasComment`,
-`reviewStatus=NEW|REVIEWED`, `needsAttention=true`.
+`reviewStatus=NEW|REVIEWED`, `needsAttention=true`, `conversationId` (one
+conversation's ratings — it narrows the scope, never widens it: an editor still
+names the agent).
 
 **Summary** buckets carry `count`, `avgNormalized`, `distribution` (thumbs up/down,
 stars 1–5), `csat` (share of five-star ratings scored 4–5), `thumbsUpRate`,
@@ -195,6 +197,38 @@ who rated).
   for example `?agentId=…&needsAttention=true`. Logged at INFO.
 - **A re-rating resets the triage**: status back to `NEW`, reviewer, time and note
   cleared — the note was about the old rating.
+
+## In the Manager
+
+- **Feedback page** (`/manage/feedback`, sidebar "Feedback", admins and editors).
+  Opens on **Needs attention** — NEW ratings that are low or carry a comment,
+  newest first — with *Mark reviewed*, an internal *Note* and *Open conversation*
+  (only where `canOpenTranscript`) per row, plus bulk review (the selected rows, or
+  everything needing attention for the chosen agent). **All ratings** adds a filter
+  bar (period, version, environment, kind, score, comment, review status, reason),
+  KPI tiles with the change against the previous period, a per-day trend, the score
+  distribution, the most picked reasons (click to filter) and a by-version table in
+  which versions with fewer than 10 ratings are greyed. Filters live in the URL.
+  Export downloads the CSV and warns when the 100,000-row cap cut it short. A
+  non-administrator picks an agent first (the backend's `AGENT_ID_REQUIRED` shows
+  as that prompt, not an error). A triage that collides with a re-rating (409
+  `RATING_CHANGED`) reloads the list and says so.
+- **Sidebar badge and dashboard tile.** For administrators, the attention count
+  (`GET /ratings/attention-count`) shows as a badge on the Feedback entry and, when
+  above zero, as a "Feedback needing attention" tile on the dashboard. Both share one
+  query and poll it every 30 seconds.
+- **Agent configuration.** A **Ratings** section beside "Usage & conversation
+  review" edits every `ratingConfig` field, with the backend's limits checked as you
+  type; the page refuses to save values the backend would reject.
+- **Agent detail.** A compact "Feedback, last 30 days" line (ratings, average,
+  satisfaction, how many need attention) links to the Feedback page filtered to the
+  agent. It appears when the agent asks for ratings or has some.
+- **Conversation detail.** The conversation's rating, its review status and note,
+  and each rated reply's thumb at its step — for a caller the rating list admits.
+- **Manager chat.** The same rating controls as the Chat UI (thumbs, the card from
+  the header, after `askAfterTurns` replies, and after *End conversation* when the
+  agent asks on end), so a designer can try the flow; ratings sent from there carry
+  `channel: "manager"`.
 
 ## Lifetime and privacy
 
