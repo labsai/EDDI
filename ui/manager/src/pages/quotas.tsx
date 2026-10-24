@@ -488,18 +488,34 @@ function QuotaField({
  * the model), so this says which of four states the tenant is in rather than
  * leaving the operator to infer it from a progress bar.
  */
+/**
+ * Dollars for the budget status. Two decimals hide sub-cent spend — a $0.006
+ * spend against a $0.01 cap read "$0.01 of $0.01 … $0.00 left" — so amounts
+ * under a dollar keep up to four decimals, trailing zeros trimmed back to two.
+ */
+function formatUsd(n: number): string {
+  if (n !== 0 && Math.abs(n) < 1) {
+    return `$${n.toFixed(4).replace(/(\.\d\d\d?)0+$/, "$1").replace(/(\.\d\d)0$/, "$1")}`;
+  }
+  return `$${n.toFixed(2)}`;
+}
+
 function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
   const reached = !unlimited && spent >= limit;
-  const money = (n: number) => `$${n.toFixed(2)}`;
+  const money = formatUsd;
 
   let tone = "border-border/50 bg-muted/30 text-muted-foreground";
   let state: string;
-  if (unlimited) {
-    state = t("quotas.budgetUnlimited", "No monthly cost budget is set, so spend is metered but never limited.");
+  // Enforcement first: with it off the backend records no spend at all, so
+  // "metered but never limited" would be untrue for a disabled tenant.
+  if (!enforced && unlimited) {
+    state = t("quotas.budgetDisabled", "Enforcement is off, so spend is neither metered nor limited.");
   } else if (!enforced) {
     state = t("quotas.budgetNotEnforced", "A budget of {{limit}} is set, but enforcement is off, so it is not applied.", { limit: money(limit) });
+  } else if (unlimited) {
+    state = t("quotas.budgetUnlimited", "No monthly cost budget is set, so spend is metered but never limited.");
   } else if (reached) {
     tone = "border-destructive/40 bg-destructive/5 text-destructive";
     state = t(

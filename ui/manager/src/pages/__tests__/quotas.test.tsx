@@ -566,6 +566,52 @@ describe("QuotasPage", () => {
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/never limited/));
   });
 
+  it("does not claim spend is metered for a disabled tenant with no budget", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: -1,
+          enabled: false,
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/neither metered nor limited/));
+    expect(screen.getByTestId("cost-budget-state")).not.toHaveTextContent(/metered but never limited/);
+  });
+
+  it("shows sub-cent spend against a small budget instead of rounding it away", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 0.01,
+          enabled: true,
+        }),
+      ),
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 1,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 0.006,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.006 of $0.01 used this month"));
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.004 left");
+  });
+
   it("describes the saved quota, not an unsaved edit of the form", async () => {
     renderQuotas();
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$2500.00"));
