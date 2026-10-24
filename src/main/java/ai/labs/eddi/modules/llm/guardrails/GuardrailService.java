@@ -501,7 +501,7 @@ public class GuardrailService {
      * reprompter is available, or the turn is out of time — the answer is blocked,
      * unless that guardrail's {@code onExhausted} is {@code deliver-best}: then the
      * attempt it rated best is delivered with a {@code warn}, after one more pass
-     * through every other guardrail (see {@link #deliverBest}).
+     * through the guardrails after it (see {@link #deliverBest}).
      *
      * @param reprompter
      *            the branch's way to ask the same model again, or null when this
@@ -621,9 +621,9 @@ public class GuardrailService {
      * for a guardrail without codes, the last attempt), recorded as a {@code warn}
      * with reason {@code <reason>:delivered_best} and the reprompts sent as its
      * retry count. A quality check giving up must never let an answer past a PII
-     * redaction or a safety check, so the attempt goes through the whole list once
-     * more with the exhausted guardrail skipped and no further reprompts: a
-     * {@code redact} still rewrites it, a {@code warn} is still recorded, and a
+     * redaction or a safety check, so the guardrails after the exhausted one — the
+     * ones that have not seen this attempt — screen it, with no further reprompts:
+     * a {@code redact} still rewrites it, a {@code warn} is still recorded, and a
      * {@code block} — or a {@code reprompt}, which may not re-ask now — blocks it.
      * <p>
      * The re-screen's outcomes are held back until it ends, so the record matches
@@ -650,17 +650,21 @@ public class GuardrailService {
     }
 
     /**
-     * The re-screen of {@link #deliverBest}: every guardrail but the exhausted one,
-     * no reprompts. Its outcomes are collected into {@code pending}, not emitted —
-     * the block outcome included, as the last entry.
+     * The re-screen of {@link #deliverBest}: the guardrails <em>after</em> the
+     * exhausted one, no reprompts. Its outcomes are collected into {@code pending},
+     * not emitted — the block outcome included, as the last entry.
+     * <p>
+     * A {@code deliver-best} guardrail rates an attempt only once every guardrail
+     * before it has screened that same attempt in the same pass: their redactions
+     * are already in the chosen text and their findings already recorded, and an
+     * earlier {@code block} or {@code reprompt} finding would have ended the pass
+     * before the attempt was rated. Running them again would record each finding
+     * twice and call (and bill) a model-backed guardrail twice on the same text.
      */
     private OutputResult rescreen(List<GuardrailConfig> configs, int exhaustedIndex, String chosenText, int attempts,
                                   List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext, List<GuardrailOutcome> pending) {
         String text = chosenText;
-        for (int index = 0; index < configs.size(); index++) {
-            if (index == exhaustedIndex) {
-                continue;
-            }
+        for (int index = exhaustedIndex + 1; index < configs.size(); index++) {
             GuardrailConfig config = configs.get(index);
             ContentGuardrail guardrail = resolve(config, GuardrailPhase.OUTPUT);
             if (guardrail == null) {

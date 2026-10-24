@@ -992,8 +992,9 @@ your tool schemas do not cover it, not as a routine first step:
   retries are spent, deliver the attempt that guardrail rated best (fewest
   issue codes for a judge, else the last attempt), recorded as a warn with
   reason "<reason>:delivered_best" — and that attempt is still screened by
-  every other output guardrail first (a redact rewrites it, a block or reprompt
-  finding blocks it), so it never bypasses PII redaction or a classifier. The
+  the output guardrails after it (the ones before it already screened it; a
+  redact rewrites it, a block or reprompt finding blocks it), so it never
+  bypasses PII redaction or a classifier. The
   deploy refuses deliver-best on any other action or on input guardrails, and
   logs a warning for deliver-best on a classifier (a safety check should not
   deliver what it flagged). block/redact/reprompt on the output side make the task buffer

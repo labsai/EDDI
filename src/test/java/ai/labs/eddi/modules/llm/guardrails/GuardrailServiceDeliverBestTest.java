@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * E1b: {@code onExhausted: deliver-best} on an output {@code reprompt}
  * guardrail — the best-rated attempt is delivered with a {@code warn}, and is
- * still screened by every other guardrail.
+ * still screened by the guardrails after the exhausted one.
  */
 @DisplayName("GuardrailService — onExhausted deliver-best (E1b)")
 class GuardrailServiceDeliverBestTest {
@@ -239,6 +239,25 @@ class GuardrailServiceDeliverBestTest {
             assertTrue(result.isBlocked());
             assertEquals("json-object", result.blocked().type());
             assertEquals(1, correctives.size(), "only the judge's reprompt was sent");
+        }
+
+        @Test
+        @DisplayName("a guardrail before the exhausted one screened the attempt already: it is not run, recorded or billed again")
+        void earlierGuardrailsAreNotRunAgain() throws Exception {
+            List<String> seen = new ArrayList<>();
+            var note = new Scripted("note", text -> {
+                seen.add(text);
+                return text.contains("BAD_") ? GuardrailVerdict.violation("found_note").withCost(0.01) : GuardrailVerdict.allow();
+            });
+            var configs = List.of(config("note", "warn"), deliverBest("judge", 1));
+            var result = service(note, grading()).runOutput(configs, "first BAD_A", answers("second BAD_A BAD_B"), CONTEXT, outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertEquals("first BAD_A", result.text());
+            // Once per attempt (two attempts), never a third time for the delivered one.
+            assertEquals(List.of("first BAD_A", "second BAD_A BAD_B"), seen);
+            assertEquals(2.0, meterRegistry.counter(GuardrailService.METRIC_TRIGGERED, "phase", "output", "type", "note", "action", "warn").count());
+            assertEquals(0.02, result.costUsd(), 1e-9);
         }
 
         @Test

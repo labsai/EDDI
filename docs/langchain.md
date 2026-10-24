@@ -1058,7 +1058,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 | `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
 | `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
 | `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
-| `onExhausted` | `reprompt` on output only: what happens once the retries are spent — `block`, or `deliver-best` to deliver the attempt this guardrail rated best, still screened by every other guardrail. See [When the retries run out](#when-the-retries-run-out-onexhausted). | `block` |
+| `onExhausted` | `reprompt` on output only: what happens once the retries are spent — `block`, or `deliver-best` to deliver the attempt this guardrail rated best, still screened by the guardrails after it. See [When the retries run out](#when-the-retries-run-out-onexhausted). | `block` |
 | `blockMessage` | The answer the user gets when this guardrail blocks. Used as-is — it is never run through the template engine. | `Request blocked by guardrail '<type>'.` / `Response withheld by guardrail '<type>'.` |
 | `parameters` | Per-type settings, plain strings (never templated). Two work for every type: `repromptMessage` overrides the corrective message of a reprompt (`{reason}` is replaced by the guardrail's reason), and `failMode` (`closed`/`open`) decides what a failing guardrail does — see below. | — |
 
@@ -1247,7 +1247,7 @@ Your previous reply needs these corrections:
 Write a new reply that applies them. Reply with the answer only.
 ```
 
-Nothing the judge wrote other than the codes — no critique, no reasoning — and nothing the user or the model wrote ever reaches the producing model. The judge reads untrusted content (retrieved documents, tool results, user input); its free text would be an injection path into the producer. `repromptMessage` still overrides the corrective message, as for every type.
+Nothing the judge wrote other than the codes — no critique, no reasoning — reaches the producing model, and the corrective message contains no text from the judge, the user or the model. The re-ask itself still carries the original request and the rejected answer, as every [`reprompt`](#actions) does; the closed vocabulary keeps the *judge* from adding to them. The judge reads untrusted content (retrieved documents, tool results, user input); its free text would be an injection path into the producer. `repromptMessage` still overrides the corrective message, as for every type.
 
 **Cost and latency.** Each screened answer is one judge call after the model answered, and any action but `warn` makes the task [buffer](#streaming) its answer. Keep `timeoutMs` short and the judge model small; each reprompt is one more model call **and** one more judge call. A model judging its own answers is biased — the deploy logs a note when the judge's provider and model equal the task's. The call is timed by `eddi.guardrail.judge.duration{provider, outcome}` (outcome `pass`, `fail`, `unparseable`, `unavailable` or `timeout`); watch `unparseable` and `unavailable`, which under `failMode: open` switch the check off silently.
 
@@ -1260,7 +1260,7 @@ A `reprompt` guardrail whose `maxRetries` are spent — or that cannot re-ask at
 | `block` (default) | The answer is replaced by the block message, as before. |
 | `deliver-best` | The attempt **this guardrail rated best** is delivered: fewest issue codes for a `judge` (a tie goes to the later attempt), the last attempt for a guardrail without codes. It is recorded as a `warn` with reason `<reason>:delivered_best` and the number of reprompts sent as `retryCount`. |
 
-**A quality check giving up never overrides a safety check.** The delivered attempt goes through the whole list once more, with the exhausted guardrail skipped and no further reprompts: a `redact` (PII) still rewrites it, a `warn` is still recorded, and a `block` — or a `reprompt` finding, which may not re-ask now — blocks it. A guardrail that *could not decide* is not "exhausted": its `failMode` applies as always.
+**A quality check giving up never overrides a safety check.** The guardrails *before* the exhausted one already screened the delivered attempt in the pass that rated it (their redactions are in it, their findings recorded, and a blocking finding would have ended that pass). The guardrails *after* it had not, so they screen it once more, with no further reprompts: a `redact` (PII) still rewrites it, a `warn` is still recorded, and a `block` — or a `reprompt` finding, which may not re-ask now — blocks it. Each guardrail therefore sees the delivered attempt exactly once, and a model-backed one is called once for it. A guardrail that *could not decide* is not "exhausted": its `failMode` applies as always.
 
 `onExhausted: "deliver-best"` is refused at deploy time on any action but `reprompt`, and on input guardrails (an input `reprompt` blocks). On a `classifier` it is allowed but logged as a warning — a safety check that delivers what it flagged defeats its purpose.
 

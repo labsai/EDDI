@@ -1278,8 +1278,8 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * What a {@code reprompt} guardrail does once its retries are spent:
          * {@code block} (the default, also when unset) or {@code deliver-best} —
          * deliver the attempt it rated best, recorded as a {@code warn} and still
-         * screened by every other guardrail. Null when unset; meaningless for any other
-         * action (refused at deploy time). See {@link #deliversBest()}.
+         * screened by the guardrails after it. Null when unset; meaningless for any
+         * other action (refused at deploy time). See {@link #deliversBest()}.
          *
          * @since 6.7.0
          */
