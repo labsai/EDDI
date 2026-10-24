@@ -532,7 +532,10 @@ public class LlmTask implements ILifecycleTask {
         // Forward the current step's attachments to the LLM as multimodal content,
         // gated on the resolved (provider, model) capabilities, honoring any
         // per-task multimodal overrides.
-        forwardAttachments(messages, memory, task, resolvedType, processedParams);
+        // The prompt as it was before the attachments joined it: a cascade step on a
+        // different endpoint gets its own attachment content from this.
+        final List<ChatMessage> promptWithoutAttachments = new ArrayList<>(messages);
+        forwardAttachments(messages, memory, task, resolvedType, processedParams, true);
 
         if (messages.isEmpty()) {
             return;
@@ -693,7 +696,9 @@ public class LlmTask implements ILifecycleTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()));
+                        turnBudget(memory.getTurnDeadline()),
+                        (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, memory, task, resolvedType, processedParams,
+                                stepType, stepParams, screenedInput));
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -1234,7 +1239,7 @@ public class LlmTask implements ILifecycleTask {
             smaller = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, half, includeFirstAgentMessage, summaryPrefix,
                     skipSteps);
         }
-        forwardAttachments(smaller, memory, task, resolvedType, processedParams);
+        forwardAttachments(smaller, memory, task, resolvedType, processedParams, true);
         return smaller;
     }
 
@@ -1244,17 +1249,57 @@ public class LlmTask implements ILifecycleTask {
      * multimodal overrides.
      */
     private void forwardAttachments(List<ChatMessage> messages, IConversationMemory memory, Task task, String resolvedType,
-                                    Map<String, String> processedParams) {
+                                    Map<String, String> processedParams, boolean record) {
         if (attachmentForwarder == null) {
             return;
         }
         var mm = task.getMultimodal();
-        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
-        // Per-task override first, then what an openai-compatible endpoint declares.
-        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, capabilityParams(resolvedType, processedParams));
+        var vision = effectiveVision(task, resolvedType, processedParams);
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
-        attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
+        String model = resolveModelNameOf(processedParams, resolvedType);
+        if (record) {
+            attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio);
+        } else {
+            attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio, false);
+        }
+    }
+
+    /**
+     * The vision decision for the endpoint a request goes to: the per-task override
+     * first, then what an openai-compatible endpoint declares.
+     */
+    private ModelCapabilityService.Support effectiveVision(Task task, String type, Map<String, String> params) {
+        var mm = task.getMultimodal();
+        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        return ModelCapabilityService.visionOverride(taskVision, type, capabilityParams(type, params));
+    }
+
+    /**
+     * The prompt for a cascade step, or null when the task's own prompt is right
+     * for it. Attachments are gated on the endpoint that receives them, and an
+     * {@code openai-compatible} endpoint declares vision itself, so a step on
+     * another endpoint than the task's re-forwards the attachments with its own
+     * decision. Anything else — every non-cascade task, a step on the same
+     * endpoint, and any step when neither side is openai-compatible — keeps the
+     * task's prompt.
+     */
+    private List<ChatMessage> promptForCascadeStep(List<ChatMessage> promptWithoutAttachments, IConversationMemory memory, Task task,
+                                                   String taskType, Map<String, String> taskParams, String stepType,
+                                                   Map<String, String> stepParams, GuardrailService.InputResult screenedInput) {
+        if (attachmentForwarder == null || !(OpenAiCompatibleEndpoint.isType(taskType) || OpenAiCompatibleEndpoint.isType(stepType))) {
+            return null;
+        }
+        boolean sameEndpoint = Objects.equals(stepType, taskType)
+                && Objects.equals(resolveModelNameOf(stepParams, stepType), resolveModelNameOf(taskParams, taskType))
+                && effectiveVision(task, stepType, stepParams) == effectiveVision(task, taskType, taskParams);
+        if (sameEndpoint) {
+            return null;
+        }
+        List<ChatMessage> forStep = new ArrayList<>(promptWithoutAttachments);
+        // The turn's errors and counts were recorded by the task-level pass.
+        forwardAttachments(forStep, memory, task, stepType, stepParams, false);
+        return reapplyInputScreening(memory, task, screenedInput, forStep);
     }
 
     /**

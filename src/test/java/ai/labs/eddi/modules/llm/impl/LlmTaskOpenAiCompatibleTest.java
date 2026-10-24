@@ -29,6 +29,8 @@ import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -51,8 +53,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
@@ -240,5 +244,108 @@ class LlmTaskOpenAiCompatibleTest {
 
         llmTask.execute(memory, config(false));
         verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any());
+    }
+
+    // ---- per-cascade-step vision ----
+
+    private static final String STEP_IMAGE_MARKER = "STEP-IMAGE";
+
+    private static LlmConfiguration cascaded(String[] taskFlags, String stepType, Map<String, String> stepParams) {
+        var cfg = config(false, taskFlags);
+        var task = cfg.tasks().getFirst();
+        var step = new LlmConfiguration.CascadeStep();
+        step.setType(stepType);
+        step.setParameters(stepParams);
+        var cascade = new LlmConfiguration.ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        cascade.setSteps(List.of(step));
+        task.setModelCascade(cascade);
+        return cfg;
+    }
+
+    /**
+     * A forwarder whose per-step (non-recording) pass leaves a marker in the
+     * prompt.
+     */
+    private AttachmentForwarder markingForwarder() {
+        var forwarder = mock(AttachmentForwarder.class);
+        doAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(0);
+            msgs.add(UserMessage.from(STEP_IMAGE_MARKER));
+            return null;
+        }).when(forwarder).forward(any(), any(), any(), any(), any(), any(), any(), eq(false));
+        llmTask.attachmentForwarder = forwarder;
+        return forwarder;
+    }
+
+    private static boolean promptCarriesMarker(FaultInjectingChatModel model) {
+        return model.requests().getFirst().messages().toString().contains(STEP_IMAGE_MARKER);
+    }
+
+    @Test
+    @DisplayName("cascade: a step whose own endpoint has vision=true gets the attachments; the task's does not")
+    void cascadeStepWithVisionReceivesImages() throws Exception {
+        var model = liveModel();
+        var forwarder = markingForwarder();
+
+        llmTask.execute(memory, cascaded(new String[0], "openai-compatible",
+                Map.of("baseUrl", "http://vlm:8000/v1", "modelName", "qwen-vl", "vision", "true")));
+
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("qwen-vl"), eq(Support.ON), any(), any(), eq(false));
+        assertTrue(promptCarriesMarker(model), "the step's prompt must carry its own attachment content");
+    }
+
+    @Test
+    @DisplayName("cascade: a step without vision does not inherit the task's vision=true")
+    void cascadeStepWithoutVisionDoesNotInherit() throws Exception {
+        var model = liveModel();
+        var forwarder = markingForwarder();
+
+        // the step overrides vision off; the task-level pass saw ON
+        llmTask.execute(memory, cascaded(new String[]{"vision", "true"}, "openai-compatible",
+                Map.of("baseUrl", "http://text:8000/v1", "modelName", "granite", "vision", "false")));
+
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any(), eq(false));
+        assertTrue(promptCarriesMarker(model), "the step is re-forwarded with ITS decision (AUTO), not the task's ON");
+    }
+
+    @Test
+    @DisplayName("cascade: a step on the same endpoint as the task keeps the task's prompt")
+    void cascadeStepOnSameEndpointKeepsPrompt() throws Exception {
+        var model = liveModel();
+        var forwarder = markingForwarder();
+
+        llmTask.execute(memory, cascaded(new String[]{"vision", "true"}, "openai-compatible", Map.of()));
+
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        assertTrue(!promptCarriesMarker(model));
+    }
+
+    @Test
+    @DisplayName("cascade: type openai steps and tasks are untouched")
+    void cascadeOpenAiUnchanged() throws Exception {
+        var model = liveModel();
+        var forwarder = markingForwarder();
+        var cfg = cascaded(new String[0], "openai", Map.of("modelName", "gpt-4o"));
+        cfg.tasks().getFirst().setType("openai");
+
+        llmTask.execute(memory, cfg);
+
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        assertTrue(!promptCarriesMarker(model));
+    }
+
+    @Test
+    @DisplayName("non-cascade: attachments are forwarded once, by the task-level pass")
+    void nonCascadeUnchanged() throws Exception {
+        liveModel();
+        var forwarder = markingForwarder();
+
+        llmTask.execute(memory, config(false, "vision", "true"));
+
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any());
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
     }
 }
