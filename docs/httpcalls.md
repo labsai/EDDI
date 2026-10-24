@@ -247,6 +247,15 @@ We will emphasize the `httpCall` model and go through an example step by step, y
       "actions": [
         "string"
       ],
+      "forEach": {
+        "pathToTargetArray": "string",
+        "iterationObjectName": "string",
+        "templateFilterExpression": "string",
+        "maxItems": integer,
+        "maxConcurrency": integer,
+        "onItemFailure": "continue | fail",
+        "maxTotalResponseSizeInBytes": integer
+      },
       "preRequest": {
         "delayBeforeExecutingInMillis": integer,
         "propertyInstructions": [ <property instruction, as in postResponse> ],
@@ -340,10 +349,18 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.actions                                                            | (`List<String>`) the behavior-rule actions that trigger this call (`"*"` matches any action).                                                                                                                                   |
 | httpCall.timeoutInMillis                                                    | (`Integer`) request timeout for this call; unset falls back to `eddi.httpcalls.default-timeout-millis` (30 s).                                                                                                                  |
 | httpCall.maxResponseSizeInBytes                                             | (`Integer`) how much of the response body is kept in conversation memory. A larger body is **truncated** (with a warning) rather than failing the call; unset falls back to `eddi.httpcalls.default-max-response-size-bytes` (2 MB). |
+| httpCall.forEach                                                            | (`Object`, unset by default) run the call once per element of an array and store every element's result as one array — see [forEach](#foreach--one-call-per-element). Unset sends exactly one request, as before.            |
+| httpCall.forEach.pathToTargetArray                                          | (`String`, required) plain dot path to the array in the template data, e.g. `properties.orders` — the notation of `fromObjectPath`, not a template. Nothing there is an empty loop; something other than an array fails the call. |
+| httpCall.forEach.iterationObjectName                                        | (`String`, default `item`) the name the current element is bound to — the element itself, so `{item.id}` works.                                                                                                                 |
+| httpCall.forEach.templateFilterExpression                                   | (`String`) optional Qute condition per element, e.g. `item.active`; elements for which it is false are skipped.                                                                                                                  |
+| httpCall.forEach.maxItems                                                   | (`Integer`, default and ceiling as `batchRequests.maxBatchSize`: `100` / `1000`, see `eddi.httpcalls.batch.*`) more elements refuses the call before anything is sent. Saving a value above the ceiling is refused with `400`. |
+| httpCall.forEach.maxConcurrency                                             | (`Integer`, default `1`, at most `16`) items in flight at once, on virtual threads. Saving a value outside `1..16` is refused.                                                                                                    |
+| httpCall.forEach.onItemFailure                                              | (`String`, default `continue`) `continue` records each failed item and goes on; `fail` fails the step once every item has finished — after the results are stored. Any other value is refused at save time.                     |
+| httpCall.forEach.maxTotalResponseSizeInBytes                                | (`Integer`, default: the call's `maxResponseSizeInBytes`) budget for every item's stored body together; bodies past it are dropped (status kept) and marked `bodyDropped`.                                                         |
 | httpCall.preRequest.delayBeforeExecutingInMillis                            | (`Integer`, default `0`) wait this long before sending the request.                                                                                                                                                            |
 | httpCall.preRequest.propertyInstructions                                    | (`List`) property instructions run before the request is built, with the same fields and behaviour as `postResponse.propertyInstructions` (no HTTP-code gate).                                                                  |
 | httpCall.preRequest.batchRequests.executeCallsSequentially                  | (`Boolean`, default `false`) send the expanded batch requests one after another instead of concurrently.                                                                                                                       |
-| httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent. |
+| httpCall.preRequest.batchRequests.pathToTargetArray                         | (`String`) `JSON` path to the target array to be used as body of requests e.g: "`memory.current.output`". Only honoured when `fireAndForget` is `true`; on a call that waits for a response the batch instruction is ignored and exactly one request is sent — use [`forEach`](#foreach--one-call-per-element) to collect per-element results. |
 | httpCall.preRequest.batchRequests.iterationObjectName                       | (`String`) name of the variable to be used for each element of array found in `pathToTargetArray`                                                                                                                                |
 | httpCall.preRequest.batchRequests.maxBatchSize                              | (`Integer`, default `100`, at most `1000` — both operator-configurable, see `eddi.httpcalls.batch.*` in the [configuration reference](configuration-reference.md)) most requests the batch may expand into. A target array with more elements refuses the whole call — nothing is sent and the turn fails with a message naming the limit — instead of silently dropping the tail. Saving a value above the ceiling is refused with `400`. |
 | httpCall.request.path                                                       | (`String`) path in the `targetServer` of the `httpCall` (e.g /`books`)                                                                                                                                                           |
@@ -389,16 +406,58 @@ fails fast instead of being sent. Without a deadline, nothing changes.
 
 Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
 
-### Turn deadline
+A `forEach` call is bounded per item: each item's timeout is clamped as above when it starts, and an item whose turn comes after the deadline is not sent and is recorded as such. The deploy-time worst-case warning counts a `forEach` call once per round — `maxItems` divided by `maxConcurrency`, rounded up.
 
-When the agent sets a [turn deadline](langchain.md#turn-deadline) (`turnDeadlineMs`, or the caller's
-`X-EDDI-Turn-Deadline-Ms` header), each call's `timeoutInMillis` is clamped to the time the turn has
-left after its reserve, and a `retryApiCallInstruction` retry is skipped when its backoff plus a call
-of `min(timeoutInMillis, 3 s)` no longer fits — the last response is then used as if the retries had
-been exhausted. The first call is always sent while the deadline has not passed; once it has, the call
-fails fast instead of being sent. Without a deadline, nothing changes.
+### forEach — one call per element
 
-Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
+`forEach` runs the call once for every element of an array and stores what each element produced as one array, under the call's `responseObjectName`, like any other response. `postResponse` property instructions, output templates and later calls read it as usual — `{properties.x}` once copied, or `{memory.current.httpCalls.<responseObjectName>}`.
+
+```json
+{
+  "name": "fetchOrderStatus",
+  "actions": ["check_orders"],
+  "saveResponse": true,
+  "responseObjectName": "orderStatus",
+  "forEach": {
+    "pathToTargetArray": "properties.orderIds",
+    "iterationObjectName": "orderId",
+    "maxConcurrency": 4
+  },
+  "request": { "method": "GET", "path": "/orders/{orderId}" }
+}
+```
+
+Each element of the stored array describes one item, in the order of the source array whatever order the items finished in:
+
+| Field | Meaning |
+| --- | --- |
+| `index` | the element's position in the source array (filtered elements leave gaps) |
+| `ok` | `true` for a `2xx` with no error |
+| `httpCode` | the last attempt's status; absent when no response arrived |
+| `body` | the body, stored exactly as a single call stores it (parsed JSON, redacted, capped at `maxResponseSizeInBytes`); for a non-`2xx`, the redacted error text. Absent with `saveResponse: false` |
+| `headers` | the response headers, when the call sets `responseHeaderObjectName` (credential headers removed) |
+| `error` | why the item failed, written by EDDI |
+| `timedOut` | `true` when the request timed out |
+| `sent` | `false` when nothing was sent (the request could not be built, or the turn deadline had passed) |
+| `attempts` | requests sent for this item |
+| `bodyDropped` | `true` when the total size budget was spent before this item |
+
+**Which code `postResponse` sees.** When every item succeeded the step runs `postResponse` with `200`; when any failed, with `207` (HTTP's own Multi-Status) and `{responseObjectName}Error` holds a summary such as `2 of 5 forEach items failed`. Property instructions gated on the default codes (`200`, `201`) therefore run only on a complete result; add `207` to `runOnHttpCode` to process a partial one.
+
+**A failing item never cancels its siblings.** Each item records its own error. `onItemFailure: "fail"` turns a partial result into a failed step, but only after every item has finished and the results are stored, so the calls that did succeed — and may have been paid for — stay readable.
+
+**Retries.** `retryApiCallInstruction` applies per item, to responses (`retryOnHttpCodes`, `responseValuePathMatchers` evaluated against the item's own response). **A request that threw — a timeout above all — is never retried**: the API may have processed it (and billed it) even though no answer arrived. The item is marked `timedOut`.
+
+**Bounds.**
+
+- *Items*: more elements than `maxItems` refuses the whole call before anything is sent, instead of silently dropping the tail.
+- *Concurrency*: `maxConcurrency` (default `1`, at most `16`) items in flight at once, on virtual threads. The default sends the load the same calls written one after another would; raise it only for an API that tolerates parallel calls.
+- *Time*: the [turn deadline](#turn-deadline), per item.
+- *Memory*: every body is capped by `maxResponseSizeInBytes`, and all of them together by `maxTotalResponseSizeInBytes` (default: the same value — the array gets what one response would). Conversation memory is loaded on every turn.
+
+**Security is unchanged.** Every item's request is built on the turn's own thread exactly as a single call's is — templating, `${vault:}`, `${connection:}` and `${caller:}` resolution, the SSRF check, the approval scope — and only the sending happens in parallel. The element is bound as template **data**, never as template source: an element containing `{properties.secret}` is sent as that literal text, and one substituted into the path is a single encoded segment. An item whose request cannot be built (a refused reference, say) is not sent and records why; the others still run. A `forEach` call used as an LLM tool cannot be pinned to an approved request fingerprint, since it sends N requests.
+
+**Not combinable** with `fireAndForget` or `preRequest.batchRequests` — saving such a config is refused. `forEach` does not record each item's request in memory (the log has every one, redacted). httpcalls are not cost-tracked; per-item spend checks will plug into the item admission step.
 
 ### HttpCall API endpoints
 

@@ -194,6 +194,12 @@ public class RestApiCallsStore implements IRestApiCallsStore {
                         + " exceeds this deployment's ceiling of " + maxBatchSizeCeiling + " (" + ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY
                         + "). Lower it, or ask an operator to raise the ceiling.");
             }
+            Integer forEachItems = call != null && call.getForEach() != null ? call.getForEach().getMaxItems() : null;
+            if (forEachItems != null && forEachItems > maxBatchSizeCeiling) {
+                return badRequest("http call '" + call.getName() + "': forEach.maxItems " + forEachItems + " exceeds this deployment's ceiling of "
+                        + maxBatchSizeCeiling + " (" + ApiCallExecutor.BATCH_MAX_SIZE_CEILING_PROPERTY
+                        + "). Lower it, or ask an operator to raise the ceiling.");
+            }
         }
         return null;
     }

@@ -6,6 +6,8 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ForEachInstruction;
+import ai.labs.eddi.modules.apicalls.impl.ApiCallExecutor;
 import ai.labs.eddi.configs.apicalls.model.RetryApiCallInstruction;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -131,9 +133,24 @@ final class TurnResilienceWarnings {
             if (retry != null && retry.getMaxRetries() != null && retry.getMaxRetries() >= 1) {
                 total += (long) retry.getMaxRetries() * timeout + retryBackoffMs(retry);
             }
+            total *= forEachWaves(call.getForEach());
             worst = Math.max(worst, total);
         }
         return worst;
+    }
+
+    /**
+     * How many rounds a {@code forEach} takes at worst: its item limit (the engine
+     * default when unset) divided by its concurrency, rounded up. One for a call
+     * without {@code forEach}.
+     */
+    static long forEachWaves(ForEachInstruction forEach) {
+        if (forEach == null) {
+            return 1;
+        }
+        long items = forEach.getMaxItems() != null && forEach.getMaxItems() > 0 ? forEach.getMaxItems() : ApiCallExecutor.DEFAULT_MAX_BATCH_SIZE;
+        long concurrency = forEach.effectiveMaxConcurrency();
+        return Math.max(1, (items + concurrency - 1) / concurrency);
     }
 
     private static long retryBackoffMs(RetryApiCallInstruction retry) {

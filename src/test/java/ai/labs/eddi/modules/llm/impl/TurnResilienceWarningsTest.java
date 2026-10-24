@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.apicalls.model.ForEachInstruction;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.apicalls.model.RetryApiCallInstruction;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
@@ -213,6 +214,28 @@ class TurnResilienceWarningsTest {
 
         // 10 s + 1 retry x 10 s + 1 s backoff
         assertEquals(21_000, TurnResilienceWarnings.worstCaseApiCallMs(config));
+    }
+
+    @Test
+    @DisplayName("a forEach call counts once per round: its item limit over its concurrency, rounded up")
+    void forEachWorstCase() {
+        var loop = new ApiCall();
+        loop.setName("loop");
+        loop.setTimeoutInMillis(1_000);
+        var forEach = new ForEachInstruction();
+        forEach.setPathToTargetArray("properties.items");
+        forEach.setMaxItems(10);
+        forEach.setMaxConcurrency(4);
+        loop.setForEach(forEach);
+        var config = new ApiCallsConfiguration();
+        config.setHttpCalls(List.of(loop));
+
+        // ceil(10 / 4) = 3 rounds of 1 s
+        assertEquals(3_000, TurnResilienceWarnings.worstCaseApiCallMs(config));
+        assertEquals(1, TurnResilienceWarnings.forEachWaves(null));
+        forEach.setMaxItems(null);
+        forEach.setMaxConcurrency(null);
+        assertEquals(100, TurnResilienceWarnings.forEachWaves(forEach), "unset: the engine default, one at a time");
     }
 
     // ─── the budget rule ────────────────────────────────────────────
