@@ -86,6 +86,12 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public synchronized long countCreatedSince(String recipient, Kind kind, Instant since) {
+        return rows.values().stream().filter(r -> recipient.equals(r.recipient()) && r.kind() == kind && !r.createdAt().isBefore(since)
+                && r.state() != State.SUPPRESSED).count();
+    }
+
+    @Override
     public synchronized long countPending() {
         return rows.values().stream().filter(r -> r.state() == State.PENDING).count();
     }

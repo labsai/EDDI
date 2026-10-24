@@ -530,7 +530,7 @@
     "hitlNotifyEnable": "Email people when this agent waits for approval",
     "hitlNotifyRecipients": "Recipients (comma or one per line)",
     "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
-    "hitlNotifyHint": "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator). It links to the Approvals page, carries no conversation content, and cannot approve anything.",
+    "hitlNotifyHint": "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page, carries no conversation content, and cannot approve anything.",
     "hitlNotifyEmpty": "Add at least one address, or switch email notifications off.",
     "hitlNotifyTooMany": "At most {{max}} addresses — use a distribution list for more.",
     "hitlNotifyInvalid": "Entry {{position}} is not a plain address like name@example.com.",

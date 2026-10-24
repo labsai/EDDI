@@ -501,7 +501,7 @@
     "hitlNotifyEnable": "当此代理等待审批时发送电子邮件通知",
     "hitlNotifyRecipients": "收件人（用逗号分隔或每行一个）",
     "hitlNotifyPlaceholder": "approvers@example.com, ops-lead@example.com",
-    "hitlNotifyHint": "每次暂停发送一封邮件，通过本部署的系统邮件发送器发出（eddi.mail.smtp.*，由运维人员配置）。邮件链接到“审批”页面，不包含任何对话内容，也无法批准任何操作。",
+    "hitlNotifyHint": "每次暂停发送一封邮件，通过本部署的系统邮件发送器发出（eddi.mail.smtp.*，由运维人员配置），且只发往运维人员允许的域。邮件链接到“审批”页面，不包含任何对话内容，也无法批准任何操作。",
     "hitlNotifyEmpty": "请至少添加一个地址，或关闭电子邮件通知。",
     "hitlNotifyTooMany": "最多 {{max}} 个地址——更多收件人请使用通讯组列表。",
     "hitlNotifyInvalid": "第 {{position}} 项不是 name@example.com 这样的普通地址。",

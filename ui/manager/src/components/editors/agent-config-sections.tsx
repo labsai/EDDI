@@ -1339,7 +1339,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                     {recipientsError ??
                       t(
                         "agentDetail.hitlNotifyHint",
-                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator). It links to the Approvals page, carries no conversation content, and cannot approve anything.",
+                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page, carries no conversation content, and cannot approve anything.",
                       )}
                   </p>
                 </div>

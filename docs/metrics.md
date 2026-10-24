@@ -676,13 +676,14 @@ reset with every restart and never saw pauses taken before it; alert on
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text
-eddi_email_outbound_total                   # Notification mails by outcome; tags: kind (notify), outcome (sent|retry|failed|suppressed)
+eddi_email_outbound_total                   # Notification mails by outcome; tags: kind (notify), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited)
 eddi_email_ledger_pending                   # Email ledger rows not yet sent, failed or suppressed (gauge)
 ```
 
 `outcome=retry` counts a deferred attempt that will be retried with backoff; `failed` a row given up on (a 5xx
 refusal, or the last of `eddi.email.outbound.max-attempts`); `suppressed` a notification not sent because its pause
-was decided first. The gauge is read store-wide on every ledger sweep (`eddi.email.ledger.sweep-interval`, default
+was decided first; `not_allowed` a recipient outside `eddi.mail.notify.allowed-recipient-domains`; `rate_limited` a
+recipient over `eddi.mail.notify.max-per-recipient-per-hour` (a sustained rise means something keeps an agent pausing). The gauge is read store-wide on every ledger sweep (`eddi.email.ledger.sweep-interval`, default
 30 s), so aggregate with `max`; it reads `NaN` until the first sweep and after a failed one. No tag carries an
 address, an agent or a conversation.
 

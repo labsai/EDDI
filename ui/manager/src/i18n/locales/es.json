@@ -502,7 +502,7 @@
     "hitlNotifyEnable": "Avisar por correo cuando este agente espere una aprobación",
     "hitlNotifyRecipients": "Destinatarios (separados por comas o uno por línea)",
     "hitlNotifyPlaceholder": "aprobadores@example.com, jefe-ops@example.com",
-    "hitlNotifyHint": "Un correo por pausa, enviado por el servicio de correo del sistema de este despliegue (eddi.mail.smtp.*, configurado por el operador). Enlaza a la página de Aprobaciones, no incluye contenido de la conversación y no puede aprobar nada.",
+    "hitlNotifyHint": "Un correo por pausa, enviado por el servicio de correo del sistema de este despliegue (eddi.mail.smtp.*, configurado por el operador), solo a dominios que el operador permite. Enlaza a la página de Aprobaciones, no incluye contenido de la conversación y no puede aprobar nada.",
     "hitlNotifyEmpty": "Añade al menos una dirección o desactiva las notificaciones por correo.",
     "hitlNotifyTooMany": "Como máximo {{max}} direcciones; usa una lista de distribución para más.",
     "hitlNotifyInvalid": "La entrada {{position}} no es una dirección simple como nombre@example.com.",

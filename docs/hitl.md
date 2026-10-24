@@ -597,7 +597,12 @@ Manager's **Approvals** page; it decides nothing. Two settings, one per audience
 | Field | Default | Description |
 |-------|---------|-------------|
 | `notify` | absent — nobody is notified | Who is told when this agent pauses. A config without it behaves exactly as before |
-| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses, ASCII, no display names, no duplicates (compared case-insensitively). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
+| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses, ASCII, no display names, no duplicates (compared case-insensitively), each in a domain the operator allows (below). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
+
+**Which addresses — the operator decides.** Anyone who may edit an agent can set its recipients, but the mail goes out through the operator's relay, from the operator's sender address, carrying text an author (agent name, pause reason) and an end user (tool arguments) can influence. So the operator bounds it with `eddi.mail.notify.allowed-recipient-domains` (exact domains, `*.domain` for subdomains, `*` for any); **unset, only the domain of `eddi.mail.smtp.from` and its subdomains are allowed.** With a mailer configured, a recipient outside is refused at save time; without one it is accepted with a WARN, since the operator may configure the mailer later. Either way it is checked again at every send and never mailed: its ledger row ends `SUPPRESSED`.
+
+**Flood brake.** An end user can drive an agent into a pause every turn, or in many conversations at once. Each recipient gets at most `eddi.mail.notify.max-per-recipient-per-hour` (default 30) notifications in any hour, counted from the ledger across all instances; the rest are `SUPPRESSED` (`rate_limited`), and each instance logs one WARN per recipient per hour. Pending approvals stay on the Approvals page either way.
+
 
 **One mail per pause and recipient**, across every pod: each recipient's notification is a row in the email ledger
 under a unique key derived from the conversation, the pause and the address, so a pause observed twice — or on two
@@ -632,7 +637,7 @@ provider, not in EDDI's user directory, so EDDI cannot list who holds them — a
 would keep mailing a revoked approver forever. Name the approvers' shared mailbox or distribution list in
 `recipients` instead.
 
-**Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed"}` and
+**Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed|not_allowed|rate_limited"}` and
 the `eddi_email_ledger_pending` gauge ([metrics.md](metrics.md#hitl-metrics)). Every sent or failed notification
 writes an `email.notify` audit-ledger entry with the conversation, the outcome, the Message-ID, the relay's reply and
 the recipient as a SHA-256 hash plus its domain — the audit ledger is write-once, so the address itself is not

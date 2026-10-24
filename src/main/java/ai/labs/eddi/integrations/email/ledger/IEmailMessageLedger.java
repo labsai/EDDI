@@ -185,6 +185,14 @@ public interface IEmailMessageLedger {
      */
     boolean reschedule(String id, String claimToken, Instant nextAttemptAt, String lastError, Instant now);
 
+    /**
+     * How many {@code kind} rows to {@code recipient} were created at or after
+     * {@code since} and not {@link State#SUPPRESSED} — the cluster-wide count a
+     * per-recipient rate limit reads. Suppressed rows do not count, so a flood that
+     * is being refused does not keep the window full for ever.
+     */
+    long countCreatedSince(String recipient, Kind kind, Instant since);
+
     /** Rows not yet terminal, store-wide (the pending gauge). */
     long countPending();
 

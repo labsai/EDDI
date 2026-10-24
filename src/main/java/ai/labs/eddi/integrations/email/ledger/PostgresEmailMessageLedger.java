@@ -70,6 +70,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     private static final String[] INDEXES = {"CREATE INDEX IF NOT EXISTS idx_email_ledger_due ON email_message_ledger (state, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_recipient ON email_message_ledger (recipient)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_rate ON email_message_ledger (recipient, kind, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)"};
 
     /**
@@ -210,6 +211,21 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to reschedule an email ledger row", e);
+        }
+    }
+
+    @Override
+    public long countCreatedSince(String recipient, Kind kind, Instant since) {
+        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE recipient = ? AND kind = ? AND created_at >= ? AND state <> 'SUPPRESSED'";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, recipient);
+            statement.setString(2, kind.name());
+            statement.setTimestamp(3, timestamp(since));
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count email ledger rows", e);
         }
     }
 

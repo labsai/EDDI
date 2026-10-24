@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.hitl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
+import ai.labs.eddi.engine.mail.NotifyRecipientPolicy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,5 +98,33 @@ class HitlConfigValidationNotifyTest {
     @DisplayName("duplicates are found after normalisation")
     void duplicates() {
         assertTrue(refusal(List.of("ops@example.com", "OPS@example.com")).contains("repeats"));
+    }
+
+    @Test
+    @DisplayName("with a mailer configured, a recipient outside the operator's domains is refused at save time")
+    void outsidePolicyRefusedWithMailer() {
+        var previous = HitlConfigValidation.recipientPolicySource;
+        HitlConfigValidation.recipientPolicySource = () -> new NotifyRecipientPolicy.Current(true,
+                NotifyRecipientPolicy.of(List.of(), "eddi@example.com"));
+        try {
+            assertDoesNotThrow(() -> HitlConfigValidation.validate(withRecipients(List.of("ops@example.com", "lead@eu.example.com"))));
+            String message = refusal(List.of("ops@example.com", "someone@gmail.com"));
+            assertTrue(message.contains("recipients[1]") && message.contains(NotifyRecipientPolicy.ALLOWED_DOMAINS), message);
+            assertFalse(message.contains("someone@gmail.com"), message);
+        } finally {
+            HitlConfigValidation.recipientPolicySource = previous;
+        }
+    }
+
+    @Test
+    @DisplayName("without a mailer it is accepted (warned): the operator may configure the policy later")
+    void outsidePolicyAcceptedWithoutMailer() {
+        var previous = HitlConfigValidation.recipientPolicySource;
+        HitlConfigValidation.recipientPolicySource = () -> new NotifyRecipientPolicy.Current(false, NotifyRecipientPolicy.of(List.of(), null));
+        try {
+            assertDoesNotThrow(() -> HitlConfigValidation.validate(withRecipients(List.of("someone@gmail.com"))));
+        } finally {
+            HitlConfigValidation.recipientPolicySource = previous;
+        }
     }
 }

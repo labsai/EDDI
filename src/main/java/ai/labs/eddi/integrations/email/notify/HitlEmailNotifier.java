@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
 import ai.labs.eddi.engine.mail.MessageIds;
+import ai.labs.eddi.engine.mail.NotifyRecipientPolicy;
 import ai.labs.eddi.engine.mail.OutboundMail;
 import ai.labs.eddi.engine.mail.PlainTextMailRenderer;
 import ai.labs.eddi.engine.mail.SystemMailer;
@@ -54,6 +55,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -103,6 +105,15 @@ public class HitlEmailNotifier {
 
     static final String APPROVALS_PATH = "/manage/approvals";
 
+    /**
+     * Why a row was not sent: its recipient is outside the operator's domain
+     * policy.
+     */
+    static final String NOT_ALLOWED = "RECIPIENT_NOT_ALLOWED: outside " + NotifyRecipientPolicy.ALLOWED_DOMAINS;
+
+    /** Why a row was not sent: the recipient had its hourly maximum already. */
+    static final String RATE_LIMITED = "RATE_LIMITED: eddi.mail.notify.max-per-recipient-per-hour reached";
+
     /** Why a row ended without being sent because its pause is gone. */
     static final String PAUSE_RESOLVED = "PAUSE_RESOLVED: the pause was decided, cancelled or replaced before the notification went out";
 
@@ -117,6 +128,12 @@ public class HitlEmailNotifier {
     private final Duration retention;
     private final int maxAttempts;
     private final Duration retryBackoff;
+    private final NotifyRecipientPolicy recipientPolicy;
+    private final String recipientPolicyError;
+    private final int maxPerRecipientPerHour;
+
+    /** recipient hash to when this pod last warned that it was rate-limited. */
+    private final Map<String, Instant> rateLimitWarned = new ConcurrentHashMap<>();
 
     private final AtomicReference<Double> pending = new AtomicReference<>(Double.NaN);
 
@@ -126,7 +143,9 @@ public class HitlEmailNotifier {
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention,
             @ConfigProperty(name = "eddi.email.outbound.max-attempts", defaultValue = "6") int maxAttempts,
-            @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff) {
+            @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff,
+            @ConfigProperty(name = "eddi.mail.notify.allowed-recipient-domains") Optional<List<String>> allowedRecipientDomains,
+            @ConfigProperty(name = "eddi.mail.notify.max-per-recipient-per-hour", defaultValue = "30") int maxPerRecipientPerHour) {
         this.mailer = mailer;
         this.ledger = ledger;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -138,14 +157,32 @@ public class HitlEmailNotifier {
         this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
         this.maxAttempts = Math.max(1, maxAttempts);
         this.retryBackoff = retryBackoff == null || retryBackoff.isZero() || retryBackoff.isNegative() ? Duration.ofMinutes(1) : retryBackoff;
+        this.maxPerRecipientPerHour = maxPerRecipientPerHour;
+        NotifyRecipientPolicy policy;
+        String error = null;
+        try {
+            policy = NotifyRecipientPolicy.of(allowedRecipientDomains == null ? List.of() : allowedRecipientDomains.orElse(List.of()),
+                    mailer.from().map(MailAddress::address).orElse(null));
+        } catch (IllegalArgumentException e) {
+            // Fail closed: a typo in the allowlist must not widen it to everyone.
+            policy = NotifyRecipientPolicy.of(List.of(), null);
+            error = e.getMessage();
+        }
+        this.recipientPolicy = policy;
+        this.recipientPolicyError = error;
     }
 
     @PostConstruct
     void registerGauge() {
         Gauge.builder(METER_PENDING, pending, AtomicReference::get)
                 .description("Email ledger rows not yet sent, failed or suppressed (store-wide; NaN until the first sweep)").register(meterRegistry);
-        for (String outcome : List.of("sent", "retry", "failed", "suppressed")) {
+        for (String outcome : List.of("sent", "retry", "failed", "suppressed", "not_allowed", "rate_limited")) {
             outbound(outcome);
+        }
+        if (recipientPolicyError != null) {
+            LOGGER.errorf("HITL email notifications are sent to NOBODY: %s", recipientPolicyError);
+        } else if (mailer.isEnabled()) {
+            LOGGER.infof("HITL email notifications may go to %s", recipientPolicy.describe());
         }
     }
 
@@ -186,6 +223,21 @@ public class HitlEmailNotifier {
         }
         MailAddress from = mailer.from().orElseThrow();
         for (String recipient : recipients) {
+            String refusal = refusal(recipient, now);
+            if (refusal != null) {
+                LedgerEntry suppressed = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY,
+                        Direction.OUT, MessageIds.generate(from.domain()), conversationId, pauseId,
+                        idempotencyKey(conversationId, pauseId, recipient), recipient, State.SUPPRESSED, 0, null, null, null, refusal, now, now,
+                        now.plus(retention));
+                if (ledger.insertIfAbsent(suppressed)) {
+                    boolean rateLimited = RATE_LIMITED.equals(refusal);
+                    count(rateLimited ? "rate_limited" : "not_allowed");
+                    if (rateLimited) {
+                        warnRateLimited(recipient, now);
+                    }
+                }
+                continue;
+            }
             LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
                     MessageIds.generate(from.domain()), conversationId, pauseId, idempotencyKey(conversationId, pauseId, recipient), recipient,
                     State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null, now, now, now.plus(retention));
@@ -193,6 +245,48 @@ public class HitlEmailNotifier {
                 attempt(row, context.get(), now);
             }
         }
+    }
+
+    /**
+     * Why {@code recipient} must not be mailed now (outside the domain policy, or
+     * over its hourly maximum, counted from the ledger so the limit holds across
+     * the cluster), or null when it may be. The count and the insert are two steps,
+     * so concurrent pauses on several pods can overshoot the limit by a few; it is
+     * a flood brake, not an exact quota.
+     */
+    String refusal(String recipient, Instant now) {
+        if (!recipientPolicy.allows(recipient)) {
+            return NOT_ALLOWED;
+        }
+        if (maxPerRecipientPerHour > 0
+                && ledger.countCreatedSince(recipient, Kind.NOTIFY, now.minus(Duration.ofHours(1))) >= maxPerRecipientPerHour) {
+            return RATE_LIMITED;
+        }
+        return null;
+    }
+
+    /** One WARN per recipient per hour on this pod; the address only as a hash. */
+    private void warnRateLimited(String recipient, Instant now) {
+        String key = recipientHash(recipient);
+        Instant last = rateLimitWarned.get(key);
+        if (last != null && last.isAfter(now.minus(Duration.ofHours(1)))) {
+            return;
+        }
+        if (rateLimitWarned.size() > 10_000) {
+            rateLimitWarned.clear();
+        }
+        rateLimitWarned.put(key, now);
+        LOGGER.warnf("HITL email notifications to recipient %s are rate-limited: %d in the last hour "
+                + "(eddi.mail.notify.max-per-recipient-per-hour). Further notifications are suppressed until the hour has passed.", key,
+                maxPerRecipientPerHour);
+    }
+
+    /**
+     * Package-private for tests: whether a rate-limit WARN was logged for
+     * {@code recipient}.
+     */
+    boolean warnedRateLimited(String recipient) {
+        return rateLimitWarned.containsKey(recipientHash(recipient));
     }
 
     /**
@@ -276,6 +370,13 @@ public class HitlEmailNotifier {
         if (context.isEmpty()) {
             if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, PAUSE_RESOLVED, now)) {
                 count("suppressed");
+            }
+            return;
+        }
+        if (!recipientPolicy.allows(row.recipient())) {
+            // The policy can narrow between attempts (a restart with new settings).
+            if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, NOT_ALLOWED, now)) {
+                count("not_allowed");
             }
             return;
         }

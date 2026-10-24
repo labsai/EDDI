@@ -85,6 +85,24 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
   (`emailLedger`) erases/exports rows by the user id's address and the directory's recorded email;
   `IGdprParticipant.order()` makes the user directory run last so the address is still readable.
 
+### Recipient domain policy and flood brake (review follow-up)
+
+- **`eddi.mail.notify.allowed-recipient-domains`** (`NotifyRecipientPolicy`, `engine/mail`): exact domains, `*.domain`
+  for subdomains, `*` for any; **unset = the domain of `eddi.mail.smtp.from` and its subdomains**. Recipients are set by
+  anyone with EDIT on an agent while the mail leaves through the operator's relay under the operator's sender, so
+  without a bound the relay was an open mailer for agent authors. Enforced at send time on every attempt (the row ends
+  `SUPPRESSED`, `RECIPIENT_NOT_ALLOWED`, `outcome=not_allowed`) and at save time in `HitlConfigValidation` — refused
+  when a mailer is configured, accepted with a WARN when not (read through `ConfigProvider`, since the validation is
+  static). A malformed entry fails closed: nobody is mailed, ERROR at startup.
+- **`eddi.mail.notify.max-per-recipient-per-hour`** (default 30): `IEmailMessageLedger.countCreatedSince(recipient, kind,
+  since)` counts the recipient's non-suppressed `NOTIFY` rows of the last hour across the cluster (new index
+  `(recipient, kind, createdAt)` on both stores); over the limit the row is `SUPPRESSED` (`RATE_LIMITED`,
+  `outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming it by hash. Suppressed rows do
+  not count, so the window empties once the flood stops. Count and insert are two steps, so concurrent pods can
+  overshoot by a few.
+- Docs (`hitl.md`, `configuration-reference.md`, `metrics.md`), the Manager hint and the operator prompt say so;
+  operator revision stays 37 (one PR) with the new fingerprint.
+
 ### Manager and the Platform Operator
 
 - The agent's **Human-in-the-Loop** settings gain "Email people when this agent waits for approval" with a
@@ -114,5 +132,6 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
 ```decision-log
 | 2026-10-24 | HITL email notifications go to configured recipients only, not to "every approver" | EDDI's approvers are role holders in the identity provider, which EDDI cannot enumerate; a list built from past sign-ins would keep mailing a revoked approver indefinitely | Recording roles in the user directory at sign-in (stale and unrevokable); mailing the conversation owner (usually the end user, not an approver) |
 | 2026-10-24 | The audit entry of a notification records the recipient as SHA-256 + domain, not the address | The audit ledger is write-once and erasure only pseudonymises its userId, so a plain address would outlive an erasure; the hash still answers "was this address mailed?" for someone who has it | Plain address (unerasable personal data); no recipient at all (unauditable) |
+| 2026-10-25 | HITL notification recipients are bounded by an operator domain allowlist, defaulting to the sender's own domain | Agent authors choose recipients but the mail goes out under the operator's sender and relay, with author- and user-influenced text; an unbounded list makes the relay an open mailer | Unbounded recipients (open mailer); a per-agent allowlist (set by the same author it is meant to bound) |
 | 2026-10-24 | Operator-configured relays get their own socket policy instead of a bypass | An on-premises relay on a private address or port 25 is a normal deployment, but the pinning, metadata refusal and TLS verification are still worth having; a bypass would lose them | Allowing private addresses through eddi.email.allowed-hosts (would open them to channel authors too); opening a raw socket outside SafeSocketConnector |
 ```

@@ -77,6 +77,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_STATE), Indexes.ascending(F_NEXT)),
                 new IndexOptions().name("idx_email_ledger_due"));
         rows.createIndex(Indexes.ascending(F_RECIPIENT), new IndexOptions().name("idx_email_ledger_recipient"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_RECIPIENT), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
+                new IndexOptions().name("idx_email_ledger_rate"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -140,6 +142,12 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     private static Bson claimed(String id, String claimToken) {
         return Filters.and(Filters.eq(F_ID, id), Filters.eq(F_STATE, State.PENDING.name()), Filters.eq(F_CLAIM, claimToken));
+    }
+
+    @Override
+    public long countCreatedSince(String recipient, Kind kind, Instant since) {
+        return rows.countDocuments(Filters.and(Filters.eq(F_RECIPIENT, recipient), Filters.eq(F_KIND, kind.name()),
+                Filters.gte(F_CREATED, Date.from(since)), Filters.ne(F_STATE, State.SUPPRESSED.name())));
     }
 
     @Override

@@ -83,6 +83,8 @@ class HitlEmailNotifierTest {
     private AgentConfiguration agent;
     private ConnectionsConfig connectionsConfig;
     private final List<PlainTextMailRenderer.RenderedMail> sent = new CopyOnWriteArrayList<>();
+    private List<String> allowedDomains = List.of();
+    private int maxPerHour = 30;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -138,7 +140,7 @@ class HitlEmailNotifierTest {
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(connectionsConfig);
         var notifier = new HitlEmailNotifier(mailer, ledger, conversations, agents, descriptors, instance, audit, meters, Duration.ofDays(30),
-                maxAttempts, Duration.ofMinutes(1));
+                maxAttempts, Duration.ofMinutes(1), Optional.of(allowedDomains), maxPerHour);
         notifier.registerGauge();
         return notifier;
     }
@@ -425,5 +427,113 @@ class HitlEmailNotifierTest {
 
         assertTrue(ledger.all().isEmpty());
         assertEquals(0.0, notifier.pendingGauge());
+    }
+
+    @Nested
+    @DisplayName("who may be mailed")
+    class RecipientGuards {
+
+        @Test
+        @DisplayName("by default only the sender's domain and its subdomains: an external recipient is SUPPRESSED, never mailed")
+        void defaultDomainPolicy() throws Exception {
+            notifyTo("ops@example.com", "lead@eu.example.com", "someone@gmail.com");
+
+            notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+
+            assertEquals(2, sent.size());
+            LedgerEntry external = ledger.all().stream().filter(r -> r.recipient().equals("someone@gmail.com")).findFirst().orElseThrow();
+            assertEquals(State.SUPPRESSED, external.state());
+            assertEquals(HitlEmailNotifier.NOT_ALLOWED, external.lastError());
+            assertEquals(0, external.attempts(), "refused before any attempt is made, not only by the send-time re-check");
+            assertEquals(1.0, outbound("not_allowed"));
+            verify(audit, times(2)).submit(any(AuditEntry.class));
+        }
+
+        @Test
+        @DisplayName("an explicit allowlist replaces the default; * allows any domain")
+        void explicitPolicy() throws Exception {
+            notifyTo("ops@example.com", "someone@partner.test");
+            allowedDomains = List.of("partner.test");
+
+            notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+            assertEquals(1, sent.size());
+            assertEquals(1.0, outbound("not_allowed"));
+
+            allowedDomains = List.of("*");
+            Instant later = PAUSED_AT.plusSeconds(60);
+            snapshot.setHitlPausedAt(later);
+            notifier(6).notifyPause(CONVERSATION, HitlDecision.pauseIdOf(later), later.plusSeconds(1));
+            assertEquals(3, sent.size());
+        }
+
+        @Test
+        @DisplayName("a malformed allowlist fails closed: nobody is mailed")
+        void malformedPolicyFailsClosed() throws Exception {
+            notifyTo("ops@example.com");
+            allowedDomains = List.of("not a domain");
+
+            notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+
+            assertTrue(sent.isEmpty());
+            assertEquals(State.SUPPRESSED, ledger.all().get(0).state());
+        }
+
+        @Test
+        @DisplayName("a retry checks the policy again and suppresses a recipient it no longer allows")
+        void policyRecheckedOnRetry() throws Exception {
+            notifyTo("someone@partner.test");
+            allowedDomains = List.of("*");
+            doThrow(new MailSendException(MailSendException.Category.CONNECT, false, "refused", null)).when(mailer).send(any(), anyList());
+            notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+            assertEquals(State.PENDING, ledger.all().get(0).state());
+
+            allowedDomains = List.of();
+            notifier(6).sweep(NOW.plus(Duration.ofMinutes(5)));
+
+            assertEquals(State.SUPPRESSED, ledger.all().get(0).state());
+            assertEquals(HitlEmailNotifier.NOT_ALLOWED, ledger.all().get(0).lastError());
+            verify(mailer, times(1)).send(any(), anyList());
+        }
+
+        @Test
+        @DisplayName("past the hourly maximum a recipient's notifications are SUPPRESSED, counted, warned once — and flow again an hour later")
+        void rateLimited() throws Exception {
+            notifyTo("ops@example.com");
+            maxPerHour = 2;
+            var notifier = notifier(6);
+            for (int i = 0; i < 4; i++) {
+                Instant pausedAt = PAUSED_AT.plusSeconds(60L * i);
+                snapshot.setHitlPausedAt(pausedAt);
+                notifier.notifyPause(CONVERSATION, HitlDecision.pauseIdOf(pausedAt), pausedAt.plusSeconds(1));
+            }
+
+            assertEquals(2, sent.size());
+            assertEquals(2.0, outbound("rate_limited"));
+            assertTrue(ledger.all().stream().filter(r -> r.state() == State.SUPPRESSED)
+                    .allMatch(r -> HitlEmailNotifier.RATE_LIMITED.equals(r.lastError())));
+            assertTrue(notifier.warnedRateLimited("ops@example.com"));
+
+            Instant nextHour = PAUSED_AT.plus(Duration.ofMinutes(65));
+            snapshot.setHitlPausedAt(nextHour);
+            notifier.notifyPause(CONVERSATION, HitlDecision.pauseIdOf(nextHour), nextHour.plusSeconds(1));
+            assertEquals(3, sent.size(), "suppressed rows do not keep the window full");
+        }
+
+        @Test
+        @DisplayName("the limit is per recipient: one flooded address does not silence another")
+        void perRecipient() throws Exception {
+            notifyTo("ops@example.com");
+            maxPerHour = 1;
+            var notifier = notifier(6);
+            notifier.notifyPause(CONVERSATION, PAUSE, NOW);
+            notifyTo("ops@example.com", "lead@example.com");
+            Instant second = PAUSED_AT.plusSeconds(60);
+            snapshot.setHitlPausedAt(second);
+
+            notifier.notifyPause(CONVERSATION, HitlDecision.pauseIdOf(second), second.plusSeconds(1));
+
+            assertEquals(2, sent.size());
+            assertEquals(1.0, outbound("rate_limited"));
+        }
     }
 }

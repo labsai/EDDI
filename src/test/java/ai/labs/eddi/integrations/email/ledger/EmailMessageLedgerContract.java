@@ -204,6 +204,28 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("the rate-limit count covers one recipient and kind since a point in time, suppressed rows excluded")
+    default void countCreatedSince() {
+        Instant hourAgo = NOW.minus(Duration.ofHours(1));
+        ledger().insertIfAbsent(entry("c1", NOW, "alice@example.com"));
+        ledger().insertIfAbsent(entry("c2", NOW, "alice@example.com"));
+        ledger().insertIfAbsent(entry("c3", NOW, "bob@example.com"));
+        ledger().insertIfAbsent(new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY,
+                Direction.OUT, "<old@example.com>", "c", "p", "c4", "alice@example.com", State.SENT, 1, null, null, null, null,
+                hourAgo.minusSeconds(1), hourAgo, NOW.plus(Duration.ofDays(1))));
+        ledger().insertIfAbsent(new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY,
+                Direction.OUT, "<suppressed@example.com>", "c", "p", "c5", "alice@example.com", State.SUPPRESSED, 0, null, null, null,
+                "RATE_LIMITED", NOW, NOW, NOW.plus(Duration.ofDays(1))));
+        ledger().insertIfAbsent(new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.REPLY,
+                Direction.OUT, "<reply2@example.com>", "c", "s", "c6", "alice@example.com", State.SENT, 1, null, null, null, null, NOW, NOW,
+                NOW.plus(Duration.ofDays(1))));
+
+        assertEquals(2, ledger().countCreatedSince("alice@example.com", Kind.NOTIFY, hourAgo));
+        assertEquals(1, ledger().countCreatedSince("bob@example.com", Kind.NOTIFY, hourAgo));
+        assertEquals(0, ledger().countCreatedSince("carol@example.com", Kind.NOTIFY, hourAgo));
+    }
+
+    @Test
     @DisplayName("retention removes expired rows only")
     default void retention() {
         LedgerEntry old = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
