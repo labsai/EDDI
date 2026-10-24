@@ -215,6 +215,14 @@ class GuardrailServiceDeliverBestTest {
             assertTrue(result.isBlocked());
             assertEquals("Blocked by safety.", result.text());
             assertEquals("safety", result.blocked().type());
+            // The attempt was never delivered, so nothing may record it as delivered —
+            // and the block is counted once, not once when collected and again when
+            // emitted.
+            assertTrue(outcomes.stream().noneMatch(o -> o.reason().endsWith(GuardrailService.DELIVERED_BEST_SUFFIX)), outcomes.toString());
+            assertEquals(GuardrailAction.BLOCK, last().action());
+            assertEquals(1.0,
+                    meterRegistry.counter(GuardrailService.METRIC_TRIGGERED, "phase", "output", "type", "safety", "action", "block").count());
+            assertEquals(0.0, meterRegistry.counter(GuardrailService.METRIC_TRIGGERED, "phase", "output", "type", "judge", "action", "warn").count());
         }
 
         @Test

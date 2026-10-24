@@ -625,17 +625,38 @@ public class GuardrailService {
      * more with the exhausted guardrail skipped and no further reprompts: a
      * {@code redact} still rewrites it, a {@code warn} is still recorded, and a
      * {@code block} — or a {@code reprompt}, which may not re-ask now — blocks it.
+     * <p>
+     * The re-screen's outcomes are held back until it ends, so the record matches
+     * what happened: a delivered attempt is recorded as the {@code :delivered_best}
+     * warn followed by the re-screen's findings; a blocked one as the re-screen's
+     * findings and the block — with no {@code :delivered_best} warn for an attempt
+     * that was never delivered.
      */
     private OutputResult deliverBest(List<GuardrailConfig> configs, int exhaustedIndex, Rated chosen, int attempts,
                                      List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext,
                                      Consumer<GuardrailOutcome> onOutcome) {
         GuardrailConfig exhausted = configs.get(exhaustedIndex);
         String reason = chosen.verdict().reason() != null && !chosen.verdict().reason().isBlank() ? chosen.verdict().reason() : exhausted.getType();
-        emit(onOutcome, new GuardrailOutcome(exhausted.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, reason + DELIVERED_BEST_SUFFIX,
-                attempts));
         LOGGER.infof("Output guardrail '%s' spent its retries for task '%s' — re-screening its best attempt for delivery", exhausted.getType(),
                 outputContext.taskId());
-        String text = chosen.text();
+        List<GuardrailOutcome> pending = new ArrayList<>();
+        OutputResult result = rescreen(configs, exhaustedIndex, chosen.text(), attempts, reprompts, cost, outputContext, pending);
+        if (!result.isBlocked()) {
+            emit(onOutcome, new GuardrailOutcome(exhausted.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, reason + DELIVERED_BEST_SUFFIX,
+                    attempts));
+        }
+        pending.forEach(outcome -> emit(onOutcome, outcome));
+        return result;
+    }
+
+    /**
+     * The re-screen of {@link #deliverBest}: every guardrail but the exhausted one,
+     * no reprompts. Its outcomes are collected into {@code pending}, not emitted —
+     * the block outcome included, as the last entry.
+     */
+    private OutputResult rescreen(List<GuardrailConfig> configs, int exhaustedIndex, String chosenText, int attempts,
+                                  List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext, List<GuardrailOutcome> pending) {
+        String text = chosenText;
         for (int index = 0; index < configs.size(); index++) {
             if (index == exhaustedIndex) {
                 continue;
@@ -651,10 +672,12 @@ public class GuardrailService {
             if (evaluation.failed()) {
                 cost += evaluation.failureCostUsd();
                 if (failsClosed(config, action)) {
-                    return blocked(config, evaluation.failureReason(), attempts, reprompts, cost, onOutcome);
+                    OutputResult refused = blockedResult(config, evaluation.failureReason(), attempts, reprompts, cost);
+                    pending.add(refused.blocked());
+                    return refused;
                 }
-                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
-                        attempts));
+                pending.add(
+                        new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(), attempts));
                 continue;
             }
             GuardrailVerdict verdict = evaluation.verdict();
@@ -663,16 +686,17 @@ public class GuardrailService {
                 continue;
             }
             switch (action) {
-                case WARN -> emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, verdict.reason(),
-                        attempts));
+                case WARN ->
+                    pending.add(new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, verdict.reason(), attempts));
                 case REDACT -> {
                     text = verdict.kind() == GuardrailVerdict.Kind.REWRITE ? verdict.text() : blockMessage(config, GuardrailPhase.OUTPUT);
-                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.REDACT, verdict.reason(),
-                            attempts));
+                    pending.add(new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.REDACT, verdict.reason(), attempts));
                 }
                 // BLOCK, and REPROMPT: no further reprompts once a best attempt is chosen.
                 default -> {
-                    return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                    OutputResult refused = blockedResult(config, verdict.reason(), attempts, reprompts, cost);
+                    pending.add(refused.blocked());
+                    return refused;
                 }
             }
         }
@@ -681,8 +705,15 @@ public class GuardrailService {
 
     private OutputResult blocked(GuardrailConfig config, String reason, int attempts, List<Map<String, Object>> reprompts, double cost,
                                  Consumer<GuardrailOutcome> onOutcome) {
+        OutputResult result = blockedResult(config, reason, attempts, reprompts, cost);
+        emit(onOutcome, result.blocked());
+        return result;
+    }
+
+    /** A blocked output result, without emitting its outcome. */
+    private static OutputResult blockedResult(GuardrailConfig config, String reason, int attempts, List<Map<String, Object>> reprompts,
+                                              double cost) {
         var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.BLOCK, reason, attempts);
-        emit(onOutcome, outcome);
         return new OutputResult(blockMessage(config, GuardrailPhase.OUTPUT), outcome, reprompts, cost);
     }
 
