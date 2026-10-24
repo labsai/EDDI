@@ -2413,7 +2413,8 @@
     "disabledAccessRevokedHintBy": "Su creador ({{user}}) ya no puede usar este agente, por lo que dejó de dispararse. Vuelve a compartir el agente con esa persona —o crea de nuevo la programación como alguien que pueda usarlo— y luego actívala.",
     "finishedOneShot": "Programación única: se ejecutó y ha terminado.",
     "oneTimeHelpZone": "Se ejecuta una sola vez en este momento y luego finaliza. Se interpreta en la hora de {{zone}} (la zona horaria de abajo).",
-    "openKnowledgeBase": "Abrir la base de conocimiento"
+    "openKnowledgeBase": "Abrir la base de conocimiento",
+    "serverOwnedHint": "La ejecuta el propio EDDI (reintentos de alertas, resúmenes y retención). No se puede cambiar, desactivar ni eliminar."
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
@@ -6979,6 +6980,37 @@
       "TURN_DEADLINE": "Plazo superado",
       "COST_CEILING": "Límite de coste alcanzado",
       "TENANT_BUDGET": "Presupuesto del tenant agotado"
+    },
+    "urlKept": "La URL guardada está oculta. Déjala como está para conservarla o introduce una nueva.",
+    "includeValue": "Incluir el valor que coincidió",
+    "includeValueHint": "Solo si la versión del agente tiene activada la revisión de conversaciones: el valor procede de la conversación. Si no, la alerta solo nombra la ruta, la comparación y tu constante. Recortado a 280 caracteres.",
+    "matchIncomplete": "Elige una comparación que encaje con el valor e introduce el valor.",
+    "matchOp": "Comparación",
+    "matchPath": "Ruta",
+    "matchPathDepth": "Como máximo 8 niveles de profundidad.",
+    "matchPathInvalid": "Solo nombres separados por puntos (letras, dígitos, _ y -), sin comodines.",
+    "matchSource": "Examinar",
+    "matchSourceActions": "Las acciones del turno",
+    "matchSourceOutput": "Un campo de la salida JSON del agente",
+    "matchSourceProperties": "Una propiedad de la conversación",
+    "matchTypeBoolean": "Verdadero / falso",
+    "matchTypeList": "Uno de una lista",
+    "matchTypeNumber": "Número",
+    "matchTypeText": "Texto",
+    "matchValue": "Valor",
+    "matchValueType": "Tipo de valor",
+    "sourceOutput": "El resultado de un turno coincide",
+    "sourceOutputShort": "Resultados de turnos",
+    "op": {
+      "exists": "existe",
+      "eq": "es igual a",
+      "neq": "no es igual a",
+      "in": "es uno de",
+      "gt": "es mayor que",
+      "gte": "es como mínimo",
+      "lt": "es menor que",
+      "lte": "es como máximo",
+      "contains": "contiene"
     }
   }
 }

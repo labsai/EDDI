@@ -2413,7 +2413,8 @@
     "disabledAccessRevokedHintBy": "O criador ({{user}}) não pode mais usar este agente, então ele parou de disparar. Compartilhe o agente com essa pessoa de novo — ou recrie o agendamento como alguém que possa usá-lo — e então ative-o.",
     "finishedOneShot": "Agendamento único: foi executado e está concluído.",
     "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo).",
-    "openKnowledgeBase": "Abrir a base de conhecimento"
+    "openKnowledgeBase": "Abrir a base de conhecimento",
+    "serverOwnedHint": "Executada pelo próprio EDDI (novas tentativas de alertas, resumos e retenção). Não pode ser alterada, desativada nem excluída."
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
@@ -6979,6 +6980,37 @@
       "TURN_DEADLINE": "Prazo excedido",
       "COST_CEILING": "Teto de custo atingido",
       "TENANT_BUDGET": "Orçamento do tenant esgotado"
+    },
+    "urlKept": "A URL salva está oculta. Deixe-a como está para mantê-la ou digite uma nova.",
+    "includeValue": "Incluir o valor que correspondeu",
+    "includeValueHint": "Somente se a versão do agente tiver a revisão de conversas ativada — o valor vem da conversa. Caso contrário, o alerta cita apenas o caminho, a comparação e sua constante. Cortado em 280 caracteres.",
+    "matchIncomplete": "Escolha uma comparação compatível com o valor e informe o valor.",
+    "matchOp": "Comparação",
+    "matchPath": "Caminho",
+    "matchPathDepth": "No máximo 8 níveis de profundidade.",
+    "matchPathInvalid": "Apenas nomes separados por pontos (letras, dígitos, _ e -), sem curingas.",
+    "matchSource": "Examinar",
+    "matchSourceActions": "As ações do turno",
+    "matchSourceOutput": "Um campo da saída JSON do agente",
+    "matchSourceProperties": "Uma propriedade da conversa",
+    "matchTypeBoolean": "Verdadeiro / falso",
+    "matchTypeList": "Um de uma lista",
+    "matchTypeNumber": "Número",
+    "matchTypeText": "Texto",
+    "matchValue": "Valor",
+    "matchValueType": "Tipo de valor",
+    "sourceOutput": "O resultado de um turno corresponde",
+    "sourceOutputShort": "Resultados de turnos",
+    "op": {
+      "exists": "existe",
+      "eq": "é igual a",
+      "neq": "é diferente de",
+      "in": "é um de",
+      "gt": "é maior que",
+      "gte": "é no mínimo",
+      "lt": "é menor que",
+      "lte": "é no máximo",
+      "contains": "contém"
     }
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ruleProblems } from "../alert-rules";
+import { opsFor, outputMatchProblems, pathProblem, ruleProblems } from "../alert-rules";
 import { blankRule } from "../api/alerts";
 
 describe("ruleProblems — mirrors AlertRuleValidator", () => {
@@ -21,5 +21,38 @@ describe("ruleProblems — mirrors AlertRuleValidator", () => {
     expect(ruleProblems({ ...rule, delivery: [{ type: "SLACK", channelId: "#general" }] })).toEqual(["delivery0"]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "https://h.example.com", signingSecret: "plain" }] })).toEqual(["delivery0"]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "https://h.example.com", signingSecret: "${vault:k}" }] })).toEqual([]);
+  });
+});
+
+describe("OUTPUT_MATCH conditions — mirror OutputMatchCondition", () => {
+  it("accepts the three path sources and refuses wildcards, empty segments and depth over 8", () => {
+    expect(pathProblem("properties.escalate")).toBeNull();
+    expect(pathProblem("output.json.result.sentiment")).toBeNull();
+    expect(pathProblem("actions")).toBeNull();
+    expect(pathProblem("properties.*")).toBe("path");
+    expect(pathProblem("output.json.a..b")).toBe("path");
+    expect(pathProblem("output.json.a.b.c.d.e.f.g.h.i")).toBe("depth");
+    expect(pathProblem("memory.current.input")).toBe("path");
+  });
+
+  it("offers only the operators that fit the value type, and only contains/exists for actions", () => {
+    expect(opsFor("properties", "number")).toContain("gt");
+    expect(opsFor("properties", "text")).not.toContain("gt");
+    expect(opsFor("properties", "list")).toEqual(["in"]);
+    expect(opsFor("actions", "text")).toEqual(["contains", "exists"]);
+  });
+
+  it("checks op/value compatibility and the in-list cap", () => {
+    expect(outputMatchProblems({ path: "properties.escalate", op: "eq", value: true })).toEqual([]);
+    expect(outputMatchProblems({ path: "properties.score", op: "gt", value: "high" })).toContain("op");
+    expect(outputMatchProblems({ path: "properties.x", op: "exists" })).toEqual([]);
+    expect(outputMatchProblems({ path: "properties.x", op: "in", value: Array.from({ length: 51 }, (_, i) => `v${i}`) })).toContain("value");
+    expect(outputMatchProblems({ path: "properties.x", op: "eq", value: "" })).toContain("value");
+  });
+
+  it("a rule with a bad output-match condition is refused", () => {
+    const rule = { ...blankRule("OUTPUT_MATCH", "agent1"), name: "x" };
+    expect(ruleProblems(rule)).toEqual([]);
+    expect(ruleProblems({ ...rule, condition: { path: "properties.*", op: "eq", value: 1 } })).toContain("condition");
   });
 });

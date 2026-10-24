@@ -2383,7 +2383,8 @@
     "disabledAccessRevokedHintBy": "Sein Ersteller ({{user}}) kann diesen Agenten nicht mehr nutzen, daher wird er nicht mehr ausgelöst. Teile den Agenten wieder mit ihm – oder lege den Zeitplan als jemand an, der den Agenten nutzen darf – und aktiviere ihn dann.",
     "finishedOneShot": "Einmaliger Zeitplan: Er wurde ausgeführt und ist abgeschlossen.",
     "oneTimeHelpZone": "Wird einmal zu diesem Zeitpunkt ausgelöst und ist dann abgeschlossen. Wird als Zeit in {{zone}} gelesen (die Zeitzone unten).",
-    "openKnowledgeBase": "Wissensbasis öffnen"
+    "openKnowledgeBase": "Wissensbasis öffnen",
+    "serverOwnedHint": "Wird von EDDI selbst ausgeführt (Alarm-Wiederholungen, Sammelmeldungen und Aufbewahrung). Er kann nicht geändert, deaktiviert oder gelöscht werden."
   },
   "cascadeTrace": {
     "title": "Modellkaskade",
@@ -6908,6 +6909,37 @@
       "TURN_DEADLINE": "Frist überschritten",
       "COST_CEILING": "Kostenobergrenze erreicht",
       "TENANT_BUDGET": "Mandantenbudget aufgebraucht"
+    },
+    "urlKept": "Die gespeicherte URL ist verborgen. Lass sie unverändert, um sie zu behalten, oder gib eine neue ein.",
+    "includeValue": "Den passenden Wert mitsenden",
+    "includeValueHint": "Nur wenn bei der Agent-Version die Unterhaltungsprüfung aktiviert ist – der Wert stammt aus der Unterhaltung. Sonst nennt der Alarm nur Pfad, Vergleich und deine Konstante. Auf 280 Zeichen gekürzt.",
+    "matchIncomplete": "Wähle einen Vergleich, der zum Wert passt, und gib den Wert ein.",
+    "matchOp": "Vergleich",
+    "matchPath": "Pfad",
+    "matchPathDepth": "Höchstens 8 Ebenen tief.",
+    "matchPathInvalid": "Nur durch Punkte getrennte Namen (Buchstaben, Ziffern, _ und -), keine Platzhalter.",
+    "matchSource": "Prüfen",
+    "matchSourceActions": "Die Aktionen des Turns",
+    "matchSourceOutput": "Ein Feld der JSON-Ausgabe des Agents",
+    "matchSourceProperties": "Eine Unterhaltungseigenschaft",
+    "matchTypeBoolean": "Wahr / falsch",
+    "matchTypeList": "Einer aus einer Liste",
+    "matchTypeNumber": "Zahl",
+    "matchTypeText": "Text",
+    "matchValue": "Wert",
+    "matchValueType": "Werttyp",
+    "sourceOutput": "Das Ergebnis eines Turns passt",
+    "sourceOutputShort": "Turn-Ergebnisse",
+    "op": {
+      "exists": "ist vorhanden",
+      "eq": "ist gleich",
+      "neq": "ist ungleich",
+      "in": "ist einer von",
+      "gt": "ist größer als",
+      "gte": "ist mindestens",
+      "lt": "ist kleiner als",
+      "lte": "ist höchstens",
+      "contains": "enthält"
     }
   }
 }

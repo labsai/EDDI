@@ -2383,7 +2383,8 @@
     "disabledAccessRevokedHintBy": "其创建者（{{user}}）已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。",
     "finishedOneShot": "一次性计划：已运行并完成。",
     "oneTimeHelpZone": "仅在此时刻触发一次，然后完成。按 {{zone}} 时间解读（即下方的时区）。",
-    "openKnowledgeBase": "打开知识库"
+    "openKnowledgeBase": "打开知识库",
+    "serverOwnedHint": "由 EDDI 自身运行（告警重试、汇总和保留清理）。无法修改、停用或删除。"
   },
   "cascadeTrace": {
     "title": "模型级联",
@@ -6908,6 +6909,37 @@
       "TURN_DEADLINE": "超出时限",
       "COST_CEILING": "达到费用上限",
       "TENANT_BUDGET": "租户预算已用完"
+    },
+    "urlKept": "已保存的 URL 已隐藏。保持不变即可保留，或输入新的 URL。",
+    "includeValue": "包含匹配到的值",
+    "includeValueHint": "仅当该代理版本开启了对话审阅时才包含——该值来自对话。否则告警只说明路径、比较方式和你设定的常量。截断为 280 个字符。",
+    "matchIncomplete": "请选择与值匹配的比较方式，并输入值。",
+    "matchOp": "比较方式",
+    "matchPath": "路径",
+    "matchPathDepth": "最多 8 层。",
+    "matchPathInvalid": "仅限以点分隔的名称（字母、数字、_ 和 -），不支持通配符。",
+    "matchSource": "检查对象",
+    "matchSourceActions": "该轮次的动作",
+    "matchSourceOutput": "代理 JSON 输出中的字段",
+    "matchSourceProperties": "对话属性",
+    "matchTypeBoolean": "真 / 假",
+    "matchTypeList": "列表中的某一项",
+    "matchTypeNumber": "数字",
+    "matchTypeText": "文本",
+    "matchValue": "值",
+    "matchValueType": "值类型",
+    "sourceOutput": "某轮次的结果匹配",
+    "sourceOutputShort": "轮次结果",
+    "op": {
+      "exists": "存在",
+      "eq": "等于",
+      "neq": "不等于",
+      "in": "属于以下之一",
+      "gt": "大于",
+      "gte": "至少为",
+      "lt": "小于",
+      "lte": "至多为",
+      "contains": "包含"
     }
   }
 }

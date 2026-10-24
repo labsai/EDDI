@@ -66,6 +66,24 @@ describe("SchedulesPage — system-managed schedules", () => {
     }
   );
 
+  it("shows the alerts-maintenance schedule as system-managed, with no edit, toggle or delete", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({ id: "alerts-1", name: "alerts-maintenance", metadata: { alertType: "alert_maintenance" } }),
+          scheduleRow({ id: "chat-1", name: "Chat schedule" }),
+        ])
+      )
+    );
+    renderSchedules();
+    await waitFor(() => expect(screen.getByTestId("system-schedule-badge-alerts-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("edit-alerts-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("toggle-alerts-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-alerts-1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("delete-chat-1")).toBeInTheDocument();
+    expect(screen.getByTestId("toggle-chat-1")).toBeInTheDocument();
+  });
+
   it("links an ingestion schedule to the knowledge base it is changed on", async () => {
     server.use(
       http.get("*/schedulestore/schedules", () =>

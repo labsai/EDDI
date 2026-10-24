@@ -5,12 +5,15 @@ import { Plus, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentPicker } from "@/components/shared/agent-picker";
+import { OutputMatchBuilder } from "./output-match-builder";
 import { alertErrorCode, useSaveAlertRule, useTestAlertRule } from "@/hooks/use-alerts";
 import { isApiError } from "@/lib/api-client";
 import { ruleProblems } from "@/lib/alert-rules";
 import {
   ALERT_LIMITS,
+  defaultCondition,
   ERROR_KINDS,
+  MASKED_URL_SUFFIX,
   type AlertRule,
   type AlertSource,
   type DeliveryTarget,
@@ -48,7 +51,7 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
     setRule((r) => ({ ...r, delivery: r.delivery.map((d, j) => (j === i ? { ...d, ...patch } : d)) }));
 
   const changeSource = (source: AlertSource) =>
-    set({ source, condition: source === "RATING" ? { maxNormalizedScore: 0.5, onComment: true } : { errorKinds: ["TURN_ERROR", "TURN_DEADLINE"] } });
+    set({ source, condition: defaultCondition(source) });
 
   const toggleKind = (kind: ErrorKind) => {
     const kinds = new Set(rule.condition.errorKinds ?? []);
@@ -107,6 +110,7 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
           >
             <option value="RATING">{t("alerts.sourceRating", "A rating is given or changed")}</option>
             <option value="CONVERSATION_ERROR">{t("alerts.sourceError", "A turn fails")}</option>
+            <option value="OUTPUT_MATCH">{t("alerts.sourceOutput", "A turn's result matches")}</option>
           </select>
         </label>
       </div>
@@ -138,7 +142,9 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
 
       <fieldset className="space-y-2" data-testid="alert-rule-condition">
         <legend className="text-sm font-medium">{t("alerts.ruleCondition", "Condition")}</legend>
-        {rule.source === "RATING" ? (
+        {rule.source === "OUTPUT_MATCH" ? (
+          <OutputMatchBuilder condition={rule.condition} onChange={setCondition} />
+        ) : rule.source === "RATING" ? (
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">{t("alerts.maxScore", "Score at or below (0–1)")}</span>
@@ -225,14 +231,20 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
               />
             ) : (
               <>
-                <Input
-                  className="max-w-sm"
-                  placeholder="https://hooks.example.com/eddi"
-                  value={target.url ?? ""}
-                  onChange={(e) => setTarget(i, { url: e.target.value.trim() })}
-                  aria-label={t("alerts.webhookUrl", "Webhook URL")}
-                  data-testid={`alert-rule-target-url-${i}`}
-                />
+                <div className="max-w-sm flex-1">
+                  <Input
+                    placeholder="https://hooks.example.com/eddi — or ${vault:alert-hook-url}"
+                    value={target.url ?? ""}
+                    onChange={(e) => setTarget(i, { url: e.target.value.trim(), urlConfigured: null })}
+                    aria-label={t("alerts.webhookUrl", "Webhook URL")}
+                    data-testid={`alert-rule-target-url-${i}`}
+                  />
+                  {target.urlConfigured && target.url?.endsWith(MASKED_URL_SUFFIX) && (
+                    <p className="mt-1 text-xs text-muted-foreground" data-testid={`alert-rule-target-url-kept-${i}`}>
+                      {t("alerts.urlKept", "The stored URL is hidden. Leave it as it is to keep it, or enter a new one.")}
+                    </p>
+                  )}
+                </div>
                 <Input
                   className="max-w-xs"
                   placeholder="${vault:alert-signing-secret}"

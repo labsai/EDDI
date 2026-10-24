@@ -11,7 +11,9 @@ import { seg } from "./path-segment";
  * webhook targets (403 `WEBHOOK_ADMIN_ONLY`); a webhook is shown to them by host.
  */
 
-export type AlertSource = "RATING" | "CONVERSATION_ERROR";
+export type AlertSource = "RATING" | "CONVERSATION_ERROR" | "OUTPUT_MATCH";
+export type MatchOp = "exists" | "eq" | "neq" | "in" | "gt" | "gte" | "lt" | "lte" | "contains";
+export const MATCH_OPS: MatchOp[] = ["exists", "eq", "neq", "in", "gt", "gte", "lt", "lte", "contains"];
 export type ErrorKind = "TURN_ERROR" | "TURN_INTERRUPTED" | "TURN_DEADLINE" | "COST_CEILING" | "TENANT_BUDGET";
 export type DigestMode = "NONE" | "HOURLY" | "DAILY";
 export type DeliveryType = "SLACK" | "WEBHOOK";
@@ -42,14 +44,31 @@ export interface AlertCondition {
   onComment?: boolean | null;
   tags?: string[] | null;
   errorKinds?: ErrorKind[] | null;
+  /** OUTPUT_MATCH: `properties.<name>`, `output.json.<a.b.c>` or `actions`. */
+  path?: string | null;
+  op?: MatchOp | null;
+  /** OUTPUT_MATCH: the rule author's constant (string, number, boolean, or a list for `in`). */
+  value?: string | number | boolean | (string | number | boolean)[] | null;
+  /** OUTPUT_MATCH: include the matched runtime value — honoured only with conversation review on. */
+  includeValue?: boolean | null;
 }
 
 export interface DeliveryTarget {
   type: DeliveryType;
   channelId?: string | null;
+  /**
+   * A webhook URL is a secret and never comes back from a read: reads answer
+   * scheme + host + {@link MASKED_URL_SUFFIX}. Sending that value back (or none)
+   * keeps the stored URL. May also be a `${vault:…}` reference.
+   */
   url?: string | null;
   signingSecret?: string | null;
+  /** Read-only: a URL is stored (shown masked). */
+  urlConfigured?: boolean | null;
 }
+
+/** What replaces a webhook URL's path on every read. */
+export const MASKED_URL_SUFFIX = "/***";
 
 export interface AlertRule {
   id?: string | null;
@@ -94,6 +113,8 @@ export interface AlertDelivery {
 
 export interface AlertMatch {
   matched: string[];
+  /** OUTPUT_MATCH: the runtime value, only when the rule asked and conversation review is on (≤ 280 chars). */
+  value?: string | null;
   errorKind?: ErrorKind | null;
   ratingId?: string | null;
   stepIndex?: number | null;
@@ -210,9 +231,21 @@ export function blankRule(source: AlertSource, agentId: string): AlertRule {
     enabled: true,
     scope: agentId ? { allAgents: false, agentIds: [agentId] } : { allAgents: true, agentIds: [] },
     source,
-    condition: source === "RATING" ? { maxNormalizedScore: 0.5, onComment: true } : { errorKinds: ["TURN_ERROR", "TURN_DEADLINE"] },
+    condition: defaultCondition(source),
     delivery: [],
     throttle: { windowMinutes: ALERT_LIMITS.defaultWindowMinutes, maxPerWindow: ALERT_LIMITS.defaultMaxPerWindow },
     digest: "HOURLY",
   };
+}
+
+/** The condition a new rule of a source starts with. */
+export function defaultCondition(source: AlertSource): AlertCondition {
+  switch (source) {
+    case "RATING":
+      return { maxNormalizedScore: 0.5, onComment: true };
+    case "OUTPUT_MATCH":
+      return { path: "properties.escalate", op: "eq", value: true, includeValue: false };
+    default:
+      return { errorKinds: ["TURN_ERROR", "TURN_DEADLINE"] };
+  }
 }

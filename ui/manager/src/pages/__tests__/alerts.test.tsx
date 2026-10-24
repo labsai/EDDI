@@ -172,6 +172,53 @@ describe("AlertsPage — rules", () => {
     expect(sent!.throttle).toEqual({ windowMinutes: 60, maxPerWindow: 10 });
   });
 
+  it("builds an output-match condition: property path, operator by value type, value and includeValue", async () => {
+    let sent: AlertRule | null = null;
+    server.use(
+      http.post("*/alerts/rules", async ({ request }) => {
+        sent = (await request.json()) as AlertRule;
+        return HttpResponse.json({ ...sent, id: "rule-om" }, { status: 201 });
+      }),
+    );
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "Angry users" } });
+    fireEvent.change(screen.getByTestId("alert-rule-source"), { target: { value: "OUTPUT_MATCH" } });
+    fireEvent.change(screen.getByTestId("output-match-source"), { target: { value: "output.json" } });
+    fireEvent.change(screen.getByTestId("output-match-path"), { target: { value: "sentiment" } });
+    fireEvent.change(screen.getByTestId("output-match-type"), { target: { value: "list" } });
+    expect(within(screen.getByTestId("output-match-op")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["in"]);
+    fireEvent.change(screen.getByTestId("output-match-value"), { target: { value: "angry, frustrated" } });
+    fireEvent.click(screen.getByTestId("output-match-include-value"));
+    fireEvent.click(screen.getByTestId("alert-rule-save"));
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.source).toBe("OUTPUT_MATCH");
+    expect(sent!.condition).toEqual({ path: "output.json.sentiment", op: "in", value: ["angry", "frustrated"], includeValue: true });
+  });
+
+  it("flags an invalid path inline and blocks saving; actions offers contains and exists only", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "x" } });
+    fireEvent.change(screen.getByTestId("alert-rule-source"), { target: { value: "OUTPUT_MATCH" } });
+    fireEvent.change(screen.getByTestId("output-match-path"), { target: { value: "a.*" } });
+    expect(screen.getByTestId("output-match-path-error")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-rule-save")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("output-match-source"), { target: { value: "actions" } });
+    expect(screen.queryByTestId("output-match-path")).toBeNull();
+    expect(within(screen.getByTestId("output-match-op")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
+      "contains",
+      "exists",
+    ]);
+  });
+
+  it("shows a stored webhook masked and says it is kept unless replaced", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alert-rule-edit-rule-errors"));
+    expect((screen.getByTestId("alert-rule-target-url-0") as HTMLInputElement).value).toBe("https://hooks.example.com/***");
+    expect(screen.getByTestId("alert-rule-target-url-kept-0")).toBeInTheDocument();
+  });
+
   it("refuses an invalid Slack channel before sending anything", async () => {
     renderAlerts("/manage/alerts?tab=rules");
     fireEvent.click(await screen.findByTestId("alerts-new-rule"));

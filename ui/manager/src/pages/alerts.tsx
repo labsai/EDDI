@@ -174,6 +174,7 @@ function Inbox({ agentId, params, setParam }: { agentId: string; params: URLSear
           <option value="">{t("alerts.allSources", "All sources")}</option>
           <option value="RATING">{t("alerts.sourceRatingShort", "Ratings")}</option>
           <option value="CONVERSATION_ERROR">{t("alerts.sourceErrorShort", "Failed turns")}</option>
+          <option value="OUTPUT_MATCH">{t("alerts.sourceOutputShort", "Turn results")}</option>
         </select>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -287,7 +288,12 @@ function Rules({ agentId, isAdmin }: { agentId: string; isAdmin: boolean }) {
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-foreground">{rule.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {rule.source === "RATING" ? t("alerts.sourceRatingShort", "Ratings") : t("alerts.sourceErrorShort", "Failed turns")} ·{" "}
+                  {rule.source === "RATING"
+                    ? t("alerts.sourceRatingShort", "Ratings")
+                    : rule.source === "OUTPUT_MATCH"
+                      ? t("alerts.sourceOutputShort", "Turn results")
+                      : t("alerts.sourceErrorShort", "Failed turns")}{" "}
+                  ·{" "}
                   {rule.scope.allAgents
                     ? t("alerts.allAgents", "Every agent")
                     : t("alerts.agentCount", { n: rule.scope.agentIds.length, defaultValue: "Agents: {{n}}" })}{" "}

@@ -46,7 +46,8 @@ export function alertRuleFixtures(): AlertRule[] {
       scope: { allAgents: true, agentIds: [] },
       source: "CONVERSATION_ERROR",
       condition: { errorKinds: ["TURN_ERROR", "TURN_DEADLINE"] },
-      delivery: [{ type: "WEBHOOK", url: "https://hooks.example.com/eddi", signingSecret: "${vault:alert-hook}" }],
+      // As the backend answers a read: the URL masked to scheme + host.
+      delivery: [{ type: "WEBHOOK", url: "https://hooks.example.com/***", signingSecret: "${vault:alert-hook}", urlConfigured: true }],
       throttle: { windowMinutes: 60, maxPerWindow: 10 },
       digest: "DAILY",
       createdBy: "admin",

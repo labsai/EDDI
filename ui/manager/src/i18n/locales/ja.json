@@ -2383,7 +2383,8 @@
     "disabledAccessRevokedHintBy": "作成者（{{user}}）がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
     "finishedOneShot": "1 回限りのスケジュール：実行済みで完了しています。",
     "oneTimeHelpZone": "この時刻に一度だけ実行され、その後完了します。{{zone}} の時刻として解釈されます（下のタイムゾーン）。",
-    "openKnowledgeBase": "ナレッジベースを開く"
+    "openKnowledgeBase": "ナレッジベースを開く",
+    "serverOwnedHint": "EDDI 自身が実行します（アラートの再試行、ダイジェスト、保持期間の管理）。変更、無効化、削除はできません。"
   },
   "cascadeTrace": {
     "title": "モデルカスケード",
@@ -6908,6 +6909,37 @@
       "TURN_DEADLINE": "期限超過",
       "COST_CEILING": "コスト上限に到達",
       "TENANT_BUDGET": "テナント予算を使い切り"
+    },
+    "urlKept": "保存済みの URL は非表示です。そのままにすると保持され、新しい URL を入力すると置き換わります。",
+    "includeValue": "一致した値を含める",
+    "includeValueHint": "エージェントのバージョンで会話レビューが有効な場合のみ（値は会話から取得されます）。それ以外の場合、アラートにはパス、比較方法、指定した定数だけが記載されます。280 文字で切り詰められます。",
+    "matchIncomplete": "値に合った比較方法を選び、値を入力してください。",
+    "matchOp": "比較",
+    "matchPath": "パス",
+    "matchPathDepth": "最大 8 階層までです。",
+    "matchPathInvalid": "ドット区切りの名前のみ（英字、数字、_、-）。ワイルドカードは使えません。",
+    "matchSource": "対象",
+    "matchSourceActions": "ターンのアクション",
+    "matchSourceOutput": "エージェントの JSON 出力のフィールド",
+    "matchSourceProperties": "会話のプロパティ",
+    "matchTypeBoolean": "真 / 偽",
+    "matchTypeList": "リストのいずれか",
+    "matchTypeNumber": "数値",
+    "matchTypeText": "テキスト",
+    "matchValue": "値",
+    "matchValueType": "値の種類",
+    "sourceOutput": "ターンの結果が一致したとき",
+    "sourceOutputShort": "ターンの結果",
+    "op": {
+      "exists": "存在する",
+      "eq": "等しい",
+      "neq": "等しくない",
+      "in": "次のいずれか",
+      "gt": "より大きい",
+      "gte": "以上",
+      "lt": "より小さい",
+      "lte": "以下",
+      "contains": "含む"
     }
   }
 }

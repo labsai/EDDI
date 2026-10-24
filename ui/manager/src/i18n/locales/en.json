@@ -2466,7 +2466,8 @@
     "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
     "finishedOneShot": "One-time schedule: it ran and is finished.",
     "oneTimeHelpZone": "Fires once at this moment, then completes. Read as {{zone}} time (the Time Zone below).",
-    "openKnowledgeBase": "Open the knowledge base"
+    "openKnowledgeBase": "Open the knowledge base",
+    "serverOwnedHint": "Run by EDDI itself (alert retries, digests and retention). It cannot be changed, disabled or deleted."
   },
   "cascadeTrace": {
     "title": "Model Cascade",
@@ -6908,6 +6909,37 @@
       "TURN_DEADLINE": "Deadline exceeded",
       "COST_CEILING": "Cost ceiling reached",
       "TENANT_BUDGET": "Tenant budget spent"
+    },
+    "urlKept": "The stored URL is hidden. Leave it as it is to keep it, or enter a new one.",
+    "includeValue": "Include the value that matched",
+    "includeValueHint": "Only when the agent version has conversation review turned on — the value comes from the conversation. Otherwise the alert names the path, the comparison and your constant only. Cut to 280 characters.",
+    "matchIncomplete": "Choose a comparison that fits the value, and enter the value.",
+    "matchOp": "Comparison",
+    "matchPath": "Path",
+    "matchPathDepth": "At most 8 levels deep.",
+    "matchPathInvalid": "Dot-separated names only (letters, digits, _ and -), no wildcards.",
+    "matchSource": "Look at",
+    "matchSourceActions": "The turn's actions",
+    "matchSourceOutput": "A field of the agent's JSON output",
+    "matchSourceProperties": "A conversation property",
+    "matchTypeBoolean": "True / false",
+    "matchTypeList": "One of a list",
+    "matchTypeNumber": "Number",
+    "matchTypeText": "Text",
+    "matchValue": "Value",
+    "matchValueType": "Value type",
+    "sourceOutput": "A turn's result matches",
+    "sourceOutputShort": "Turn results",
+    "op": {
+      "exists": "exists",
+      "eq": "equals",
+      "neq": "does not equal",
+      "in": "is one of",
+      "gt": "is greater than",
+      "gte": "is at least",
+      "lt": "is less than",
+      "lte": "is at most",
+      "contains": "contains"
     }
   }
 }

@@ -2383,7 +2383,8 @@
     "disabledAccessRevokedHintBy": "생성자({{user}})가 더 이상 이 에이전트를 사용할 수 없어 실행이 멈췄습니다. 에이전트를 다시 공유하거나, 사용할 수 있는 사람으로 일정을 다시 만든 뒤 활성화하세요.",
     "finishedOneShot": "일회성 일정: 실행되었고 완료되었습니다.",
     "oneTimeHelpZone": "이 시각에 한 번만 실행된 후 완료됩니다. {{zone}} 시간으로 해석됩니다(아래의 시간대).",
-    "openKnowledgeBase": "지식 베이스 열기"
+    "openKnowledgeBase": "지식 베이스 열기",
+    "serverOwnedHint": "EDDI가 직접 실행합니다(알림 재시도, 요약, 보존). 변경, 비활성화 또는 삭제할 수 없습니다."
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",
@@ -6908,6 +6909,37 @@
       "TURN_DEADLINE": "기한 초과",
       "COST_CEILING": "비용 상한 도달",
       "TENANT_BUDGET": "테넌트 예산 소진"
+    },
+    "urlKept": "저장된 URL은 숨겨져 있습니다. 그대로 두면 유지되고, 새 URL을 입력하면 바뀝니다.",
+    "includeValue": "일치한 값 포함",
+    "includeValueHint": "에이전트 버전에 대화 검토가 켜져 있을 때만 포함됩니다(값은 대화에서 가져옵니다). 그렇지 않으면 알림에는 경로, 비교 방식, 지정한 상수만 표시됩니다. 280자로 잘립니다.",
+    "matchIncomplete": "값에 맞는 비교 방식을 고르고 값을 입력하세요.",
+    "matchOp": "비교",
+    "matchPath": "경로",
+    "matchPathDepth": "최대 8단계까지입니다.",
+    "matchPathInvalid": "점으로 구분된 이름만 가능합니다(문자, 숫자, _, -). 와일드카드는 사용할 수 없습니다.",
+    "matchSource": "살펴볼 대상",
+    "matchSourceActions": "턴의 액션",
+    "matchSourceOutput": "에이전트 JSON 출력의 필드",
+    "matchSourceProperties": "대화 속성",
+    "matchTypeBoolean": "참 / 거짓",
+    "matchTypeList": "목록 중 하나",
+    "matchTypeNumber": "숫자",
+    "matchTypeText": "텍스트",
+    "matchValue": "값",
+    "matchValueType": "값 유형",
+    "sourceOutput": "턴의 결과가 일치할 때",
+    "sourceOutputShort": "턴 결과",
+    "op": {
+      "exists": "존재함",
+      "eq": "같음",
+      "neq": "같지 않음",
+      "in": "다음 중 하나",
+      "gt": "보다 큼",
+      "gte": "이상",
+      "lt": "보다 작음",
+      "lte": "이하",
+      "contains": "포함함"
     }
   }
 }

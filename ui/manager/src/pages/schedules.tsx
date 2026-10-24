@@ -105,8 +105,17 @@ function isSystemManagedSchedule(s: ScheduleConfiguration): boolean {
     md.hitlType === "hitl_timeout" ||
     md.ragIngestion === true ||
     nonEmpty(md.dreamType) ||
-    nonEmpty(md.teamCadenceType)
+    nonEmpty(md.teamCadenceType) ||
+    nonEmpty(md.alertType)
   );
+}
+
+/** The server's own alert maintenance schedule (`alertType` metadata): the
+ *  backend refuses every change to it — update, delete, enable, disable,
+ *  dismiss — with 409 SYSTEM_SCHEDULE, so the list offers none of them. */
+function isServerOwnedSchedule(s: ScheduleConfiguration): boolean {
+  const md = s.metadata;
+  return typeof md?.alertType === "string" && md.alertType.length > 0;
 }
 
 /** Where an ingestion schedule is defined: its knowledge base's editor. */
@@ -1852,6 +1861,7 @@ export function SchedulesPage() {
                   {schedules.map((s) => {
                     const hitl = isHitlTimeoutSchedule(s);
                     const systemManaged = isSystemManagedSchedule(s);
+                    const serverOwned = isServerOwnedSchedule(s);
                     const outcome = fireOutcomes[s.id!];
                     return (
                       <Fragment key={s.id}>
@@ -1876,10 +1886,17 @@ export function SchedulesPage() {
                             {systemManaged && !hitl && (
                               <span
                                 className="ms-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                                title={t(
-                                  "schedules.systemManagedHint",
-                                  "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here."
-                                )}
+                                title={
+                                  serverOwned
+                                    ? t(
+                                        "schedules.serverOwnedHint",
+                                        "Run by EDDI itself (alert retries, digests and retention). It cannot be changed, disabled or deleted."
+                                      )
+                                    : t(
+                                        "schedules.systemManagedHint",
+                                        "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here."
+                                      )
+                                }
                                 data-testid={`system-schedule-badge-${s.id}`}
                               >
                                 {t("schedules.systemManaged", "System")}
@@ -1993,6 +2010,7 @@ export function SchedulesPage() {
                               )}
 
                               {/* Toggle Enable/Disable */}
+                              {!serverOwned && (
                               <button
                                 onClick={() => handleToggle(s)}
                                 // Every row with a toggle in flight, and only
@@ -2014,6 +2032,7 @@ export function SchedulesPage() {
                                   <ToggleLeft className="h-4 w-4" />
                                 )}
                               </button>
+                              )}
 
                               {/* Fire Now — hidden for HITL-timeout schedules,
                                   which the backend refuses to fire (409). A
@@ -2061,8 +2080,8 @@ export function SchedulesPage() {
                                 </button>
                               )}
 
-                              {/* Delete */}
-                              {confirmDeleteId === s.id ? (
+                              {/* Delete — never for a schedule the server owns */}
+                              {serverOwned ? null : confirmDeleteId === s.id ? (
                                 <div className="flex items-center gap-1">
                                   <button
                                     onClick={() => handleDelete(s.id!)}

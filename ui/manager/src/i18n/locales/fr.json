@@ -2413,7 +2413,8 @@
     "disabledAccessRevokedHintBy": "Son créateur ({{user}}) ne peut plus utiliser cet agent, elle ne se déclenche donc plus. Partagez à nouveau l'agent avec lui — ou recréez la planification au nom de quelqu'un qui peut l'utiliser — puis activez-la.",
     "finishedOneShot": "Planification unique : elle s'est exécutée et est terminée.",
     "oneTimeHelpZone": "Se déclenche une seule fois à cet instant, puis se termine. Interprété à l'heure de {{zone}} (le fuseau horaire ci-dessous).",
-    "openKnowledgeBase": "Ouvrir la base de connaissances"
+    "openKnowledgeBase": "Ouvrir la base de connaissances",
+    "serverOwnedHint": "Exécutée par EDDI lui-même (nouvelles tentatives d'alerte, récapitulatifs et rétention). Elle ne peut être ni modifiée, ni désactivée, ni supprimée."
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",
@@ -6979,6 +6980,37 @@
       "TURN_DEADLINE": "Délai dépassé",
       "COST_CEILING": "Plafond de coût atteint",
       "TENANT_BUDGET": "Budget du tenant épuisé"
+    },
+    "urlKept": "L'URL enregistrée est masquée. Laissez-la telle quelle pour la conserver, ou saisissez-en une nouvelle.",
+    "includeValue": "Inclure la valeur correspondante",
+    "includeValueHint": "Uniquement si la révision des conversations est activée pour la version de l'agent — la valeur vient de la conversation. Sinon, l'alerte ne cite que le chemin, la comparaison et votre constante. Tronquée à 280 caractères.",
+    "matchIncomplete": "Choisissez une comparaison adaptée à la valeur et saisissez la valeur.",
+    "matchOp": "Comparaison",
+    "matchPath": "Chemin",
+    "matchPathDepth": "8 niveaux au maximum.",
+    "matchPathInvalid": "Uniquement des noms séparés par des points (lettres, chiffres, _ et -), sans caractères génériques.",
+    "matchSource": "Examiner",
+    "matchSourceActions": "Les actions du tour",
+    "matchSourceOutput": "Un champ de la sortie JSON de l'agent",
+    "matchSourceProperties": "Une propriété de la conversation",
+    "matchTypeBoolean": "Vrai / faux",
+    "matchTypeList": "Une valeur d'une liste",
+    "matchTypeNumber": "Nombre",
+    "matchTypeText": "Texte",
+    "matchValue": "Valeur",
+    "matchValueType": "Type de valeur",
+    "sourceOutput": "Le résultat d'un tour correspond",
+    "sourceOutputShort": "Résultats des tours",
+    "op": {
+      "exists": "existe",
+      "eq": "est égal à",
+      "neq": "est différent de",
+      "in": "fait partie de",
+      "gt": "est supérieur à",
+      "gte": "est au moins",
+      "lt": "est inférieur à",
+      "lte": "est au plus",
+      "contains": "contient"
     }
   }
 }
