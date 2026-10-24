@@ -6635,12 +6635,12 @@
       "PASSED": "Superada",
       "FAILED": "Fallida",
       "ERROR": "Error",
-      "ABORTED": "Cancelada",
+      "ABORTED": "Interrumpida",
       "CANCELLED": "Cancelada",
       "RUNNING": "En ejecución"
     },
     "notice": {
-      "abortedTitle": "Esta ejecución se canceló: el agente no fue evaluado",
+      "abortedTitle": "Esta ejecución se interrumpió: el agente no fue evaluado",
       "abortedBody": "El nodo que ejecutaba esta prueba se detuvo antes de terminar, por lo que la ejecución se cerró y sus conversaciones de prueba se eliminaron. Vuelve a iniciar la ejecución.",
       "cancelledTitle": "Esta ejecución se canceló: el agente no se evaluó por completo",
       "cancelledBody": "La ejecución se detuvo antes de terminar. Los casos completados conservan sus resultados; el resto cuenta como fallido. Vuelve a iniciar la ejecución para obtener un veredicto completo.",

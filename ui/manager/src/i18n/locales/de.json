@@ -6564,12 +6564,12 @@
       "PASSED": "Bestanden",
       "FAILED": "Fehlgeschlagen",
       "ERROR": "Fehler",
-      "ABORTED": "Abgebrochen",
+      "ABORTED": "Unterbrochen",
       "CANCELLED": "Abgebrochen",
       "RUNNING": "Läuft"
     },
     "notice": {
-      "abortedTitle": "Dieser Lauf wurde abgebrochen – der Agent wurde nicht bewertet",
+      "abortedTitle": "Dieser Lauf wurde unterbrochen – der Agent wurde nicht bewertet",
       "abortedBody": "Der Knoten, auf dem dieser Test lief, wurde vor Abschluss beendet. Der Lauf wurde daher geschlossen und seine Testgespräche wurden gelöscht. Starte den Lauf erneut.",
       "cancelledTitle": "Dieser Lauf wurde abgebrochen — der Agent wurde nicht vollständig bewertet",
       "cancelledBody": "Der Lauf wurde vor Abschluss gestoppt. Abgeschlossene Fälle behalten ihre Ergebnisse, die übrigen gelten als fehlgeschlagen. Starte den Lauf erneut, um ein vollständiges Ergebnis zu erhalten.",
