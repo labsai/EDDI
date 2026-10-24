@@ -2628,6 +2628,7 @@ jobs:
     permissions:
       contents: write  # Required for creating GitHub Releases
       id-token: write  # Sigstore cosign keyless signing of SHA256SUMS (OIDC → Fulcio)
+      attestations: write  # SLSA provenance attestation of SHA256SUMS
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2665,6 +2666,17 @@ jobs:
             SHA256SUMS
           echo "### 🔏 SHA256SUMS signed (Sigstore cosign, keyless)" >> "$GITHUB_STEP_SUMMARY"
           echo "Verify: \`cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity ${SIGNER_IDENTITY} --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Signing proves who signed SHA256SUMS; provenance records how it was built
+      # (this workflow, this commit, this runner). Scorecard's Signed-Releases check
+      # warns on a release that has the signature but no provenance, so attest the
+      # same file the release publishes. Like the image attestation above, the
+      # statement is stored in GitHub's attestation store and verifiable with
+      # `gh attestation verify SHA256SUMS --repo labsai/EDDI`.
+      - name: Generate SLSA provenance attestation (SHA256SUMS)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
