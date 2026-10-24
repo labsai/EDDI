@@ -64,6 +64,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -552,6 +553,9 @@ public class LlmTask implements ILifecycleTask {
         // messages of the window are screened again. Redaction rewrites what the model
         // sees; conversation memory keeps the message as the user sent it.
         final List<ChatMessage> promptBeforeScreening = messages;
+        // Step-only text screened this turn, by text: N cascade steps pay for one
+        // verdict.
+        final Map<String, String> stepTextVerdicts = new ConcurrentHashMap<>();
         GuardrailService.InputResult inputScreening = null;
         if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
             inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
@@ -703,7 +707,7 @@ public class LlmTask implements ILifecycleTask {
                         turnBudget(memory.getTurnDeadline()),
                         (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
                                 processedParams,
-                                stepType, stepParams, screenedInput, currentStep));
+                                stepType, stepParams, screenedInput, currentStep, stepTextVerdicts));
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -1284,7 +1288,8 @@ public class LlmTask implements ILifecycleTask {
      * prompt.
      */
     List<ChatMessage> screenedStepPrompt(List<ChatMessage> forStep, List<ChatMessage> beforeScreening, GuardrailService.InputResult screened,
-                                         IConversationMemory memory, Task task, IWritableConversationStep currentStep) {
+                                         IConversationMemory memory, Task task, IWritableConversationStep currentStep,
+                                         Map<String, String> stepTextVerdicts) {
         if (guardrailService == null || isNullOrEmpty(task.getInputGuardrails()) || screened == null || screened.messages() == null) {
             return forStep;
         }
@@ -1326,7 +1331,7 @@ public class LlmTask implements ILifecycleTask {
         }
         result.set(stepLast, stepUser.toBuilder().contents(contents).build());
         var unseen = guardrailService.screenUnseenText(task.getInputGuardrails(), result, stepLast, screenedTexts,
-                guardrailContext(memory, task, result));
+                stepTextVerdicts, guardrailContext(memory, task, result));
         accumulateCost(currentStep, unseen.costUsd());
         return unseen.messages();
     }
@@ -1363,7 +1368,7 @@ public class LlmTask implements ILifecycleTask {
                                                    IConversationMemory memory, Task task,
                                                    String taskType, Map<String, String> taskParams, String stepType,
                                                    Map<String, String> stepParams, GuardrailService.InputResult screenedInput,
-                                                   IWritableConversationStep currentStep) {
+                                                   IWritableConversationStep currentStep, Map<String, String> stepTextVerdicts) {
         if (attachmentForwarder == null || !(OpenAiCompatibleEndpoint.isType(taskType) || OpenAiCompatibleEndpoint.isType(stepType))) {
             return null;
         }
@@ -1376,7 +1381,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> forStep = new ArrayList<>(promptWithoutAttachments);
         // The turn's errors and counts were recorded by the task-level pass.
         forwardAttachments(forStep, memory, task, stepType, stepParams, false);
-        return screenedStepPrompt(forStep, promptBeforeScreening, screenedInput, memory, task, currentStep);
+        return screenedStepPrompt(forStep, promptBeforeScreening, screenedInput, memory, task, currentStep, stepTextVerdicts);
     }
 
     /**

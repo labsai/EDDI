@@ -24,6 +24,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.ClassifierGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PromptInjectionGuardrail;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
@@ -31,12 +32,17 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,9 +55,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -527,8 +536,115 @@ class LlmTaskOpenAiCompatibleTest {
         List<ChatMessage> forStep = List.of(
                 UserMessage.from(TextContent.from("a"), TextContent.from("jane@example.org"), ImageContent.from(IMAGE_B64, "image/png")));
 
-        var result = llmTask.screenedStepPrompt(forStep, before, screened, memory, task, currentStep);
+        var result = llmTask.screenedStepPrompt(forStep, before, screened, memory, task, currentStep, new HashMap<>());
 
         assertSame(after, result, "unmatched shape must never yield the step's unscreened message");
+    }
+
+    // ---- a classifier (screensHistory() == false) still screens step-only
+    // current-turn text ----
+
+    /**
+     * Installs a classifier whose answer depends on the text it is asked about; a
+     * null answer is an outage.
+     */
+    private void classifierAnswering(Function<String, String> answerFor) throws Exception {
+        ChatModel classifierModel = mock(ChatModel.class);
+        when(classifierModel.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            ChatRequest request = inv.getArgument(0);
+            String asked = request.messages().stream().map(Object::toString).collect(Collectors.joining(" "));
+            String answer = answerFor.apply(asked);
+            if (answer == null) {
+                throw new IllegalStateException("classifier down");
+            }
+            return ChatResponse.builder().aiMessage(AiMessage.from(answer)).build();
+        });
+        var classifierRegistry = mock(ChatModelRegistry.class);
+        when(classifierRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
+        llmTask.guardrailService = new GuardrailService(
+                List.of(new ClassifierGuardrail(classifierRegistry, new TemplatingEngine(Engine.builder().addDefaults().build()),
+                        new SimpleMeterRegistry())),
+                new SimpleMeterRegistry());
+    }
+
+    private LlmConfiguration cascadedWithClassifier(String failMode) {
+        var cfg = cascaded(new String[0], "openai-compatible", Map.of("baseUrl", "http://other:8000/v1", "modelName", "other"));
+        var guardrail = new LlmConfiguration.GuardrailConfig();
+        guardrail.setType("classifier");
+        guardrail.setAction("block");
+        var params = new HashMap<String, String>();
+        params.put("provider", "ollama");
+        params.put("model", "shieldgemma:2b");
+        params.put("baseUrl", "http://classifier:11434");
+        if (failMode != null) {
+            params.put("failMode", failMode);
+        }
+        guardrail.setParameters(params);
+        cfg.tasks().getFirst().setInputGuardrails(List.of(guardrail));
+        return cfg;
+    }
+
+    @Test
+    @DisplayName("classifier: step-only text it flags is withheld (the task's own message is cleared)")
+    void classifierFlagsStepOnlyText() throws Exception {
+        var model = liveModel();
+        extractForwarder("extract: something nasty");
+        classifierAnswering(asked -> asked.contains("nasty") ? "yes" : "no");
+
+        llmTask.execute(memory, cascadedWithClassifier(null));
+
+        var sent = text(lastUser(model));
+        assertTrue(!sent.contains("nasty") && sent.contains("withheld by a guardrail"), sent);
+    }
+
+    @Test
+    @DisplayName("classifier: step-only text it clears passes through")
+    void classifierClearsStepOnlyText() throws Exception {
+        var model = liveModel();
+        extractForwarder("extract: harmless figures");
+        classifierAnswering(asked -> "no");
+
+        llmTask.execute(memory, cascadedWithClassifier(null));
+
+        assertTrue(text(lastUser(model)).contains("harmless figures"), text(lastUser(model)));
+    }
+
+    @Test
+    @DisplayName("classifier: unavailable with failMode closed withholds step-only text")
+    void classifierUnavailableClosedWithholds() throws Exception {
+        var model = liveModel();
+        extractForwarder("extract: unchecked text");
+        classifierAnswering(asked -> asked.contains("unchecked") ? null : "no");
+
+        llmTask.execute(memory, cascadedWithClassifier("closed"));
+
+        var sent = text(lastUser(model));
+        assertTrue(!sent.contains("unchecked text") && sent.contains("withheld by a guardrail"), sent);
+    }
+
+    @Test
+    @DisplayName("classifier: the same step-only text is classified once per turn, however many steps carry it")
+    void classifierVerdictIsCachedPerTurn() throws Exception {
+        liveModel();
+        extractForwarder("extract: repeated figures");
+        var calls = new AtomicInteger();
+        classifierAnswering(asked -> {
+            if (asked.contains("repeated")) {
+                calls.incrementAndGet();
+            }
+            return "no";
+        });
+        var cfg = cascadedWithClassifier(null);
+        var second = new LlmConfiguration.CascadeStep();
+        second.setType("openai-compatible");
+        second.setParameters(Map.of("baseUrl", "http://third:8000/v1", "modelName", "third"));
+        var first = cfg.tasks().getFirst().getModelCascade().getSteps().getFirst();
+        first.setConfidenceThreshold(2.0);
+        cfg.tasks().getFirst().getModelCascade().setSteps(List.of(first, second));
+        cfg.tasks().getFirst().getModelCascade().setEvaluationStrategy("none");
+
+        llmTask.execute(memory, cfg);
+
+        assertEquals(1, calls.get(), "one classifier call for the part, shared by both steps");
     }
 }

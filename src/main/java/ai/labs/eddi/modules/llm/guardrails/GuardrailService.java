@@ -351,7 +351,7 @@ public class GuardrailService {
                 if (!(contents.get(c) instanceof TextContent part) || (i == last && c == lastText)) {
                     continue;
                 }
-                PartResult result = screenPart(configs, part.text(), messages, context);
+                PartResult result = screenPart(configs, part.text(), messages, context, false);
                 cost += result.costUsd();
                 String screened = result.text();
                 if (!screened.equals(part.text())) {
@@ -378,7 +378,8 @@ public class GuardrailService {
      * rule — a REDACT rewrites it, a block, or a guardrail that cannot check it,
      * withholds it.
      */
-    private PartResult screenPart(List<GuardrailConfig> configs, String text, List<ChatMessage> messages, GuardrailContext context) {
+    private PartResult screenPart(List<GuardrailConfig> configs, String text, List<ChatMessage> messages, GuardrailContext context,
+                                  boolean currentTurn) {
         String screened = text;
         double cost = 0.0;
         for (GuardrailConfig config : configs) {
@@ -387,7 +388,7 @@ public class GuardrailService {
                 continue;
             }
             ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
-            if (guardrail == null || !guardrail.screensHistory()) {
+            if (guardrail == null || (!currentTurn && !guardrail.screensHistory())) {
                 continue;
             }
             Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
@@ -419,17 +420,23 @@ public class GuardrailService {
      * Quietly screens the text parts of one user message that were not part of the
      * prompt the input phase screened — text only a cascade step's own prompt
      * carries (an extract the task's model did not get, a skip note naming a file).
-     * Same rule as an earlier message of the window ({@link #screenHistory}), and
-     * the same silence: nothing is recorded, because the turn's findings were
-     * recorded once by {@link #runInput}.
+     * Same outcome rule as an earlier message of the window
+     * ({@link #screenHistory}) and the same silence (nothing is recorded, because
+     * the turn's findings were recorded once by {@link #runInput}), but it is
+     * current-turn content, so EVERY input guardrail applies, including one that
+     * skips earlier messages for cost (the classifier). A guardrail that cannot
+     * decide follows its {@code failMode}.
      *
      * @param alreadyScreened
      *            the texts that need no further screening (the task's own parts,
      *            before and after screening)
+     * @param verdictCache
+     *            screened text by original text, kept by the caller for the turn:
+     *            an identical part is not screened (or paid for) twice; may be null
      * @return the messages with the new texts screened, and what that cost
      */
     public InputResult screenUnseenText(List<GuardrailConfig> configs, List<ChatMessage> messages, int index, Set<String> alreadyScreened,
-                                        GuardrailContext context) {
+                                        Map<String, String> verdictCache, GuardrailContext context) {
         if (configs == null || configs.isEmpty() || index < 0 || index >= messages.size() || !(messages.get(index) instanceof UserMessage user)) {
             return new InputResult(messages, null, null, 0.0);
         }
@@ -441,10 +448,20 @@ public class GuardrailService {
             if (!(contents.get(c) instanceof TextContent part) || alreadyScreened.contains(part.text())) {
                 continue;
             }
-            PartResult result = screenPart(configs, part.text(), messages, inputContext);
-            cost += result.costUsd();
-            if (!result.text().equals(part.text())) {
-                contents.set(c, TextContent.from(result.text()));
+            String cached = verdictCache != null ? verdictCache.get(part.text()) : null;
+            String screenedText;
+            if (cached != null) {
+                screenedText = cached;
+            } else {
+                PartResult result = screenPart(configs, part.text(), messages, inputContext, true);
+                cost += result.costUsd();
+                screenedText = result.text();
+                if (verdictCache != null) {
+                    verdictCache.put(part.text(), screenedText);
+                }
+            }
+            if (!screenedText.equals(part.text())) {
+                contents.set(c, TextContent.from(screenedText));
                 changed = true;
             }
         }
