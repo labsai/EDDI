@@ -17,7 +17,7 @@ cd $SRC/project
 FUZZ_SRC=$SRC/fuzz-src
 mkdir -p $FUZZ_SRC/ai/labs/eddi/utils
 
-for f in PathNavigator.java MatchingUtilities.java RuntimeUtilities.java; do
+for f in PathNavigator.java MatchingUtilities.java RuntimeUtilities.java SafeJsonExpression.java; do
     cp ".clusterfuzzlite/$f" "$FUZZ_SRC/ai/labs/eddi/utils/$f"
 done
 
@@ -41,7 +41,8 @@ javac --release $RELEASE_VER -encoding UTF-8 \
     -d $OUT/classes \
     $FUZZ_SRC/ai/labs/eddi/utils/PathNavigator.java \
     $FUZZ_SRC/ai/labs/eddi/utils/MatchingUtilities.java \
-    $FUZZ_SRC/ai/labs/eddi/utils/RuntimeUtilities.java
+    $FUZZ_SRC/ai/labs/eddi/utils/RuntimeUtilities.java \
+    $FUZZ_SRC/ai/labs/eddi/utils/SafeJsonExpression.java
 
 echo "✅ Utility classes compiled (--release $RELEASE_VER)"
 
@@ -113,12 +114,49 @@ public class MatchingUtilitiesFuzzer {
 }
 EOF
 
+# ── Fuzz Target: SafeJsonExpressionFuzzer ──
+# The evaluator of the `expression` output guardrail: the expression is author
+# configuration, the data a model's answer. Only its two declared exceptions
+# may escape; anything else (or a StackOverflowError) is a finding.
+cat > $SRC/SafeJsonExpressionFuzzer.java << 'EOF'
+import com.code_intelligence.jazzer.api.FuzzedDataProvider;
+import ai.labs.eddi.utils.SafeJsonExpression;
+import java.math.BigDecimal;
+import java.util.*;
+
+public class SafeJsonExpressionFuzzer {
+    private static final Map<String, Object> DATA = buildData();
+
+    private static Map<String, Object> buildData() {
+        Map<String, Object> root = new HashMap<>();
+        root.put("total", new BigDecimal("30.30"));
+        root.put("invoice", Map.of("total", 30, "currency", "EUR"));
+        root.put("lines", List.of(
+                Map.of("amount", new BigDecimal("10.10"), "qty", 1),
+                Map.of("amount", new BigDecimal("20.20"), "qty", 2)));
+        root.put("tags", List.of("a", "b"));
+        root.put("paid", false);
+        return root;
+    }
+
+    public static void fuzzerTestOneInput(FuzzedDataProvider data) {
+        String expression = data.consumeString(2100);
+        try {
+            SafeJsonExpression.compile(expression).evaluate(DATA);
+        } catch (SafeJsonExpression.SyntaxException | SafeJsonExpression.EvaluationException ignored) {
+            // Expected: invalid expressions and undecidable evaluations
+        }
+    }
+}
+EOF
+
 # ── Compile fuzz targets against the utility classes + Jazzer API ──
 javac --release $RELEASE_VER -encoding UTF-8 \
     -cp "$OUT/classes:$JAZZER_API_PATH" \
     -d $OUT \
     $SRC/PathNavigatorFuzzer.java \
-    $SRC/MatchingUtilitiesFuzzer.java
+    $SRC/MatchingUtilitiesFuzzer.java \
+    $SRC/SafeJsonExpressionFuzzer.java
 
 echo "✅ Fuzz targets compiled"
 
@@ -128,7 +166,7 @@ RUNTIME_CP="\$this_dir/classes:\$this_dir"
 # ── Generate Jazzer wrapper scripts ──
 # The "LLVMFuzzerTestOneInput" comment is required — bad_build_check scans
 # wrapper scripts for this string to detect valid fuzz targets.
-for fuzzer in PathNavigatorFuzzer MatchingUtilitiesFuzzer; do
+for fuzzer in PathNavigatorFuzzer MatchingUtilitiesFuzzer SafeJsonExpressionFuzzer; do
     echo "#!/bin/bash
 # LLVMFuzzerTestOneInput for fuzzer detection.
 this_dir=\$(dirname \"\$0\")
@@ -147,4 +185,4 @@ LD_LIBRARY_PATH=\"$JVM_LD_LIBRARY_PATH\":\$this_dir \\
 done
 
 echo "=== ClusterFuzzLite build complete ==="
-echo "Fuzz targets: PathNavigatorFuzzer, MatchingUtilitiesFuzzer"
+echo "Fuzz targets: PathNavigatorFuzzer, MatchingUtilitiesFuzzer, SafeJsonExpressionFuzzer"
