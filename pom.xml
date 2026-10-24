@@ -397,6 +397,22 @@
             <artifactId>jsoup</artifactId>
             <version>1.23.2</version>
         </dependency>
+        <!-- Mail core (engine/mail): MIME parsing and rendering, and later the
+             IMAP/SMTP clients, which take their sockets from
+             SafeSocketConnector. Angus Mail is the Jakarta Mail implementation;
+             EPL-2.0 OR GPL-2.0-with-Classpath-exception OR BSD-3-Clause (EDL 1.0).
+             Pinned to the versions the Quarkus BOM manages, so there is one copy
+             on the classpath. -->
+        <dependency>
+            <groupId>jakarta.mail</groupId>
+            <artifactId>jakarta.mail-api</artifactId>
+            <version>2.1.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+            <version>2.0.5</version>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-csv</artifactId>
