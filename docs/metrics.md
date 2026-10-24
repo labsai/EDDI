@@ -781,7 +781,7 @@ eddi_a2a_tasks_total                        # A2A tasks by the state their turn 
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
-eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_<http status>)
+eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
 `eddi_channel_observe_decisions_total` is one sample per message an observer

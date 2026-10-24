@@ -160,4 +160,16 @@ class ChannelTargetRouterWebhookTest {
     void sufficientlyLongVaultSecretIsKept() throws Exception {
         assertEquals("0123456789abcdef", signingSecretOf("${vault:hook}", "0123456789abcdef"));
     }
+
+    @Test
+    void fifteenCharacterSecretIsStripped() throws Exception {
+        assertNull(signingSecretOf("${vault:hook}", "a".repeat(15)));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void sixteenCharacterSecretIsKept() throws Exception {
+        assertEquals("a".repeat(16), signingSecretOf("${vault:hook}", "a".repeat(16)));
+        assertEquals(0, router.weakWebhookSecretWarningsLogged());
+    }
 }

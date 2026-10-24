@@ -334,4 +334,15 @@ class RestWebhookChannelTest {
         assertEquals(429, response.getStatus());
         assertEquals("60", response.getHeaderString("Retry-After"));
     }
+
+    @Test
+    void awaitingApprovalIs409WithReasonAndNoRetryAfter() throws Exception {
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("waiting")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        Response response = endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-90"), PUSH.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(409, response.getStatus());
+        assertTrue(response.getEntity().toString().contains("\"reason\":\"awaiting_approval\""));
+        assertNull(response.getHeaderString("Retry-After"), "a human decision does not clear by retrying");
+    }
 }

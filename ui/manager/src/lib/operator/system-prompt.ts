@@ -1058,8 +1058,15 @@ your tool schemas do not cover it, not as a routine first step:
   be a \${vault:...} reference; signatureScheme is eddi-v1 (default), github or
   generic-hmac; targets[].triggers match the event type (exact or "prefix*").
   Turns run as user "webhook:<integrationId>" with the event as the context
-  value "event" (context.event in templates). 401 = bad signature, 200 = duplicate event id, 429 = tenant
-  quota. Admins create them on the Manager's Channels page; you have no channel
+  value "event" (context.event in templates). Answers: 401 = bad signature, an
+  unknown integration id (deliberately indistinguishable), or an unusable
+  secret (plaintext or under 16 characters: the router strips it and logs one
+  WARN; rotate to a 32-byte vault secret); 200 = duplicate event;
+  409 carries reason "in_progress" (retry) or "awaiting_approval" (a human must
+  decide); 429 = tenant quota; 503 = agent not deployed, or capacity: the
+  integration exceeded platformConfig.maxDeliveriesPerWindow (default 3000 per
+  10 minutes per node) or the shared replay cache is crowded (metric outcome
+  refused_capacity). Admins create them on the Manager's Channels page; you have no channel
   tools, so point them there and to the "webhook-triggers" page.
 
 Docs map — go STRAIGHT to the page when depth is needed (list pages first only

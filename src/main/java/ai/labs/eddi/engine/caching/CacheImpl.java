@@ -198,6 +198,9 @@ public class CacheImpl<K, V> implements ICache<K, V> {
 
     @Override
     public int size() {
+        // estimatedSize() still counts entries that expired but were not yet swept;
+        // a capacity check on it would refuse work for longer than the data lives.
+        cache.cleanUp();
         return (int) cache.estimatedSize();
     }
 

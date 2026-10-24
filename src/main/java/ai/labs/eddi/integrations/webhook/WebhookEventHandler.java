@@ -46,7 +46,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.LongSupplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -99,13 +102,30 @@ public class WebhookEventHandler {
     public static final String DEDUP_CACHE_NAME = "webhook-event-dedup";
 
     /**
-     * Occupancy of the dedup cache at which a delivery that is not already
-     * remembered is refused (503, retryable) instead of reserved. The cache is
-     * sized at twice this (see {@code CacheFactory.RATE_SIZED_EVICTION_HEADROOM}),
-     * so it never has to evict a live key to admit a new one: an evicted key is a
-     * replay that would run again.
+     * Occupancy of the dedup cache at which the fairness backstop starts: from
+     * here, only integrations above their share of it ({@code dedupRefuseAt /
+     * activeIntegrations}) are refused, so a new delivery is never reserved by an
+     * integration that is crowding the others out. The cache is sized at twice this
+     * (see {@code CacheFactory.RATE_SIZED_EVICTION_HEADROOM}), so it never has to
+     * evict a live key to admit a new one: an evicted key is a replay that would
+     * run again. The first line of defence is each integration's own
+     * {@code maxDeliveriesPerWindow}; this one only matters when many integrations
+     * are each within theirs.
      */
     static final long DEDUP_REFUSE_AT = CacheFactory.maximumSizeFor(DEDUP_CACHE_NAME, DEDUP_TTL) / 2;
+
+    /** Metric outcome of a delivery refused for replay-protection capacity. */
+    static final String OUTCOME_CAPACITY = "refused_capacity";
+
+    /** Length of the per-integration delivery window, in one-minute buckets. */
+    private static final int WINDOW_MINUTES = 10;
+
+    /**
+     * Integrations tracked at most; entries with no recent delivery are dropped.
+     */
+    private static final int MAX_TRACKED_INTEGRATIONS = 10_000;
+
+    private static final long CAPACITY_WARN_INTERVAL_MS = 60_000L;
 
     /** Machine-readable {@code reason} of a 409 whose first delivery is running. */
     public static final String REASON_IN_PROGRESS = "in_progress";
@@ -130,6 +150,10 @@ public class WebhookEventHandler {
     private final ICache<String, String> dedup;
     private final MeterRegistry meterRegistry;
     private final long dedupRefuseAt;
+    private final Map<String, DeliveryWindow> deliveries = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastCapacityWarn = new ConcurrentHashMap<>();
+    private LongSupplier clock = System::currentTimeMillis;
+    private final AtomicInteger capacityWarnings = new AtomicInteger();
 
     @Inject
     public WebhookEventHandler(ChannelTargetRouter router,
@@ -159,6 +183,93 @@ public class WebhookEventHandler {
         this.templatingEngine = templatingEngine;
         this.dedup = cacheFactory.getCache(DEDUP_CACHE_NAME, DEDUP_TTL);
         this.meterRegistry = meterRegistry;
+    }
+
+    /** Test seam: capacity warnings logged so far. */
+    int capacityWarningsLogged() {
+        return capacityWarnings.get();
+    }
+
+    /** Test seam: the clock the per-integration windows run on. */
+    void setClock(LongSupplier clock) {
+        this.clock = clock;
+    }
+
+    /**
+     * Deliveries one integration reserved keys for in the last
+     * {@value #WINDOW_MINUTES} minutes, node-local, in one-minute buckets.
+     */
+    private static final class DeliveryWindow {
+        private final long[] counts = new long[WINDOW_MINUTES];
+        private final long[] minutes = new long[WINDOW_MINUTES];
+
+        synchronized void add(long minute) {
+            int slot = (int) (minute % WINDOW_MINUTES);
+            if (minutes[slot] != minute) {
+                minutes[slot] = minute;
+                counts[slot] = 0;
+            }
+            counts[slot]++;
+        }
+
+        synchronized long total(long minute) {
+            long sum = 0;
+            for (int i = 0; i < WINDOW_MINUTES; i++) {
+                if (minutes[i] > minute - WINDOW_MINUTES && minutes[i] <= minute) {
+                    sum += counts[i];
+                }
+            }
+            return sum;
+        }
+    }
+
+    /**
+     * Whether a delivery that is not yet remembered may reserve keys: within the
+     * integration's own budget and, when the shared cache is past the backstop,
+     * within its fair share of it.
+     */
+    private boolean admit(String integrationId, WebhookChannelSettings settings) {
+        long minute = clock.getAsLong() / 60_000L;
+        if (deliveries.size() > MAX_TRACKED_INTEGRATIONS) {
+            deliveries.entrySet().removeIf(entry -> entry.getValue().total(minute) == 0);
+        }
+        DeliveryWindow own = deliveries.get(integrationId);
+        long used = own == null ? 0 : own.total(minute);
+        if (used >= settings.maxDeliveriesPerWindow()) {
+            warnCapacity(integrationId, "it reached its own budget of " + settings.maxDeliveriesPerWindow()
+                    + " deliveries per 10 minutes (platformConfig.maxDeliveriesPerWindow)");
+            return false;
+        }
+        if (dedup.size() >= dedupRefuseAt) {
+            long active = Math.max(1, deliveries.values().stream().filter(w -> w.total(minute) > 0).count());
+            long share = dedupRefuseAt / 2 / active;
+            if (used >= share) {
+                warnCapacity(integrationId, "the shared replay-protection cache is past half full and it holds " + used
+                        + " of its deliveries, above its fair share of " + share);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void recordDelivery(String integrationId) {
+        deliveries.computeIfAbsent(integrationId, id -> new DeliveryWindow()).add(clock.getAsLong() / 60_000L);
+    }
+
+    /**
+     * Warns at most once a minute per integration, so a refusal storm is one line.
+     */
+    private void warnCapacity(String integrationId, String why) {
+        long now = clock.getAsLong();
+        Long last = lastCapacityWarn.get(integrationId);
+        if (last == null || now - last >= CAPACITY_WARN_INTERVAL_MS) {
+            lastCapacityWarn.put(integrationId, now);
+            if (lastCapacityWarn.size() > MAX_TRACKED_INTEGRATIONS) {
+                lastCapacityWarn.values().removeIf(t -> now - t >= CAPACITY_WARN_INTERVAL_MS);
+            }
+            capacityWarnings.incrementAndGet();
+            LOGGER.warnf("Webhook %s: deliveries are being refused (503) because %s", sanitize(integrationId), why);
+        }
     }
 
     /**
@@ -216,14 +327,13 @@ public class WebhookEventHandler {
         if (replayKey != null) {
             keys.add(integrationId + ":sig:" + replayKey);
         }
-        if (dedup.size() >= dedupRefuseAt && keys.stream().noneMatch(key -> dedup.get(key) != null)) {
-            // The cache is full of live keys. Reserving another would evict one, and
-            // an evicted key is a signed request that can be replayed. A repeat of
-            // something already remembered still gets its answer (the check above);
-            // anything new waits for entries to age out (10 minutes).
-            LOGGER.warnf("Webhook %s: delivery refused, the replay-protection cache is at capacity (%d keys)", sanitize(integrationId),
-                    dedupRefuseAt);
-            count("refused_503");
+        if (keys.stream().noneMatch(key -> dedup.get(key) != null) && !admit(integrationId, settings)) {
+            // Reserving another key for an integration that is over its budget (or its
+            // share of a nearly full cache) would end in evicting someone's key, and an
+            // evicted key is a signed request that can be replayed. A repeat of
+            // something already remembered still gets its answer; anything new from
+            // THIS integration waits, and every other integration is unaffected.
+            count(OUTCOME_CAPACITY);
             return Dispatch.error(503, "Temporarily unable to accept events — retry later.");
         }
         List<String> reserved = new ArrayList<>(keys.size());
@@ -249,6 +359,7 @@ public class WebhookEventHandler {
             return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null, null);
         }
 
+        recordDelivery(integrationId);
         Dispatch outcome;
         try {
             outcome = route(integrationId, integration, settings, event);
@@ -338,12 +449,12 @@ public class WebhookEventHandler {
             String conversationId = startConversation(agentId, userId, integrationId);
             try {
                 say(conversationId, input, event, integrationId);
-            } catch (Exception | Error refused) {
+            } catch (Exception refused) {
                 // The turn was refused (429 on the API-call quota, 503, ...) after the
                 // conversation was created, and the sender will retry with a new one:
                 // end this one rather than leave one orphan per retry. (A correlated
                 // conversation below is kept - the retry reuses it.)
-                endQuietly(conversationId);
+                endQuietly(conversationId, "system:webhook-turn-refused");
                 throw refused;
             }
             return conversationId;
@@ -383,7 +494,7 @@ public class WebhookEventHandler {
         } catch (IResourceStore.ResourceAlreadyExistsException race) {
             UserConversation winner = userConversationStore.readUserConversation(intent, userId);
             if (winner != null && winner.getConversationId() != null) {
-                endQuietly(conversationId);
+                endQuietly(conversationId, "system:lost-create-race");
                 return winner.getConversationId();
             }
         }
@@ -401,9 +512,9 @@ public class WebhookEventHandler {
         }
     }
 
-    private void endQuietly(String conversationId) {
+    private void endQuietly(String conversationId, String reason) {
         try {
-            conversationService.endConversation(conversationId, "system:lost-create-race");
+            conversationService.endConversation(conversationId, reason);
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not end orphaned webhook conversation %s", sanitize(conversationId));
         }

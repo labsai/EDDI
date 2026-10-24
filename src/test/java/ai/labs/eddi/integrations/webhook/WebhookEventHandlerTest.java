@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.CacheImpl;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -330,26 +331,100 @@ class WebhookEventHandlerTest {
         verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
-    @Test
-    void fullReplayCacheRefusesNewDeliveriesInsteadOfEvictingLiveKeys() throws Exception {
+    private static final String OTHER_ID = "76543210fedcba9876543210";
+
+    private WebhookEventHandler handlerWithRefuseAt(long refuseAt, SimpleMeterRegistry meters) throws Exception {
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.getCache(anyString(), any(Duration.class)))
                 .thenReturn(new CacheImpl<>("dedup", Caffeine.newBuilder().build()));
-        // Refuse at 4 keys: two deliveries carrying an id and a signature each.
-        handler = new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
-                new SimpleMeterRegistry(), 4);
-        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-30", "{}"), "b:one").status());
-        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-31", "{}"), "b:two").status());
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenAnswer(inv -> new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1)));
+        return new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
+                meters, refuseAt);
+    }
 
-        Dispatch overflow = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-32", "{}"), "b:three");
-        assertEquals(503, overflow.status());
+    @Test
+    void integrationOverItsOwnBudgetIsRefusedWhileOthersAreStillAccepted() throws Exception {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        handler = handlerWithRefuseAt(1_000_000, meters);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "2"));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-40", "{}"), "b:1").status());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-41", "{}"), "b:2").status());
 
+        Dispatch over = handler.dispatch(INTEGRATION_ID, integration, budget, event("d-42", "{}"), "b:3");
+        Dispatch other = handler.dispatch(OTHER_ID, integration, budget, event("d-43", "{}"), "b:4");
+
+        assertEquals(503, over.status());
+        assertEquals(202, other.status(), "one integration at its cap must not refuse another");
+        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_capacity").count());
+        assertEquals(0.0, meters.counter("eddi.webhook.events", "outcome", "refused_503").count());
         // A repeat of something already remembered is still answered, not refused.
-        Dispatch repeat = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-30", "{}"), "b:one");
+        Dispatch repeat = handler.dispatch(INTEGRATION_ID, integration, budget, event("d-40", "{}"), "b:1");
         assertEquals(200, repeat.status());
         assertTrue(repeat.duplicate());
-        // And the refusal consumed nothing: no third turn ran.
-        verify(conversationService, times(2)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void budgetWindowRollsOverAfterTenMinutes() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        long[] now = {1_000_000_000L};
+        handler.setClock(() -> now[0]);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-50", "{}"), "b:1").status());
+        assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-51", "{}"), "b:2").status());
+
+        now[0] += 11 * 60_000L;
+
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-52", "{}"), "b:3").status());
+    }
+
+    @Test
+    void sharedCachePastTheBackstopRefusesOnlyTheIntegrationCrowdingItOut() throws Exception {
+        // Backstop at 4 keys: with two active integrations each one's fair share is 1.
+        handler = handlerWithRefuseAt(4, new SimpleMeterRegistry());
+        WebhookChannelSettings roomy = settings(Map.of());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-60", "{}"), "b:1").status());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-61", "{}"), "b:2").status());
+        assertEquals(202, handler.dispatch(OTHER_ID, integration, roomy, event("d-62", "{}"), "b:3").status());
+        // The cache now holds 6 keys, past the backstop.
+
+        assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-63", "{}"), "b:4").status(),
+                "the integration holding two deliveries is above its share");
+        assertEquals(202, handler.dispatch("00000000000000000000000a", integration, roomy, event("d-64", "{}"), "b:5").status(),
+                "an integration with no deliveries is not refused for someone else's volume");
+    }
+
+    @Test
+    void refusalStormWarnsOncePerMinute() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        long[] now = {5_000_000_000L};
+        handler.setClock(() -> now[0]);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        handler.dispatch(INTEGRATION_ID, integration, budget, event("d-70", "{}"), "b:1");
+        for (int i = 0; i < 5; i++) {
+            assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-7" + (i + 1), "{}"), "b:x" + i).status());
+        }
+        assertEquals(1, handler.capacityWarningsLogged(), "five refusals inside a minute are one log line");
+        now[0] += 61_000L;
+        // The window (10 min) still holds the first delivery, so this is refused and
+        // warns again.
+        handler.dispatch(INTEGRATION_ID, integration, budget, event("d-79", "{}"), "b:y");
+        assertEquals(2, handler.capacityWarningsLogged());
+    }
+
+    @Test
+    void refusalThresholdLeavesHeadroomInTheCache() {
+        assertTrue(WebhookEventHandler.DEDUP_REFUSE_AT * 2 <= CacheFactory.maximumSizeFor(WebhookEventHandler.DEDUP_CACHE_NAME,
+                WebhookEventHandler.DEDUP_TTL), "the backstop must sit at or below half the capacity");
+        assertTrue(WebhookEventHandler.DEDUP_REFUSE_AT > 0);
+    }
+
+    @Test
+    void orphanedConversationIsEndedWithItsOwnReason() throws Exception {
+        doThrow(new QuotaExceededException("api calls")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-80", "{}"), null);
+        verify(conversationService).endConversation(CONV_1, "system:webhook-turn-refused");
     }
 
     @Test

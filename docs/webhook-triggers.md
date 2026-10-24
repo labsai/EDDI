@@ -43,6 +43,12 @@ validation cannot see: a plaintext secret that reached the store through a ZIP
 import or a direct write, or a vault value shorter than 16 characters, is not used
 - the integration answers `401` to everything and the log carries one `WARN`
 naming the integration - until the secret is fixed.
+Saving an integration whose vault secret already exists but is shorter than 16
+characters is refused with 400 (a secret that is not in the vault yet cannot be
+judged at save time, so the router's check is the one that catches it). **Upgrading
+from 6.6.0:** an integration whose vault secret is under 16 characters used to
+work and now answers `401` to every request; search the log for "signing secret is
+shorter than" and rotate that secret to 32 random bytes (and update the sender).
 
 ### 2. Create the integration
 
@@ -93,6 +99,7 @@ endpoint path as `webhookEndpoint`.
 | `inputTemplate` | `event:<type>` | Qute template for the turn's input text, rendered with `event` as its data |
 | `conversationStrategy` | `new` | `new` (a conversation per event) or `correlate` |
 | `correlationKeyPath` | — | `correlate` only (required there): JSON pointer into the event, e.g. `/data/pull_request/number` |
+| `maxDeliveriesPerWindow` | `3000` | Most deliveries this integration may have remembered in one 10-minute window, per node (1 to 100000; a delivery stores up to two replay-protection keys, so the default is 6,000 keys). Over it, new deliveries get a retryable `503` while every other integration is unaffected. Raise it for a genuinely busy sender; see "Where the keys live" |
 
 `channelId` is not used: a webhook integration is addressed by its own id.
 `observeMode` targets are refused for this channel type.
@@ -224,7 +231,7 @@ the pointer gets a new conversation.
 | `415` | Unsupported content type |
 | `422` | No target accepts this event type, or the target cannot run |
 | `429` | Tenant quota exceeded (`Retry-After: 60`) |
-| `503` | Agent not deployed, node shutting down, quota accounting unavailable, or the replay-protection cache is full (`Retry-After: 30`) |
+| `503` | Agent not deployed, node shutting down, quota accounting unavailable, or the integration is over its `maxDeliveriesPerWindow` budget / the replay-protection cache is crowded (`Retry-After: 30`; metric outcome `refused_capacity`) |
 
 The conversation is created, and the turn admitted, **before** the endpoint
 answers — that is what lets it return the conversation id, and a `429` while the
@@ -253,10 +260,23 @@ payloads on purpose.
 every webhook integration, sized for 100 keys per second across all of them (a
 delivery writes up to two keys; that is 50 deliveries per second sustained,
 120,000 entries at the 10-minute window with a factor-two head-room). The cache
-never evicts a live key to make room: once it is half full a delivery that is not
-already remembered is refused with a retryable `503` (and a `WARN` is logged), and
-repeats of remembered deliveries are still answered. Refusing instead of evicting is
-deliberate - an evicted key is a signed request that could be replayed. In a
+never evicts a live key to make room, and one integration cannot fill it against
+the others, in two layers. First, each integration has its own budget,
+`maxDeliveriesPerWindow` (default 3000 deliveries per rolling 10 minutes on a node):
+past it, that integration's new deliveries get a retryable `503`. Second, once the
+shared cache is half full, only integrations above their fair share of it (half the
+cache divided by the number of integrations that delivered in the window) are
+refused; an integration with little traffic keeps being accepted. Repeats of
+remembered deliveries are always answered, and a refused delivery releases its keys
+so its retry is processed. Refusing instead of evicting is deliberate - an evicted
+key is a signed request that could be replayed. These refusals are counted as
+`eddi_webhook_events_total{outcome="refused_capacity"}`, apart from the `503` of an
+agent that is not deployed, and logged as a `WARN` at most once a minute per
+integration. The budgets and the fair-share check are **per node**: the per-integration
+counters are node-local, and in a cluster the cache size the backstop reads is the
+node-local view (the shared bucket cannot be counted), so a sender spread over N
+nodes may have N times the budget in total, and the backstop triggers on each node's
+own traffic. In a
 cluster (`eddi.messaging.type=nats`) the keys live in the shared `DEDUP` NATS KV
 bucket (the one Slack event de-duplication uses), so a replay is caught on whichever
 node it hits; the 10-minute bucket TTL is the window, and the bucket is not size
