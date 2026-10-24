@@ -22,3 +22,18 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
   stays a distinct origin. An https entry for the same host does not cover a mail origin. The credential-endpoint
   allowlist and the public base URL stay http(s) only. The Manager's `connection-validation.ts` mirror accepts the
   same schemes, with the `originScheme` message updated in all 11 locales.
+
+### The system mailer
+
+- **`SystemMailer`** (`engine/mail`): the deployment's one SMTP sender, configured by the operator under
+  `eddi.mail.smtp.*` (host, port, `tls` = `starttls` | `implicit` | `none`, `from`, `from-name`, and at most one
+  credential source: `connection` — `BASIC` or `OAUTH2_CLIENT_CREDENTIALS`/XOAUTH2 — or `username` + `password`).
+  Unset host = disabled, one INFO line at startup; an unusable configuration disables it with one ERROR line and
+  never falls back to something weaker. Sockets come from `SafeSocketConnector.resolveOperator`. STARTTLS is
+  required, not opportunistic; `tls=none` needs `eddi.mail.smtp.allow-plaintext=true` and never carries a
+  credential. Failures are classified (`MailSendException.Category`), permanent only for a 5xx refusal.
+- **GreenMail 2.1.14** (Apache-2.0, test scope; its aggregate `org.eclipse.angus:jakarta.mail` and JUnit 4 are
+  excluded) runs implicit TLS, plain SMTP and AUTH in `SystemMailerTest`; a small in-test STARTTLS server covers the
+  upgrade GreenMail does not speak, and proves AUTH (PLAIN and XOAUTH2) only ever crosses the wire after it. The
+  certificate is a throwaway made with the JDK's `keytool`; the production TLS path, with certificate and host-name
+  checks, is what accepts it.

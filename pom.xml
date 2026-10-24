@@ -567,6 +567,28 @@
             <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- GreenMail: an in-process SMTP server for the system mailer's tests
+             (STARTTLS, implicit TLS, AUTH, refused submissions). Apache-2.0.
+             Test scope only. Its aggregate org.eclipse.angus:jakarta.mail is
+             excluded so the angus-mail declared above stays the one copy of the
+             mail implementation on the classpath, and its JUnit 4 dependency is
+             excluded because only the server classes are used. -->
+        <dependency>
+            <groupId>com.icegreen</groupId>
+            <artifactId>greenmail</artifactId>
+            <version>2.1.14</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.eclipse.angus</groupId>
+                    <artifactId>jakarta.mail</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>junit</groupId>
+                    <artifactId>junit</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <!-- NATS JetStream client for async conversation processing (Phase 5) -->
         <dependency>
             <groupId>io.nats</groupId>

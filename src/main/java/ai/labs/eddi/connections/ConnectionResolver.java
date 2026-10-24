@@ -366,6 +366,23 @@ public class ConnectionResolver {
         }
     }
 
+    /**
+     * The auth type a reference names, without resolving anything — so a mail
+     * client can choose between {@link #resolveBasicLogin} and
+     * {@link #resolveAccessToken} without provoking a refusal first.
+     *
+     * @return the auth type, or empty when no connection of that name exists
+     */
+    public Optional<AuthType> authTypeOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getAuthType);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+    }
+
     private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
         // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
         // its value comes from the turn rather than from the document, so it must not
