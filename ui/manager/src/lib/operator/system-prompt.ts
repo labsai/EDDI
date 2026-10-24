@@ -1051,6 +1051,21 @@ your tool schemas do not cover it, not as a routine first step:
   someone re-enables it). No reason means a person disabled it. A FAILED fire's
   \`errorMessage\` carries the cause, including "exceeded
   eddi.schedule.fire-timeout" for a run that was cut off.
+- Self-continuation (long jobs): a behavior rule emitting the reserved action
+  CONTINUE_CONVERSATION starts the next turn of the same conversation without
+  user input, once the asking turn is committed. Off unless the agent sets
+  \`maxContinuations\` (per conversation, 0..10000; \`continuationInput\` is
+  the literal input of those turns) — agent-document fields you do not edit;
+  point the user at the agent's page (Self-continuation section). Each
+  continuation is a one-shot schedule named "continuation-<conversationId>"
+  (it cannot be fired by hand: 409), runs under the agent's turnDeadlineMs,
+  and maxCostPerConversationUsd bounds all of them together. The turn's step
+  records "continuation:next" (scheduled) or "continuation:refused" (why not:
+  disabled, limit, cost_ceiling, not_settled, group_member, ...) — read the
+  conversation with returnDetailed=true. It never runs for an ENDED or
+  AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
+  the next turn. Metrics: eddi_continuation_{scheduled,run,refused}_total.
+  The "long-jobs" docs page explains it.
 - Channel integrations: channelType "slack" or "webhook". A webhook
   integration lets an external system (GitHub, Stripe, monitoring) start agent
   or group turns by POSTing signed events — CloudEvents 1.0 or plain JSON — to
@@ -1072,7 +1087,7 @@ if the one you want is missing; this deployment may ship a subset):
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
-- approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
+- approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling" · long jobs / self-continuation: "long-jobs"
 - inbound webhooks / CloudEvents triggers: "webhook-triggers"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"

@@ -8,6 +8,7 @@ import {
   UserMemorySection,
   MemoryPolicySection,
   LimitsSection,
+  ContinuationSection,
   SessionManagementSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -761,5 +762,63 @@ describe("LimitsSection", () => {
     await user.clear(input);
     await user.type(input, "3");
     expect(onValidityChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("ContinuationSection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("is collapsed and off when the agent sets nothing", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ContinuationSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Self-continuation"));
+    expect(screen.getByTestId("max-continuations")).toHaveValue(null);
+    expect(screen.getByTestId("continuation-input")).toHaveValue("");
+  });
+
+  it("opens by default and shows the stored count and input", () => {
+    renderWithProviders(
+      <ContinuationSection agent={{ ...baseAgent, maxContinuations: 20, continuationInput: "go on" }} onChange={mockOnChange} />,
+    );
+    expect(screen.getByTestId("max-continuations")).toHaveValue(20);
+    expect(screen.getByTestId("continuation-input")).toHaveValue("go on");
+  });
+
+  it("writes a whole number into the draft", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ContinuationSection agent={baseAgent} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Self-continuation"));
+    await user.type(screen.getByTestId("max-continuations"), "12");
+    expect(mockOnChange).toHaveBeenLastCalledWith({ ...baseAgent, maxContinuations: 12 });
+  });
+
+  it("removes the field when cleared, rather than storing 0 or null", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ContinuationSection agent={{ ...baseAgent, maxContinuations: 5 }} onChange={mockOnChange} />);
+    await user.clear(screen.getByTestId("max-continuations"));
+    const sent = (mockOnChange.mock.lastCall as [Agent])[0];
+    expect("maxContinuations" in sent).toBe(false);
+  });
+
+  it("refuses a count above the backend cap, leaves the draft alone and tells the page", async () => {
+    const user = userEvent.setup();
+    const onValidityChange = vi.fn();
+    renderWithProviders(<ContinuationSection agent={baseAgent} onChange={mockOnChange} onValidityChange={onValidityChange} />);
+    await user.click(screen.getByText("Self-continuation"));
+    await user.type(screen.getByTestId("max-continuations"), "10001");
+    expect(screen.getByTestId("max-continuations-invalid")).toBeInTheDocument();
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    expect(mockOnChange).not.toHaveBeenLastCalledWith(expect.objectContaining({ maxContinuations: 10001 }));
+  });
+
+  it("writes the input as a literal and drops it when emptied", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ContinuationSection agent={{ ...baseAgent, continuationInput: "x" }} onChange={mockOnChange} />);
+    await user.click(screen.getByText("Self-continuation"));
+    await user.clear(screen.getByTestId("continuation-input"));
+    const sent = (mockOnChange.mock.lastCall as [Agent])[0];
+    expect("continuationInput" in sent).toBe(false);
   });
 });
