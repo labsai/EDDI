@@ -245,6 +245,14 @@ function literalSegments(template: string): string[] {
  * matches anything at resolve time — an allowlist that looks right and blocks
  * everything.
  */
+/**
+ * Schemes a `baseUrlAllowlist` entry may use. Besides http(s), the mail schemes
+ * let a connection name the SMTP/IMAP server its credential may log in to
+ * (`smtps://smtp.office365.com` for XOAUTH2) — mirroring
+ * `ConnectionConfiguration.MAIL_ORIGIN_SCHEMES` on the backend.
+ */
+const ORIGIN_PROTOCOLS = new Set(["http:", "https:", "smtp:", "smtps:", "imap:", "imaps:"]);
+
 export function validateOrigin(origin: string): ValidationCode | null {
   const candidate = origin.trim();
   if (!candidate) return "originHost";
@@ -255,7 +263,7 @@ export function validateOrigin(origin: string): ValidationCode | null {
   } catch {
     return "originNotBare";
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return "originScheme";
+  if (!ORIGIN_PROTOCOLS.has(url.protocol)) return "originScheme";
   if (!url.hostname) return "originHost";
   if (url.username || url.password) return "originNotBare";
   if (url.search || url.hash) return "originNotBare";

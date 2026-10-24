@@ -5746,7 +5746,7 @@
       "nameFormat": "Use letters, digits, dots, dashes or underscores. Other characters make ${connection:…} silently fail to resolve.",
       "allowlistRequired": "Add at least one origin. A connection must name where its credential may be sent.",
       "originNotBare": "Origins are scheme://host[:port] only — no path, query, fragment or credentials.",
-      "originScheme": "An origin needs an http:// or https:// scheme.",
+      "originScheme": "An origin needs an http://, https:// or mail (smtps://, smtp://, imaps://, imap://) scheme.",
       "originHost": "An origin needs a host name.",
       "headerNameRequired": "Name the header the credential is sent in, e.g. Authorization.",
       "templateRequired": "A header value is required, e.g. Bearer ${vault:jira-token}.",

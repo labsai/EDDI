@@ -5746,7 +5746,7 @@
       "nameFormat": "अक्षर, अंक, बिंदु, हाइफ़न या अंडरस्कोर उपयोग करें। अन्य वर्णों से ${connection:…} चुपचाप हल होना बंद कर देता है।",
       "allowlistRequired": "कम से कम एक ऑरिजिन जोड़ें। कनेक्शन को बताना होगा कि उसका क्रेडेंशियल कहाँ भेजा जा सकता है।",
       "originNotBare": "ऑरिजिन केवल scheme://host[:port] होता है — कोई पथ, क्वेरी, फ़्रैगमेंट या क्रेडेंशियल नहीं।",
-      "originScheme": "ऑरिजिन के लिए http:// या https:// स्कीम चाहिए।",
+      "originScheme": "ऑरिजिन के लिए http://, https:// या मेल (smtps://, smtp://, imaps://, imap://) स्कीम चाहिए।",
       "originHost": "ऑरिजिन के लिए होस्ट नाम चाहिए।",
       "headerNameRequired": "वह हेडर बताएँ जिसमें क्रेडेंशियल भेजा जाता है, जैसे Authorization।",
       "templateRequired": "हेडर का मान आवश्यक है, जैसे Bearer ${vault:jira-token}।",

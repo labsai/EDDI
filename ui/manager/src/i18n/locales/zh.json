@@ -5746,7 +5746,7 @@
       "nameFormat": "请使用字母、数字、点、连字符或下划线。其他字符会让 ${connection:…} 悄无声息地解析失败。",
       "allowlistRequired": "至少添加一个来源。连接必须写明其凭据可被发送到哪里。",
       "originNotBare": "来源只能写成 scheme://host[:port] —— 不含路径、查询串、片段或凭据。",
-      "originScheme": "来源需要 http:// 或 https:// 协议。",
+      "originScheme": "来源需要 http://、https:// 或邮件（smtps://、smtp://、imaps://、imap://）协议。",
       "originHost": "来源需要一个主机名。",
       "headerNameRequired": "请写明凭据所在的请求头，例如 Authorization。",
       "templateRequired": "必须填写请求头取值，例如 Bearer ${vault:jira-token}。",

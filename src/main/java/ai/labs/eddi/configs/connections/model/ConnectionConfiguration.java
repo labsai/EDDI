@@ -291,7 +291,7 @@ public class ConnectionConfiguration {
                     + "or a config edit can redirect that credential to any host.");
         }
         for (String origin : baseUrlAllowlist) {
-            String canonical = requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            String canonical = requireCanonicalAllowlistOrigin(origin, "baseUrlAllowlist");
             // Structurally valid, so not refused here: whether a deployment accepts
             // plaintext to an internal host is a deployment decision
             // (eddi.connections.allow-plaintext-remote-origins, enforced by the write
@@ -699,13 +699,20 @@ public class ConnectionConfiguration {
      * that blocks everything, or worse, be "fixed" by loosening the comparison.
      */
     public static String requireCanonicalOrigin(String origin, String field) {
+        return requireCanonical(origin, field, false);
+    }
+
+    private static String requireCanonical(String origin, String field, boolean mailSchemes) {
         if (origin == null || origin.isBlank()) {
             throw new IllegalArgumentException(field + " entries must be non-empty origins, e.g. https://api.example.com");
         }
         URI parsed = parse(origin, field);
         String scheme = parsed.getScheme();
-        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
-            throw new IllegalArgumentException(field + " entries must be a bare origin with an http or https scheme — got: " + origin);
+        boolean web = scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"));
+        boolean mail = mailSchemes && scheme != null && MAIL_ORIGIN_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT));
+        if (!web && !mail) {
+            throw new IllegalArgumentException(field + " entries must be a bare origin with an "
+                    + (mailSchemes ? "http, https, smtp, smtps, imap or imaps" : "http or https") + " scheme — got: " + origin);
         }
         if (parsed.getHost() == null || parsed.getHost().isBlank()) {
             throw new IllegalArgumentException(field + " entries must name a host — got: " + origin);
@@ -716,6 +723,31 @@ public class ConnectionConfiguration {
                     + "userinfo — got: " + origin);
         }
         return canonicalOrigin(parsed);
+    }
+
+    /**
+     * The mail schemes a {@code baseUrlAllowlist} entry may use besides http(s), so
+     * a connection can say "this credential may go to that mail server" for
+     * {@code XOAUTH2} and SMTP/IMAP login.
+     * <p>
+     * {@code smtps}/{@code imaps} are implicit TLS; {@code smtp}/{@code imap} are
+     * the STARTTLS submission and access ports. Which of them is actually allowed
+     * to connect, and whether STARTTLS is required, is the socket guard's decision
+     * ({@code SafeSocketConnector}), not this list's: an origin here only names
+     * where a credential may be sent.
+     */
+    public static final Set<String> MAIL_ORIGIN_SCHEMES = Set.of("smtp", "smtps", "imap", "imaps");
+
+    /**
+     * A bare origin for a {@code baseUrlAllowlist} entry: as
+     * {@link #requireCanonicalOrigin}, but also accepting the
+     * {@link #MAIL_ORIGIN_SCHEMES} ({@code smtps://smtp.office365.com},
+     * {@code smtp://relay.example.com:587}). The other allowlists — credential
+     * endpoints, the public base URL — stay http(s) only, since nothing sends a
+     * client secret or an OAuth redirect to a mail server.
+     */
+    public static String requireCanonicalAllowlistOrigin(String origin, String field) {
+        return requireCanonical(origin, field, true);
     }
 
     /**
@@ -745,6 +777,14 @@ public class ConnectionConfiguration {
         }
         String lower = scheme == null ? "" : scheme.toLowerCase(Locale.ROOT);
         if (("https".equals(lower) && port == 443) || ("http".equals(lower) && port == 80)) {
+            return -1;
+        }
+        // The mail schemes fold the ports their TLS mode implies: implicit TLS on
+        // 465/993, and the STARTTLS submission (587) and access (143) ports. So
+        // smtp://relay and smtp://relay:587 are one origin, while smtp://relay:25 —
+        // the relay port, a deliberate operator choice — stays distinct.
+        if (("smtps".equals(lower) && port == 465) || ("smtp".equals(lower) && port == 587) || ("imaps".equals(lower) && port == 993)
+                || ("imap".equals(lower) && port == 143)) {
             return -1;
         }
         return port;

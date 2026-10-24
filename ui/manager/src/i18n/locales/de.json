@@ -5746,7 +5746,7 @@
       "nameFormat": "Verwenden Sie Buchstaben, Ziffern, Punkte, Bindestriche oder Unterstriche. Andere Zeichen führen dazu, dass ${connection:…} stillschweigend nicht aufgelöst wird.",
       "allowlistRequired": "Fügen Sie mindestens eine Origin hinzu. Eine Verbindung muss benennen, wohin ihre Zugangsdaten gesendet werden dürfen.",
       "originNotBare": "Origins bestehen nur aus schema://host[:port] — ohne Pfad, Query, Fragment oder Zugangsdaten.",
-      "originScheme": "Eine Origin braucht ein http://- oder https://-Schema.",
+      "originScheme": "Eine Origin braucht ein http://-, https://- oder Mail-Schema (smtps://, smtp://, imaps://, imap://).",
       "originHost": "Eine Origin braucht einen Hostnamen.",
       "headerNameRequired": "Benennen Sie den Header, in dem die Zugangsdaten gesendet werden, z. B. Authorization.",
       "templateRequired": "Ein Header-Wert ist erforderlich, z. B. Bearer ${vault:jira-token}.",

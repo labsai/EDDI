@@ -283,7 +283,7 @@ public final class UrlValidationUtils {
      * NAT64/6to4/Teredo/IPv4-compatible wrapper of a metadata address is caught the
      * same as its bare IPv4 or {@code ::ffff:} mapped form.
      */
-    static boolean isMetadataAddress(InetAddress address) {
+    public static boolean isMetadataAddress(InetAddress address) {
         if (address.isLinkLocalAddress()) {
             return true;
         }

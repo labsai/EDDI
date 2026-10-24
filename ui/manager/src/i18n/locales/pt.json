@@ -5806,7 +5806,7 @@
       "nameFormat": "Use letras, dígitos, pontos, hifens ou sublinhados. Outros caracteres fazem ${connection:…} deixar de resolver silenciosamente.",
       "allowlistRequired": "Adicione pelo menos uma origem. Uma conexão precisa dizer para onde a sua credencial pode ser enviada.",
       "originNotBare": "Uma origem é só esquema://host[:porta] — sem caminho, consulta, fragmento ou credenciais.",
-      "originScheme": "Uma origem precisa de um esquema http:// ou https://.",
+      "originScheme": "Uma origem precisa de um esquema http://, https:// ou de e-mail (smtps://, smtp://, imaps://, imap://).",
       "originHost": "Uma origem precisa de um nome de host.",
       "headerNameRequired": "Diga em qual cabeçalho a credencial é enviada, por ex. Authorization.",
       "templateRequired": "Um valor de cabeçalho é obrigatório, por ex. Bearer ${vault:jira-token}.",

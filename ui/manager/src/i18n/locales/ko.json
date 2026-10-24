@@ -5746,7 +5746,7 @@
       "nameFormat": "영문자, 숫자, 점, 하이픈, 밑줄을 사용하세요. 다른 문자를 쓰면 ${connection:…}이 아무 말 없이 해석에 실패합니다.",
       "allowlistRequired": "오리진을 최소 하나 추가하세요. 연결은 자격 증명을 어디로 보낼 수 있는지 밝혀야 합니다.",
       "originNotBare": "오리진은 scheme://host[:port] 형태만 가능합니다 — 경로, 쿼리, 프래그먼트, 자격 증명은 포함할 수 없습니다.",
-      "originScheme": "오리진에는 http:// 또는 https:// 스킴이 필요합니다.",
+      "originScheme": "오리진에는 http://, https:// 또는 메일(smtps://, smtp://, imaps://, imap://) 스킴이 필요합니다.",
       "originHost": "오리진에는 호스트 이름이 필요합니다.",
       "headerNameRequired": "자격 증명을 실어 보낼 헤더를 지정하세요. 예: Authorization.",
       "templateRequired": "헤더 값은 필수입니다. 예: Bearer ${vault:jira-token}.",

@@ -5746,7 +5746,7 @@
       "nameFormat": "英数字、ドット、ハイフン、アンダースコアを使ってください。それ以外の文字を使うと ${connection:…} は黙って解決に失敗します。",
       "allowlistRequired": "オリジンを少なくとも 1 つ追加してください。接続は、資格情報の送信先を明示する必要があります。",
       "originNotBare": "オリジンは scheme://host[:port] だけです — パス、クエリ、フラグメント、資格情報は含められません。",
-      "originScheme": "オリジンには http:// または https:// のスキームが必要です。",
+      "originScheme": "オリジンには http://、https://、またはメール (smtps://、smtp://、imaps://、imap://) のスキームが必要です。",
       "originHost": "オリジンにはホスト名が必要です。",
       "headerNameRequired": "資格情報を載せるヘッダー名を指定してください。例：Authorization。",
       "templateRequired": "ヘッダーの値は必須です。例：Bearer ${vault:jira-token}。",

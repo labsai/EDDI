@@ -5806,7 +5806,7 @@
       "nameFormat": "Utilisez des lettres, chiffres, points, tirets ou tirets bas. D'autres caractères empêchent silencieusement ${connection:…} de se résoudre.",
       "allowlistRequired": "Ajoutez au moins une origine. Une connexion doit indiquer où ses informations d'authentification peuvent être envoyées.",
       "originNotBare": "Une origine s'écrit uniquement schéma://hôte[:port] — sans chemin, requête, fragment ni identifiants.",
-      "originScheme": "Une origine a besoin d'un schéma http:// ou https://.",
+      "originScheme": "Une origine a besoin d'un schéma http://, https:// ou de messagerie (smtps://, smtp://, imaps://, imap://).",
       "originHost": "Une origine a besoin d'un nom d'hôte.",
       "headerNameRequired": "Indiquez l'en-tête dans lequel l'identifiant est envoyé, par ex. Authorization.",
       "templateRequired": "Une valeur d'en-tête est obligatoire, par ex. Bearer ${vault:jira-token}.",

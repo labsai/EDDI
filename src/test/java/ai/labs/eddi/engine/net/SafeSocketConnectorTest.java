@@ -331,4 +331,101 @@ class SafeSocketConnectorTest {
             assertEquals("false", properties.getProperty("mail.smtp.socketFactory.fallback"));
         }
     }
+
+    @Nested
+    @DisplayName("operator policy (the system mailer's own relay)")
+    class Operator {
+
+        @Test
+        @DisplayName("a private relay on port 25 is refused for an author and allowed for the operator, pinned")
+        void privateRelay() throws Exception {
+            var connector = connector(Map.of("relay.corp.example", "10.0.0.25"));
+
+            assertEquals(SocketPolicyException.Reason.PORT_NOT_ALLOWED,
+                    refusal(connector, "relay.corp.example", 25, SafeSocketConnector.Protocol.SMTP));
+            assertEquals(SocketPolicyException.Reason.PRIVATE_ADDRESS,
+                    refusal(connector, "relay.corp.example", 587, SafeSocketConnector.Protocol.SMTP));
+
+            var endpoint = connector.resolveOperator("relay.corp.example", 25, SafeSocketConnector.Protocol.SMTP,
+                    SafeSocketConnector.TlsMode.STARTTLS);
+            assertEquals(SafeSocketConnector.Policy.OPERATOR, endpoint.policy());
+            assertEquals(ip("10.0.0.25"), endpoint.address());
+            assertEquals(new InetSocketAddress(ip("10.0.0.25"), 25),
+                    PinnedSocket.connectTarget(endpoint, InetSocketAddress.createUnresolved("relay.corp.example", 25)));
+        }
+
+        @Test
+        @DisplayName("IP literals and single-label names are accepted, literals without any lookup")
+        void literalsAndShortNames() throws Exception {
+            AtomicInteger lookups = new AtomicInteger();
+            var connector = connector(List.of(), host -> {
+                lookups.incrementAndGet();
+                if (!"localhost".equals(host)) {
+                    throw new UnknownHostException(host);
+                }
+                return new InetAddress[]{ip("127.0.0.1")};
+            });
+
+            assertEquals(ip("10.1.2.3"), connector.resolveOperator("10.1.2.3", 2525, SafeSocketConnector.Protocol.SMTP,
+                    SafeSocketConnector.TlsMode.IMPLICIT).address());
+            assertEquals(ip("::1"), connector.resolveOperator("[::1]", 465, SafeSocketConnector.Protocol.SMTP,
+                    SafeSocketConnector.TlsMode.IMPLICIT).address());
+            assertEquals(0, lookups.get(), "a literal must not be resolved");
+            assertEquals(ip("127.0.0.1"), connector.resolveOperator("localhost", 25, SafeSocketConnector.Protocol.SMTP,
+                    SafeSocketConnector.TlsMode.PLAINTEXT).address());
+        }
+
+        @Test
+        @DisplayName("cloud metadata and link-local addresses stay refused, as literal or by resolution")
+        void metadataRefused() throws Exception {
+            var connector = connector(Map.of("sneaky.example.com", "169.254.169.254"));
+
+            assertEquals(SocketPolicyException.Reason.PRIVATE_ADDRESS, assertThrows(SocketPolicyException.class,
+                    () -> connector.resolveOperator("169.254.169.254", 25, SafeSocketConnector.Protocol.SMTP,
+                            SafeSocketConnector.TlsMode.STARTTLS))
+                    .getReason());
+            assertEquals(SocketPolicyException.Reason.PRIVATE_ADDRESS, assertThrows(SocketPolicyException.class,
+                    () -> connector.resolveOperator("sneaky.example.com", 25, SafeSocketConnector.Protocol.SMTP,
+                            SafeSocketConnector.TlsMode.STARTTLS))
+                    .getReason());
+        }
+
+        @Test
+        @DisplayName("eddi.email.allowed-hosts confines authors, not the operator")
+        void allowlistNotApplied() throws Exception {
+            var connector = connector(List.of("imap.example.com"), table(Map.of("relay.corp.example", "10.0.0.25")));
+
+            assertEquals(SafeSocketConnector.Policy.OPERATOR, connector.resolveOperator("relay.corp.example", 587,
+                    SafeSocketConnector.Protocol.SMTP, SafeSocketConnector.TlsMode.STARTTLS).policy());
+        }
+
+        @Test
+        @DisplayName("a port outside 1..65535 and a missing TLS mode are refused")
+        void badInput() throws Exception {
+            var connector = connector(Map.of("relay.corp.example", "10.0.0.25"));
+
+            assertEquals(SocketPolicyException.Reason.PORT_NOT_ALLOWED, assertThrows(SocketPolicyException.class,
+                    () -> connector.resolveOperator("relay.corp.example", 0, SafeSocketConnector.Protocol.SMTP,
+                            SafeSocketConnector.TlsMode.STARTTLS))
+                    .getReason());
+            assertThrows(IllegalArgumentException.class,
+                    () -> connector.resolveOperator("relay.corp.example", 25, SafeSocketConnector.Protocol.SMTP, null));
+        }
+
+        @Test
+        @DisplayName("plaintext exists only for an operator endpoint, and then turns both TLS switches off")
+        void plaintextOnlyForOperator() throws Exception {
+            assertThrows(IllegalArgumentException.class, () -> new SafeSocketConnector.Endpoint("smtp.example.com", 587,
+                    SafeSocketConnector.Protocol.SMTP, SafeSocketConnector.TlsMode.PLAINTEXT, ip("93.184.216.34")));
+
+            var connector = connector(Map.of("relay.corp.example", "10.0.0.25"));
+            var endpoint = connector.resolveOperator("relay.corp.example", 25, SafeSocketConnector.Protocol.SMTP,
+                    SafeSocketConnector.TlsMode.PLAINTEXT);
+            Properties properties = connector.angusProperties(endpoint);
+
+            assertEquals("false", properties.getProperty("mail.smtp.ssl.enable"));
+            assertEquals("false", properties.getProperty("mail.smtp.starttls.enable"));
+            assertEquals("false", properties.getProperty("mail.smtp.socketFactory.fallback"));
+        }
+    }
 }
