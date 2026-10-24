@@ -159,6 +159,18 @@ What to check:
   and connect with `authSource=eddi`. If you changed `mongodb.database`, use that name instead
   of `eddi` throughout.
 
+## Newly reserved names
+
+- **`CONTINUE_CONVERSATION` is a reserved action** ([self-continuation](long-jobs.md)). A behaviour
+  rule that already emits an action with this exact name keeps working unless the agent also sets the
+  new `maxContinuations`; until then the action is ignored with a WARN and
+  `eddi_continuation_refused_total{reason="disabled"}` counts it. Rename such actions anyway.
+- **`selfContinuation` is an engine-reserved context key.** Like `groupId`, it is dropped from client
+  context, and so is any key that starts with it (`selfContinuationStep`, for example). Rename a client
+  key with that name.
+- **`POST /agents/{conversationId}/cancel`** on a conversation that is neither paused nor running
+  answers `200` instead of `409` when it has a pending self-continuation — the cancel withdrew it.
+
 ## Keycloak admin password off loopback
 
 `docker-compose.auth.yml` now refuses to start Keycloak when `KEYCLOAK_BIND` is not a loopback

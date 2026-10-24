@@ -538,6 +538,21 @@ history.
 | `eddi.schedule.claim.conflict` | Counter | Instances racing for the same schedule. Normal and expected in a cluster; a sharp rise alongside falling `fire.count` suggests contention rather than work |
 | `eddi.schedule.firelog.pruned` | Counter | Fire logs removed by the retention sweep. Flat while the table grows means retention is disabled (`fire-log-retention=0`) or the sweep is failing — check the logs |
 
+## Engine-minted schedules
+
+Besides the schedules you create, the engine arms one-shot schedules of its own, each routed to its own
+handler by its metadata:
+
+| Kind | Name | What it does |
+|---|---|---|
+| HITL approval timeout | `hitl-timeout-<conversationId>` | Applies the timeout policy of a pending approval — see [hitl.md](hitl.md#timeout-policies) |
+| Self-continuation | `continuation-<conversationId>` | Runs the next turn of a conversation that asked for it with `CONTINUE_CONVERSATION` — see [Long Jobs](long-jobs.md) |
+
+Neither can be fired by hand (`409`), and neither is exported with its agent: both belong to one
+conversation on this deployment, not to the agent's configuration. A continuation is disabled by an
+undeploy and re-enabled by the next deploy like the agent's own schedules; a failed continuation fire
+is retried with the normal backoff and dead-lettered after `eddi.schedule.max-retries`.
+
 ## Best Practices
 
 1. **Start with longer intervals** — Begin with hourly or daily schedules and increase frequency only if needed
@@ -552,3 +567,4 @@ history.
 - [User Memory](user-memory.md) — Persistent user memory (target of dream consolidation)
 - [LLM Configuration](langchain.md) — Agent configuration reference
 - [Metrics](metrics.md) — Monitoring scheduled execution performance
+- [Long Jobs](long-jobs.md) — Self-continuation, delivered as engine-minted one-shot schedules

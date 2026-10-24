@@ -389,6 +389,12 @@ fails fast instead of being sent. Without a deadline, nothing changes.
 
 Fire-and-forget calls are not bounded by it: they are built on the turn's thread but sent in the background and never awaited, so they add nothing to the turn's duration. LLM tool calls (including these httpcalls when used as tools) are clamped the same way — a tool is not started once the deadline has passed.
 
+> **Waiting for a long external operation?** A `retryApiCallInstruction` sleeps on the conversation's
+> thread between attempts, and each backoff is capped at 30 seconds — it is meant for transient errors,
+> not for polling a render or export that takes minutes. Poll from
+> [continuation turns](long-jobs.md#waiting-for-an-external-operation) instead: one short turn per check,
+> each traced and bounded by `maxContinuations`.
+
 ### Turn deadline
 
 When the agent sets a [turn deadline](langchain.md#turn-deadline) (`turnDeadlineMs`, or the caller's
