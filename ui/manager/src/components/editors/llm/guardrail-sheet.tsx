@@ -1082,7 +1082,14 @@ function JudgeIssuesEditor({
           id={`${uid}-raw`}
           rows={4}
           value={raw ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            // Once the text parses, the row editor takes over — seed its rows from it,
+            // or they stay [] and the first "Add" overwrites the author's fixed JSON.
+            const next = e.target.value;
+            const nextRows = parseJudgeIssues(next);
+            if (nextRows) setRows(nextRows);
+            onChange(next);
+          }}
           readOnly={readOnly}
           aria-invalid
           className={AREA}

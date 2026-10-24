@@ -461,6 +461,24 @@ describe("TaskGuardrailsSection", () => {
       expect(spy).not.toHaveBeenCalled();
     });
 
+    it("seeds the rows from raw text once it becomes valid, so the next Add keeps the fixed codes", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withJudge({ ...complete, issues: '["UNSUPPORTED_CLAIM"]' })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issues-raw"), {
+        target: { value: '{"UNSUPPORTED_CLAIM": "Remove every claim the sources do not state."}' },
+      });
+      expect(screen.getByTestId("guardrail-judge-issue-code-0")).toHaveValue("UNSUPPORTED_CLAIM");
+
+      fireEvent.click(screen.getByTestId("guardrail-judge-issue-add"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-code-1"), { target: { value: "MISSING_CITATION" } });
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-fix-1"), { target: { value: "Cite your sources." } });
+      expect(JSON.parse(last(spy).outputGuardrails![0]!.parameters!.issues!)).toEqual({
+        UNSUPPORTED_CLAIM: "Remove every claim the sources do not state.",
+        MISSING_CITATION: "Cite your sources.",
+      });
+    });
+
     it("writes the model call parameters under the judge's own keys", () => {
       const spy = vi.fn();
       show(<Harness initial={withJudge({ provider: "openai" })} onChangeSpy={spy} />);
