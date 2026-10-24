@@ -402,10 +402,12 @@ public class GuardrailService {
                 }
                 continue;
             }
+            // Paid whether or not it fired: a classifier that clears the text was still
+            // called.
+            cost += verdict.costUsd();
             if (!verdict.triggered()) {
                 continue;
             }
-            cost += verdict.costUsd();
             if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
                 screened = verdict.text();
             } else {

@@ -43,6 +43,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.model.chat.request.ResponseFormat;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -557,7 +558,11 @@ class LlmTaskOpenAiCompatibleTest {
             if (answer == null) {
                 throw new IllegalStateException("classifier down");
             }
-            return ChatResponse.builder().aiMessage(AiMessage.from(answer)).build();
+            var response = ChatResponse.builder().aiMessage(AiMessage.from(answer));
+            if (asked.contains("extract:")) {
+                response.tokenUsage(new TokenUsage(2, 0)); // only the step-only part is priced
+            }
+            return response.build();
         });
         var classifierRegistry = mock(ChatModelRegistry.class);
         when(classifierRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifierModel);
@@ -576,6 +581,7 @@ class LlmTaskOpenAiCompatibleTest {
         params.put("provider", "ollama");
         params.put("model", "shieldgemma:2b");
         params.put("baseUrl", "http://classifier:11434");
+        params.put("inputPricePer1M", "1000000"); // $1 per input token
         if (failMode != null) {
             params.put("failMode", failMode);
         }
@@ -595,6 +601,7 @@ class LlmTaskOpenAiCompatibleTest {
 
         var sent = text(lastUser(model));
         assertTrue(!sent.contains("nasty") && sent.contains("withheld by a guardrail"), sent);
+        verify(dataFactory).createData(eq("audit:cost"), eq(2.0));
     }
 
     @Test
@@ -607,6 +614,8 @@ class LlmTaskOpenAiCompatibleTest {
         llmTask.execute(memory, cascadedWithClassifier(null));
 
         assertTrue(text(lastUser(model)).contains("harmless figures"), text(lastUser(model)));
+        // a classifier that CLEARS the text was still paid: its cost reaches the turn
+        verify(dataFactory).createData(eq("audit:cost"), eq(2.0));
     }
 
     @Test
