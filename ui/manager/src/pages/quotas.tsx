@@ -482,13 +482,6 @@ function QuotaField({
 }
 
 /**
- * What the monthly cost budget is doing right now. The limit is enforced by the
- * backend (priced spend is metered after each turn; once the month's total
- * reaches the limit, LLM tasks serve their fallback answer instead of calling
- * the model), so this says which of four states the tenant is in rather than
- * leaving the operator to infer it from a progress bar.
- */
-/**
  * Dollars for the budget status. Two decimals hide sub-cent spend — a $0.006
  * spend against a $0.01 cap read "$0.01 of $0.01 … $0.00 left" — so amounts
  * under a dollar keep up to four decimals, trailing zeros trimmed back to two.
@@ -500,6 +493,15 @@ function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+/**
+ * What the monthly cost budget is doing right now. The limit is enforced by the
+ * backend (priced spend is metered after each turn; once the month's total
+ * reaches the limit, LLM tasks serve their fallback answer instead of calling
+ * the model), so this says which of five states the tenant is in rather than
+ * leaving the operator to infer it from a progress bar: enforcement off with no
+ * budget (nothing metered), enforcement off with a budget, no budget, budget
+ * reached, or spend versus remaining.
+ */
 function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
