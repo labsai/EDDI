@@ -1,4 +1,4 @@
-import type { GuardrailActionName, GuardrailConfig } from "./types";
+import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "./types";
 
 /** Where a guardrail runs: on the user's message, or on the model's answer. */
 export type GuardrailPhaseName = "input" | "output";
@@ -10,6 +10,7 @@ export const GUARDRAIL_TYPES = [
   "regex-filter",
   "max-length",
   "classifier",
+  "judge",
   "json-object",
 ] as const;
 export type GuardrailTypeName = (typeof GUARDRAIL_TYPES)[number];
@@ -22,6 +23,16 @@ export const DEFAULT_GUARDRAIL_ACTION: GuardrailActionName = "block";
 export const DEFAULT_REPROMPT_RETRIES = 2;
 export const MAX_REPROMPT_RETRIES = 5;
 
+/** `onExhausted` values, default first. Mirrors the backend `GuardrailConfig`. */
+export const ON_EXHAUSTED: GuardrailOnExhausted[] = ["block", "deliver-best"];
+
+/** The judge's `issues` limits, mirroring `JudgeGuardrail.validate`. */
+export const JUDGE_MAX_ISSUES = 20;
+export const JUDGE_MAX_FIX_CHARS = 1000;
+export const JUDGE_CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
+/** The judge's `timeoutMs` default (the classifier's is 3000). */
+export const JUDGE_DEFAULT_TIMEOUT_MS = 5000;
+
 /** The built-in `pii-redaction` kinds, in the order the backend lists them. */
 export const PII_KINDS = ["email", "ssn", "creditcard", "phone"] as const;
 
@@ -31,11 +42,12 @@ const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
   "regex-filter": ["input", "output"],
   "max-length": ["input", "output"],
   classifier: ["input", "output"],
+  judge: ["output"],
   "json-object": ["output"],
 };
 
 /** Types without a rewrite: `redact` has nothing to rewrite with, so the engine blocks instead. */
-const NO_REWRITE: ReadonlySet<string> = new Set(["prompt-injection", "classifier", "json-object"]);
+const NO_REWRITE: ReadonlySet<string> = new Set(["prompt-injection", "classifier", "judge", "json-object"]);
 
 export function isKnownGuardrailType(type: string): type is GuardrailTypeName {
   return (GUARDRAIL_TYPES as readonly string[]).includes(type);
@@ -100,9 +112,76 @@ export function withText(g: GuardrailConfig, field: "blockMessage", value: strin
  */
 export function withAction(g: GuardrailConfig, action: GuardrailActionName): GuardrailConfig {
   if (action === "reprompt") return { ...g, action };
-  const { maxRetries: _drop, ...rest } = g;
+  // onExhausted means nothing without retries to exhaust, and the backend
+  // refuses deliver-best on any other action.
+  const { maxRetries: _drop, onExhausted: _dropToo, ...rest } = g;
   void _drop;
+  void _dropToo;
   return { ...rest, action };
+}
+
+/** Sets `onExhausted`; `block` is the default, so it is stored as absent. */
+export function withOnExhausted(g: GuardrailConfig, value: GuardrailOnExhausted): GuardrailConfig {
+  const { onExhausted: _drop, ...rest } = g;
+  void _drop;
+  return value === "deliver-best" ? { ...rest, onExhausted: value } : rest;
+}
+
+/** One declared judge issue: its code and the author's fix text. */
+export interface JudgeIssue {
+  code: string;
+  fix: string;
+}
+
+/**
+ * The judge's `issues` parameter (a JSON object string) as rows, or null when
+ * the stored value is not a JSON object of strings — the sheet then shows the
+ * raw text rather than silently dropping it.
+ */
+export function parseJudgeIssues(raw: string | undefined): JudgeIssue[] | null {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const rows: JudgeIssue[] = [];
+    for (const [code, fix] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof fix !== "string") return null;
+      rows.push({ code, fix });
+    }
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rows back to the `issues` string; no rows is stored as absent. A row whose
+ * code repeats an earlier one would be lost in a JSON object, so rows keep
+ * their own order and the deploy check reports the duplicate.
+ */
+export function serializeJudgeIssues(rows: JudgeIssue[]): string {
+  if (rows.length === 0) return "";
+  return `{${rows.map((r) => `${JSON.stringify(r.code)}: ${JSON.stringify(r.fix)}`).join(", ")}}`;
+}
+
+export type JudgeIssuesProblem = "none" | "tooMany" | "badCode" | "duplicate" | "blankFix" | "longFix";
+
+/**
+ * Why the backend would refuse these issues at deploy time, or null when they
+ * are fine.
+ */
+export function judgeIssuesProblem(rows: JudgeIssue[]): JudgeIssuesProblem | null {
+  if (rows.length === 0) return "none";
+  if (rows.length > JUDGE_MAX_ISSUES) return "tooMany";
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!JUDGE_CODE.test(row.code)) return "badCode";
+    if (seen.has(row.code)) return "duplicate";
+    seen.add(row.code);
+    if (!row.fix.trim()) return "blankFix";
+    if (row.fix.length > JUDGE_MAX_FIX_CHARS) return "longFix";
+  }
+  return null;
 }
 
 export function withMaxRetries(g: GuardrailConfig, value: number | undefined): GuardrailConfig {
@@ -152,6 +231,7 @@ export function summarizeGuardrail(g: GuardrailConfig): string {
   const p = g.parameters ?? {};
   switch (g.type) {
     case "classifier":
+    case "judge":
       return [p.provider, p.modelName ?? p.model ?? p.modelId ?? p.deploymentName].filter(Boolean).join(" · ");
     case "pii-redaction":
       return enabledPiiKinds(g).join(", ");
@@ -193,6 +273,12 @@ export const TYPE_TEXT: Record<GuardrailTypeName, [string, string, string, strin
     "Safety classifier model",
     "llmEditor.grTypeClassifierDesc",
     "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. EDDI ships no classifier model.",
+  ],
+  judge: [
+    "llmEditor.grTypeJudge",
+    "Judge model",
+    "llmEditor.grTypeJudgeDesc",
+    "Asks a model to grade the answer against your criteria. It may only name the issue codes you declare; a reprompt sends your fix text for each code found.",
   ],
   "json-object": [
     "llmEditor.grTypeJson",
