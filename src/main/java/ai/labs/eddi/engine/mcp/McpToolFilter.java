@@ -89,7 +89,7 @@ public class McpToolFilter implements ToolFilter {
             // and never call resources/read
             "list_docs", "read_docs",
             // Agent test suites (McpAgentTestTools) — same tier as deploy
-            "run_agent_tests", "get_agent_test_run", "list_agent_test_runs");
+            "run_agent_tests", "get_agent_test_run", "list_agent_test_runs", "cancel_agent_test_run");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

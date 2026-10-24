@@ -21,9 +21,14 @@ package ai.labs.eddi.engine.agenttests;
  * <li>tool calls are mocked or refused rather than executed
  * ({@code ToolMockRegistry}).</li>
  * </ul>
- * Anyone may start a conversation with such a user id, and gets exactly that:
- * no user memory and no live tool calls. Nothing is granted by the prefix, only
- * taken away, so it does not have to be unforgeable.
+ * Nothing is granted by the prefix, only taken away. But a run's mocks and its
+ * record of tool calls are keyed on these user ids, so a conversation started
+ * from outside with a live run's id would join that run's session and write
+ * into its results: a caller-supplied user id in this namespace is refused at
+ * every external conversation start ({@code OwnershipValidator}), whoever the
+ * caller and whether or not authorization is on. The runner starts its
+ * conversations through {@code IConversationService} directly, below that
+ * check.
  *
  * @since 6.5.0
  */

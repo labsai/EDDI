@@ -126,6 +126,46 @@ class ConversationPurgeServiceTest {
         verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
 
+    /**
+     * The tool loop checkpoints memory before every tool call (mocked test calls
+     * included); a permanent delete that left those copies behind did not delete
+     * the conversation. Only GDPR erasure used to remove them.
+     */
+    @Test
+    @DisplayName("a permanent delete removes the conversation's memory checkpoints too")
+    @SuppressWarnings("unchecked")
+    void purgeDeletesCheckpoints() throws Exception {
+        IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+        Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+        when(checkpointInstance.isResolvable()).thenReturn(true);
+        when(checkpointInstance.get()).thenReturn(checkpoints);
+        Instance<AutoVaultedSecrets> vault = mock(Instance.class);
+        Instance<IAttachmentStore> attachments = mock(Instance.class);
+        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, attachments,
+                checkpointInstance);
+
+        withCheckpoints.purge(CONVERSATION_ID);
+
+        verify(checkpoints).deleteByConversationId(CONVERSATION_ID);
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
+    @DisplayName("a checkpoint store that fails does not stop the delete")
+    @SuppressWarnings("unchecked")
+    void checkpointFailureDoesNotStopThePurge() throws Exception {
+        IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+        when(checkpoints.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
+        Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+        when(checkpointInstance.isResolvable()).thenReturn(true);
+        when(checkpointInstance.get()).thenReturn(checkpoints);
+        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
+                mock(Instance.class), checkpointInstance);
+
+        assertDoesNotThrow(() -> withCheckpoints.purge(CONVERSATION_ID));
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
     @Test
     @DisplayName("the store's null for a missing conversation means already gone, not a refusal")
     void aNullSnapshotIsANoOp() throws Exception {

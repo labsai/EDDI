@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.configs.apicalls.model.RetryApiCallInstruction;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -169,6 +170,52 @@ class ApiCallExecutorAgentTestMockTest {
             // the live path hit unprimed mocks
         }
         assertEquals(1, session.calls().size(), "the tool path's call must not be recorded by the executor");
+    }
+
+    /**
+     * An httpcall reached through the LLM tool path, mocked: the mock chosen there
+     * travels in the template data, and this executor answers with it — so the
+     * saveResponse and postResponse a live call gets run on it too. Before, the
+     * tool path answered the model itself and none of that happened, so an agent
+     * setting a property from the tool's response behaved differently mocked.
+     */
+    @Test
+    @DisplayName("a tool-path call with a chosen mock sends nothing, runs saveResponse and postResponse, and is not recorded again")
+    void toolPathMockRunsTheResponseHandling() throws Exception {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null, List.of(), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        var templateData = new HashMap<String, Object>();
+        templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+        templateData.put(ToolMockRegistry.TOOL_PATH_MOCK,
+                new ToolMockRegistry.MockResult(200, "3 rooms", ToolMockRegistry.Outcome.MOCKED));
+
+        Map<String, Object> result = executor.execute(call(false), memory, templateData, SERVER);
+
+        verify(httpClient, never()).newRequest(any(URI.class), any());
+        verify(request, never()).send(any());
+        assertEquals(200, result.get("httpCode"));
+        assertEquals("3 rooms", result.get("body"));
+        assertEquals("3 rooms", templateData.get("availability"), "saveResponse stores the mocked body for postResponse");
+        verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(200), eq(false));
+        assertEquals(0, session.calls().size(), "ToolLoopRunner recorded the call; the executor must not record it again");
+    }
+
+    @Test
+    @DisplayName("a mocked rule-triggered call that is retried is one recorded call, like a retried live call")
+    void retriedMockIsRecordedOnce() throws Exception {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null,
+                List.of(new ToolMock("getAvailability", null, new MockResponse(503, "busy"))), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        ApiCall call = call(false);
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(2);
+        retry.setRetryOnHttpCodes(List.of(503));
+        call.getPostResponse().setRetryApiCallInstruction(retry);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), SERVER);
+
+        assertEquals(503, result.get("httpCode"));
+        assertEquals(1, session.calls().size(), String.valueOf(session.calls()));
     }
 
     @Test

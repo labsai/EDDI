@@ -69,6 +69,15 @@ public final class ToolMockRegistry {
      */
     public static final String TOOL_PATH_MARKER = "__agentTestToolPathIntercepted";
 
+    /**
+     * Template-data key carrying the {@link MockResult} the LLM tool path chose for
+     * an httpcall tool. The executor answers the call with it instead of sending a
+     * request, and runs everything else — {@code saveResponse}, retries,
+     * {@code postResponse} property instructions — on it exactly as on a real
+     * response, the same way a rule-triggered call is mocked.
+     */
+    public static final String TOOL_PATH_MOCK = "__agentTestToolPathMock";
+
     static final String SOURCE_HTTP = "http";
     static final String SOURCE_MEMORY = "memory";
 
@@ -246,17 +255,35 @@ public final class ToolMockRegistry {
      *            {@code memory}, …), may be null
      */
     public static String interceptToolCall(IConversationMemory memory, String tool, String arguments, String source) {
+        MockResult result = decideToolCall(memory, tool, arguments, source);
+        return result == null ? null : toolResultOf(result, source);
+    }
+
+    /**
+     * How an LLM tool call of a test conversation is answered — decided, and
+     * recorded, once. {@code null} means execute it: not a test conversation, an
+     * internal tool, or a call the suite runs live.
+     *
+     * @param source
+     *            the tool's source tag, may be null
+     */
+    public static MockResult decideToolCall(IConversationMemory memory, String tool, String arguments, String source) {
         String userId = memory != null ? memory.getUserId() : null;
         if (!AgentTestConversations.isTestUserId(userId) || INTERNAL_TOOLS.contains(tool)) {
             return null;
         }
         Session session = SESSIONS.get(userId);
-        MockResult result = session != null
+        return session != null
                 ? session.answer(tool, arguments, source, true)
                 : new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED);
-        if (result == null) {
-            return null;
-        }
+    }
+
+    /**
+     * The tool result a decided call hands the model when no executor runs it: a
+     * refusal as its JSON, an httpcall tool's mock in the httpcall result shape
+     * ({@code {"httpCode": …, "body": …}}), any other mock as its body.
+     */
+    public static String toolResultOf(MockResult result, String source) {
         if (result.outcome() != Outcome.MOCKED) {
             return result.bodyAsText();
         }

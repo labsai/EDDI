@@ -28,11 +28,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -78,7 +82,7 @@ class AgentTestRunnerTest {
 
     private static AgentTestRun started(boolean keep) {
         return new AgentTestRun(RUN_ID, "bbbbbbbbbbbbbbbbbbbbbbbb", 3, "wizard", AGENT_ID, 7, AgentTestRun.Status.RUNNING, "alice", 1L, null, null,
-                null, null, null, null, null, null, null, null, keep, null);
+                null, null, null, null, null, null, null, null, keep, null, null, null);
     }
 
     private static Expectation actions(String... contain) {
@@ -297,6 +301,65 @@ class AgentTestRunnerTest {
         AgentTestRun run = runner(engine, 4).run(started(false), suite);
 
         assertEquals(AgentTestRun.Status.PASSED, run.status(), () -> String.valueOf(run.cases()));
+    }
+
+    /**
+     * A run holds one of a node's few run slots for as long as it runs — up to
+     * 2,000 turns of up to 900 s each. Cancel must free it without waiting for the
+     * turn in flight, and still end and delete the conversation.
+     */
+    @Test
+    @DisplayName("cancel stops a run mid-turn: CANCELLED, the conversation ended and deleted, the run no longer active")
+    void cancelStopsARunMidTurn() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = runner(engine, 4);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
+        verify(engine.service, timeout(5_000)).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+
+        assertTrue(runner.cancel(RUN_ID, "bob"));
+        AgentTestRun run = result.get(10, TimeUnit.SECONDS);
+
+        assertEquals(AgentTestRun.Status.CANCELLED, run.status());
+        assertTrue(run.error().contains("bob"), run.error());
+        AttemptResult attempt = run.cases().getFirst().attempts().getFirst();
+        assertFalse(attempt.passed());
+        assertTrue(attempt.error().contains("cancelled"), attempt.error());
+        String conversationId = engine.conversations.keySet().iterator().next();
+        verify(engine.service).endConversation(conversationId, AgentTestConversations.SYSTEM_ACTOR);
+        verify(conversationStore).purgeAgentTestConversation(conversationId, RUN_ID);
+        assertFalse(runner.isActive(RUN_ID));
+        assertFalse(runner.cancel(RUN_ID, "bob"), "a finished run is not cancellable");
+        verify(runStore).update(run);
+    }
+
+    @Test
+    @DisplayName("a run not executing on this node cannot be cancelled here")
+    void unknownRunIsNotCancelled() throws Exception {
+        assertFalse(runner(engine(), 4).cancel(RUN_ID, "bob"));
+    }
+
+    /**
+     * Other replicas tell a live run from an orphan by its heartbeat. The final
+     * write must be the last one: a heartbeat after it would put RUNNING back.
+     */
+    @Test
+    @DisplayName("a running run's heartbeat is refreshed, and nothing is written after the final record")
+    void heartbeatRunsUntilTheFinalWrite() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = new AgentTestRunner(engine.service, runStore, conversationStore, auditLedger, new SimpleMeterRegistry(), 4, 50, 20);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
+        verify(runStore, timeout(5_000).atLeast(2)).update(argThat(r -> r.status() == AgentTestRun.Status.RUNNING && r.heartbeatAt() != null));
+
+        runner.cancel(RUN_ID, "bob");
+        AgentTestRun finished = result.get(10, TimeUnit.SECONDS);
+        Thread.sleep(100);
+
+        var captor = ArgumentCaptor.forClass(AgentTestRun.class);
+        verify(runStore, atLeast(3)).update(captor.capture());
+        assertEquals(finished, captor.getAllValues().getLast(), "the final record is the last write");
     }
 
     @Test

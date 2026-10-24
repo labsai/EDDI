@@ -44,7 +44,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.DoubleAdder;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -64,6 +66,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * time; each turn waits at most its timeout; the summed {@code audit:cost} is
  * checked against {@code maxCostPerRun} before every turn; and the runs kept
  * per agent are pruned to {@code eddi.agent-tests.max-runs-per-agent}.
+ * <h3>Cancellation and liveness</h3> A run in progress on this node can be
+ * cancelled ({@link #cancel}): cooperatively, between turns — a turn already
+ * waiting for the engine is abandoned, its conversation ended — and the run
+ * ends {@link AgentTestRun.Status#CANCELLED} with the cases that finished.
+ * While it runs, its record's {@code heartbeatAt} is refreshed every
+ * {@link #HEARTBEAT_INTERVAL_MS}, so another node sharing the database can tell
+ * a live run from one whose node died ({@link AgentTestRunRecovery}).
  *
  * @since 6.5.0
  */
@@ -77,6 +86,10 @@ public class AgentTestRunner {
     static final String AUDIT_TASK_TYPE = "agent_test_run";
     static final int MAX_OUTPUT_CHARS = 2_000;
     static final int STORED_STEP_WAIT_SECONDS = 5;
+    /** How often a running run's record is touched as a sign of life. */
+    static final long HEARTBEAT_INTERVAL_MS = 30_000;
+    /** How often a waiting turn looks whether its run was cancelled. */
+    static final long CANCEL_POLL_MS = 500;
 
     private final IConversationService conversationService;
     private final IAgentTestRunStore runStore;
@@ -85,12 +98,22 @@ public class AgentTestRunner {
     private final MeterRegistry meterRegistry;
     private final int maxParallelCases;
     private final int maxRunsPerAgent;
+    private final long heartbeatIntervalMs;
+    /** The runs executing on this node, by id. */
+    private final Map<String, RunContext> activeRuns = new ConcurrentHashMap<>();
 
     @Inject
     public AgentTestRunner(IConversationService conversationService, IAgentTestRunStore runStore, ConversationPurgeService purgeService,
             AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.agent-tests.max-parallel-cases", defaultValue = "4") int maxParallelCases,
             @ConfigProperty(name = "eddi.agent-tests.max-runs-per-agent", defaultValue = "50") int maxRunsPerAgent) {
+        this(conversationService, runStore, purgeService, auditLedgerService, meterRegistry, maxParallelCases, maxRunsPerAgent,
+                HEARTBEAT_INTERVAL_MS);
+    }
+
+    AgentTestRunner(IConversationService conversationService, IAgentTestRunStore runStore, ConversationPurgeService purgeService,
+            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry, int maxParallelCases, int maxRunsPerAgent,
+            long heartbeatIntervalMs) {
         this.conversationService = conversationService;
         this.runStore = runStore;
         this.purgeService = purgeService;
@@ -98,11 +121,12 @@ public class AgentTestRunner {
         this.meterRegistry = meterRegistry;
         this.maxParallelCases = Math.max(1, maxParallelCases);
         this.maxRunsPerAgent = Math.max(1, maxRunsPerAgent);
+        this.heartbeatIntervalMs = Math.max(1, heartbeatIntervalMs);
     }
 
     /** Everything one run shares across its parallel attempts. */
     record RunContext(AgentTestRun run, AgentTestSuite suite, AgentTestSuite.Defaults defaults, double maxCost, DoubleAdder cost,
-            AtomicBoolean costCeilingReached, Set<String> models) {
+            AtomicBoolean costCeilingReached, Set<String> models, AtomicReference<String> cancelledBy) {
 
         boolean overBudget() {
             if (cost.sum() >= maxCost) {
@@ -111,6 +135,31 @@ public class AgentTestRunner {
             }
             return false;
         }
+
+        boolean cancelled() {
+            return cancelledBy.get() != null;
+        }
+    }
+
+    /**
+     * Asks a run executing on this node to stop. Cooperative: no new turn starts, a
+     * turn waiting for the engine is abandoned, every conversation is ended and
+     * (unless kept) deleted, and the run is stored {@code CANCELLED}.
+     *
+     * @return false when the run is not executing on this node
+     */
+    public boolean cancel(String runId, String cancelledBy) {
+        RunContext ctx = runId != null ? activeRuns.get(runId) : null;
+        if (ctx == null) {
+            return false;
+        }
+        ctx.cancelledBy().compareAndSet(null, cancelledBy != null ? cancelledBy : "anonymous");
+        return true;
+    }
+
+    /** Whether the run is executing on this node right now. */
+    public boolean isActive(String runId) {
+        return runId != null && activeRuns.containsKey(runId);
     }
 
     /**
@@ -121,17 +170,34 @@ public class AgentTestRunner {
     public AgentTestRun run(AgentTestRun started, AgentTestSuite suite) {
         long startNanos = System.nanoTime();
         var ctx = new RunContext(started, suite, suite.effectiveDefaults(), suite.effectiveMaxCostPerRun(), new DoubleAdder(),
-                new AtomicBoolean(), Collections.synchronizedSet(new LinkedHashSet<>()));
+                new AtomicBoolean(), Collections.synchronizedSet(new LinkedHashSet<>()), new AtomicReference<>());
+        if (started.id() != null) {
+            activeRuns.put(started.id(), ctx);
+        }
+        var heartbeat = new Heartbeat(started);
         AgentTestRun finished;
         try {
+            heartbeat.start();
             List<CaseResult> cases = runCases(ctx);
             int passed = (int) cases.stream().filter(CaseResult::passed).count();
             boolean allPassed = passed == cases.size() && !ctx.costCeilingReached().get();
-            finished = finish(ctx, startNanos, allPassed ? AgentTestRun.Status.PASSED : AgentTestRun.Status.FAILED, cases, passed, null);
+            if (ctx.cancelled()) {
+                finished = finish(ctx, startNanos, AgentTestRun.Status.CANCELLED, cases, passed,
+                        "Cancelled by " + ctx.cancelledBy().get() + " before it finished; the cases that did not run to the end are failed.");
+            } else {
+                finished = finish(ctx, startNanos, allPassed ? AgentTestRun.Status.PASSED : AgentTestRun.Status.FAILED, cases, passed, null);
+            }
         } catch (Exception e) {
             LOGGER.errorf(e, "Agent test run %s failed", sanitize(started.id()));
             finished = finish(ctx, startNanos, AgentTestRun.Status.ERROR, List.of(), 0,
                     "The run could not be completed: " + e.getClass().getSimpleName());
+        } finally {
+            // Stopped before the final write, and waited for: a heartbeat landing after
+            // it would put the RUNNING record back.
+            heartbeat.stop();
+            if (started.id() != null) {
+                activeRuns.remove(started.id());
+            }
         }
 
         try {
@@ -165,7 +231,57 @@ public class AgentTestRunner {
         return new AgentTestRun(s.id(), s.suiteId(), s.suiteVersion(), s.suiteName(), s.agentId(), s.agentVersion(), status, s.startedBy(),
                 s.startedAt(), now, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), round(ctx.cost().sum()), ctx.maxCost(),
                 ctx.costCeilingReached().get(), List.copyOf(ctx.models()), cases.size(), passed, cases.size() - passed, cases,
-                s.keepConversations(), error);
+                s.keepConversations(), error, s.ownerNode(), now);
+    }
+
+    /**
+     * Refreshes the RUNNING record's {@code heartbeatAt} until stopped. Writes and
+     * {@link #stop} exclude each other, so once {@code stop} returns no heartbeat
+     * write is in flight or still to come.
+     */
+    private final class Heartbeat {
+        private final AgentTestRun started;
+        private final Object lock = new Object();
+        private boolean stopped;
+        private Thread thread;
+
+        Heartbeat(AgentTestRun started) {
+            this.started = started;
+        }
+
+        void start() {
+            if (started.id() == null) {
+                return;
+            }
+            thread = Thread.ofVirtual().name("agent-test-heartbeat-" + started.id()).start(() -> {
+                while (true) {
+                    try {
+                        Thread.sleep(heartbeatIntervalMs);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    synchronized (lock) {
+                        if (stopped) {
+                            return;
+                        }
+                        try {
+                            runStore.update(started.withHeartbeat(System.currentTimeMillis()));
+                        } catch (Exception e) {
+                            LOGGER.warnf("Could not refresh the heartbeat of agent test run %s: %s", sanitize(started.id()), e.getMessage());
+                        }
+                    }
+                }
+            });
+        }
+
+        void stop() {
+            synchronized (lock) {
+                stopped = true;
+            }
+            if (thread != null) {
+                thread.interrupt();
+            }
+        }
     }
 
     private List<CaseResult> runCases(RunContext ctx) throws InterruptedException {
@@ -251,6 +367,9 @@ public class AgentTestRunner {
         ToolMockRegistry.register(userId, mocks);
 
         try {
+            if (ctx.cancelled()) {
+                return new AttemptResult(repetition, null, false, 0.0, 0, null, List.of(), List.of(), "Not run: the run was cancelled.");
+            }
             if (ctx.overBudget()) {
                 return new AttemptResult(repetition, null, false, 0.0, 0, null, List.of(), List.of(),
                         "Not run: the run's cost ceiling of $" + ctx.maxCost() + " was reached.");
@@ -268,6 +387,10 @@ public class AgentTestRunner {
             List<Turn> turns = testCase.turns();
             for (int t = 0; t < turns.size(); t++) {
                 Turn turn = turns.get(t);
+                if (ctx.cancelled()) {
+                    error = "Stopped before turn " + (t + 1) + ": the run was cancelled.";
+                    break;
+                }
                 if (ctx.overBudget()) {
                     error = "Stopped before turn " + (t + 1) + ": the run's cost ceiling of $" + ctx.maxCost() + " was reached.";
                     break;
@@ -284,6 +407,9 @@ public class AgentTestRunner {
                 attemptCost += result.costUsd();
                 finalState = result.conversationState();
                 if (result.conversationState() == null) {
+                    if (ctx.cancelled()) {
+                        error = "Stopped during turn " + (t + 1) + ": the run was cancelled.";
+                    }
                     break; // the turn itself failed to run; its result says why
                 }
             }
@@ -331,7 +457,10 @@ public class AgentTestRunner {
                             outcome.complete(null);
                         }
                     });
-            turnSnapshot = outcome.get(timeoutSeconds, TimeUnit.SECONDS);
+            turnSnapshot = awaitTurn(ctx, outcome, timeoutSeconds);
+            if (turnSnapshot == null && ctx.cancelled() && !outcome.isDone()) {
+                return failedTurn(turn, index, startNanos, "turn", "completed", "abandoned: the run was cancelled");
+            }
             if (turnSnapshot == null) {
                 return failedTurn(turn, index, startNanos, "turn", "executed", "skipped: the conversation was busy or paused");
             }
@@ -360,6 +489,31 @@ public class AgentTestRunner {
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), observed.actions(), truncate(observed.output()),
                 observed.toolCalls().stream().map(TurnObservation.ObservedToolCall::tool).toList(), observed.conversationState(),
                 failures.isEmpty() ? null : failures);
+    }
+
+    /**
+     * Waits for the turn, at most {@code timeoutSeconds}, looking every
+     * {@link #CANCEL_POLL_MS} whether the run was cancelled: null then, while the
+     * turn is still running.
+     */
+    private static SimpleConversationMemorySnapshot awaitTurn(RunContext ctx, CompletableFuture<SimpleConversationMemorySnapshot> outcome,
+                                                              int timeoutSeconds)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (true) {
+            if (ctx.cancelled() && !outcome.isDone()) {
+                return null;
+            }
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                throw new TimeoutException();
+            }
+            try {
+                return outcome.get(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(CANCEL_POLL_MS)), TimeUnit.NANOSECONDS);
+            } catch (TimeoutException e) {
+                // look at the cancel flag again
+            }
+        }
     }
 
     /**
