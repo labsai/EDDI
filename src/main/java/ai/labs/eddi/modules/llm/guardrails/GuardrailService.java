@@ -351,38 +351,9 @@ public class GuardrailService {
                 if (!(contents.get(c) instanceof TextContent part) || (i == last && c == lastText)) {
                     continue;
                 }
-                String screened = part.text();
-                for (GuardrailConfig config : configs) {
-                    GuardrailAction action = GuardrailAction.parse(config.getAction());
-                    if (!action.mayChangeText()) {
-                        continue;
-                    }
-                    ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
-                    if (guardrail == null || !guardrail.screensHistory()) {
-                        continue;
-                    }
-                    Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
-                    GuardrailVerdict verdict = evaluation.verdict();
-                    if (evaluation.failed()) {
-                        cost += evaluation.failureCostUsd();
-                        // Fail closed: an earlier message that cannot be checked is withheld.
-                        if (failsClosed(config, action)) {
-                            screened = HISTORY_PLACEHOLDER;
-                            break;
-                        }
-                        continue;
-                    }
-                    if (!verdict.triggered()) {
-                        continue;
-                    }
-                    cost += verdict.costUsd();
-                    if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
-                        screened = verdict.text();
-                    } else {
-                        screened = HISTORY_PLACEHOLDER;
-                        break;
-                    }
-                }
+                PartResult result = screenPart(configs, part.text(), messages, context);
+                cost += result.costUsd();
+                String screened = result.text();
                 if (!screened.equals(part.text())) {
                     contents.set(c, TextContent.from(screened));
                     messageChanged = true;
@@ -397,6 +368,92 @@ public class GuardrailService {
             LOGGER.debugf("Input guardrails rewrote earlier user messages of the history window for task '%s'", context.taskId());
         }
         return new HistoryResult(changed, cost);
+    }
+
+    private record PartResult(String text, double costUsd) {
+    }
+
+    /**
+     * One earlier text screened quietly (no outcome, metric or event): the history
+     * rule — a REDACT rewrites it, a block, or a guardrail that cannot check it,
+     * withholds it.
+     */
+    private PartResult screenPart(List<GuardrailConfig> configs, String text, List<ChatMessage> messages, GuardrailContext context) {
+        String screened = text;
+        double cost = 0.0;
+        for (GuardrailConfig config : configs) {
+            GuardrailAction action = GuardrailAction.parse(config.getAction());
+            if (!action.mayChangeText()) {
+                continue;
+            }
+            ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
+            if (guardrail == null || !guardrail.screensHistory()) {
+                continue;
+            }
+            Evaluation evaluation = evaluate(guardrail, screened, context.with(GuardrailPhase.INPUT, config.getParameters(), messages));
+            GuardrailVerdict verdict = evaluation.verdict();
+            if (evaluation.failed()) {
+                cost += evaluation.failureCostUsd();
+                // Fail closed: an earlier message that cannot be checked is withheld.
+                if (failsClosed(config, action)) {
+                    screened = HISTORY_PLACEHOLDER;
+                    break;
+                }
+                continue;
+            }
+            if (!verdict.triggered()) {
+                continue;
+            }
+            cost += verdict.costUsd();
+            if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
+                screened = verdict.text();
+            } else {
+                screened = HISTORY_PLACEHOLDER;
+                break;
+            }
+        }
+        return new PartResult(screened, cost);
+    }
+
+    /**
+     * Quietly screens the text parts of one user message that were not part of the
+     * prompt the input phase screened — text only a cascade step's own prompt
+     * carries (an extract the task's model did not get, a skip note naming a file).
+     * Same rule as an earlier message of the window ({@link #screenHistory}), and
+     * the same silence: nothing is recorded, because the turn's findings were
+     * recorded once by {@link #runInput}.
+     *
+     * @param alreadyScreened
+     *            the texts that need no further screening (the task's own parts,
+     *            before and after screening)
+     * @return the messages with the new texts screened, and what that cost
+     */
+    public InputResult screenUnseenText(List<GuardrailConfig> configs, List<ChatMessage> messages, int index, Set<String> alreadyScreened,
+                                        GuardrailContext context) {
+        if (configs == null || configs.isEmpty() || index < 0 || index >= messages.size() || !(messages.get(index) instanceof UserMessage user)) {
+            return new InputResult(messages, null, null, 0.0);
+        }
+        GuardrailContext inputContext = context.with(GuardrailPhase.INPUT, null, messages);
+        List<Content> contents = new ArrayList<>(user.contents());
+        double cost = 0.0;
+        boolean changed = false;
+        for (int c = 0; c < contents.size(); c++) {
+            if (!(contents.get(c) instanceof TextContent part) || alreadyScreened.contains(part.text())) {
+                continue;
+            }
+            PartResult result = screenPart(configs, part.text(), messages, inputContext);
+            cost += result.costUsd();
+            if (!result.text().equals(part.text())) {
+                contents.set(c, TextContent.from(result.text()));
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return new InputResult(messages, null, null, cost);
+        }
+        List<ChatMessage> copy = new ArrayList<>(messages);
+        copy.set(index, user.toBuilder().contents(contents).build());
+        return new InputResult(copy, null, null, cost);
     }
 
     // === Output phase ===
