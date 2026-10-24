@@ -37,9 +37,13 @@ import java.time.Instant;
  *            {@code true}: only ratings that need a maintainer's attention —
  *            {@link ReviewStatus#NEW} and either low (normalized score at most
  *            {@link #ATTENTION_SCORE}) or carrying a comment
+ * @param conversationId
+ *            the ratings of one conversation only (the Manager's conversation
+ *            view)
  */
 public record RatingFilter(String agentId, Integer agentVersion, String environment, Instant from, Instant to, Double minScore,
-        Double maxScore, RatingKind kind, String tag, Boolean hasComment, ReviewStatus reviewStatus, Boolean needsAttention) {
+        Double maxScore, RatingKind kind, String tag, Boolean hasComment, ReviewStatus reviewStatus, Boolean needsAttention,
+        String conversationId) {
 
     /**
      * A rating at or below this normalized score is "low" for
@@ -47,7 +51,13 @@ public record RatingFilter(String agentId, Integer agentVersion, String environm
      */
     public static final double ATTENTION_SCORE = 0.5;
 
-    /** Without the triage filters. */
+    /** Without the conversation filter. */
+    public RatingFilter(String agentId, Integer agentVersion, String environment, Instant from, Instant to, Double minScore,
+            Double maxScore, RatingKind kind, String tag, Boolean hasComment, ReviewStatus reviewStatus, Boolean needsAttention) {
+        this(agentId, agentVersion, environment, from, to, minScore, maxScore, kind, tag, hasComment, reviewStatus, needsAttention, null);
+    }
+
+    /** Without the triage and conversation filters. */
     public RatingFilter(String agentId, Integer agentVersion, String environment, Instant from, Instant to, Double minScore,
             Double maxScore, RatingKind kind, String tag, Boolean hasComment) {
         this(agentId, agentVersion, environment, from, to, minScore, maxScore, kind, tag, hasComment, null, null);

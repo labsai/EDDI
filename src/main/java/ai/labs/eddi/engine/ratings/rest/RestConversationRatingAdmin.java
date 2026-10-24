@@ -205,7 +205,8 @@ public class RestConversationRatingAdmin implements IRestConversationRatingAdmin
         requireScore("maxScore", q.maxScore);
         return new RatingFilter(scopedAgent, q.agentVersion, blankToNull(q.environment), instant("from", q.from, false),
                 instant("to", q.to, true), q.minScore, q.maxScore, parse("kind", () -> RatingKind.parse(q.kind)), blankToNull(q.tag),
-                q.hasComment, parse("reviewStatus", () -> ReviewStatus.parse(q.reviewStatus)), q.needsAttention);
+                q.hasComment, parse("reviewStatus", () -> ReviewStatus.parse(q.reviewStatus)), q.needsAttention,
+                blankToNull(q.conversationId));
     }
 
     String requireScope(String agentId) {

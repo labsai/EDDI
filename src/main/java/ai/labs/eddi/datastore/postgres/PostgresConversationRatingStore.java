@@ -419,6 +419,7 @@ public class PostgresConversationRatingStore implements IConversationRatingStore
         List<Object> params = new ArrayList<>();
         if (filter != null) {
             add(clauses, params, "agent_id = ?", filter.agentId());
+            add(clauses, params, "conversation_id = ?", filter.conversationId());
             add(clauses, params, "agent_version = ?", filter.agentVersion());
             add(clauses, params, "environment = ?", filter.environment());
             add(clauses, params, "created_at >= ?", filter.from() == null ? null : OffsetDateTime.ofInstant(filter.from(), ZoneOffset.UTC));

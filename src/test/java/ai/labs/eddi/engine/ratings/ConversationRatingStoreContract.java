@@ -136,6 +136,9 @@ public interface ConversationRatingStoreContract {
         assertEquals(3, store.count(new RatingFilter("a1", null, null, null, null, null, null, null, null, false)));
         assertEquals(2, store.count(new RatingFilter("a1", null, null, null, null, 0.4, 1.0, null, null, null)));
         assertEquals(0, store.count(new RatingFilter("a1", null, "test", null, null, null, null, null, null, null)));
+        assertEquals(2, store.count(new RatingFilter("a1", null, null, null, null, null, null, null, null, null, null, null, "c3")));
+        assertEquals(0, store.count(new RatingFilter("other-agent", null, null, null, null, null, null, null, null, null, null, null, "c3")),
+                "the conversation filter narrows the agent scope, never widens it");
 
         List<ConversationRating> lowest = store.query(RatingFilter.ofAgent("a1"), RatingSort.LOWEST, 0, 2);
         assertEquals(2, lowest.size());

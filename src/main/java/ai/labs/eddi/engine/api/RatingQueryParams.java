@@ -56,6 +56,13 @@ public class RatingQueryParams {
     @QueryParam("needsAttention")
     public Boolean needsAttention;
 
+    /**
+     * The ratings of one conversation only. Scoping still applies: an editor names
+     * its agent too.
+     */
+    @QueryParam("conversationId")
+    public String conversationId;
+
     /** Ratings of one agent; the other fields stay unset. */
     public static RatingQueryParams ofAgent(String agentId) {
         RatingQueryParams params = new RatingQueryParams();

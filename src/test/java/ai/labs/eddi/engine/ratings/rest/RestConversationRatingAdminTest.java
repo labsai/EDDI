@@ -267,6 +267,9 @@ class RestConversationRatingAdminTest {
             assertEquals(new RatingFilter(AGENT, 3, "production", Instant.parse("2026-10-01T00:00:00Z"), Instant.parse("2026-10-08T00:00:00Z"),
                     0.0, 0.5, RatingKind.MESSAGE, "Too slow", true, ReviewStatus.NEW, true), filter);
             assertEquals(Instant.parse("2026-10-03T10:00:00Z"), RestConversationRatingAdmin.instant("to", "2026-10-03T10:00:00Z", true));
+
+            q.conversationId = " conv-9 ";
+            assertEquals("conv-9", rest.filter(q).conversationId(), "the conversation view's filter reaches the store");
         }
 
         @Test

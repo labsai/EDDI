@@ -145,6 +145,12 @@ class PostgresConversationRatingStoreUnitTest {
         assertTrue(where.sql().contains("(comment IS NULL OR comment = '')"));
         assertEquals(List.of(hostile, 2, hostile, 0.1, 0.9, hostile), where.params());
         assertEquals("", PostgresConversationRatingStore.where(null).sql());
+
+        var byConversation = PostgresConversationRatingStore
+                .where(new RatingFilter("a1", null, null, null, null, null, null, null, null, null, null, null, hostile));
+        assertTrue(byConversation.sql().contains("conversation_id = ?"), byConversation.sql());
+        assertFalse(byConversation.sql().contains(hostile));
+        assertEquals(List.of("a1", hostile), byConversation.params());
     }
 
     @Test

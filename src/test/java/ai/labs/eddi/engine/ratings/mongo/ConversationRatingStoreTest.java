@@ -166,6 +166,10 @@ class ConversationRatingStoreTest {
                 .toBson(new RatingFilter(null, null, null, null, null, null, null, RatingKind.MESSAGE, null, null))).toJson();
         assertTrue(messages.contains("\"stepIndex\": {\"$gte\": 0}"), messages);
 
+        String byConversation = render(ConversationRatingStore
+                .toBson(new RatingFilter(null, null, null, null, null, null, null, null, null, null, null, null, "c1"))).toJson();
+        assertTrue(byConversation.contains("\"conversationId\": \"c1\""), byConversation);
+
         assertEquals(new BsonDocument(), render(ConversationRatingStore.toBson(RatingFilter.all())));
         assertEquals(new BsonDocument(), render(ConversationRatingStore.toBson(null)));
     }

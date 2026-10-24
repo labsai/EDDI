@@ -345,6 +345,9 @@ public class ConversationRatingStore implements IConversationRatingStore {
             if (filter.agentId() != null) {
                 clauses.add(eq(AGENT_ID, filter.agentId()));
             }
+            if (filter.conversationId() != null) {
+                clauses.add(eq(CONVERSATION_ID, filter.conversationId()));
+            }
             if (filter.agentVersion() != null) {
                 clauses.add(eq(AGENT_VERSION, filter.agentVersion()));
             }
