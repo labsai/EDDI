@@ -271,9 +271,10 @@ not shrink anyone's share) are refused; an integration with little traffic keeps
 being accepted. As a last resort, once the cache is 90% full every new delivery is
 refused whatever its integration holds. Only privileged roles (`eddi-admin`,
 `eddi-editor`) can create integrations, and each one costs its sender a signing
-secret, so the guarantee is: an integration within its own budget is not refused for
-another integration's volume until the cache is 90% full, and the cache never has to
-evict a live key. The window the budget counts over (11 minutes) is longer than the
+secret, so the guarantee is: an integration below its fair share is not refused for
+another integration's volume until the cache is 90% full (from half full, one above
+its fair share can be refused even inside its own budget), and the cache never has
+to evict a live key. The window the budget counts over (11 minutes) is longer than the
 10-minute key lifetime, so a delivery is counted for as long as its keys exist. Only
 accepted (202) deliveries spend budget - a delivery refused with 429, 503 or the like
 is given back, so a sender looping on a quota refusal keeps seeing that refusal.
