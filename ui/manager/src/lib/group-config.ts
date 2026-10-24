@@ -424,16 +424,27 @@ export function convergenceApplies(phase: Pick<DiscussionPhase, "repeats">): boo
 export const CONVERGENCE_MIN_REPEATS_FLOOR = 2;
 export const DEFAULT_CONVERGENCE_THRESHOLD = 0.8;
 
+/** VERDICT mode compares nothing, so its floor is one repeat (backend `ConvergenceConfig`). */
+export const VERDICT_MIN_REPEATS_FLOOR = 1;
+
+/** The `minRepeats` floor of a convergence mode. */
+export function convergenceMinRepeatsFloor(mode: ConvergenceConfig["mode"]): number {
+  return mode === "VERDICT" ? VERDICT_MIN_REPEATS_FLOOR : CONVERGENCE_MIN_REPEATS_FLOOR;
+}
+
 export function normalizeConvergence(config: Partial<ConvergenceConfig>): ConvergenceConfig {
   const threshold = config.threshold;
+  const mode = config.mode === "VERDICT" ? "VERDICT" : "SIMILARITY";
+  const floor = convergenceMinRepeatsFloor(mode);
   return {
     enabled: !!config.enabled,
-    minRepeats: Math.max(config.minRepeats ?? CONVERGENCE_MIN_REPEATS_FLOOR, CONVERGENCE_MIN_REPEATS_FLOOR),
+    minRepeats: Math.max(config.minRepeats ?? floor, floor),
     threshold:
       typeof threshold === "number" && threshold > 0 && threshold <= 1
         ? threshold
         : DEFAULT_CONVERGENCE_THRESHOLD,
     judge: config.judge === "SERVICE" ? "SERVICE" : "MODERATOR",
+    mode,
   };
 }
 

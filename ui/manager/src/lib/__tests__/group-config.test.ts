@@ -96,6 +96,16 @@ describe("convergenceApplies", () => {
 });
 
 describe("normalizeConvergence", () => {
+  it("defaults the mode to SIMILARITY; VERDICT has a floor of one repeat (E2)", () => {
+    expect(normalizeConvergence({ enabled: true }).mode).toBe("SIMILARITY");
+    expect(normalizeConvergence({ enabled: true, mode: "VERDICT" }).minRepeats).toBe(1);
+    expect(normalizeConvergence({ enabled: true, mode: "VERDICT", minRepeats: 0 }).minRepeats).toBe(1);
+    expect(normalizeConvergence({ enabled: true, mode: "VERDICT", minRepeats: 3 }).minRepeats).toBe(3);
+    expect(normalizeConvergence({ enabled: true, minRepeats: 1, mode: "SIMILARITY" }).minRepeats).toBe(
+      CONVERGENCE_MIN_REPEATS_FLOOR,
+    );
+  });
+
   it("raises minRepeats to the floor — a first repeat has no predecessor", () => {
     expect(normalizeConvergence({ enabled: true, minRepeats: 1 }).minRepeats).toBe(
       CONVERGENCE_MIN_REPEATS_FLOOR,
