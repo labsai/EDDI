@@ -1075,6 +1075,10 @@ class ConversationStepRunner {
             if (kind != null) {
                 conversationService
                         .reportTurnOutcome(new TurnOutcome(memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), kind));
+            } else if (wait == TurnWait.COMPLETED && memory != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+                // A clean turn: the OUTPUT_MATCH hook checks its cache and, for an agent
+                // without such rules, does nothing else.
+                conversationService.reportCleanTurn(memory);
             }
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not report the outcome of a turn: %s", e.getMessage());

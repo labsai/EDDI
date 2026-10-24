@@ -8,8 +8,10 @@ import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.Delivery;
 import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
+import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
+import ai.labs.eddi.engine.security.ConversationReviewPolicy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -50,21 +52,23 @@ public class AlertEngine {
     private final AlertDeliveryService deliveryService;
     private final AlertSettings settings;
     private final AlertMetrics metrics;
+    private final ConversationReviewPolicy reviewPolicy;
     private final Clock clock;
 
     @Inject
     public AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, Clock.systemUTC());
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy) {
+        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, Clock.systemUTC());
     }
 
     AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, Clock clock) {
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, Clock clock) {
         this.ruleCache = ruleCache;
         this.eventStore = eventStore;
         this.deliveryService = deliveryService;
         this.settings = settings;
         this.metrics = metrics;
+        this.reviewPolicy = reviewPolicy;
         this.clock = clock;
     }
 
@@ -80,6 +84,34 @@ public class AlertEngine {
             AlertMatchers.matchTurn(rule, outcome)
                     .ifPresent(match -> fire(rule, match, outcome.agentId(), outcome.agentVersion(), outcome.conversationId()));
         }
+    }
+
+    /**
+     * Matches a finished turn against the agent's OUTPUT_MATCH rules. The runtime
+     * value goes into the alert only when the rule asks for it and the agent
+     * version the conversation ran on has conversation review enabled; otherwise
+     * the alert names the path, the comparison and the rule's constant only.
+     */
+    public void evaluateOutput(TurnSnapshot snapshot) {
+        ruleCache.loadOutputNeeds(snapshot.agentId());
+        for (AlertRule rule : ruleCache.rulesFor(snapshot.agentId())) {
+            if (!rule.enabled() || rule.source() != AlertSource.OUTPUT_MATCH || rule.scope() == null
+                    || !rule.scope().covers(snapshot.agentId()) || rule.condition() == null
+                    || !OutputMatcher.matches(rule.condition(), snapshot)) {
+                continue;
+            }
+            String value = null;
+            if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)) {
+                value = OutputMatcher.resolve(rule.condition().path(), snapshot)
+                        .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
+            }
+            fire(rule, AlertMatch.output(OutputMatcher.describe(rule.condition()), value), snapshot.agentId(), snapshot.agentVersion(),
+                    snapshot.conversationId());
+        }
+    }
+
+    private boolean reviewEnabled(TurnSnapshot snapshot) {
+        return reviewPolicy != null && reviewPolicy.reviewOf(snapshot.agentId(), snapshot.agentVersion()).isPresent();
     }
 
     /**

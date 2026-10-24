@@ -12,6 +12,7 @@ import jakarta.inject.Inject;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The enabled rules watching each agent, cached so the alert worker does not
@@ -32,11 +33,31 @@ public class AlertRuleCache {
 
     private final IAlertRuleStore ruleStore;
     private final Cache<String, List<AlertRule>> rulesByAgent;
+    private final Cache<String, OutputNeeds> outputNeedsByAgent;
 
     @Inject
     public AlertRuleCache(IAlertRuleStore ruleStore) {
         this.ruleStore = ruleStore;
         this.rulesByAgent = Caffeine.newBuilder().expireAfterWrite(TTL).maximumSize(10_000).build();
+        this.outputNeedsByAgent = Caffeine.newBuilder().expireAfterWrite(TTL).maximumSize(10_000).build();
+    }
+
+    /**
+     * What the agent's OUTPUT_MATCH rules read — from the cache only, never
+     * loading: this is asked on the turn thread. Empty on a miss.
+     */
+    public Optional<OutputNeeds> cachedOutputNeeds(String agentId) {
+        return Optional.ofNullable(outputNeedsByAgent.getIfPresent(agentId == null ? NO_AGENT : agentId));
+    }
+
+    /**
+     * Loads (on the alert worker) and caches what the agent's OUTPUT_MATCH rules
+     * read.
+     */
+    public OutputNeeds loadOutputNeeds(String agentId) {
+        OutputNeeds needs = OutputNeeds.of(rulesFor(agentId));
+        outputNeedsByAgent.put(agentId == null ? NO_AGENT : agentId, needs);
+        return needs;
     }
 
     /** The enabled rules whose scope covers {@code agentId}. */
@@ -47,5 +68,6 @@ public class AlertRuleCache {
 
     public void invalidate() {
         rulesByAgent.invalidateAll();
+        outputNeedsByAgent.invalidateAll();
     }
 }

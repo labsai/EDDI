@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.engine.alerts.model.MatchOp;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -107,5 +108,24 @@ class AlertRuleValidatorTest {
                 "masked value"));
         assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("${vault:broken", "${vault:k}")),
                 "vault reference must be"));
+    }
+
+    @Test
+    @DisplayName("OUTPUT_MATCH: the matcher's checks apply, and its fields belong to no other source")
+    void outputMatch() {
+        AlertRule base = errorRule(List.of(ErrorKind.TURN_ERROR));
+        AlertRule ok = new AlertRule(null, "x", true, base.scope(), AlertSource.OUTPUT_MATCH,
+                AlertCondition.outputMatch("properties.escalate", MatchOp.EQ, true, true), List.of(), null, null, null, null, null, null);
+        assertEquals(List.of(), AlertRuleValidator.validate(ok));
+        AlertRule badPath = new AlertRule(null, "x", true, base.scope(), AlertSource.OUTPUT_MATCH,
+                AlertCondition.outputMatch("properties.*", MatchOp.EQ, true, null), List.of(), null, null, null, null, null, null);
+        assertTrue(reports(badPath, "condition.path"));
+        AlertRule mixed = new AlertRule(null, "x", true, base.scope(), AlertSource.CONVERSATION_ERROR,
+                new AlertCondition(null, null, null, List.of(ErrorKind.TURN_ERROR), "properties.x", MatchOp.EXISTS, null, null), List.of(), null,
+                null, null, null, null, null);
+        assertTrue(reports(mixed, "belong to OUTPUT_MATCH rules"));
+        AlertRule ratingFieldsOnOutput = new AlertRule(null, "x", true, base.scope(), AlertSource.OUTPUT_MATCH,
+                new AlertCondition(0.5, null, null, null, "properties.x", MatchOp.EXISTS, null, null), List.of(), null, null, null, null, null, null);
+        assertTrue(reports(ratingFieldsOnOutput, "do not belong to OUTPUT_MATCH"));
     }
 }

@@ -68,6 +68,9 @@ public final class AlertPayloads {
         if (match.errorKind() != null) {
             out.put("errorKind", match.errorKind().name());
         }
+        if (match.value() != null) {
+            out.put("value", match.value());
+        }
         if (match.ratingId() != null) {
             out.put("ratingId", match.ratingId());
             out.put("stepIndex", match.stepIndex());
@@ -101,6 +104,9 @@ public final class AlertPayloads {
         AlertMatch match = event.match();
         if (match != null && match.commentExcerpt() != null) {
             lines.add("> " + escape(match.commentExcerpt()).replace("\n", "\n> "));
+        }
+        if (match != null && match.value() != null) {
+            lines.add("Value: `" + escape(match.value()).replace("`", "'") + "`");
         }
         if (match != null && match.tags() != null && !match.tags().isEmpty()) {
             lines.add("Tags: " + escape(String.join(", ", match.tags())));

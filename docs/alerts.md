@@ -111,7 +111,7 @@ alert event about their ratings.
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `scope` | — | `allAgents: true`, or `agentIds` (at most 100) |
-| `source` | — | `RATING` or `CONVERSATION_ERROR` (`OUTPUT_MATCH` follows in a later release) |
+| `source` | — | `RATING`, `CONVERSATION_ERROR` or `OUTPUT_MATCH` |
 | `condition` | — | See below; a rule that sets another source's fields is refused |
 | `delivery` | `[]` | Up to 5 Slack / webhook targets. The Manager inbox is always a target |
 | `throttle.windowMinutes` | `60` | 1–1440. Fixed windows aligned to the epoch |
@@ -126,6 +126,7 @@ A save is validated and the error (`INVALID_RULE`) names every field that is wro
 | --- | --- | --- |
 | `RATING` | a rating is created or changed | `maxNormalizedScore` (0..1, fire at or below), `onComment` (any comment), `tags` (any of these reason tags). OR-ed; at least one |
 | `CONVERSATION_ERROR` | a turn ends badly | `errorKinds`, one or more of the table below |
+| `OUTPUT_MATCH` | a turn completes and a value in its result matches | `path`, `op`, `value`, `includeValue` — see [Matching a turn's result](#matching-a-turns-result) |
 
 | Error kind | The turn… |
 | --- | --- |
@@ -138,6 +139,55 @@ A save is validated and the error (`INVALID_RULE`) names every field that is wro
 Both the regular turn path and the HITL resume path report outcomes. A tool loop
 stopped mid-way by the cost ceiling is not reported on that turn (the loop ends
 with a normal answer); the next turn's model call is refused and reported.
+
+### Matching a turn's result
+
+`OUTPUT_MATCH` compares one value of a finished turn with a constant the rule author
+wrote. It is a deliberately small matcher: **no expression language, and no template
+evaluation of runtime data** — the value at the path is compared with the constant,
+nothing else.
+
+| `path` | Reads |
+| --- | --- |
+| `properties.<name>` (`.<a.b>` for a nested value) | the conversation properties after the turn |
+| `output.json.<a.b.c>` | the agent's output **parsed as JSON** — only when it is JSON (an object or array, at most 64 KB) |
+| `actions` | the turn's action list |
+
+Dot segments only (letters, digits, `_`, `-`), at most 8 after the source, no
+wildcards.
+
+| `op` | Value | Holds when |
+| --- | --- | --- |
+| `exists` | none | the path has a value |
+| `eq`, `neq` | string, number, boolean | equal / not equal (numbers by value) |
+| `in` | a list of 1–50 scalars | the value is one of them |
+| `gt`, `gte`, `lt`, `lte` | number | the value is a number and compares so |
+| `contains` | string | a string value contains it, or a list value has it as an element (`actions` takes `contains` and `exists` only) |
+
+A value of the wrong type never matches (`"5" gt 3` is false). The examples from the
+plan:
+
+```json
+{ "source": "OUTPUT_MATCH", "condition": { "path": "properties.escalate", "op": "eq", "value": true } }
+{ "source": "OUTPUT_MATCH", "condition": { "path": "output.json.sentiment", "op": "in", "value": ["angry", "frustrated"] } }
+{ "source": "OUTPUT_MATCH", "condition": { "path": "actions", "op": "contains", "value": "handoff_requested" } }
+```
+
+**What the alert says.** By default the path, the operator and your constant
+(`matched: ["properties.escalate eq true"]`) — never the runtime value. With
+`"includeValue": true` the value that matched is added as `match.value` (cut to 280
+characters), **only when the agent version the conversation ran on has
+[conversation review](workspaces.md) enabled**: the value comes from the conversation,
+so it is shown only where the people running the agent may read conversations anyway.
+Without review the flag is ignored.
+
+**Cost on a clean turn.** The turn hook checks an in-memory cache: an agent without
+enabled `OUTPUT_MATCH` rules costs one lookup and nothing else. For an agent with such
+rules, only the values those rules read are copied off the turn — the named
+properties, the output text, the action list — and matched on the alert worker; the
+live conversation memory never leaves the turn. On a cache miss (the first turn of an
+agent after start-up, or after the 60-second refresh) the rules are loaded on the
+worker and that one turn copies all three, so no match is lost.
 
 ### Delivery
 
@@ -299,4 +349,5 @@ rules. Events are deleted after `eddi.alerts.event-retention` (90 days).
   reported; the group discussion as a whole is not a source.
 - A Slack channel served by several integrations uses the one the channel router
   resolves; a rule cannot pick an integration by name.
-- `OUTPUT_MATCH` (a condition on what a turn returned) is the next release.
+- `OUTPUT_MATCH` matches one value per rule; combine conditions by writing several
+  rules.

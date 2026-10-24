@@ -58,7 +58,8 @@ class AlertEngineTest {
         store = mock(IAlertEventStore.class);
         delivery = mock(AlertDeliveryService.class);
         registry = new SimpleMeterRegistry();
-        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(registry), Clock.fixed(NOW, ZoneOffset.UTC));
+        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(registry), null,
+                Clock.fixed(NOW, ZoneOffset.UTC));
         when(store.insert(any())).thenAnswer(inv -> Optional.of(((AlertEvent) inv.getArgument(0)).withId("6aba70011a25f8be7920e001")));
         when(store.updateDelivery(any(), anyLong())).thenAnswer(inv -> Optional.of(inv.getArgument(0)));
         when(delivery.deliver(any(), any())).thenAnswer(inv -> Optional.of(inv.getArgument(0)));
@@ -102,7 +103,7 @@ class AlertEngineTest {
         AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR)), new AlertRule.Throttle(60, 10), null);
         when(cache.rulesFor(AGENT)).thenReturn(List.of(rule));
         when(store.incrementWindow(any(), any(), any())).thenReturn(1L);
-        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(registry),
+        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(registry), null,
                 Clock.fixed(Instant.parse("2026-10-24T12:34:56Z"), ZoneOffset.UTC));
 
         engine.evaluateTurn(new TurnOutcome(CONVERSATION, AGENT, 2, ErrorKind.TURN_ERROR));

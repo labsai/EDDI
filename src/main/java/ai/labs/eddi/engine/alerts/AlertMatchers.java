@@ -82,6 +82,9 @@ public final class AlertMatchers {
         if (match.errorKind() != null) {
             return rule.name() + ": " + describe(match.errorKind()) + " (agent " + agent + ")";
         }
+        if (rule.source() == AlertSource.OUTPUT_MATCH) {
+            return rule.name() + ": " + String.join(", ", match.matched()) + " (agent " + agent + ")";
+        }
         String what = match.stepIndex() != null && match.stepIndex() >= 0 ? "reply rating" : "conversation rating";
         String score = match.score() == null ? "" : " " + match.score() + (match.scale() == null ? "" : " (" + match.scale() + ")");
         return rule.name() + ": " + what + score + " — " + String.join(", ", match.matched()) + " (agent " + agent + ")";

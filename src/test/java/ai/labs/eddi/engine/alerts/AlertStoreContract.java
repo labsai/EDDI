@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
+import ai.labs.eddi.engine.alerts.model.MatchOp;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -252,5 +253,24 @@ public interface AlertStoreContract {
         assertEquals(0, eventStore().redactRatingComments(List.of("rating-1")));
         assertEquals(Optional.empty(), eventStore().read("6aba70011a25f8be7920effff"));
         assertEquals(ErrorKind.TURN_ERROR, AlertMatch.error(ErrorKind.TURN_ERROR).errorKind());
+    }
+
+    @Test
+    default void outputMatchRuleRoundTrips() {
+        AlertRule rule = new AlertRule(null, "Angry", true, AlertScope.agent(AGENT), AlertSource.OUTPUT_MATCH,
+                AlertCondition.outputMatch("output.json.sentiment", MatchOp.IN, List.of("angry", "frustrated"), true), List.of(), null, null,
+                "alice", NOW, "alice", NOW);
+        AlertRule read = ruleStore().read(ruleStore().create(rule).id()).orElseThrow();
+        assertEquals(MatchOp.IN, read.condition().op());
+        assertEquals(List.of("angry", "frustrated"), read.condition().value());
+        assertEquals(Boolean.TRUE, read.condition().includeValue());
+        AlertRule numeric = new AlertRule(null, "Score", true, AlertScope.agent(AGENT), AlertSource.OUTPUT_MATCH,
+                AlertCondition.outputMatch("properties.score", MatchOp.GT, 3, null), List.of(), null, null, "alice", NOW, "alice", NOW);
+        AlertRule readNumeric = ruleStore().read(ruleStore().create(numeric).id()).orElseThrow();
+        assertEquals(3, ((Number) readNumeric.condition().value()).intValue());
+        AlertEvent stored = eventStore().insert(new AlertEvent(null, "r", "Angry", AlertSource.OUTPUT_MATCH, AlertEvent.Kind.ALERT, AGENT, 1,
+                "c", NOW, "s", AlertMatch.output("output.json.sentiment in [angry, frustrated]", "angry"), List.of(), AlertEvent.State.INBOX_ONLY,
+                null, "om-1", 0, null, null, null, null, 0)).orElseThrow();
+        assertEquals("angry", eventStore().read(stored.id()).orElseThrow().match().value());
     }
 }

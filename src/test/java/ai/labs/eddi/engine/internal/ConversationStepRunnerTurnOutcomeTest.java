@@ -182,4 +182,20 @@ class ConversationStepRunnerTurnOutcomeTest {
         });
         assertEquals(2_000 - 5, registry.counter("eddi.alerts.dropped", "reason", "queue_full").count());
     }
+
+    @Test
+    @DisplayName("a clean turn goes to the OUTPUT_MATCH hook; a failed, abandoned or paused one does not")
+    void cleanTurnsReachTheOutputMatchHook() {
+        runner.waitForExecutionFinishOrTimeout(Map.of(), ID, memory(ConversationState.READY, false, null), CompletableFuture.completedFuture(null));
+        verify(service).reportCleanTurn(any());
+
+        ConversationService other = mock(ConversationService.class);
+        ConversationStepRunner otherRunner = new ConversationStepRunner(other, mock(IConversationMemoryStore.class),
+                mock(IConversationDescriptorStore.class), mock(IRuntime.class), null, new ConcurrentHashMap<>(), 60);
+        otherRunner.reportTurnOutcome(memory(ConversationState.ERROR, false, null), TurnWait.COMPLETED);
+        otherRunner.reportTurnOutcome(memory(ConversationState.AWAITING_HUMAN, false, null), TurnWait.COMPLETED);
+        otherRunner.reportTurnOutcome(memory(ConversationState.READY, false, null), TurnWait.ABANDONED_WHILE_PAUSED);
+        otherRunner.reportTurnOutcome(memory(ConversationState.READY, false, null), TurnWait.TIMED_OUT);
+        verify(other, never()).reportCleanTurn(any());
+    }
 }

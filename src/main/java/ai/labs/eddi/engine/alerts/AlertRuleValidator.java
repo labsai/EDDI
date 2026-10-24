@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.alerts;
 import ai.labs.eddi.engine.alerts.model.AlertCondition;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertScope;
+import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
@@ -59,7 +60,7 @@ public final class AlertRuleValidator {
         }
         validateScope(rule.scope(), problems);
         if (rule.source() == null) {
-            problems.add("source is required: RATING or CONVERSATION_ERROR");
+            problems.add("source is required: RATING, CONVERSATION_ERROR or OUTPUT_MATCH");
         } else {
             validateCondition(rule, problems);
         }
@@ -108,7 +109,16 @@ public final class AlertRuleValidator {
         boolean ratingFields = condition.maxNormalizedScore() != null || condition.onComment() != null
                 || (condition.tags() != null && !condition.tags().isEmpty());
         boolean errorFields = condition.errorKinds() != null && !condition.errorKinds().isEmpty();
+        if (rule.source() != AlertSource.OUTPUT_MATCH && condition.hasOutputMatchFields()) {
+            problems.add("condition.path, op, value and includeValue belong to OUTPUT_MATCH rules");
+        }
         switch (rule.source()) {
+            case OUTPUT_MATCH -> {
+                if (ratingFields || errorFields) {
+                    problems.add("condition.maxNormalizedScore, onComment, tags and errorKinds do not belong to OUTPUT_MATCH rules");
+                }
+                problems.addAll(OutputMatcher.problems(condition));
+            }
             case RATING -> {
                 if (errorFields) {
                     problems.add("condition.errorKinds belongs to CONVERSATION_ERROR rules");
