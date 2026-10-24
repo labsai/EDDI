@@ -202,4 +202,18 @@ class ChannelTargetRouterWebhookTest {
         field.setAccessible(true);
         field.setLong(router, 0L);
     }
+
+    @Test
+    void unresolvedLongReferenceIsStrippedWithOneWarning() throws Exception {
+        String reference = "${vault:a-reference-that-is-long-enough}";
+        assertNull(signingSecretOf(reference, reference), "an unresolved reference is left unchanged by resolution");
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void unresolvedLongReferenceWithLeadingWhitespaceIsStripped() throws Exception {
+        String reference = " ${vault:a-reference-that-is-long-enough}";
+        assertNull(signingSecretOf(reference, reference));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
 }

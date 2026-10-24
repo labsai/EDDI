@@ -1029,6 +1029,11 @@ public class ChannelTargetRouter {
         String problem = null;
         if (!raw.trim().startsWith("${vault:")) {
             problem = "is stored in plaintext (it must be a ${vault:...} reference)";
+        } else if (secret != null && (secret.equals(raw) || secret.strip().equals(raw.strip()) || secret.contains("${vault:"))) {
+            // Resolution leaves a reference it cannot resolve unchanged (also one with
+            // surrounding whitespace). It is long enough to pass the length check, and
+            // it is public knowledge - never a key.
+            problem = "does not resolve to a vault value";
         } else if (secret != null && secret.length() < MIN_WEBHOOK_SECRET_LENGTH) {
             problem = "is shorter than " + MIN_WEBHOOK_SECRET_LENGTH + " characters";
         }
