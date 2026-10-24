@@ -10,8 +10,8 @@ configuration (`ratingConfig`). They live in a store of their own
 conversation memory: memory is loaded on every turn and must stay small, and
 ratings must be aggregated across conversations.
 
-> **Status.** This page describes the backend (REST API, storage, metrics, GDPR).
-> Rating controls in the Chat UI, the Manager's Feedback page, MCP tools and push
+> **Status.** The backend (REST API, storage, metrics, GDPR) and the Chat UI's
+> rating controls are in place. The Manager's Feedback page, MCP tools and push
 > alerts follow in later releases.
 
 ## Switching ratings on
@@ -103,6 +103,37 @@ A rating writes only the rating store, never conversation memory or the
 descriptor, so it does not go through the conversation coordinator and may be
 given while a turn is running.
 
+## In the Chat UI
+
+The standalone Chat UI (`/chat`) reads the profile's `rating` object and renders
+**nothing** when it is absent — an agent without `ratingConfig`, or an EDDI too old
+to send it, looks exactly as before.
+
+- **Reply thumbs** (`messageRating.enabled`). Under the last agent bubble of each
+  step, shown on hover or keyboard focus on desktop, always on touch screens, and
+  always once a reply is rated. One tap rates; tapping the pressed thumb again
+  withdraws. Thumbs down rates at once and then opens a small optional form with
+  the reason tags and, when comments are accepted, a comment box.
+- **Rating card** (`conversationRating.enabled`). Stars (a radio group) or thumbs,
+  per `scale`. It offers itself when the conversation ends (`askOnEnd`) and/or after
+  `askAfterTurns` agent replies — **at most once per conversation**, never to
+  somebody who already rated, and never again once closed (remembered in the
+  browser; without storage, for the page's lifetime). A "Rate this conversation"
+  entry in the header always opens it. One tap on a score rates; tags and the
+  comment (only below `comment.askBelowScore`, when set) appear after it. The card
+  then says *"Thanks — your feedback goes to the team running this assistant."*
+  and the rating stays changeable and removable. It sits in the transcript and
+  never blocks the message box.
+- **State.** Ratings are read back when a conversation opens, so a reload shows
+  what was rated. Every change is applied at once and rolled back, with a short
+  notice, when the server refuses it; each error code above has its own wording in
+  every shipped language.
+- **Steps.** A reply rating names its step. The widget takes it from the
+  conversation read (every step of a full snapshot is stamped) and counts live
+  turns from there — step 0 is the greeting, each message sent opens the next.
+- **Demo.** `/chat/demo/showcase` asks for every control (five stars, reply thumbs,
+  tags, comment, the card after three replies) against an in-memory backend.
+
 ## Analyzing and triaging (the people running the agent)
 
 Roles: `eddi-admin`, `eddi-editor` (enumerated — REST has no role hierarchy, and
@@ -181,8 +212,8 @@ who rated).
 ## Known limitations
 
 - **Rerun.** Rerunning a step does not delete that step's reply rating on the
-  server; the chat client clears its local thumb. A stale thumb on a rerun reply is
-  a minor analytics skew.
+  server; the Chat UI clears its local thumb (a reload shows the stored one again).
+  A stale thumb on a rerun reply is a minor analytics skew.
 - **Undo.** Ratings of undone steps stay stored and count in summaries (they rated
   what the person saw).
 - **Reply version.** A reply rating records the agent version of the conversation
