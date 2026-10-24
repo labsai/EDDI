@@ -610,6 +610,9 @@ describe("QuotasPage", () => {
     renderQuotas();
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.006 of $0.01 used this month"));
     expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.004 left");
+    // The usage card agrees with the status line rather than rounding to $0.01.
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("$0.006");
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("/ $0.01");
   });
 
   it("describes the saved quota, not an unsaved edit of the form", async () => {

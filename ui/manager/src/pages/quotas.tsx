@@ -325,7 +325,7 @@ export function QuotasPage() {
                     label={t("quotas.monthlyCost", "Monthly Cost")}
                     value={usage.monthlyCostUsd}
                     limit={form?.maxMonthlyCostUsd ?? -1}
-                    prefix="$"
+                    format={formatUsd}
                     testId="usage-cost"
                   />
                   <div className="flex flex-col justify-center rounded-lg border border-border/50 bg-muted/30 p-3">
@@ -552,12 +552,15 @@ function UsageCard({
   value,
   limit,
   prefix = "",
+  format,
   testId,
 }: {
   label: string;
   value: number;
   limit: number;
   prefix?: string;
+  /** Renders value and limit; replaces `prefix` and the two-decimal rounding. */
+  format?: (n: number) => string;
   testId: string;
 }) {
   const isUnlimited = limit < 0;
@@ -570,10 +573,10 @@ function UsageCard({
       <span className="text-xs text-muted-foreground">{label}</span>
       <div className="mt-1 flex items-baseline gap-1">
         <span className="text-xl font-bold text-foreground">
-          {prefix}{typeof value === "number" && value % 1 !== 0 ? value.toFixed(2) : value}
+          {format ? format(value) : <>{prefix}{typeof value === "number" && value % 1 !== 0 ? value.toFixed(2) : value}</>}
         </span>
         <span className="text-xs text-muted-foreground">
-          / {isUnlimited ? "∞" : `${prefix}${limit}`}
+          / {isUnlimited ? "∞" : format ? format(limit) : `${prefix}${limit}`}
         </span>
       </div>
       {!isUnlimited && (
