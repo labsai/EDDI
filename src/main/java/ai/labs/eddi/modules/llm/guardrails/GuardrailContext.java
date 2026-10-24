@@ -35,27 +35,42 @@ import java.util.Map;
  * @param deadline
  *            the turn's deadline, or null when the turn has none — a guardrail
  *            that makes a network call must not outlive it
+ * @param spend
+ *            asked before a guardrail makes a paid call of its own; never null
+ *            ({@link PaidCallGate#UNGATED} when none is given)
  */
 public record GuardrailContext(GuardrailPhase phase, String taskId, String conversationId, String agentId, Map<String, String> parameters,
-        List<ChatMessage> messages, String retrievedContext, TurnDeadline deadline) {
+        List<ChatMessage> messages, String retrievedContext, TurnDeadline deadline, PaidCallGate spend) {
 
     public GuardrailContext {
         parameters = parameters != null ? Map.copyOf(withoutNulls(parameters)) : Map.of();
         messages = messages != null ? List.copyOf(messages) : List.of();
+        spend = spend != null ? spend : PaidCallGate.UNGATED;
+    }
+
+    /** A context without spend checks. */
+    public GuardrailContext(GuardrailPhase phase, String taskId, String conversationId, String agentId, Map<String, String> parameters,
+            List<ChatMessage> messages, String retrievedContext, TurnDeadline deadline) {
+        this(phase, taskId, conversationId, agentId, parameters, messages, retrievedContext, deadline, null);
     }
 
     /** A context without retrieved context or deadline. */
     public GuardrailContext(GuardrailPhase phase, String taskId, String conversationId, String agentId, Map<String, String> parameters,
             List<ChatMessage> messages) {
-        this(phase, taskId, conversationId, agentId, parameters, messages, null, null);
+        this(phase, taskId, conversationId, agentId, parameters, messages, null, null, null);
     }
 
     /**
      * This context for another phase, parameter set and message list; the retrieved
-     * context and the deadline are kept.
+     * context, the deadline and the spend checks are kept.
      */
     public GuardrailContext with(GuardrailPhase newPhase, Map<String, String> newParameters, List<ChatMessage> newMessages) {
-        return new GuardrailContext(newPhase, taskId, conversationId, agentId, newParameters, newMessages, retrievedContext, deadline);
+        return new GuardrailContext(newPhase, taskId, conversationId, agentId, newParameters, newMessages, retrievedContext, deadline, spend);
+    }
+
+    /** This context with other spend checks. */
+    public GuardrailContext withSpend(PaidCallGate newSpend) {
+        return new GuardrailContext(phase, taskId, conversationId, agentId, parameters, messages, retrievedContext, deadline, newSpend);
     }
 
     /** A parameter, or {@code fallback} when it is unset or blank. */

@@ -138,6 +138,17 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The paid calls of this conversation that are in flight, held against
+     * {@link #getConversationCostCeilingUsd()} so concurrent calls cannot all pass
+     * the same check. Transient and per loaded memory; {@code null} (the default)
+     * when this memory keeps none, in which case the ceiling is checked without
+     * reservations.
+     */
+    default SpendReservations getSpendReservations() {
+        return null;
+    }
+
+    /**
      * Get the audit entry collector for this conversation turn. Returns
      * {@code null} when auditing is disabled.
      */

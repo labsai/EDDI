@@ -97,6 +97,10 @@ public class ConversationMemory implements IConversationMemory {
     private transient TurnDeadline turnDeadline;
     /** The agent's per-conversation cost ceiling; NOT persisted. */
     private transient Double maxCostPerConversationUsd;
+    /**
+     * In-flight paid calls held against the ceiling; transient, never persisted.
+     */
+    private final transient SpendReservations spendReservations = new SpendReservations();
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -509,6 +513,11 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setConversationCostCeilingUsd(Double maxCostPerConversationUsd) {
         this.maxCostPerConversationUsd = maxCostPerConversationUsd;
+    }
+
+    @Override
+    public SpendReservations getSpendReservations() {
+        return spendReservations;
     }
 
     @Override

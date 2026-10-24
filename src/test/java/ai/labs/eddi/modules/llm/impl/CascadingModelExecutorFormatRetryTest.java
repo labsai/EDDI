@@ -388,4 +388,64 @@ class CascadingModelExecutorFormatRetryTest {
         // the loop's own metadata (tool spend) survives the re-ask
         assertEquals(0.25, result.runToolCostUsd());
     }
+
+    // === E4: spend checks inside the cascade ===
+
+    private final List<Double> spendAsked = new ArrayList<>();
+
+    /**
+     * Admits the first {@code admitted} calls and records the pending figure of
+     * each.
+     */
+    private FormatRetryRunner.ReaskSpend spend(int admitted) {
+        return (pending, expected) -> {
+            spendAsked.add(pending);
+            return spendAsked.size() <= admitted
+                    ? LlmSpendGate.Admission.ALLOWED
+                    : new LlmSpendGate.Admission(new LlmSpendGate.Refusal(LlmSpendGate.REASON_CONVERSATION_CEILING, "reached"), null);
+        };
+    }
+
+    private CascadingModelExecutor.CascadeResult runWithSpend(ModelCascadeConfig cascade, LlmConfiguration.Task task,
+                                                              FormatRetryRunner.ReaskSpend spend)
+            throws LifecycleException {
+        return executor.execute(cascade, messages(), "sys", Map.of(), task, memory, mock(IAgentOrchestrator.class), Map.of(), false, true, false,
+                null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT, null, FormatRetryRunner.RemainingBudget.UNBOUNDED, spend);
+    }
+
+    @Test
+    @DisplayName("spend refused: a step's re-ask is not sent, and the escalation is not started either")
+    void spendRefusedStopsReaskAndEscalation() throws Exception {
+        var first = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
+        var second = FaultInjectingChatModel.script(Step.text(VALID));
+        models(first, second);
+
+        try {
+            runWithSpend(cascade(plain("openai"), plain("anthropic")), task(invalidJsonRetry()), spend(0));
+        } catch (LifecycleException noResult) {
+            // no step produced an accepted answer: the cascade has nothing to return
+        }
+
+        assertEquals(1, first.callCount(), "no re-ask of step 0");
+        assertEquals(0, second.callCount(), "no escalation to step 1");
+        assertEquals(2, spendAsked.size(), "asked before the re-ask and before step 1");
+        assertEquals(1.0, recovery("retry", FormatRetryRunner.SKIPPED_SPEND, "invalid_json"));
+        assertEquals(1.0, meters.find("eddi.llm.cascade.ceiling.exceeded").tag("kind", "spend").counter().count());
+    }
+
+    @Test
+    @DisplayName("spend admitted: re-ask and escalation run exactly as without the check")
+    void spendAdmittedChangesNothing() throws Exception {
+        var first = FaultInjectingChatModel.script(Step.text(PROSE), Step.text(PROSE));
+        var second = FaultInjectingChatModel.script(Step.text(VALID));
+        models(first, second);
+
+        var result = runWithSpend(cascade(plain("openai"), plain("anthropic")), task(invalidJsonRetry()), spend(99));
+
+        assertEquals(1, result.stepUsed());
+        assertEquals(VALID, result.response());
+        assertEquals(2, first.callCount());
+        assertEquals(1, second.callCount());
+        assertEquals(2, spendAsked.size(), "step 0's re-ask and step 1's start");
+    }
 }

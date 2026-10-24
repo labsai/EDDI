@@ -401,7 +401,8 @@ public class LlmTask implements ILifecycleTask {
         // reuses this result instead of evaluating again.
         GuardrailService.TextResult inputPrescreen = null;
         if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails()) && userInput != null) {
-            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
+            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput,
+                    guardrailContext(memory, task, List.of()).withSpend(TaskSpend.of(spendGate, memory)),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             accumulateCost(currentStep, inputPrescreen.costUsd());
             if (inputPrescreen.isBlocked()) {
@@ -547,7 +548,8 @@ public class LlmTask implements ILifecycleTask {
         // sees; conversation memory keeps the message as the user sent it.
         GuardrailService.InputResult inputScreening = null;
         if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
-            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
+            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages,
+                    guardrailContext(memory, task, messages).withSpend(TaskSpend.of(spendGate, memory)),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen);
             accumulateCost(currentStep, inputScreening.costUsd());
             if (inputScreening.isBlocked()) {
@@ -572,10 +574,13 @@ public class LlmTask implements ILifecycleTask {
         FormatRetryRunner.ContextShrinker contextShrinker = () -> reapplyInputScreening(memory, task, screenedInput,
                 rebuildWithHalvedWindow(memory, task, shrinkSystemMessage, processedParams.get(KEY_PROMPT), shrinkLogSizeLimit, maxContextTokens,
                         anchorFirstSteps, includeFirstAgentMessage, resolvedType, processedParams, shrinkSummaryPrefix, shrinkSkipSteps));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
+        // A re-ask is checked against the conversation's ceiling and the tenant budget
+        // before it starts, like the first call (reaskSpend).
+        final FormatRetryRunner.ReaskSpend reaskSpend = FormatRetryRunner.ReaskSpend.of(spendGate, memory);
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()), reaskSpend);
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -693,7 +698,7 @@ public class LlmTask implements ILifecycleTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()));
+                        turnBudget(memory.getTurnDeadline()), reaskSpend);
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -907,8 +912,12 @@ public class LlmTask implements ILifecycleTask {
                 // === Output guardrails (WS4) === — on the validated answer, before it is
                 // stored, parsed or delivered. Not on a fallback: that is the author's text.
                 if (fallbackServed == null && outputGuarded && responseContent != null) {
+                    // The answer's own cost is not in audit:cost yet (it is recorded below), so
+                    // the phase's spend checks start from it.
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, outputReprompter,
-                            guardrailContext(memory, task, requestMessages, retrievedContextText),
+                            guardrailContext(memory, task, requestMessages, retrievedContextText).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -1334,10 +1343,29 @@ public class LlmTask implements ILifecycleTask {
         if (tokenUsage != null) {
             accumulateTokenUsage(currentStep, tokenUsage);
         }
+        accumulateCost(currentStep, pricedCost(responseMetadata, task));
+    }
+
+    /**
+     * The priced cost of a model phase's metadata — its tokens at the task's prices
+     * (a cascade's own {@code cascadeCostUsd} instead) plus its tool cost. What
+     * {@link #accumulateUsageAndCost} records, and what the output phase's spend
+     * checks start from before it is recorded.
+     */
+    static double pricedCost(Map<String, Object> responseMetadata, Task task) {
+        if (responseMetadata == null) {
+            return 0.0;
+        }
+        Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
         double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
                 ? asDouble(responseMetadata.get("cascadeCostUsd"))
                 : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
-        accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
+        return llmCostUsd + asDouble(responseMetadata.get("toolCostUsd"));
+    }
+
+    /** {@code policy} with the spend check, or null when there is no policy. */
+    private static FormatRetryRunner.Policy withSpend(FormatRetryRunner.Policy policy, FormatRetryRunner.ReaskSpend spend) {
+        return policy != null ? policy.withSpend(spend) : null;
     }
 
     /**
@@ -1835,9 +1863,10 @@ public class LlmTask implements ILifecycleTask {
         // neither consults nor settles a circuit) and the cascade (the resume pins the
         // step whose tool loop paused). See docs/llm-resilience.md.
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()),
+                FormatRetryRunner.ReaskSpend.of(spendGate, memory));
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -1920,8 +1949,10 @@ public class LlmTask implements ILifecycleTask {
                     Reprompter reprompter = result != null && !result.resumeTranscript().isEmpty()
                             ? transcriptReprompter(chatModel, result.resumeTranscript(), task, memory, jsonPolicy, RepromptCircuit.NONE)
                             : null;
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, reprompter,
-                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()),
+                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -2462,7 +2493,9 @@ public class LlmTask implements ILifecycleTask {
         if (retryPolicy != null) {
             // Only the final model call is re-asked, over a transcript that already holds
             // the tool results; the loop and its tools are never re-run.
-            var recovered = formatRetryRunner.resolve(retryPolicy,
+            // The loop's tool cost is spent as well; the runner prices only tokens.
+            var loopPolicy = retryPolicy.withSpend(retryPolicy.spend().plus(asDouble(agentResult.responseMetadata().get("toolCostUsd"))));
+            var recovered = formatRetryRunner.resolve(loopPolicy,
                     new FormatRetryRunner.Attempt(agentResult.response(), agentResult.responseMetadata()),
                     CascadingModelExecutor.toolTranscript(systemMessage, chatMessagesWithoutSystem, agentResult.toolExchange()),
                     (msgs, maxTokens) -> {
@@ -2692,8 +2725,23 @@ public class LlmTask implements ILifecycleTask {
                 throw e;
             }
             settleCircuit(ticket, attempt.text(), circuit.convertObject(), circuit.params(), task);
-            return new Reprompter.Attempt(attempt.text(), attempt.metadata());
+            return new Reprompter.Attempt(attempt.text(), attempt.metadata(), repromptCost(attempt.metadata(), task));
         };
+    }
+
+    /**
+     * What one reprompt cost: a cascade step's own price
+     * ({@code KEY_REPROMPT_COST}) or the reply's tokens at the task's prices.
+     */
+    private static double repromptCost(Map<String, Object> metadata, Task task) {
+        if (metadata == null) {
+            return 0.0;
+        }
+        if (metadata.containsKey(KEY_REPROMPT_COST)) {
+            return asDouble(metadata.get(KEY_REPROMPT_COST));
+        }
+        return TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                metadata.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null);
     }
 
     /** Plain chat: the same model over the same request. */

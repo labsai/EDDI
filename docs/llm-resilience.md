@@ -52,6 +52,11 @@ first would pay a different, possibly slower or dearer model for every hiccup. A
 same way is taken out of rotation altogether by the [circuit breaker](#circuit-breaker), which also switches off
 step 3 for it.
 
+Steps 3 and 4 are paid calls: each is checked against the agent's `maxCostPerConversationUsd` and the
+tenant's monthly budget before it starts, with what the task has already spent in this turn. A refused
+re-ask is skipped (`skipped_spend`) and a refused escalation returns the best answer so far, so the
+order goes on to step 5 — see [Per-conversation LLM cost ceiling](langchain.md#per-conversation-llm-cost-ceiling).
+
 Two rules hold at every step:
 
 - **Tools are never re-run.** Only the final model call is re-asked, over a transcript that already holds the
@@ -84,7 +89,7 @@ Two rules hold at every step:
 | `responseValidation.maxRetries` | Same-model re-asks per model (per cascade step), shared by every `retry` policy. Clamped to 0..3. A cascade step overrides it with `maxFormatRetries` | `1` |
 | `responseValidation.truncationRetryFactor` | Output-token cap multiplier for the one truncation re-ask (1..4) | `2` |
 | `responseValidation.correctiveMessage` | The user message of an invalid-JSON re-ask; `{reason}` is replaced with EDDI's own reason. Not a template | built-in sentence |
-| `responseValidation.maxRetryCostUsd` | Dollar cap on what the re-asks of one model may cost; needs `inputPricePer1M` / `outputPricePer1M` | none |
+| `responseValidation.maxRetryCostUsd` | Dollar cap on what the re-asks of one model may cost; needs `inputPricePer1M` / `outputPricePer1M`. Every re-ask and escalation is also checked against the agent's `maxCostPerConversationUsd` and the tenant budget, counting the attempts already made ([cost ceiling](langchain.md#per-conversation-llm-cost-ceiling)) | none |
 | `responseValidation.minAttemptMs` | A re-ask only starts if at least this much time remains for the model | `3000` |
 | `responseValidation.fallbackAction` | What happens when re-asks and cascade steps did not help: `fallback`, `error` or `warn` | `fallback` |
 | `responseValidation.fallbackMessage` | The fallback text; a Qute template over the task's template data | "I'm sorry, I wasn't able to generate a complete response. Please try again." |

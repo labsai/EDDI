@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -81,6 +82,11 @@ import java.util.regex.Pattern;
  * applies: {@code closed} — the default for a {@code block} or {@code reprompt}
  * guardrail — refuses the text, {@code open} records a warning and lets it
  * through.
+ * <h3>Spend</h3> The call is asked of {@link GuardrailContext#spend()} before
+ * it starts: once the conversation has reached its
+ * {@code maxCostPerConversationUsd} or the tenant its monthly budget, it is not
+ * made, and the guardrail could not decide
+ * ({@link PaidCallGate#REASON_SPEND_REFUSED}) — {@code failMode} applies.
  * <h3>History</h3> {@link #screensHistory()} is false: one model call per
  * earlier message of the window on every turn would multiply the cost by the
  * window size. Each message was classified on its own turn.
@@ -222,16 +228,27 @@ public class ClassifierGuardrail implements ContentGuardrail {
             List<ChatMessage> messages = buildMessages(text, context);
             ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters(context));
             providerTag = provider.trim();
-            ChatResponse response = call(model, ChatRequest.builder().messages(messages).build(), context);
-            double cost = cost(response, context);
-            String answer = response != null && response.aiMessage() != null ? response.aiMessage().text() : null;
-            Label label = classify(answer, context);
-            outcome = label.name().toLowerCase(Locale.ROOT);
-            return switch (label) {
-                case UNSAFE -> GuardrailVerdict.violation(flaggedReason(context)).withCost(cost);
-                case SAFE -> GuardrailVerdict.allow().withCost(cost);
-                case UNPARSEABLE -> throw new GuardrailUndecidedException(REASON_UNPARSEABLE, cost);
-            };
+            // The call is checked against the conversation's cost ceiling and the tenant
+            // budget before it starts, like the task's own model call. Refused, it is not
+            // made: "could not decide", so failMode applies.
+            try (PaidCallGate.PaidCall paid = context.spend().begin(expectedCost(messages, context))) {
+                if (!paid.admitted()) {
+                    outcome = PaidCallGate.REASON_SPEND_REFUSED;
+                    LOGGER.infof("Classifier guardrail of task '%s' skipped: %s", context.taskId(), paid.refusalReason());
+                    throw new GuardrailUndecidedException(PaidCallGate.REASON_SPEND_REFUSED, 0.0);
+                }
+                ChatResponse response = call(model, ChatRequest.builder().messages(messages).build(), context);
+                double cost = cost(response, context);
+                paid.spent(cost);
+                String answer = response != null && response.aiMessage() != null ? response.aiMessage().text() : null;
+                Label label = classify(answer, context);
+                outcome = label.name().toLowerCase(Locale.ROOT);
+                return switch (label) {
+                    case UNSAFE -> GuardrailVerdict.violation(flaggedReason(context)).withCost(cost);
+                    case SAFE -> GuardrailVerdict.allow().withCost(cost);
+                    case UNPARSEABLE -> throw new GuardrailUndecidedException(REASON_UNPARSEABLE, cost);
+                };
+            }
         } catch (ChatModelRegistry.UnsupportedLlmTaskException e) {
             providerTag = "unsupported";
             LOGGER.warnf("Classifier guardrail of task '%s' names an unsupported provider", context.taskId());
@@ -443,6 +460,32 @@ public class ClassifierGuardrail implements ContentGuardrail {
         tokenUsage.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
         tokenUsage.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
         double cost = TokenPricing.cost(inputPrice, outputPrice, tokenUsage);
+        return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
+    }
+
+    /**
+     * What a call over {@code messages} is expected to cost, for the spend
+     * reservation: the prompt at about four characters per token and the input
+     * price. The answer is a label, a few tokens, so it is left out. 0 when the
+     * classifier is unpriced.
+     */
+    static double expectedCost(List<ChatMessage> messages, GuardrailContext context) {
+        Double inputPrice = price(context, PARAM_INPUT_PRICE);
+        if (inputPrice == null || messages == null) {
+            return 0.0;
+        }
+        long chars = 0;
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage user) {
+                chars += userText(user).length();
+            } else if (message instanceof AiMessage ai && ai.text() != null) {
+                chars += ai.text().length();
+            }
+        }
+        Map<String, Object> tokenUsage = new HashMap<>();
+        tokenUsage.put("inputTokens", chars / 4);
+        tokenUsage.put("outputTokens", 0);
+        double cost = TokenPricing.cost(inputPrice, null, tokenUsage);
         return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
     }
 

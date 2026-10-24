@@ -38,7 +38,9 @@ start of the month.
   priced calls directly.
 - **Gating (before the next spend).** Once the month's total reaches the limit, every LLM task
   skips its model call and serves its configured fallback answer (`responseValidation.fallbackMessage`,
-  or the default sentence), recording `llm:spend_refused:<taskId>` on the step; tool calls are
+  or the default sentence), recording `llm:spend_refused:<taskId>` on the step; a task already
+  running sends no further re-ask, cascade escalation or guardrail reprompt, and a `classifier`
+  guardrail does not call its model (reason `spend_refused`); tool calls are
   refused with an error result; and Dream stops consolidating. Nothing already running is cut
   short, so the turn that crosses the limit finishes and the total can end a little above it.
 

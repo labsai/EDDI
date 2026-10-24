@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
@@ -43,6 +44,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code llm:spend_refused:<taskId>}; {@code eddi.llm.spend.refused} counts it.
  * A store that cannot answer refuses too (fail closed), exactly as the
  * tool-call gate does.
+ * <h3>Every attempt after the first</h3> {@link #admit} asks the same two
+ * questions for every further paid call of a running task — a same-model
+ * re-ask, a cascade escalation, a guardrail reprompt, a {@code classifier}
+ * guardrail's call — with what the task has spent and not yet recorded, and
+ * holds the call's expected cost in the conversation's
+ * {@link SpendReservations} while it runs. The rule is the same everywhere: a
+ * call starts while the spend so far (calls in flight included) is below the
+ * ceiling, so the call that crosses it completes and the next one is refused.
  * <p>
  * Stateless; the per-conversation inputs come from the memory passed in.
  */
@@ -75,6 +84,36 @@ public class LlmSpendGate {
     public record Refusal(String reason, String detail) {
     }
 
+    /**
+     * The answer to {@link #admit}: refused, or admitted with the reservation (if
+     * any) that holds the call's expected cost. Closing releases it; idempotent.
+     *
+     * @param refusal
+     *            why the call may not start, or null when it may
+     * @param reservation
+     *            what the admitted call holds, or null when nothing is reserved
+     */
+    public record Admission(Refusal refusal, SpendReservations.Reservation reservation) implements AutoCloseable {
+
+        /** An admission that reserves nothing — what a caller without a gate uses. */
+        public static final Admission ALLOWED = new Admission(null, null);
+
+        static Admission refused(Refusal refusal) {
+            return new Admission(refusal, null);
+        }
+
+        public boolean allowed() {
+            return refusal == null;
+        }
+
+        @Override
+        public void close() {
+            if (reservation != null) {
+                reservation.close();
+            }
+        }
+    }
+
     /** Thrown inside {@code LlmTask}'s guarded model phase to skip it. */
     static final class SpendRefusedException extends RuntimeException {
         private final transient Refusal refusal;
@@ -103,15 +142,74 @@ public class LlmSpendGate {
      *         (already counted and logged)
      */
     public Refusal check(IConversationMemory memory) {
-        // The agent's own ceiling first: pure arithmetic over memory, no I/O.
+        // The agent's own ceiling first: pure arithmetic over memory, no I/O. Calls
+        // still in flight count at what they hold (nothing, outside a concurrent turn).
         OptionalDouble ceiling = memory != null ? memory.getConversationCostCeilingUsd() : OptionalDouble.empty();
         if (ceilingApplies(ceiling)) {
-            double spent = conversationCost(memory);
+            SpendReservations reservations = memory.getSpendReservations();
+            double spent = conversationCost(memory) + (reservations != null ? reservations.heldUsd() : 0.0);
             if (spent >= ceiling.getAsDouble()) {
-                return refused(memory, new Refusal(REASON_CONVERSATION_CEILING,
-                        String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", ceiling.getAsDouble(), spent)));
+                return refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent));
             }
         }
+        Refusal tenant = tenantRefusal();
+        return tenant != null ? refused(memory, tenant) : null;
+    }
+
+    /**
+     * Admits one more paid call of a task that is already running — a same-model
+     * re-ask, a guardrail reprompt, a model-backed guardrail's own call — or any
+     * other paid call that must not start once the spend is gone. The same two
+     * checks as {@link #check}, with what the caller has already spent in this task
+     * but not yet recorded in {@code audit:cost}: a task records its cost only once
+     * it has finished, so without {@code pendingUsd} every attempt after the first
+     * would be checked against a figure that leaves out the attempts before it.
+     * <p>
+     * When a ceiling applies and the memory keeps {@link SpendReservations}, an
+     * admitted call holds {@code expectedUsd} until the returned admission is
+     * closed, so a concurrent call sees it. Close the admission in a
+     * {@code finally} once the call is over and its cost is in the caller's pending
+     * figure (or in memory).
+     *
+     * @param pendingUsd
+     *            what this task has spent so far and not yet recorded
+     * @param expectedUsd
+     *            what the call is expected to cost (0 when unknown)
+     * @return the admission; when refused, already counted and logged
+     */
+    public Admission admit(IConversationMemory memory, double pendingUsd, double expectedUsd) {
+        double pending = Double.isFinite(pendingUsd) && pendingUsd > 0.0 ? pendingUsd : 0.0;
+        OptionalDouble ceiling = memory != null ? memory.getConversationCostCeilingUsd() : OptionalDouble.empty();
+        SpendReservations.Reservation reservation = null;
+        if (ceilingApplies(ceiling)) {
+            double spent = conversationCost(memory) + pending;
+            SpendReservations reservations = memory.getSpendReservations();
+            if (reservations != null) {
+                var held = reservations.tryReserve(spent, ceiling.getAsDouble(), expectedUsd);
+                if (held.isEmpty()) {
+                    return Admission.refused(refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent + reservations.heldUsd())));
+                }
+                reservation = held.get();
+            } else if (spent >= ceiling.getAsDouble()) {
+                return Admission.refused(refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent)));
+            }
+        }
+        Refusal tenant = tenantRefusal();
+        if (tenant != null) {
+            if (reservation != null) {
+                reservation.close();
+            }
+            return Admission.refused(refused(memory, tenant));
+        }
+        return new Admission(null, reservation);
+    }
+
+    private static Refusal ceilingRefusal(double ceiling, double spent) {
+        return new Refusal(REASON_CONVERSATION_CEILING, String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", ceiling, spent));
+    }
+
+    /** The tenant budget's verdict: null when the budget allows spending. */
+    private Refusal tenantRefusal() {
         if (tenantQuotaService == null) {
             return null;
         }
@@ -119,10 +217,9 @@ public class LlmSpendGate {
         if (costCheck.allowed()) {
             return null;
         }
-        Refusal refusal = costCheck.accountingUnavailable()
+        return costCheck.accountingUnavailable()
                 ? new Refusal(REASON_TENANT_ACCOUNTING_UNAVAILABLE, costCheck.reason())
                 : new Refusal(REASON_TENANT_BUDGET, costCheck.reason());
-        return refused(memory, refusal);
     }
 
     /**

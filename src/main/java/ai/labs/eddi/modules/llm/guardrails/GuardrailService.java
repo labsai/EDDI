@@ -426,7 +426,9 @@ public class GuardrailService {
      * A {@code reprompt} finding asks the model again (through {@code reprompter})
      * and restarts the screening of the new answer from the first guardrail; once
      * the triggering guardrail's {@code maxRetries} are spent — or when no
-     * reprompter is available, or the turn is out of time — the answer is blocked.
+     * reprompter is available, the turn is out of time, or the context's
+     * {@link GuardrailContext#spend() spend checks} refuse the call — the answer is
+     * blocked.
      *
      * @param reprompter
      *            the branch's way to ask the same model again, or null when this
@@ -444,6 +446,8 @@ public class GuardrailService {
         double cost = 0.0;
         int attempts = 0;
         boolean changed = false;
+        // What the previous reprompt cost: the expected cost of the next one.
+        double lastRepromptCost = 0.0;
 
         screening : while (true) {
             for (GuardrailConfig config : configs) {
@@ -488,7 +492,22 @@ public class GuardrailService {
                             return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
                         }
                         String corrective = correctiveMessage(config, verdict);
-                        Reprompter.Attempt next = reprompter.reprompt(text, corrective);
+                        Reprompter.Attempt next;
+                        // A reprompt is another paid model call: checked against the
+                        // conversation's cost ceiling and the tenant budget before it starts,
+                        // like the task's own call. Refused, it cannot start — block.
+                        try (PaidCallGate.PaidCall paid = outputContext.spend().begin(lastRepromptCost)) {
+                            if (!paid.admitted()) {
+                                LOGGER.infof("Output guardrail '%s' wanted a reprompt for task '%s' but the spend checks refused it (%s) — blocking",
+                                        config.getType(), context.taskId(), paid.refusalReason());
+                                return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                            }
+                            next = reprompter.reprompt(text, corrective);
+                            if (next != null) {
+                                lastRepromptCost = next.costUsd();
+                                paid.spent(next.costUsd());
+                            }
+                        }
                         if (next == null) {
                             LOGGER.infof(
                                     "Output guardrail '%s' wanted a reprompt for task '%s' but none could start (turn out of time or the model's circuit is open) — blocking",
