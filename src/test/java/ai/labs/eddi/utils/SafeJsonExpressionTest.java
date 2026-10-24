@@ -403,6 +403,11 @@ class SafeJsonExpressionTest {
             assertEquals(SafeJsonExpression.ERR_FAN_OUT, assertThrows(EvaluationException.class, () -> expression.evaluate(data)).code());
             assertEquals(SafeJsonExpression.ERR_FAN_OUT,
                     assertThrows(EvaluationException.class, () -> SafeJsonExpression.compile("count(lines) > 0").evaluate(data)).code());
+            // A bare path, with no aggregate around it: only the path's own cap can stop
+            // this (sum/count above also hit the list() check, which would mask a missing
+            // path cap).
+            assertEquals(SafeJsonExpression.ERR_FAN_OUT,
+                    assertThrows(EvaluationException.class, () -> SafeJsonExpression.compile("lines[*].amount != null").evaluate(data)).code());
             // 101 x 101 through a nested wildcard is 10,201 values
             List<Object> grid = new ArrayList<>();
             for (int i = 0; i < 101; i++) {
