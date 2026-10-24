@@ -2078,6 +2078,13 @@ refuses every model call, priced or not, since the spend so far already equals i
 unrelated to the task-level `maxBudgetPerConversation` (tool cost only; see `enforceBudget`
 above), which is unchanged.
 
+**Undo does not refund the ceiling.** The spend only grows. An undone step's cost still counts
+while it sits in the redo cache (a rerun of the step before it runs against it), a redo moves it
+back without changing the total, and when the next `say` discards the redo cache the new step
+inherits the discarded spend as `audit:discarded_cost`, which counts like `audit:cost` and is
+persisted with the step. A rerun adds to the step's own `audit:cost`. So say → undo → say cannot
+reset what a conversation has spent.
+
 #### Tool cache scoping
 
 **What is cached.** Built-in tools, except those bound to one conversation, which

@@ -259,7 +259,9 @@ public class ConversationMemoryUtilities {
      * step's value. {@code null} when no step carried a cost, so a consumer can
      * tell "nothing priced ran" apart from a genuine total. Non-finite and negative
      * values are skipped: one NaN would poison the total and silently disable every
-     * ceiling compared against it.
+     * ceiling compared against it. A step's {@code audit:discarded_cost} — the
+     * spend of undone steps a later turn discarded — is spend too and is summed
+     * with it, so an undo does not lower the total.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps) {
         if (steps == null) {
@@ -281,7 +283,7 @@ public class ConversationMemoryUtilities {
                     continue;
                 }
                 for (var result : workflow.getLifecycleTasks()) {
-                    if (result != null && AUDIT_COST.equals(result.getKey()) && result.getResult() instanceof Number cost
+                    if (result != null && isSpendKey(result.getKey()) && result.getResult() instanceof Number cost
                             && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
                         total += cost.doubleValue();
                         found = true;
@@ -290,6 +292,10 @@ public class ConversationMemoryUtilities {
             }
         }
         return found ? total : null;
+    }
+
+    private static boolean isSpendKey(String key) {
+        return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
     private static boolean isSensitiveDetailedKey(String key) {
@@ -995,18 +1001,21 @@ public class ConversationMemoryUtilities {
 
         /**
          * What {@link ConversationMemoryUtilities#conversationCost(List)} returns for
-         * the fully converted steps, read from the live steps' {@code audit:cost}
-         * entries alone — one stack-level read, no step converted. A step holds at most
-         * one value per key, which is all the full conversion sums per step.
+         * the fully converted steps, read from the live steps' {@code audit:cost} and
+         * {@code audit:discarded_cost} entries alone — one stack-level read per key, no
+         * step converted. A step holds at most one value per key, which is all the full
+         * conversion sums per step.
          */
         Double conversationCost() {
             double total = 0.0;
             boolean found = false;
-            for (IData<Object> data : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
-                if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
-                        && cost.doubleValue() >= 0.0) {
-                    total += cost.doubleValue();
-                    found = true;
+            for (String key : List.of(AUDIT_COST, AUDIT_DISCARDED_COST)) {
+                for (IData<Object> data : steps.<Object>getExactDataPerStep(key)) {
+                    if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
+                            && cost.doubleValue() >= 0.0) {
+                        total += cost.doubleValue();
+                        found = true;
+                    }
                 }
             }
             return found ? total : null;

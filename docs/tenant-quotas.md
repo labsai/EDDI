@@ -48,7 +48,10 @@ the turn's step records it as `audit:pending_cost`, and the conversation's next 
 together with its own cost (the pending amount carries forward until a charge succeeds). It is
 charged to the month that settle runs in: a charge lost to an outage across a month boundary lands
 in the new month, because the closed month's counter has already been reset and there is no
-window left to add it to. A store
+window left to add it to. An undo does not lose it either: when the next `say` discards the undone
+step, the new step inherits the pending amount. Dream consolidation has no conversation to carry
+it on, so a Dream charge lost to an outage is held in memory on the node and added to its next
+priced consolidation charge — a restart before the store recovers loses it. A store
 outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts
@@ -84,6 +87,12 @@ request rather than letting it through. Both the MongoDB and the PostgreSQL stor
 same message, `Quota accounting unavailable — denying request for safety`, surfaced as `503`, so a
 caller cannot tell which backend refused and cannot get a different answer by retrying against
 another node.
+
+The monthly cost gate is the exception to the `503`, because it runs inside a turn: when the
+month's spend cannot be read, an LLM task skips its model call and serves its fallback answer
+(`llm:spend_refused:<taskId>` with `reason: tenant_accounting_unavailable`), a tool call gets an
+error result, and Dream stops consolidating. The turn itself completes. Each refusal also counts on
+`eddi_tenant_quota_unavailable_total{type="cost"}`, the same on both backends.
 
 ## Admin API
 

@@ -4,16 +4,21 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.List;
 import java.util.OptionalDouble;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -23,10 +28,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * before any model request is built, whether the task may spend at all.
  * <p>
  * First the agent's own {@code maxCostPerConversationUsd}: the conversation's
- * priced spend so far (every step's {@code audit:cost}) against the ceiling —
- * arithmetic over memory, no I/O. The tool loop repeats that check between its
- * rounds ({@code ToolLoopRunner}), since this gate sees a loop's cost only once
- * the loop has finished.
+ * priced spend so far (every step's {@code audit:cost}, undone steps included —
+ * see {@link #conversationCost}) against the ceiling — arithmetic over memory,
+ * no I/O. The tool loop repeats that check between its rounds
+ * ({@code ToolLoopRunner}), since this gate sees a loop's cost only once the
+ * loop has finished.
  * <p>
  * Then it asks {@link TenantQuotaService#checkCostBudget} — the same read-only
  * gate {@code ToolLoopRunner} asks before every tool call. That gate alone
@@ -42,7 +48,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * fallback answer instead — a deterministic reply. The step records why under
  * {@code llm:spend_refused:<taskId>}; {@code eddi.llm.spend.refused} counts it.
  * A store that cannot answer refuses too (fail closed), exactly as the
- * tool-call gate does.
+ * tool-call gate does — on every backend, and as this fallback answer, never as
+ * an exception out of the turn.
  * <p>
  * Stateless; the per-conversation inputs come from the memory passed in.
  */
@@ -115,7 +122,18 @@ public class LlmSpendGate {
         if (tenantQuotaService == null) {
             return null;
         }
-        var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+        QuotaCheckResult costCheck;
+        try {
+            costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+        } catch (RuntimeException e) {
+            // The gate runs outside LlmTask's guarded model phase, so a throw here fails
+            // the whole turn. The service already turns a store outage into a result;
+            // anything else that escapes is refused the same way — fail closed with the
+            // deterministic fallback answer, never a 500.
+            LOGGER.errorf(e, "Tenant cost budget check failed in conversation %s — refusing the model call",
+                    sanitize(memory != null ? memory.getConversationId() : null));
+            costCheck = ITenantQuotaStore.accountingUnavailable();
+        }
         if (costCheck.allowed()) {
             return null;
         }
@@ -134,26 +152,52 @@ public class LlmSpendGate {
     }
 
     /**
-     * The conversation's priced spend so far: the sum of every step's
-     * {@code audit:cost}, the current step included (it holds what earlier tasks of
-     * this turn already spent). Memory holds every step, so this is a walk over
-     * in-memory data, no I/O.
+     * The conversation's priced spend so far — monotonic: an undo cannot lower it.
+     * The sum of every step's {@code audit:cost}, the current step included (it
+     * holds what earlier tasks of this turn already spent), plus
+     * <ul>
+     * <li>the steps an undo moved to the redo cache: still spent, and a rerun of
+     * the step before them runs while they sit there;</li>
+     * <li>{@code audit:discarded_cost}: what a new turn inherited from a redo cache
+     * it cleared ({@code ConversationMemory.startNextStep()}).</li>
+     * </ul>
+     * A redo moves a step back without changing the total. Memory holds every step,
+     * so this is a walk over in-memory data, no I/O.
      */
+    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST);
+
     static double conversationCost(IConversationMemory memory) {
         double total = 0.0;
         var steps = memory.getAllSteps();
-        if (steps == null) {
-            return total;
+        if (steps != null) {
+            // One stack-level read per key, the same two keys recordedSpend sums.
+            for (String key : SPEND_KEYS) {
+                for (IData<Object> cost : steps.<Object>getExactDataPerStep(key)) {
+                    if (cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0.0) {
+                        total += n.doubleValue();
+                    }
+                }
+            }
         }
-        for (IData<Object> cost : steps.<Object>getExactDataPerStep(MemoryKeys.AUDIT_COST)) {
-            if (cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue())) {
-                total += n.doubleValue();
+        var undone = memory.getRedoCache();
+        if (undone != null) {
+            for (IConversationStep step : undone) {
+                total += ConversationMemory.recordedSpend(step);
             }
         }
         return total;
     }
 
-    /** Count and log a refusal the tool loop decided on its own (mid-loop). */
+    /**
+     * Count and log a refusal the tool loop decided on its own (mid-loop).
+     * <p>
+     * Static, on the Micrometer global registry, because its caller
+     * {@code ToolLoopRunner} is not a CDI bean and is built (by
+     * {@code AgentOrchestrator} and a dozen tests) without a registry — the idiom
+     * {@code LifecycleManager} and the pause-cap guard use. Quarkus adds its
+     * registry to the global composite, so the series reaches {@code /q/metrics}
+     * under the same name and tags as {@link #check}'s.
+     */
     static void countMidLoop(String conversationId, String detail) {
         Metrics.globalRegistry.counter(METRIC, "reason", REASON_CONVERSATION_CEILING).increment();
         LOGGER.warnf("Tool loop stopped in conversation %s (%s): %s", sanitize(conversationId), REASON_CONVERSATION_CEILING, detail);

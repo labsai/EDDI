@@ -1,0 +1,21 @@
+## 🐛 fix(tenancy): the cost gates fail closed on both datastores, and undo no longer refunds spend (2026-10-24)
+
+**Repo:** EDDI (`fix/cost-gate-consistency`)
+
+### What changed and why
+
+Follow-ups to the tenant monthly cost budget and the per-conversation cost ceiling.
+
+- **The pre-call cost gate answered a store outage differently per backend.** `PostgresTenantQuotaStore.getMonthlyCost` caught the `SQLException` and returned `0.0`, so the gate read "nothing spent" and allowed every model and tool call (fail open). `MongoTenantQuotaStore.getMonthlyCost` did not catch the `MongoException`, and `LlmTask` asks `LlmSpendGate` outside its guarded model phase, so the turn failed instead of serving the fallback answer. [`tenant-quotas.md`](../tenant-quotas.md) promised fail closed. Both stores now raise `QuotaAccountingUnavailableException`, as their `getQuota` already did ([`ITenantQuotaStore`](../../src/main/java/ai/labs/eddi/engine/tenancy/ITenantQuotaStore.java) documents the contract), and [`TenantQuotaService.checkCostBudget`](../../src/main/java/ai/labs/eddi/engine/tenancy/TenantQuotaService.java) turns it into a refusal flagged `accountingUnavailable`, counted on `eddi.tenant.quota.unavailable{type=cost}`. [`LlmSpendGate`](../../src/main/java/ai/labs/eddi/modules/llm/impl/LlmSpendGate.java) also refuses on any exception from the check, so the LLM task serves its fallback answer (`reason: tenant_accounting_unavailable`) and the turn is never failed by it.
+- **say → undo → say discarded spend.** The ceiling summed `audit:cost` over the live steps. Undo moved the priced step to the redo cache, and the next say cleared it, so a public `/undo` reset what a conversation had spent, and an `audit:pending_cost` still on the undone step was lost from tenant metering. [`ConversationMemory.startNextStep()`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemory.java) now carries the discarded steps' spend onto the new step as `audit:discarded_cost` (new key in [`MemoryKeys`](../../src/main/java/ai/labs/eddi/engine/memory/MemoryKeys.java)), plus their newest pending charge. A `0.0` is carried too, so a charge recovered on the undone step is not charged again from an older one. Both values are persisted with the step. The ceiling counts `audit:discarded_cost` and the redo cache, which a rerun runs against, and so does the snapshot's conversation total (group ceiling, schedules). Redo leaves the total unchanged, and a rerun already added to the step's own `audit:cost`.
+- **Dream charges lost to an outage** are carried in [`DreamService`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java) (node-local, in-process) and added to the next priced consolidation charge. The docs say a restart loses it.
+- **Manager quotas page.** The cost-budget status checked "unlimited" before "enforced", so a disabled tenant with no budget was told its spend was metered, although `recordCost` records nothing while enforcement is off. Enforcement is checked first, with a new `quotas.budgetDisabled` message in all 11 locales. Amounts under $1 keep up to four decimals, so $0.006 against a $0.01 cap no longer reads "$0.01 of $0.01 … $0.00 left".
+- `TurnCostMeterTest`'s outage test claimed the marker is left untouched. It advances, as the class documents, and the test now says so and asserts it.
+
+### Decisions
+
+- `LlmSpendGate.countMidLoop` stays on `Metrics.globalRegistry`. Its caller, `ToolLoopRunner`, is not a CDI bean and is built without a registry in `AgentOrchestrator` and a dozen tests. That is the same idiom as `LifecycleManager`, and Quarkus adds its registry to the global composite. The Javadoc now says so.
+- The old-JSON round trip for `maxCostPerConversationUsd` already existed (`ConversationCostCeilingTest.storedConfigCompatibility`), so no test was added for it.
+- Not added: an IT of the full deployment path, from a priced model through `ConversationService` to a refused tool call. The existing IT scaffolding has no priced model to drive through the service. The store-level halves are covered for both datastores in `TenantCostMeteringIT`: a monthly-cost read that fails at the gate, and say → undo → say persisted through the real conversation store.
+
+**Docs:** [`tenant-quotas.md`](../tenant-quotas.md), [`langchain.md`](../langchain.md#per-conversation-llm-cost-ceiling).

@@ -158,10 +158,57 @@ public class ConversationMemory implements IConversationMemory {
      * loaded ({@code ConversationMemoryUtilities.convertConversationMemorySnapshot}
      * restores the redo cache first), so clearing there wiped the redo history on
      * every load and every redo through the API was refused.
+     * <p>
+     * <b>Spend is not undone.</b> The steps dropped here carried money that was
+     * really spent, and both cost limits read it from the steps: the agent's
+     * {@code maxCostPerConversationUsd} sums every step's {@code audit:cost}, and
+     * {@code TurnCostMeter} carries an unrecorded tenant charge forward on the
+     * newest step's {@code audit:pending_cost}. Dropping them silently made say →
+     * undo → say discard the spend — an unlimited conversation behind a public
+     * endpoint. So the new step inherits what the abandoned timeline held: its
+     * total under {@link MemoryKeys#AUDIT_DISCARDED_COST}, and its newest pending
+     * charge (a {@code 0.0} included, which says an older one was recovered and
+     * must not be charged again).
      */
     public IConversationStep startNextStep() {
+        double discardedSpend = 0.0;
+        IData<Object> newestPending = null;
+        // Stack order: the bottom entry was undone first and is the newest turn.
+        for (IConversationStep abandoned : redoCache) {
+            discardedSpend += recordedSpend(abandoned);
+            if (newestPending == null) {
+                newestPending = abandoned.getData(MemoryKeys.AUDIT_PENDING_COST);
+            }
+        }
         redoCache.clear();
-        return startNextStep(null);
+        IConversationStep step = startNextStep(null);
+        if (discardedSpend > 0.0) {
+            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_DISCARDED_COST, discardedSpend));
+        }
+        if (newestPending != null && newestPending.getResult() instanceof Number pending) {
+            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, pending.doubleValue()));
+        }
+        return step;
+    }
+
+    /**
+     * The priced spend a step records: its own {@link MemoryKeys#AUDIT_COST} plus
+     * the {@link MemoryKeys#AUDIT_DISCARDED_COST} it inherited from an abandoned
+     * timeline. Non-finite and negative values count as nothing — one NaN would
+     * otherwise disable every ceiling compared against the total.
+     */
+    public static double recordedSpend(IConversationStep step) {
+        if (step == null) {
+            return 0.0;
+        }
+        return nonNegative(step.getData(MemoryKeys.AUDIT_COST)) + nonNegative(step.getData(MemoryKeys.AUDIT_DISCARDED_COST));
+    }
+
+    private static double nonNegative(IData<Object> data) {
+        if (data != null && data.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0.0) {
+            return n.doubleValue();
+        }
+        return 0.0;
     }
 
     IConversationStep startNextStep(ConversationOutput conversationOutput) {

@@ -201,11 +201,28 @@ public final class MemoryKeys {
      * quota store was unavailable when the step settled, carried forward until a
      * later settle records it ({@code 0.0} afterwards). Written by
      * {@code TurnCostMeter} on the newest step only — say turns are persisted as
-     * appends, so an earlier step would never be rewritten.
+     * appends, so an earlier step would never be rewritten. A new turn after an
+     * undo copies the abandoned timeline's newest value onto its step
+     * ({@code ConversationMemory.startNextStep()}), so an undo cannot lose it.
      *
      * @since 6.6.0
      */
     public static final String AUDIT_PENDING_COST = "audit:pending_cost";
+
+    /**
+     * Priced spend ({@code Double}) of steps that an undo moved to the redo cache
+     * and a new turn then discarded, carried onto that new turn's step by
+     * {@code ConversationMemory.startNextStep()}. The money was spent, so the
+     * conversation's total — what {@code maxCostPerConversationUsd} is compared
+     * against — counts it with the steps' {@link #AUDIT_COST}; without it, say →
+     * undo → say reset the conversation's spend.
+     * <p>
+     * Deliberately NOT {@code "audit:cost:..."}: step lookups by key are prefix
+     * matches (see {@link #AUDIT_METERED_COST}).
+     *
+     * @since 6.6.0
+     */
+    public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
 
     /**
      * Prefix of the guardrail evidence keys,
