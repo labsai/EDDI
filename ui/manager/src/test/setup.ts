@@ -5,6 +5,7 @@ import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
 import { resetSecretsMockState } from "./mocks/handlers";
 import { resetRatingStore } from "./mocks/rating-handlers";
+import { resetAlertStore } from "./mocks/alert-handlers";
 import { drainToasts } from "./drain-toasts";
 
 // Increase default waitFor timeout to handle parallel test load. The suite is
@@ -88,6 +89,7 @@ afterEach(async () => {
   // Handlers that hold module state are not reset by resetHandlers().
   resetSecretsMockState();
   resetRatingStore();
+  resetAlertStore();
 });
 
 // Clean up after all tests

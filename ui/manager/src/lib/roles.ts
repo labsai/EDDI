@@ -43,6 +43,8 @@ const SCREEN_ROLES: ReadonlyArray<readonly [prefix: string, roles: readonly stri
   ["/manage/userdata", [ROLE_ADMIN, ROLE_USER]],
   // `IRestConversationRatingAdmin` enumerates admin and editor (no viewer).
   ["/manage/feedback", [ROLE_ADMIN, ROLE_EDITOR]],
+  // `IRestAlertRules` / `IRestAlertEvents` enumerate admin and editor (no viewer).
+  ["/manage/alerts", [ROLE_ADMIN, ROLE_EDITOR]],
 ];
 
 /** The roles that may use the screen at `path`, or `null` when any role may. */

@@ -1,0 +1,233 @@
+import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { server } from "@/test/mocks/server";
+import { createTestQueryClient, renderPage } from "@/test/test-utils";
+import { ThemeProvider } from "@/components/layout/theme-provider";
+import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { Sidebar } from "@/components/layout/sidebar";
+import { renderWithProviders } from "@/test/test-utils";
+import { FAILING_CHANNEL } from "@/test/mocks/alert-handlers";
+import type { AlertRule } from "@/lib/api/alerts";
+import { AlertsPage } from "../alerts";
+
+const editorAuth: AuthContextValue = {
+  authenticated: true,
+  loading: false,
+  user: null,
+  roles: ["eddi-editor"],
+  method: "keycloak",
+  login: () => {},
+  logout: () => {},
+};
+
+function renderAlerts(path = "/manage/alerts") {
+  return renderPage(path, <AlertsPage />, "/manage/alerts");
+}
+
+function renderAsEditor(path = "/manage/alerts", ui: React.ReactElement = <AlertsPage />) {
+  const client = createTestQueryClient();
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <QueryClientProvider client={client}>
+        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
+          <AuthContext.Provider value={editorAuth}>
+            <Routes>
+              <Route path="/manage/alerts" element={ui} />
+            </Routes>
+          </AuthContext.Provider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
+describe("AlertsPage — inbox", () => {
+  it("opens on the unacknowledged alerts, with what matched and the delivery per target", async () => {
+    renderAlerts();
+    expect(await screen.findByTestId("alert-event-row-alert-1")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-event-row-alert-2")).toBeInTheDocument();
+    // alert-3 is acknowledged: not in the open inbox.
+    expect(screen.queryByTestId("alert-event-row-alert-3")).toBeNull();
+    expect(screen.getByTestId("alert-event-comment-alert-1").textContent).toBe("It kept looping on my order number.");
+    expect(within(screen.getByTestId("alert-event-row-alert-2")).getByText("The webhook answered HTTP 503")).toBeInTheDocument();
+  });
+
+  it("renders a comment excerpt as plain text, never as markup", async () => {
+    server.use(
+      http.get("*/alerts/events", () =>
+        HttpResponse.json({
+          total: 1,
+          index: 0,
+          limit: 25,
+          events: [
+            {
+              id: "x",
+              ruleId: "r",
+              ruleName: "r",
+              source: "RATING",
+              kind: "ALERT",
+              agentId: "agent1",
+              firedAt: new Date().toISOString(),
+              summary: "s",
+              match: { matched: ["comment"], commentExcerpt: "<img src=x onerror=alert(1)>" },
+              deliveries: [],
+              state: "INBOX_ONLY",
+              duplicates: 0,
+            },
+          ],
+        }),
+      ),
+    );
+    renderAlerts();
+    const comment = await screen.findByTestId("alert-event-comment-x");
+    expect(comment.textContent).toBe("<img src=x onerror=alert(1)>");
+    expect(comment.querySelector("img")).toBeNull();
+  });
+
+  it("acknowledges one alert, and it leaves the open inbox", async () => {
+    renderAlerts();
+    fireEvent.click(await screen.findByTestId("alert-acknowledge-alert-1"));
+    await waitFor(() => expect(screen.queryByTestId("alert-event-row-alert-1")).toBeNull());
+    expect(screen.getByTestId("alert-event-row-alert-2")).toBeInTheDocument();
+  });
+
+  it("acknowledges the selected alerts in bulk", async () => {
+    let sent: unknown = null;
+    server.use(
+      http.post("*/alerts/events/acknowledge", async ({ request }) => {
+        sent = await request.json();
+        return HttpResponse.json({ acknowledged: 2 });
+      }),
+    );
+    renderAlerts();
+    fireEvent.click(await screen.findByTestId("alert-events-select-all"));
+    fireEvent.click(screen.getByTestId("alerts-ack-selected"));
+    await waitFor(() => expect(sent).toEqual({ ids: ["alert-1", "alert-2"] }));
+  });
+
+  it("offers Retry only for a failed delivery, and retries it", async () => {
+    renderAlerts();
+    expect(await screen.findByTestId("alert-retry-alert-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("alert-retry-alert-1")).toBeNull();
+    fireEvent.click(screen.getByTestId("alert-retry-alert-2"));
+    await waitFor(() => expect(screen.getByTestId("alert-event-state-alert-2").textContent).toBe("Delivering"));
+  });
+
+  it("filters by source and can show acknowledged alerts", async () => {
+    renderAlerts();
+    await screen.findByTestId("alert-event-row-alert-1");
+    fireEvent.change(screen.getByTestId("alerts-filter-source"), { target: { value: "CONVERSATION_ERROR" } });
+    await waitFor(() => expect(screen.queryByTestId("alert-event-row-alert-1")).toBeNull());
+    fireEvent.click(screen.getByTestId("alerts-show-acknowledged"));
+    expect(await screen.findByTestId("alert-event-row-alert-3")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-event-acknowledged-alert-3")).toBeInTheDocument();
+  });
+
+  it("asks a non-administrator to pick an agent instead of listing everything", async () => {
+    let asked = false;
+    server.use(
+      http.get("*/alerts/events", () => {
+        asked = true;
+        return HttpResponse.json({ total: 0, index: 0, limit: 25, events: [] });
+      }),
+    );
+    renderAsEditor();
+    expect(await screen.findByText("Pick an agent to see its alerts")).toBeInTheDocument();
+    expect(asked).toBe(false);
+  });
+});
+
+describe("AlertsPage — rules", () => {
+  it("lists the rules", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    expect(await screen.findByTestId("alert-rule-row-rule-ratings")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-rule-row-rule-errors")).toBeInTheDocument();
+  });
+
+  it("creates a rule with a Slack target; the body carries the source, scope, condition and throttle", async () => {
+    let sent: AlertRule | null = null;
+    server.use(
+      http.post("*/alerts/rules", async ({ request }) => {
+        sent = (await request.json()) as AlertRule;
+        return HttpResponse.json({ ...sent, id: "rule-new" }, { status: 201 });
+      }),
+    );
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    expect(screen.getByTestId("alert-rule-save")).toBeDisabled(); // no name yet
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "Failing turns" } });
+    fireEvent.change(screen.getByTestId("alert-rule-source"), { target: { value: "CONVERSATION_ERROR" } });
+    fireEvent.click(screen.getByTestId("alert-rule-kind-COST_CEILING"));
+    fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+    fireEvent.change(screen.getByTestId("alert-rule-target-channel-0"), { target: { value: "C0123ABC" } });
+    fireEvent.click(screen.getByTestId("alert-rule-save"));
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sent!.source).toBe("CONVERSATION_ERROR");
+    expect(sent!.scope).toEqual({ allAgents: true, agentIds: [] });
+    expect(sent!.condition.errorKinds).toEqual(["TURN_ERROR", "TURN_DEADLINE", "COST_CEILING"]);
+    expect(sent!.delivery).toEqual([{ type: "SLACK", channelId: "C0123ABC" }]);
+    expect(sent!.throttle).toEqual({ windowMinutes: 60, maxPerWindow: 10 });
+  });
+
+  it("refuses an invalid Slack channel before sending anything", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "x" } });
+    fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+    fireEvent.change(screen.getByTestId("alert-rule-target-channel-0"), { target: { value: "#general" } });
+    expect(screen.getByTestId("alert-rule-save")).toBeDisabled();
+    expect(screen.getByTestId("alert-rule-test")).toBeDisabled();
+  });
+
+  it("sends a test alert and shows the outcome per target", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alert-rule-edit-rule-ratings"));
+    fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+    fireEvent.change(screen.getByTestId("alert-rule-target-channel-1"), { target: { value: FAILING_CHANNEL } });
+    fireEvent.click(screen.getByTestId("alert-rule-test"));
+    const results = await screen.findByTestId("alert-rule-test-results");
+    expect(within(results).getByText(/Slack C0123ABC: delivered/)).toBeInTheDocument();
+    expect(within(results).getByText(/Slack refused the message/)).toBeInTheDocument();
+  });
+
+  it("deletes a rule after confirmation", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alert-rule-delete-rule-ratings"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByTestId("alert-rule-row-rule-ratings")).toBeNull());
+  });
+
+  it("an editor gets neither 'Every agent' nor webhook targets", async () => {
+    renderAsEditor("/manage/alerts?tab=rules&agentId=agent1");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    expect(screen.queryByTestId("alert-rule-all-agents")).toBeNull();
+    fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+    const type = screen.getByTestId("alert-rule-target-type-0");
+    expect(within(type).queryByText("Webhook")).toBeNull();
+  });
+});
+
+describe("Sidebar alerts badge", () => {
+  it("shows the unacknowledged count to an administrator", async () => {
+    server.use(http.get("*/alerts/events/unacknowledged-count", () => HttpResponse.json({ count: 4 })));
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("nav-alerts-badge").textContent).toBe("4"));
+  });
+
+  it("does not ask for an all-agent count on behalf of an editor", async () => {
+    let asked = false;
+    server.use(
+      http.get("*/alerts/events/unacknowledged-count", () => {
+        asked = true;
+        return HttpResponse.json({ count: 3 });
+      }),
+    );
+    renderAsEditor("/manage/alerts", <Sidebar collapsed={false} onToggle={() => {}} />);
+    await screen.findAllByRole("link");
+    expect(asked).toBe(false);
+    expect(screen.queryByTestId("nav-alerts-badge")).toBeNull();
+  });
+});
