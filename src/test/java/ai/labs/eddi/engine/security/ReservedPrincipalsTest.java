@@ -71,6 +71,7 @@ class ReservedPrincipalsTest {
             Map.entry("v4:", "ciphertext/HMAC format version"),
             Map.entry("v5:", "ciphertext/HMAC format version"),
             Map.entry("data:", "data URL scheme"),
+            Map.entry("sha256:", "brand image content hash and ETag (BrandAssetValidator.hash)"),
             Map.entry("retro:", "RETRO memory entry key"),
             Map.entry("rag-ingestion:", "schedule name"),
             Map.entry("audit-key-id:", "audit key id record"),
