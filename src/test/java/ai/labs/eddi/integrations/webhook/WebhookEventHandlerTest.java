@@ -279,4 +279,82 @@ class WebhookEventHandlerTest {
         assertEquals(CONV_2, dispatch.conversationId());
         verify(conversationService).endConversation(CONV_1, "system:lost-create-race");
     }
+
+    @Test
+    void inFlightRepeatCarriesTheInProgressReason() throws Exception {
+        Dispatch[] repeat = new Dispatch[1];
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenAnswer(inv -> {
+                    repeat[0] = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-21", "{}"), null);
+                    return new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1));
+                });
+        handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-21", "{}"), null);
+        assertEquals(409, repeat[0].status());
+        assertEquals(WebhookEventHandler.REASON_IN_PROGRESS, repeat[0].reason());
+    }
+
+    @Test
+    void approvalWaitIs409WithItsOwnReason() throws Exception {
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("waiting")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        Dispatch dispatch = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-22", "{}"), null);
+        assertEquals(409, dispatch.status());
+        assertFalse(dispatch.duplicate());
+        assertEquals(WebhookEventHandler.REASON_AWAITING_APPROVAL, dispatch.reason());
+    }
+
+    @Test
+    void refusedTurnEndsTheConversationItJustCreated() throws Exception {
+        doThrow(new QuotaExceededException("api calls")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+        assertEquals(429, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-23", "{}"), null).status());
+
+        // One conversation per retry would otherwise be left behind, empty.
+        verify(conversationService).endConversation(eq(CONV_1), anyString());
+    }
+
+    @Test
+    void sameSignedBodyUnderAnotherEventTypeIsADuplicate() throws Exception {
+        // The event-type header is not covered by the MAC. Replaying the captured body
+        // under a different one must not start a second turn.
+        InboundEvent push = event(null, "{}");
+        InboundEvent ping = parser.parse(settings(Map.of()), INTEGRATION_ID, "application/json", Map.of("x-github-event", "ping"),
+                "{}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), push, "b:abc").status());
+
+        Dispatch replay = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), ping, "b:abc");
+
+        assertEquals(200, replay.status());
+        assertTrue(replay.duplicate());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fullReplayCacheRefusesNewDeliveriesInsteadOfEvictingLiveKeys() throws Exception {
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.getCache(anyString(), any(Duration.class)))
+                .thenReturn(new CacheImpl<>("dedup", Caffeine.newBuilder().build()));
+        // Refuse at 4 keys: two deliveries carrying an id and a signature each.
+        handler = new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
+                new SimpleMeterRegistry(), 4);
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-30", "{}"), "b:one").status());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-31", "{}"), "b:two").status());
+
+        Dispatch overflow = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-32", "{}"), "b:three");
+        assertEquals(503, overflow.status());
+
+        // A repeat of something already remembered is still answered, not refused.
+        Dispatch repeat = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-30", "{}"), "b:one");
+        assertEquals(200, repeat.status());
+        assertTrue(repeat.duplicate());
+        // And the refusal consumed nothing: no third turn ran.
+        verify(conversationService, times(2)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void dedupWindowIsTheSharedBucketTtlOfSlack() {
+        assertEquals(Duration.ofMinutes(10), WebhookEventHandler.DEDUP_TTL);
+        assertEquals("webhook-event-dedup", WebhookEventHandler.DEDUP_CACHE_NAME);
+    }
 }

@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApproval
 import ai.labs.eddi.engine.api.IConversationService.ConversationEndedException;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -92,6 +93,29 @@ public class WebhookEventHandler {
      */
     static final Duration DEDUP_TTL = Duration.ofMinutes(10);
 
+    /**
+     * Name of the dedup cache; sized in {@link CacheFactory}, shared in a cluster.
+     */
+    public static final String DEDUP_CACHE_NAME = "webhook-event-dedup";
+
+    /**
+     * Occupancy of the dedup cache at which a delivery that is not already
+     * remembered is refused (503, retryable) instead of reserved. The cache is
+     * sized at twice this (see {@code CacheFactory.RATE_SIZED_EVICTION_HEADROOM}),
+     * so it never has to evict a live key to admit a new one: an evicted key is a
+     * replay that would run again.
+     */
+    static final long DEDUP_REFUSE_AT = CacheFactory.maximumSizeFor(DEDUP_CACHE_NAME, DEDUP_TTL) / 2;
+
+    /** Machine-readable {@code reason} of a 409 whose first delivery is running. */
+    public static final String REASON_IN_PROGRESS = "in_progress";
+
+    /**
+     * Machine-readable {@code reason} of a 409 for a conversation awaiting
+     * approval.
+     */
+    public static final String REASON_AWAITING_APPROVAL = "awaiting_approval";
+
     /** Marker for an event whose first delivery is still being processed. */
     static final String IN_FLIGHT = "";
 
@@ -105,6 +129,7 @@ public class WebhookEventHandler {
     private final ITemplatingEngine templatingEngine;
     private final ICache<String, String> dedup;
     private final MeterRegistry meterRegistry;
+    private final long dedupRefuseAt;
 
     @Inject
     public WebhookEventHandler(ChannelTargetRouter router,
@@ -114,12 +139,25 @@ public class WebhookEventHandler {
             ITemplatingEngine templatingEngine,
             ICacheFactory cacheFactory,
             MeterRegistry meterRegistry) {
+        this(router, conversationService, groupConversationService, userConversationStore, templatingEngine, cacheFactory, meterRegistry,
+                DEDUP_REFUSE_AT);
+    }
+
+    WebhookEventHandler(ChannelTargetRouter router,
+            IConversationService conversationService,
+            IGroupConversationService groupConversationService,
+            IUserConversationStore userConversationStore,
+            ITemplatingEngine templatingEngine,
+            ICacheFactory cacheFactory,
+            MeterRegistry meterRegistry,
+            long dedupRefuseAt) {
+        this.dedupRefuseAt = dedupRefuseAt;
         this.router = router;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
         this.userConversationStore = userConversationStore;
         this.templatingEngine = templatingEngine;
-        this.dedup = cacheFactory.getCache("webhook-event-dedup", DEDUP_TTL);
+        this.dedup = cacheFactory.getCache(DEDUP_CACHE_NAME, DEDUP_TTL);
         this.meterRegistry = meterRegistry;
     }
 
@@ -136,10 +174,18 @@ public class WebhookEventHandler {
      *            whether this was a repeat delivery
      * @param error
      *            a client-safe reason for a refusal
+     * @param reason
+     *            machine-readable discriminator for a status that has more than one
+     *            cause (409: {@link #REASON_IN_PROGRESS} or
+     *            {@link #REASON_AWAITING_APPROVAL}); null otherwise
      */
-    public record Dispatch(int status, String conversationId, String groupConversationId, boolean duplicate, String error) {
+    public record Dispatch(int status, String conversationId, String groupConversationId, boolean duplicate, String error, String reason) {
         static Dispatch error(int status, String error) {
-            return new Dispatch(status, null, null, false, error);
+            return new Dispatch(status, null, null, false, error, null);
+        }
+
+        static Dispatch error(int status, String error, String reason) {
+            return new Dispatch(status, null, null, false, error, reason);
         }
     }
 
@@ -170,6 +216,16 @@ public class WebhookEventHandler {
         if (replayKey != null) {
             keys.add(integrationId + ":sig:" + replayKey);
         }
+        if (dedup.size() >= dedupRefuseAt && keys.stream().noneMatch(key -> dedup.get(key) != null)) {
+            // The cache is full of live keys. Reserving another would evict one, and
+            // an evicted key is a signed request that can be replayed. A repeat of
+            // something already remembered still gets its answer (the check above);
+            // anything new waits for entries to age out (10 minutes).
+            LOGGER.warnf("Webhook %s: delivery refused, the replay-protection cache is at capacity (%d keys)", sanitize(integrationId),
+                    dedupRefuseAt);
+            count("refused_503");
+            return Dispatch.error(503, "Temporarily unable to accept events — retry later.");
+        }
         List<String> reserved = new ArrayList<>(keys.size());
         for (String key : keys) {
             String previous = dedup.putIfAbsent(key, IN_FLIGHT);
@@ -186,11 +242,11 @@ public class WebhookEventHandler {
                 // and it would not retry. Answer retryably instead; only a
                 // recorded 202 makes a repeat a duplicate.
                 count("in_progress");
-                return new Dispatch(409, null, null, true, IN_PROGRESS);
+                return new Dispatch(409, null, null, true, IN_PROGRESS, REASON_IN_PROGRESS);
             }
             count("duplicate");
             boolean group = previous.startsWith("group:");
-            return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null);
+            return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null, null);
         }
 
         Dispatch outcome;
@@ -230,16 +286,16 @@ public class WebhookEventHandler {
                 var groupConversation = groupConversationService.startAndDiscussAsync(target.getTargetId(), input, userId, null);
                 LOGGER.infof("Webhook %s: event type %s started group discussion %s", sanitize(integrationId),
                         sanitize(event.type()), sanitize(groupConversation.getId()));
-                return new Dispatch(202, null, groupConversation.getId(), false, null);
+                return new Dispatch(202, null, groupConversation.getId(), false, null, null);
             }
             String conversationId = runAgentTurn(integrationId, target, settings, event, userId, input);
             LOGGER.infof("Webhook %s: event type %s accepted into conversation %s", sanitize(integrationId),
                     sanitize(event.type()), sanitize(conversationId));
-            return new Dispatch(202, conversationId, null, false, null);
+            return new Dispatch(202, conversationId, null, false, null, null);
         } catch (AgentNotReadyException e) {
             return Dispatch.error(503, "The target agent is not deployed.");
         } catch (ConversationAwaitingApprovalException e) {
-            return Dispatch.error(409, "The correlated conversation is awaiting human approval.");
+            return Dispatch.error(409, "The correlated conversation is awaiting human approval.", REASON_AWAITING_APPROVAL);
         } catch (IResourceStore.ResourceNotFoundException | GroupDiscussionException e) {
             LOGGER.warnf("Webhook %s: target %s cannot run: %s", sanitize(integrationId), sanitize(target.getName()),
                     sanitize(e.getMessage()));
@@ -280,7 +336,16 @@ public class WebhookEventHandler {
                 : null;
         if (correlationKey == null) {
             String conversationId = startConversation(agentId, userId, integrationId);
-            say(conversationId, input, event, integrationId);
+            try {
+                say(conversationId, input, event, integrationId);
+            } catch (Exception | Error refused) {
+                // The turn was refused (429 on the API-call quota, 503, ...) after the
+                // conversation was created, and the sender will retry with a new one:
+                // end this one rather than leave one orphan per retry. (A correlated
+                // conversation below is kept - the retry reuses it.)
+                endQuietly(conversationId);
+                throw refused;
+            }
             return conversationId;
         }
         String intent = correlationIntent(integrationId, agentId, correlationKey);

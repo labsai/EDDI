@@ -28,9 +28,11 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
@@ -92,6 +94,18 @@ public class ChannelTargetRouter {
      * {@link #refreshIfNeeded}.
      */
     private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Shortest webhook signing secret the router will hand to the verifier. An HMAC
+     * key shorter than the 32-byte hash is brute-forceable offline from one
+     * captured request, and the endpoint is public.
+     */
+    public static final int MIN_WEBHOOK_SECRET_LENGTH = 16;
+
+    /**
+     * Webhook integrations already warned about, so a refresh does not repeat it.
+     */
+    private final Set<String> weakWebhookSecretWarned = ConcurrentHashMap.newKeySet();
 
     /**
      * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
@@ -865,6 +879,9 @@ public class ChannelTargetRouter {
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
                             resolvePlatformSecrets(copy);
+                            if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
+                                vetWebhookSigningSecret(resId.getId(), config, copy);
+                            }
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
                             coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
@@ -985,6 +1002,39 @@ public class ChannelTargetRouter {
             resolved.put(entry.getKey(), resolveSecret(entry.getValue()));
         }
         config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * Strips a webhook signing secret the endpoint must not trust: one stored in
+     * plaintext (save-time validation refuses it, but a ZIP import or a direct
+     * store write does not pass through that) or shorter than
+     * {@link #MIN_WEBHOOK_SECRET_LENGTH} once resolved. With no secret the verifier
+     * answers 401 to every request, so the integration fails closed instead of
+     * authenticating with a guessable key. Warned about once per integration.
+     */
+    private void vetWebhookSigningSecret(String integrationId, ChannelIntegrationConfiguration stored,
+                                         ChannelIntegrationConfiguration resolved) {
+        String raw = stored.getPlatformConfig() == null ? null : stored.getPlatformConfig().get("signingSecret");
+        String secret = resolved.getPlatformConfig().get("signingSecret");
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        String problem = null;
+        if (!raw.trim().startsWith("${vault:")) {
+            problem = "is stored in plaintext (it must be a ${vault:...} reference)";
+        } else if (secret != null && secret.length() < MIN_WEBHOOK_SECRET_LENGTH) {
+            problem = "is shorter than " + MIN_WEBHOOK_SECRET_LENGTH + " characters";
+        }
+        if (problem == null) {
+            return;
+        }
+        Map<String, String> without = resolved.getPlatformConfig();
+        without.remove("signingSecret");
+        resolved.setPlatformConfig(without);
+        if (weakWebhookSecretWarned.add(integrationId)) {
+            LOGGER.warnf("Webhook integration %s: its signing secret %s - every request to it is refused (401) until it is fixed",
+                    sanitize(integrationId), problem);
+        }
     }
 
     private String resolveSecret(String value) {

@@ -78,12 +78,12 @@ class ChannelTargetRouterWebhookTest {
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(descriptor));
         when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
-        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret");
+        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret-0123456789");
 
         var found = router.getWebhookIntegration(WEBHOOK_ID);
 
         assertTrue(found.isPresent());
-        assertEquals("plain-secret", found.get().getPlatformConfig().get("signingSecret"));
+        assertEquals("plain-secret-0123456789", found.get().getPlatformConfig().get("signingSecret"));
         // The store's own instance keeps the reference.
         assertEquals("${vault:hook-secret}", config.getPlatformConfig().get("signingSecret"));
         assertTrue(router.getWebhookIntegration("ffffffffffffffffffffffff").isEmpty());
@@ -128,5 +128,36 @@ class ChannelTargetRouterWebhookTest {
         config.setDefaultTargetName("missing");
         assertNull(router.resolveEventTarget(config, "other"));
         assertNull(router.resolveEventTarget(null, "push"));
+    }
+
+    private String signingSecretOf(String stored, String resolved) throws Exception {
+        var config = webhook(target("default"));
+        config.setPlatformConfig(Map.of("signingSecret", stored));
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/" + WEBHOOK_ID + "?version=2"));
+        when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(descriptor));
+        when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
+        when(secretResolver.resolveValue(anyString())).thenReturn(resolved);
+        var found = router.getWebhookIntegration(WEBHOOK_ID);
+        assertTrue(found.isPresent());
+        return found.get().getPlatformConfig().get("signingSecret");
+    }
+
+    @Test
+    void plaintextSigningSecretIsNeverHandedToTheVerifier() throws Exception {
+        // Reachable through a ZIP import or a direct store write; save-time
+        // validation refuses it, so the runtime must too.
+        assertNull(signingSecretOf("a-plaintext-secret-long-enough", "a-plaintext-secret-long-enough"));
+    }
+
+    @Test
+    void tooShortResolvedSigningSecretIsNeverHandedToTheVerifier() throws Exception {
+        assertNull(signingSecretOf("${vault:hook}", "short"));
+    }
+
+    @Test
+    void sufficientlyLongVaultSecretIsKept() throws Exception {
+        assertEquals("0123456789abcdef", signingSecretOf("${vault:hook}", "0123456789abcdef"));
     }
 }

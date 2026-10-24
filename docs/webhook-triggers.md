@@ -37,6 +37,13 @@ integrations stored before the rule.) The endpoint is public, so a secret readab
 from `GET /channelstore/channels/{id}`, a ZIP export or a backup would hand its
 authentication to anyone who can read the configuration.
 
+Make the secret long and random (at least 16 characters; 32+ bytes of randomness is
+right). The router also enforces this at runtime, for the cases save-time
+validation cannot see: a plaintext secret that reached the store through a ZIP
+import or a direct write, or a vault value shorter than 16 characters, is not used
+- the integration answers `401` to everything and the log carries one `WARN`
+naming the integration - until the secret is fixed.
+
 ### 2. Create the integration
 
 ```bash
@@ -106,8 +113,18 @@ constant-time.
 `eddi-v1` accepts several `v1=` entries in one header, so a sender can sign with an
 old and a new secret while you rotate. `github` and `generic-hmac` sign no
 timestamp: a captured request can be replayed once its signature has left the
-10-minute deduplication window (or on another node of a cluster). Prefer `eddi-v1`
-for anything you control.
+10-minute deduplication window. Prefer `eddi-v1` for anything you control.
+
+**The routing headers are not signed.** The MAC covers the body (`eddi-v1`: the
+timestamp and the body) and nothing else, so the CloudEvents binary-mode headers
+(`ce-type`, `ce-id`, ...), `eventTypeHeader` and `eventIdHeader` are whatever the
+request carries - a party who can tamper with a request in transit can change what
+an event is routed as without breaking the signature. The signature protects who
+sent the body, not which route it takes: use HTTPS end to end, and prefer a
+sender that puts the type inside the signed body (a CloudEvents *structured*
+envelope, or `eventTypePath`). Deduplication cannot be sidestepped with a header,
+though: the replay key comes from the MAC, so within the window the same signed
+body is a duplicate whatever `ce-type` or `X-GitHub-Event` it arrives with.
 
 ### Signing a request (`eddi-v1`)
 
@@ -168,7 +185,7 @@ back to `defaultTargetName`.
 
 Targets can be **agents** or **groups**. A group target starts a discussion with
 the rendered input as its question — group members see only that text, not the
-`event` map.
+`event` map: put what they need into `inputTemplate`.
 
 ## What the agent sees
 
@@ -201,23 +218,25 @@ the pointer gets a new conversation.
 | `202` | Accepted: `{"conversationId": "..."}` or `{"groupConversationId": "..."}` |
 | `200` | Duplicate: this event was already accepted in the last 10 minutes — `{"duplicate": true, "conversationId": "..."}`, no turn runs |
 | `400` | Malformed JSON or CloudEvent |
-| `401` | Missing, malformed, stale or wrong signature, or the secret cannot be resolved |
-| `404` | No webhook integration with this id |
-| `409` | A repeat of an event whose first delivery is still being processed (`{"duplicate": true}`, `Retry-After: 5` — retry, it is answered 200 once accepted, or processed if the first was refused); or the correlated conversation is waiting for a human approval |
+| `401` | Missing, malformed, stale or wrong signature, the secret cannot be resolved or is unusable (plaintext / too short), **or no integration has this id** - an unknown id is answered exactly like a bad signature, so ids cannot be probed (the server log says which it was). A just-created integration answers 401 for up to a minute until the router has loaded it |
+| `409` | Two causes, told apart by the `reason` field of the body: `"in_progress"` - a repeat of an event whose first delivery is still being processed (`{"duplicate": true, "reason": "in_progress"}`, `Retry-After: 5`; retry, it is answered 200 once accepted, or processed if the first was refused); `"awaiting_approval"` - the correlated conversation is waiting for a human approval (no `Retry-After`; it will not clear by retrying until someone decides) |
 | `413` | Body larger than `eddi.webhook.max-body-bytes` (default 262144 = 256 KB) |
 | `415` | Unsupported content type |
 | `422` | No target accepts this event type, or the target cannot run |
 | `429` | Tenant quota exceeded (`Retry-After: 60`) |
-| `503` | Agent not deployed, node shutting down, or quota accounting unavailable (`Retry-After: 30`) |
+| `503` | Agent not deployed, node shutting down, quota accounting unavailable, or the replay-protection cache is full (`Retry-After: 30`) |
 
 The conversation is created, and the turn admitted, **before** the endpoint
 answers — that is what lets it return the conversation id, and a `429` while the
 sender can still retry. The agent's work itself runs asynchronously on the
 conversation coordinator, as for any REST turn. The one exception is a new
 conversation's `CONVERSATION_START` turn, which runs inline: keep webhook agents'
-start rules light.
+start rules light. If the turn is then refused (for instance `429` on the API-call
+quota), the conversation just created is ended, so a sender that retries does not
+leave one empty conversation behind per attempt (a correlated conversation is kept
+- the retry reuses it). Each attempt still spends a conversation slot.
 
-Deduplication is per node (an in-memory cache, 10 minutes) and keyed twice: by
+Deduplication keeps its keys for 10 minutes and is keyed twice: by
 the event id when there is one, and always by a **replay key derived from the
 signature EDDI computed** (not from the header the sender sent, which can be
 varied without invalidating it — an extra `v1=` candidate, upper-case hex). A
@@ -228,6 +247,21 @@ otherwise run again. The trade-off: two deliveries with byte-identical signed
 content inside the window count as one (for `eddi-v1`, only within the same
 timestamp second) — give events a distinguishing field if you send identical
 payloads on purpose.
+
+**Where the keys live, and what that guarantees.** On a single node (and in
+`eddi.messaging.type=in-memory` mode) they are in an in-memory cache shared by
+every webhook integration, sized for 100 keys per second across all of them (a
+delivery writes up to two keys; that is 50 deliveries per second sustained,
+120,000 entries at the 10-minute window with a factor-two head-room). The cache
+never evicts a live key to make room: once it is half full a delivery that is not
+already remembered is refused with a retryable `503` (and a `WARN` is logged), and
+repeats of remembered deliveries are still answered. Refusing instead of evicting is
+deliberate - an evicted key is a signed request that could be replayed. In a
+cluster (`eddi.messaging.type=nats`) the keys live in the shared `DEDUP` NATS KV
+bucket (the one Slack event de-duplication uses), so a replay is caught on whichever
+node it hits; the 10-minute bucket TTL is the window, and the bucket is not size
+capped. If NATS is unreachable each node falls back to its own cache until it
+returns (so a replay can then run once per node).
 
 Only an accepted (202) event is remembered: a refused one (4xx, 429, 5xx) is
 forgotten, so the sender's retry is processed, and a repeat that arrives while the
@@ -250,10 +284,12 @@ Each event consumes what a REST conversation would: one conversation slot
   parsed before the signature is verified.
 - Bodies and signatures are never logged.
 - **`github` and `generic-hmac` carry no timestamp.** Their only replay protection
-  is the deduplication window — 10 minutes, per node: a captured request replayed
-  after that (or against another node of a cluster) runs again. Use `eddi-v1`
+  is the deduplication window — 10 minutes, cluster-wide when NATS is configured: a
+  captured request replayed after that runs again. Use `eddi-v1`
   wherever you can configure the sender; its 5-minute timestamp window is
   enforced by the signature itself.
+- **Routing headers are outside the signature** - see the scheme table above.
+  Terminate TLS end to end and, where you can, route on a field of the signed body.
 - Rotate a secret by updating the vault entry; the channel router drops its cache
   when a vault secret changes. With `eddi-v1`, send both signatures during the
   switch.
