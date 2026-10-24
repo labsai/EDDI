@@ -403,7 +403,11 @@ class ConversationHistoryBuilder {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
             if (input != null) {
-                var user = UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
+                // A message an input guardrail refused is withheld whole — whatever the
+                // guardrail type, and whether or not it re-screens history.
+                var user = UserMessage.from(ConversationLogGenerator.isInputWithheldStep(allSteps, i)
+                        ? ConversationLogGenerator.WITHHELD_INPUT
+                        : ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
                 if (mergeNextUser && !result.isEmpty() && result.getLast() instanceof UserMessage previous) {
                     // The assistant turn between them was a fallback and is gone: fold
                     // the inputs together so roles keep alternating.
@@ -483,7 +487,9 @@ class ConversationHistoryBuilder {
         var outputs = memory.getConversationOutputs();
         if (last instanceof UserMessage user && outputs != null && outputs.size() >= 2
                 && ConversationLogGenerator.isFallbackStep(memory.getAllSteps(), outputs.size() - 2)) {
-            int current = 1 + (inputFilesAreContents ? ConversationLogGenerator.inputFileCount(outputs.getLast()) : 0);
+            // A withheld current turn is one placeholder part: its files are gone too.
+            boolean withheld = ConversationLogGenerator.isInputWithheldStep(memory.getAllSteps(), outputs.size() - 1);
+            int current = 1 + (inputFilesAreContents && !withheld ? ConversationLogGenerator.inputFileCount(outputs.getLast()) : 0);
             var contents = user.contents();
             if (contents.size() > current) {
                 var merged = new ArrayList<>(contents.subList(0, contents.size() - current));

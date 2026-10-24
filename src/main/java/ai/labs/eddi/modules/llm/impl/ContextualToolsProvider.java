@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationGroups;
+import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -282,7 +283,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
             return;
 
         int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
-        var tool = new ConversationRecallTool(List.copyOf(memory.getConversationOutputs()), throughStep, summaryConfig.getMaxRecallTurns());
+        var tool = new ConversationRecallTool(List.copyOf(ConversationLogGenerator.modelFacingOutputs(memory)), throughStep,
+                summaryConfig.getMaxRecallTurns());
         tools.add(tool);
         LOGGER.debugf("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());

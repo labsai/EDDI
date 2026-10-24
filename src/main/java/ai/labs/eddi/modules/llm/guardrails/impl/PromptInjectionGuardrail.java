@@ -7,11 +7,14 @@ package ai.labs.eddi.modules.llm.guardrails.impl;
 import ai.labs.eddi.modules.llm.guardrails.ContentGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -28,11 +31,20 @@ import java.util.regex.Pattern;
  * <li>{@code mode} — {@code append} (default: the built-in list plus
  * {@code patterns}) or {@code replace} (only {@code patterns}).</li>
  * </ul>
+ * All patterns together get {@link #MATCH_BUDGET_MS} per text; past it the text
+ * is undecided ({@code pattern_timeout}) and {@code failMode} applies — closed
+ * for {@code block}, so an author pattern that backtracks refuses the text
+ * rather than letting it through. An invalid pattern fails the deploy.
  */
 @ApplicationScoped
 public class PromptInjectionGuardrail implements ContentGuardrail {
 
+    private static final Logger LOGGER = Logger.getLogger(PromptInjectionGuardrail.class);
+
     public static final String TYPE = "prompt-injection";
+
+    /** How long all patterns together may run over one text. */
+    static final long MATCH_BUDGET_MS = 250;
 
     /**
      * The built-in list. Each needs an imperative override shape, so ordinary text
@@ -58,12 +70,28 @@ public class PromptInjectionGuardrail implements ContentGuardrail {
         return Set.of(GuardrailPhase.INPUT);
     }
 
+    /**
+     * Refuses a deploy whose {@code patterns} holds a line that does not compile.
+     */
+    @Override
+    public String validate(Map<String, String> parameters) {
+        String invalid = PatternCache.firstInvalidLine(parameters != null ? parameters.get("patterns") : null);
+        return invalid != null ? "prompt-injection guardrail: " + invalid : null;
+    }
+
     @Override
     public GuardrailVerdict evaluate(String text, GuardrailContext context) {
-        for (Pattern pattern : patterns(context)) {
-            if (pattern.matcher(text).find()) {
-                return GuardrailVerdict.violation("prompt_injection_pattern");
+        long deadline = BoundedRegex.deadline(MATCH_BUDGET_MS);
+        try {
+            for (Pattern pattern : patterns(context)) {
+                if (BoundedRegex.matcher(pattern, text, deadline).find()) {
+                    return GuardrailVerdict.violation("prompt_injection_pattern");
+                }
             }
+        } catch (BoundedRegex.BudgetExceededException e) {
+            LOGGER.warnf("prompt-injection patterns of task '%s' exceeded their %d ms budget — the text is undecided", context.taskId(),
+                    MATCH_BUDGET_MS);
+            throw new GuardrailUndecidedException(RegexFilterGuardrail.REASON_TIMEOUT, 0.0);
         }
         return GuardrailVerdict.allow();
     }
