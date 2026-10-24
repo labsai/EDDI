@@ -948,6 +948,7 @@ public class GdprComplianceService {
         }
         List<IGdprParticipant> found = new ArrayList<>();
         participantInstances.forEach(found::add);
+        found.sort(Comparator.comparingInt(IGdprParticipant::order));
         return found;
     }
 

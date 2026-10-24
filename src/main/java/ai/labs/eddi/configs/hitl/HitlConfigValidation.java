@@ -6,9 +6,12 @@ package ai.labs.eddi.configs.hitl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
@@ -49,6 +52,58 @@ public final class HitlConfigValidation {
         }
         validateToolApprovals(hitlConfig.getToolApprovals(), "hitlConfig.toolApprovals");
         warnIfToolApprovalsInheritsAutoApprove(hitlConfig);
+        validateNotify(hitlConfig.getNotify(), "hitlConfig.notify");
+    }
+
+    /** Upper bound for {@code hitlConfig.notify.email.recipients}. */
+    public static final int MAX_NOTIFY_RECIPIENTS = 20;
+
+    /**
+     * Validates {@code hitlConfig.notify}: when {@code email} is present it needs
+     * one to {@value #MAX_NOTIFY_RECIPIENTS} distinct, plain ASCII addresses
+     * ({@code local@domain}, no display name). Addresses are compared after
+     * normalisation, so {@code Ops@Example.com} and {@code ops@example.com} are one
+     * duplicate. The refusal names the position, never the address.
+     */
+    public static void validateNotify(HitlNotifyConfig notify, String fieldPath) {
+        if (notify == null || notify.getEmail() == null) {
+            return;
+        }
+        List<String> recipients = notify.getEmail().getRecipients();
+        String path = fieldPath + ".email.recipients";
+        if (recipients == null || recipients.isEmpty()) {
+            throw new IllegalArgumentException(path + " is empty: name at least one address, or remove " + fieldPath + ".email");
+        }
+        if (recipients.size() > MAX_NOTIFY_RECIPIENTS) {
+            throw new IllegalArgumentException(path + " has " + recipients.size() + " entries; at most " + MAX_NOTIFY_RECIPIENTS
+                    + " are allowed — notify a shared mailbox or distribution list instead");
+        }
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < recipients.size(); i++) {
+            String normalized = normalizeRecipient(recipients.get(i), path + "[" + i + "]");
+            if (!seen.add(normalized)) {
+                throw new IllegalArgumentException(path + "[" + i + "] repeats an earlier address");
+            }
+        }
+    }
+
+    /**
+     * The normalised form of one configured recipient.
+     *
+     * @throws IllegalArgumentException
+     *             naming {@code where} and the rule, never the address
+     */
+    public static String normalizeRecipient(String recipient, String where) {
+        String normalized;
+        try {
+            normalized = AddressNormalizer.normalize(recipient);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(where + " is not a plain email address (local@domain): " + e.getMessage());
+        }
+        if (!StandardCharsets.US_ASCII.newEncoder().canEncode(normalized)) {
+            throw new IllegalArgumentException(where + " has a non-ASCII local part, which needs SMTPUTF8 and is not supported");
+        }
+        return normalized;
     }
 
     /**

@@ -158,15 +158,16 @@ public interface IEmailMessageLedger {
     Optional<LedgerEntry> findByIdempotencyKey(String idempotencyKey);
 
     /**
-     * Claims up to {@code limit} {@link State#PENDING} rows whose
-     * {@code nextAttemptAt} is due: each gets a new claim token, its
+     * Claims up to {@code limit} {@link State#PENDING} rows of {@code kind} whose
+     * {@code nextAttemptAt} is due — each kind has its own worker, so a sweeper
+     * never holds a row it cannot send: each gets a new claim token, its
      * {@code nextAttemptAt} moves to {@code leaseUntil} and its attempt count goes
      * up by one. Each row is claimed by a conditional update, so two sweepers
      * running at once never claim the same row.
      *
      * @return the claimed rows, as they are after the claim
      */
-    List<LedgerEntry> claimDue(Instant now, Instant leaseUntil, int limit);
+    List<LedgerEntry> claimDue(Kind kind, Instant now, Instant leaseUntil, int limit);
 
     /**
      * Moves a claimed row to a terminal state, only if {@code claimToken} still

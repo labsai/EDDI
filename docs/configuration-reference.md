@@ -552,6 +552,10 @@ guard the coming IMAP/SMTP transports will connect through. Details:
 | `eddi.mail.smtp.connection` | *(unset)* | Name of a connection holding the relay credential: `BASIC` (username + vault-backed password, `AUTH PLAIN/LOGIN`) or `OAUTH2_CLIENT_CREDENTIALS` (SASL `XOAUTH2`, e.g. Exchange Online, with the sender as the mailbox). Its `baseUrlAllowlist` must name the relay's mail origin (`smtp://smtp.office365.com`, `smtps://…`). Mutually exclusive with `username`/`password` |
 | `eddi.mail.smtp.username` | *(unset)* | SMTP username, together with `eddi.mail.smtp.password`. Neither this nor a connection means no `AUTH` (an IP-allowlisted relay) |
 | `eddi.mail.smtp.password` | *(unset)* | SMTP password. Supply it through the environment (`EDDI_MAIL_SMTP_PASSWORD`) or a secret-backed config source, not `application.properties` |
+| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification: recipient, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d` |
+| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification is marked `FAILED`. A 5xx refusal fails it at once |
+| `eddi.email.outbound.retry-backoff` | `1m` | Delay before the first retry; it doubles per attempt, capped at one hour |
+| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so instances never send the same row twice |
 | `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
 
 ### OpenAI-compatible API

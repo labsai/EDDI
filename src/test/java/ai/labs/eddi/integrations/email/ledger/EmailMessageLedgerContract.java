@@ -120,7 +120,7 @@ interface EmailMessageLedgerContract {
                 start.await();
                 List<LedgerEntry> all = new ArrayList<>();
                 List<LedgerEntry> batch;
-                while (!(batch = ledger().claimDue(NOW, NOW.plusSeconds(60), 3)).isEmpty()) {
+                while (!(batch = ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(60), 3)).isEmpty()) {
                     all.addAll(batch);
                 }
                 return all;
@@ -155,11 +155,11 @@ interface EmailMessageLedgerContract {
     @DisplayName("a claimed row is leased: not due again until the lease ends, and a stale claim cannot finish it")
     default void leaseAndStaleClaim() {
         ledger().insertIfAbsent(entry("leased", NOW.minusSeconds(1), "a@example.com"));
-        LedgerEntry first = ledger().claimDue(NOW, NOW.plusSeconds(30), 10).get(0);
+        LedgerEntry first = ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(30), 10).get(0);
 
-        assertTrue(ledger().claimDue(NOW.plusSeconds(10), NOW.plusSeconds(40), 10).isEmpty(), "still leased");
+        assertTrue(ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(10), NOW.plusSeconds(40), 10).isEmpty(), "still leased");
 
-        LedgerEntry second = ledger().claimDue(NOW.plusSeconds(31), NOW.plusSeconds(90), 10).get(0);
+        LedgerEntry second = ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(31), NOW.plusSeconds(90), 10).get(0);
         assertEquals(2, second.attempts());
         assertFalse(ledger().complete(first.id(), first.claimToken(), State.SENT, "250 ok", null, NOW.plusSeconds(32)),
                 "the first claim was taken over");
@@ -176,10 +176,22 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("a sweeper claims only its own kind")
+    default void claimByKind() {
+        LedgerEntry reply = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.REPLY, Direction.OUT,
+                "<reply@example.com>", "c", "step-1", "reply-key", "a@example.com", State.PENDING, 0, NOW.minusSeconds(1), null, null, null, NOW,
+                NOW, NOW.plus(Duration.ofDays(1)));
+        ledger().insertIfAbsent(reply);
+
+        assertTrue(ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(30), 10).isEmpty());
+        assertEquals(1, ledger().claimDue(Kind.REPLY, NOW, NOW.plusSeconds(30), 10).size());
+    }
+
+    @Test
     @DisplayName("reschedule releases the claim for a later attempt")
     default void reschedule() {
         ledger().insertIfAbsent(entry("retry", NOW.minusSeconds(1), "a@example.com"));
-        LedgerEntry claimed = ledger().claimDue(NOW, NOW.plusSeconds(30), 10).get(0);
+        LedgerEntry claimed = ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(30), 10).get(0);
 
         assertTrue(ledger().reschedule(claimed.id(), claimed.claimToken(), NOW.plusSeconds(120), "CONNECT: refused", NOW));
 
@@ -187,8 +199,8 @@ interface EmailMessageLedgerContract {
         assertEquals(State.PENDING, after.state());
         assertNull(after.claimToken());
         assertEquals("CONNECT: refused", after.lastError());
-        assertTrue(ledger().claimDue(NOW.plusSeconds(119), NOW.plusSeconds(200), 10).isEmpty());
-        assertEquals(1, ledger().claimDue(NOW.plusSeconds(120), NOW.plusSeconds(200), 10).size());
+        assertTrue(ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(119), NOW.plusSeconds(200), 10).isEmpty());
+        assertEquals(1, ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(120), NOW.plusSeconds(200), 10).size());
     }
 
     @Test

@@ -55,3 +55,32 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
   (Testcontainers): duplicate keys, eight concurrent inserts of one notification (one winner), two sweepers claiming
   20 rows at once (no overlap), lease expiry and stale claims, reschedule, retention, erasure by recipient, and the
   stored field set (no body field exists).
+
+### HITL email notifications
+
+- **Agent opt-in** `hitlConfig.notify.email.recipients` (`HitlNotifyConfig`): 1–20 plain ASCII addresses, validated
+  at save and import time (`HitlConfigValidation.validateNotify` — empty, over 20, malformed, display-name,
+  non-ASCII and duplicate-after-normalisation entries refused with the position, never the address). Configs without
+  the field are unchanged.
+- **The hook:** `HitlPauseCommittedEvent(conversationId, pauseId)`, fired asynchronously by
+  `ConversationService.firePauseCommitted` at the three places a regular pause is committed — the say turn
+  (`ConversationStepRunner`, after the state CAS and the timeout schedule), the `CONVERSATION_START` turn, and a
+  resume that pauses again (`ConversationHitlService`). Not for a pause restored after a failed resume, nor on a CAS
+  miss. Group discussions are not covered yet.
+- **`HitlEmailNotifier`** (`integrations/email/notify`): re-reads the pause from the store (state and `pauseId` must
+  still match), inserts one ledger row per recipient under a digest key of kind/conversation/pause/recipient, and
+  sends at once for the rows it won. A `@Scheduled(identity = "email-ledger-sweeper")` sweep retries due rows with
+  exponential backoff (`eddi.email.outbound.retry-backoff`, capped at 1 h) up to `eddi.email.outbound.max-attempts`,
+  removes expired rows (`eddi.email.ledger-retention`) and refreshes the `eddi.email.ledger.pending` gauge. A
+  decided pause ends `SUPPRESSED`; a 5xx fails at once.
+- **Content** (`HitlNotificationContent`): agent name, pause type, reason, start, deadline + policy, conversation id,
+  and for a tool-call pause the same redacted, 300-char-truncated argument lines as the Slack card — extracted from
+  `SlackHitlSupport` into the shared `HitlToolCallPreview`. No conversation content. Subject
+  `[EDDI] Approval needed: <agent name>`, designer text flattened to one line. The link is
+  `eddi.connections.public-base-url` + `/manage/approvals`, no token; without a base URL the page is named, not
+  linked.
+- **Metrics** `eddi.email.outbound{kind,outcome}` and `eddi.email.ledger.pending`, on the Full Metrics dashboard's
+  Human-in-the-Loop row and in `metrics.md`. **Audit** entry `email.notify` per sent/failed notification with the
+  recipient as a SHA-256 hash plus domain (the audit ledger is write-once). **GDPR**: `EmailLedgerGdprParticipant`
+  (`emailLedger`) erases/exports rows by the user id's address and the directory's recorded email;
+  `IGdprParticipant.order()` makes the user directory run last so the address is still readable.

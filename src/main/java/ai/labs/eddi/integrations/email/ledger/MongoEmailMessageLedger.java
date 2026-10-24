@@ -104,9 +104,9 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public List<LedgerEntry> claimDue(Instant now, Instant leaseUntil, int limit) {
+    public List<LedgerEntry> claimDue(Kind kind, Instant now, Instant leaseUntil, int limit) {
         List<LedgerEntry> claimed = new ArrayList<>();
-        Bson due = Filters.and(Filters.eq(F_STATE, State.PENDING.name()), Filters.lte(F_NEXT, Date.from(now)));
+        Bson due = Filters.and(Filters.eq(F_STATE, State.PENDING.name()), Filters.eq(F_KIND, kind.name()), Filters.lte(F_NEXT, Date.from(now)));
         var options = new FindOneAndUpdateOptions().sort(Sorts.ascending(F_NEXT)).returnDocument(ReturnDocument.AFTER);
         for (int i = 0; i < limit; i++) {
             Bson claim = Updates.combine(Updates.set(F_CLAIM, UUID.randomUUID().toString()), Updates.set(F_NEXT, Date.from(leaseUntil)),

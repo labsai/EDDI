@@ -152,18 +152,19 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public List<LedgerEntry> claimDue(Instant now, Instant leaseUntil, int limit) {
+    public List<LedgerEntry> claimDue(Kind kind, Instant now, Instant leaseUntil, int limit) {
         String sql = "UPDATE " + TABLE + " SET claim_token = ?, next_attempt_at = ?, attempts = attempts + 1, updated_at = ? " //
-                + "WHERE id IN (SELECT id FROM " + TABLE + " WHERE state = 'PENDING' AND next_attempt_at <= ? " //
+                + "WHERE id IN (SELECT id FROM " + TABLE + " WHERE state = 'PENDING' AND kind = ? AND next_attempt_at <= ? " //
                 + "ORDER BY next_attempt_at LIMIT ? FOR UPDATE SKIP LOCKED) " //
                 + "AND state = 'PENDING' AND next_attempt_at <= ? RETURNING " + COLUMNS;
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, UUID.randomUUID().toString());
             statement.setTimestamp(2, timestamp(leaseUntil));
             statement.setTimestamp(3, timestamp(now));
-            statement.setTimestamp(4, timestamp(now));
-            statement.setInt(5, limit);
-            statement.setTimestamp(6, timestamp(now));
+            statement.setString(4, kind.name());
+            statement.setTimestamp(5, timestamp(now));
+            statement.setInt(6, limit);
+            statement.setTimestamp(7, timestamp(now));
             List<LedgerEntry> claimed = new ArrayList<>();
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {

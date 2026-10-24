@@ -1,0 +1,436 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.integrations.email.notify;
+
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
+import ai.labs.eddi.connections.ConnectionsConfig;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.mail.MailAddress;
+import ai.labs.eddi.engine.mail.MailSendException;
+import ai.labs.eddi.engine.mail.MessageIds;
+import ai.labs.eddi.engine.mail.OutboundMail;
+import ai.labs.eddi.engine.mail.PlainTextMailRenderer;
+import ai.labs.eddi.engine.mail.SystemMailer;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.quarkus.scheduler.Scheduled;
+import jakarta.annotation.PostConstruct;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.ObservesAsync;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
+/**
+ * Emails the people an agent names when one of its conversations pauses for
+ * approval (email plan §16, Phase 1) — {@code hitlConfig.notify.email}.
+ * <p>
+ * <b>Trigger.</b> {@link HitlPauseCommittedEvent}, fired after a pause is
+ * durable. Nothing polls conversations.
+ * <p>
+ * <b>Exactly once per pause and recipient, cluster-wide.</b> For each recipient
+ * a ledger row is inserted under an idempotency key derived from kind,
+ * conversation, pause and recipient; only the pod whose insert wins sends. The
+ * winning row is inserted already claimed, with a lease, and the first attempt
+ * happens at once. A failure that may be transient is retried by
+ * {@link #sweep()} with exponential backoff
+ * ({@code eddi.email.outbound.retry-backoff}, doubling, capped at one hour)
+ * until {@code eddi.email.outbound.max-attempts}; a permanent refusal fails the
+ * row immediately.
+ * <p>
+ * <b>Nothing stored that could be read.</b> The ledger holds no body: every
+ * attempt re-reads the pause from the conversation store and re-renders the
+ * mail, with the Message-ID the row was given. A pause that has been decided
+ * meanwhile is not mailed — the row ends {@code SUPPRESSED}.
+ * <p>
+ * Every terminal outcome is counted ({@code eddi.email.outbound}) and every
+ * sent or failed notification audited (kind, conversation, a hash and the
+ * domain of the recipient, Message-ID — never the body).
+ */
+@ApplicationScoped
+public class HitlEmailNotifier {
+
+    private static final Logger LOGGER = Logger.getLogger(HitlEmailNotifier.class);
+
+    /** How long a claim holds a row: covers connect + submission timeouts. */
+    static final Duration LEASE = Duration.ofMinutes(5);
+
+    /** The longest a retry waits. */
+    static final Duration MAX_BACKOFF = Duration.ofHours(1);
+
+    /** Rows one sweep attempts. */
+    static final int SWEEP_BATCH = 20;
+
+    static final String METER_OUTBOUND = "eddi.email.outbound";
+    static final String METER_PENDING = "eddi.email.ledger.pending";
+
+    static final String APPROVALS_PATH = "/manage/approvals";
+
+    /** Why a row ended without being sent because its pause is gone. */
+    static final String PAUSE_RESOLVED = "PAUSE_RESOLVED: the pause was decided, cancelled or replaced before the notification went out";
+
+    private final SystemMailer mailer;
+    private final IEmailMessageLedger ledger;
+    private final IConversationMemoryStore conversationMemoryStore;
+    private final IAgentStore agentStore;
+    private final IDocumentDescriptorStore documentDescriptorStore;
+    private final Instance<ConnectionsConfig> connectionsConfig;
+    private final AuditLedgerService auditLedgerService;
+    private final MeterRegistry meterRegistry;
+    private final Duration retention;
+    private final int maxAttempts;
+    private final Duration retryBackoff;
+
+    private final AtomicReference<Double> pending = new AtomicReference<>(Double.NaN);
+
+    @Inject
+    public HitlEmailNotifier(SystemMailer mailer, IEmailMessageLedger ledger, IConversationMemoryStore conversationMemoryStore,
+            IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, Instance<ConnectionsConfig> connectionsConfig,
+            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention,
+            @ConfigProperty(name = "eddi.email.outbound.max-attempts", defaultValue = "6") int maxAttempts,
+            @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff) {
+        this.mailer = mailer;
+        this.ledger = ledger;
+        this.conversationMemoryStore = conversationMemoryStore;
+        this.agentStore = agentStore;
+        this.documentDescriptorStore = documentDescriptorStore;
+        this.connectionsConfig = connectionsConfig;
+        this.auditLedgerService = auditLedgerService;
+        this.meterRegistry = meterRegistry;
+        this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
+        this.maxAttempts = Math.max(1, maxAttempts);
+        this.retryBackoff = retryBackoff == null || retryBackoff.isZero() || retryBackoff.isNegative() ? Duration.ofMinutes(1) : retryBackoff;
+    }
+
+    @PostConstruct
+    void registerGauge() {
+        Gauge.builder(METER_PENDING, pending, AtomicReference::get)
+                .description("Email ledger rows not yet sent, failed or suppressed (store-wide; NaN until the first sweep)").register(meterRegistry);
+        for (String outcome : List.of("sent", "retry", "failed", "suppressed")) {
+            outbound(outcome);
+        }
+    }
+
+    private void count(String outcome) {
+        outbound(outcome).increment();
+    }
+
+    private Counter outbound(String outcome) {
+        return meterRegistry.counter(METER_OUTBOUND, "kind", "notify", "outcome", outcome);
+    }
+
+    // --- The trigger ---------------------------------------------------------
+
+    void onPauseCommitted(@ObservesAsync HitlPauseCommittedEvent event) {
+        try {
+            notifyPause(event.conversationId(), event.pauseId(), Instant.now());
+        } catch (RuntimeException e) {
+            // Best-effort by contract: the pause is persisted and must not care.
+            LOGGER.warnf(e, "HITL email notification for conversation %s failed", sanitize(event.conversationId()));
+        }
+    }
+
+    /**
+     * Inserts one ledger row per configured recipient of the paused agent and makes
+     * the first attempt for each row this pod won.
+     */
+    void notifyPause(String conversationId, String pauseId, Instant now) {
+        if (!mailer.isEnabled() || conversationId == null || pauseId == null) {
+            return;
+        }
+        Optional<PauseContext> context = loadPause(conversationId, pauseId);
+        if (context.isEmpty()) {
+            return;
+        }
+        List<String> recipients = recipients(context.get().agent());
+        if (recipients.isEmpty()) {
+            return;
+        }
+        MailAddress from = mailer.from().orElseThrow();
+        for (String recipient : recipients) {
+            LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
+                    MessageIds.generate(from.domain()), conversationId, pauseId, idempotencyKey(conversationId, pauseId, recipient), recipient,
+                    State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null, now, now, now.plus(retention));
+            if (ledger.insertIfAbsent(row)) {
+                attempt(row, context.get(), now);
+            }
+        }
+    }
+
+    /**
+     * The agent version's configured recipients, normalised; invalid ones skipped.
+     */
+    private static List<String> recipients(AgentConfiguration agent) {
+        if (agent == null || agent.getHitlConfig() == null || agent.getHitlConfig().getNotify() == null) {
+            return List.of();
+        }
+        HitlNotifyConfig.Email email = agent.getHitlConfig().getNotify().getEmail();
+        if (email == null || email.getRecipients() == null) {
+            return List.of();
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        int index = 0;
+        for (String recipient : email.getRecipients()) {
+            try {
+                normalized.add(HitlConfigValidation.normalizeRecipient(recipient, "hitlConfig.notify.email.recipients[" + index + "]"));
+            } catch (IllegalArgumentException e) {
+                // Saved before validation existed, or written straight to the store.
+                LOGGER.warnf("Skipping a HITL notification recipient: %s", e.getMessage());
+            }
+            index++;
+            if (normalized.size() >= HitlConfigValidation.MAX_NOTIFY_RECIPIENTS) {
+                break;
+            }
+        }
+        return List.copyOf(normalized);
+    }
+
+    /** The idempotency key: a digest, so the key itself holds no address. */
+    static String idempotencyKey(String conversationId, String pauseId, String recipient) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(("NOTIFY\n" + conversationId + "\n" + pauseId + "\n" + recipient).getBytes(StandardCharsets.UTF_8));
+            return "notify:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    // --- Retries -------------------------------------------------------------
+
+    @Scheduled(every = "${eddi.email.ledger.sweep-interval:30s}", delayed = "30s", identity = "email-ledger-sweeper",
+               concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void sweep() {
+        sweep(Instant.now());
+    }
+
+    /** One sweep at {@code now}: due retries, then retention, then the gauge. */
+    void sweep(Instant now) {
+        try {
+            if (mailer.isEnabled()) {
+                for (LedgerEntry claimed : ledger.claimDue(Kind.NOTIFY, now, now.plus(LEASE), SWEEP_BATCH)) {
+                    try {
+                        attempt(claimed, null, now);
+                    } catch (RuntimeException e) {
+                        LOGGER.warnf(e, "Email ledger row %s: attempt failed unexpectedly", claimed.id());
+                    }
+                }
+            }
+            long expired = ledger.deleteExpired(now);
+            if (expired > 0) {
+                LOGGER.debugf("Removed %d expired email ledger rows", expired);
+            }
+            pending.set((double) ledger.countPending());
+        } catch (RuntimeException e) {
+            pending.set(Double.NaN);
+            LOGGER.warnf("Email ledger sweep failed: %s", e.getMessage());
+        }
+    }
+
+    // --- One attempt ---------------------------------------------------------
+
+    /**
+     * Sends one claimed row. {@code known} is the pause context when the caller
+     * just read it (the first attempt); retries read it again.
+     */
+    void attempt(LedgerEntry row, PauseContext known, Instant now) {
+        Optional<PauseContext> context = known != null ? Optional.of(known) : loadPause(row.conversationId(), row.sourceRef());
+        if (context.isEmpty()) {
+            if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, PAUSE_RESOLVED, now)) {
+                count("suppressed");
+            }
+            return;
+        }
+        PlainTextMailRenderer.RenderedMail rendered;
+        MailAddress recipient = new MailAddress(row.recipient(), null);
+        try {
+            HitlNotificationContent.Message message = HitlNotificationContent.render(context.get().pause(), approvalsUrl());
+            rendered = PlainTextMailRenderer.render(new OutboundMail(mailer.from().orElseThrow(), List.of(recipient), List.of(), message.subject(),
+                    message.text(), row.messageId(), null, null, OutboundMail.Kind.AUTO_GENERATED, now));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            fail(row, context.get(), "RENDER: " + e.getMessage(), now);
+            return;
+        }
+        try {
+            SystemMailer.SendResult result = mailer.send(rendered, List.of(recipient));
+            if (ledger.complete(row.id(), row.claimToken(), State.SENT, result.serverResponse(), null, now)) {
+                count("sent");
+                audit(row, context.get(), "sent", result.serverResponse(), null);
+            }
+        } catch (MailSendException e) {
+            String error = e.getCategory() + ": " + truncate(e.getMessage(), 300);
+            if (e.isPermanent() || row.attempts() >= maxAttempts) {
+                fail(row, context.get(), error, now);
+            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
+                count("retry");
+                LOGGER.infof("HITL notification %s for conversation %s deferred after attempt %d: %s", row.id(), sanitize(row.conversationId()),
+                        row.attempts(), e.getCategory());
+            }
+        }
+    }
+
+    private void fail(LedgerEntry row, PauseContext context, String error, Instant now) {
+        if (ledger.complete(row.id(), row.claimToken(), State.FAILED, null, error, now)) {
+            count("failed");
+            audit(row, context, "failed", null, error);
+            LOGGER.warnf("HITL notification %s for conversation %s FAILED after %d attempt(s): %s", row.id(), sanitize(row.conversationId()),
+                    row.attempts(), error);
+        }
+    }
+
+    /** {@code retry-backoff × 2^(attempts-1)}, capped at {@link #MAX_BACKOFF}. */
+    Duration backoff(int attempts) {
+        int doublings = Math.min(Math.max(0, attempts - 1), 20);
+        Duration delay = retryBackoff.multipliedBy(1L << doublings);
+        return delay.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : delay;
+    }
+
+    /**
+     * The Manager approvals page, or null when no usable public base URL is set.
+     */
+    String approvalsUrl() {
+        if (connectionsConfig == null || !connectionsConfig.isResolvable()) {
+            return null;
+        }
+        ConnectionsConfig config = connectionsConfig.get();
+        String base = config.getPublicBaseUrl();
+        if (base == null || base.isBlank() || config.publicBaseUrlProblem().isPresent()) {
+            return null;
+        }
+        return (base.endsWith("/") ? base.substring(0, base.length() - 1) : base) + APPROVALS_PATH;
+    }
+
+    // --- Reading the pause ---------------------------------------------------
+
+    /** What an attempt needs: the pause facts and the agent version that paused. */
+    record PauseContext(HitlNotificationContent.Pause pause, AgentConfiguration agent, ConversationMemorySnapshot snapshot) {
+    }
+
+    /**
+     * The pause, when the conversation is still in exactly that pause; empty when
+     * it was decided, cancelled, replaced or deleted.
+     */
+    Optional<PauseContext> loadPause(String conversationId, String pauseId) {
+        try {
+            if (conversationMemoryStore.getConversationState(conversationId) != ConversationState.AWAITING_HUMAN) {
+                return Optional.empty();
+            }
+            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null || !pauseId.equals(HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()))) {
+                return Optional.empty();
+            }
+            AgentConfiguration agent = snapshot.getAgentId() == null ? null : agentStore.read(snapshot.getAgentId(), snapshot.getAgentVersion());
+            String agentName = null;
+            try {
+                var descriptor = documentDescriptorStore.readDescriptor(snapshot.getAgentId(), snapshot.getAgentVersion());
+                agentName = descriptor == null ? null : descriptor.getName();
+            } catch (Exception e) {
+                LOGGER.debugf("No descriptor for agent %s: %s", sanitize(snapshot.getAgentId()), e.getMessage());
+            }
+            var pause = new HitlNotificationContent.Pause(agentName, snapshot.getAgentId(), snapshot.getHitlPauseType(),
+                    snapshot.getHitlPauseReason(),
+                    snapshot.getHitlPausedAt(), snapshot.getHitlTimeoutPolicy(), snapshot.getHitlApprovalTimeout(), conversationId,
+                    snapshot.getHitlPendingToolCalls());
+            return Optional.of(new PauseContext(pause, agent, snapshot));
+        } catch (Exception e) {
+            // A missing conversation or agent is a pause nobody can act on any more.
+            LOGGER.debugf("Pause %s of conversation %s cannot be read: %s", pauseId, sanitize(conversationId), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    // --- Audit ---------------------------------------------------------------
+
+    private void audit(LedgerEntry row, PauseContext context, String outcome, String providerResponse, String error) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("kind", row.kind().name());
+            detail.put("outcome", outcome);
+            detail.put("recipientHash", recipientHash(row.recipient()));
+            detail.put("recipientDomain", row.recipient().substring(row.recipient().lastIndexOf('@') + 1));
+            detail.put("messageId", row.messageId());
+            detail.put("ledgerId", row.id());
+            detail.put("attempts", row.attempts());
+            if (providerResponse != null) {
+                detail.put("providerResponse", providerResponse);
+            }
+            if (error != null) {
+                detail.put("error", error);
+            }
+            ConversationMemorySnapshot snapshot = context.snapshot();
+            auditLedgerService.submit(new AuditEntry(UUID.randomUUID().toString(), row.conversationId(), snapshot.getAgentId(),
+                    snapshot.getAgentVersion(), null, snapshot.getEnvironment() == null ? null : snapshot.getEnvironment().toString(), -1,
+                    "email.notify", "email", -1, 0L, Map.of(), detail, null, null, List.of(), 0.0, Instant.now(), null, null));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Failed to audit HITL notification %s: %s", row.id(), e.getMessage());
+        }
+    }
+
+    /**
+     * SHA-256 of the normalised address, hex. The audit ledger is write-once, so it
+     * records who was mailed in a form that answers "was alice@… notified?" for
+     * someone who knows the address, without writing the address itself into an
+     * immutable store that GDPR erasure cannot reach.
+     */
+    static String recipientHash(String recipient) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(recipient.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    private static String truncate(String value, int max) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= max ? value : value.substring(0, max) + "…";
+    }
+
+    /** Package-private for tests: the gauge's last value. */
+    double pendingGauge() {
+        return pending.get();
+    }
+}

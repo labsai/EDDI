@@ -42,4 +42,13 @@ public class UserDirectoryGdprParticipant implements IGdprParticipant {
     public Object export(String userId) {
         return directory.export(userId).orElse(null);
     }
+
+    /**
+     * Last: other participants (the email ledger) look up this person's address
+     * here before it is erased.
+     */
+    @Override
+    public int order() {
+        return LAST;
+    }
 }
