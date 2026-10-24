@@ -257,7 +257,12 @@ class ToolLoopRunnerTenantCostBudgetTest {
         try {
             String result = execute(trace);
 
-            assertTrue(result.startsWith("Error: Tenant cost budget check failed"), result);
+            assertEquals("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE, result,
+                    "the model gets generic wording, not the internal exception class");
+            assertFalse(result.contains("IllegalStateException"), result);
+            assertTrue(trace.stream().filter(step -> "tool_error".equals(step.get("type")))
+                    .anyMatch(step -> String.valueOf(step.get("error")).contains("IllegalStateException")),
+                    "the trace keeps the exception class for diagnosis: " + trace);
             verify(executor, never()).execute(any(), nullable(String.class));
             assertEquals(1, trace.stream().filter(step -> "tool_error".equals(step.get("type"))).count(), trace.toString());
             assertFalse(warned(OUTAGE_SENTENCE), "a defect is not a quota-store outage; saw: " + warnings);

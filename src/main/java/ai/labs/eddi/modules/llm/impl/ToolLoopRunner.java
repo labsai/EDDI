@@ -1197,7 +1197,9 @@ class ToolLoopRunner {
                 errorStep.put("tool", toolRequest.name());
                 errorStep.put("error", checkError);
                 trace.add(errorStep);
-                return new ToolCallResult("Error: " + checkError);
+                // The exception class stays in the trace and the log; the model gets
+                // generic wording.
+                return new ToolCallResult("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE);
             }
             if (!costCheck.allowed()) {
                 // The reason string already distinguishes the two, but the log line

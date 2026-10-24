@@ -80,6 +80,13 @@ public class LlmSpendGate {
      */
     static final String REASON_TENANT_CHECK_ERROR = "tenant_check_error";
 
+    /**
+     * What the model is told when a tool call is refused for
+     * {@link #REASON_TENANT_CHECK_ERROR}. Deliberately generic: the exception class
+     * belongs in the log and the trace, not in a prompt.
+     */
+    static final String TENANT_CHECK_ERROR_MESSAGE = "Tenant cost budget could not be checked — denying request for safety";
+
     /** At most one stack trace per this interval for {@link #tenantCheckFailed}. */
     static final long CHECK_ERROR_LOG_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(1);
 
@@ -216,7 +223,9 @@ public class LlmSpendGate {
      * most once per {@link #CHECK_ERROR_LOG_INTERVAL_NANOS}, and without it
      * otherwise, since a defect here fires on every turn.
      *
-     * @return the refusal detail for the step record or the tool error result
+     * @return the refusal detail, naming the exception class, for the log, the step
+     *         record and the tool trace — never for the model, which gets
+     *         {@link #TENANT_CHECK_ERROR_MESSAGE}
      */
     static String tenantCheckFailed(MeterRegistry registry, String conversationId, String refusedWhat, RuntimeException e) {
         (registry != null ? registry : Metrics.globalRegistry).counter(METRIC, "reason", REASON_TENANT_CHECK_ERROR).increment();
@@ -248,9 +257,7 @@ public class LlmSpendGate {
     }
 
     private Refusal refused(IConversationMemory memory, Refusal refusal) {
-        if (meterRegistry != null) {
-            meterRegistry.counter(METRIC, "reason", refusal.reason()).increment();
-        }
+        (meterRegistry != null ? meterRegistry : Metrics.globalRegistry).counter(METRIC, "reason", refusal.reason()).increment();
         LOGGER.warnf("LLM call skipped in conversation %s (%s): %s", sanitize(memory != null ? memory.getConversationId() : null),
                 refusal.reason(), refusal.detail());
         return refusal;
