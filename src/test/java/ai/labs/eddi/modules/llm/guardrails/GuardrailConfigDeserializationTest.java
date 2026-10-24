@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Stored-config back-compat of
@@ -116,6 +117,21 @@ class GuardrailConfigDeserializationTest {
     void strictBoundary_acceptsGuardrails() {
         var parser = new StrictConfigurationParser(new ObjectMapper());
         assertDoesNotThrow(() -> parser.parse(GUARDED_JSON, LlmConfiguration.class));
+    }
+
+    @Test
+    @DisplayName("onExhausted round-trips, passes the strict REST boundary, and is not written when unset")
+    void onExhausted_roundTrips() throws Exception {
+        String json = "{ \"tasks\": [ { \"actions\": [\"a\"], \"id\": \"t\", \"type\": \"openai\", \"outputGuardrails\": [ "
+                + "{ \"type\": \"judge\", \"action\": \"reprompt\", \"maxRetries\": 1, \"onExhausted\": \"deliver-best\" } ] } ] }";
+        assertDoesNotThrow(() -> new StrictConfigurationParser(new ObjectMapper()).parse(json, LlmConfiguration.class));
+        var config = persistence.readValue(json, LlmConfiguration.class).tasks().get(0).getOutputGuardrails().get(0);
+        assertEquals("deliver-best", config.getOnExhausted());
+        assertTrue(config.deliversBest());
+        String written = persistence.writeValueAsString(persistence.readValue(json, LlmConfiguration.class));
+        assertTrue(written.contains("\"onExhausted\":\"deliver-best\""), written);
+        assertFalse(written.contains("deliversBest"), written);
+        assertFalse(persistence.writeValueAsString(persistence.readValue(GUARDED_JSON, LlmConfiguration.class)).contains("onExhausted"));
     }
 
     @Test

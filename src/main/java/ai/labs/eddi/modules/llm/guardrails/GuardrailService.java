@@ -76,6 +76,20 @@ public class GuardrailService {
     public static final String PARAM_FAIL_MODE = "failMode";
 
     /**
+     * Suffix of the {@code warn} reason recorded when a {@code deliver-best}
+     * guardrail's retries are spent and its best attempt is delivered.
+     */
+    public static final String DELIVERED_BEST_SUFFIX = ":delivered_best";
+
+    /** The list name {@link #validate} is given for a task's input guardrails. */
+    public static final String LIST_INPUT = "inputGuardrails";
+
+    /**
+     * The safety classifier's type, for the {@code deliver-best} deploy warning.
+     */
+    private static final String TYPE_CLASSIFIER = "classifier";
+
+    /**
      * Bound on the distinct unknown types warned about, so a typo cannot grow
      * memory.
      */
@@ -127,6 +141,10 @@ public class GuardrailService {
         }
         for (int i = 0; i < configs.size(); i++) {
             GuardrailConfig config = configs.get(i);
+            String exhaustion = config != null ? onExhaustedProblem(listName, config) : null;
+            if (exhaustion != null) {
+                problems.add(listName + "[" + i + "]: " + exhaustion);
+            }
             ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
             if (guardrail == null) {
                 continue;
@@ -137,6 +155,60 @@ public class GuardrailService {
             }
         }
         return problems;
+    }
+
+    /**
+     * {@code onExhausted}: {@code block} (the default, harmless anywhere) or
+     * {@code deliver-best}, which only means something for an output
+     * {@code reprompt} guardrail — anywhere else it would silently do nothing, so
+     * it is refused rather than ignored.
+     */
+    private static String onExhaustedProblem(String listName, GuardrailConfig config) {
+        String value = config.getOnExhausted();
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (GuardrailConfig.ON_EXHAUSTED_BLOCK.equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        if (!GuardrailConfig.ON_EXHAUSTED_DELIVER_BEST.equalsIgnoreCase(trimmed)) {
+            return "onExhausted must be 'block' or 'deliver-best'";
+        }
+        if (GuardrailAction.parse(config.getAction()) != GuardrailAction.REPROMPT) {
+            return "onExhausted 'deliver-best' needs action 'reprompt' — there are no retries to exhaust otherwise";
+        }
+        if (LIST_INPUT.equals(listName)) {
+            return "onExhausted 'deliver-best' applies to output guardrails only — an input reprompt blocks";
+        }
+        return null;
+    }
+
+    /**
+     * Configurations that work but deserve a WARN at deploy time, prefixed like
+     * {@link #validate}: each type's {@link ContentGuardrail#warnings}, and a
+     * {@code classifier} set to {@code deliver-best} — a safety check that delivers
+     * what it flagged defeats its purpose.
+     */
+    public List<String> warnings(String listName, List<GuardrailConfig> configs) {
+        List<String> warnings = new ArrayList<>();
+        if (configs == null) {
+            return warnings;
+        }
+        for (int i = 0; i < configs.size(); i++) {
+            GuardrailConfig config = configs.get(i);
+            ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
+            if (guardrail == null) {
+                continue;
+            }
+            if (config.deliversBest() && TYPE_CLASSIFIER.equals(config.getType())) {
+                warnings.add(listName + "[" + i + "]: onExhausted 'deliver-best' on a classifier delivers an answer the safety classifier flagged");
+            }
+            for (String warning : guardrail.warnings(config.getParameters())) {
+                warnings.add(listName + "[" + i + "]: " + warning);
+            }
+        }
+        return warnings;
     }
 
     /**
@@ -426,7 +498,10 @@ public class GuardrailService {
      * A {@code reprompt} finding asks the model again (through {@code reprompter})
      * and restarts the screening of the new answer from the first guardrail; once
      * the triggering guardrail's {@code maxRetries} are spent — or when no
-     * reprompter is available, or the turn is out of time — the answer is blocked.
+     * reprompter is available, or the turn is out of time — the answer is blocked,
+     * unless that guardrail's {@code onExhausted} is {@code deliver-best}: then the
+     * attempt it rated best is delivered with a {@code warn}, after one more pass
+     * through every other guardrail (see {@link #deliverBest}).
      *
      * @param reprompter
      *            the branch's way to ask the same model again, or null when this
@@ -444,9 +519,13 @@ public class GuardrailService {
         double cost = 0.0;
         int attempts = 0;
         boolean changed = false;
+        // deliver-best: per guardrail (by list index), the attempt it rated best so
+        // far.
+        Map<Integer, Rated> best = new LinkedHashMap<>();
 
         screening : while (true) {
-            for (GuardrailConfig config : configs) {
+            for (int index = 0; index < configs.size(); index++) {
+                GuardrailConfig config = configs.get(index);
                 ContentGuardrail guardrail = resolve(config, GuardrailPhase.OUTPUT);
                 if (guardrail == null) {
                     continue;
@@ -467,6 +546,10 @@ public class GuardrailService {
                 }
                 GuardrailVerdict verdict = evaluation.verdict();
                 cost += verdict.costUsd();
+                if (action == GuardrailAction.REPROMPT && config.deliversBest()) {
+                    // Ties go to the later attempt: it was written with more feedback.
+                    best.merge(index, new Rated(text, verdict), (previous, next) -> next.severity() <= previous.severity() ? next : previous);
+                }
                 if (!verdict.triggered()) {
                     continue;
                 }
@@ -485,15 +568,15 @@ public class GuardrailService {
                     case REPROMPT -> {
                         if (reprompter == null || attempts >= config.effectiveMaxRetries()
                                 || attempts >= GuardrailConfig.MAX_RETRIES_CEILING) {
-                            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                            return exhausted(configs, index, verdict, best, attempts, reprompts, cost, outputContext, onOutcome);
                         }
                         String corrective = correctiveMessage(config, verdict);
                         Reprompter.Attempt next = reprompter.reprompt(text, corrective);
                         if (next == null) {
                             LOGGER.infof(
-                                    "Output guardrail '%s' wanted a reprompt for task '%s' but none could start (turn out of time or the model's circuit is open) — blocking",
+                                    "Output guardrail '%s' wanted a reprompt for task '%s' but none could start (turn out of time or the model's circuit is open)",
                                     config.getType(), context.taskId());
-                            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                            return exhausted(configs, index, verdict, best, attempts, reprompts, cost, outputContext, onOutcome);
                         }
                         attempts++;
                         reprompts.add(next.metadata() != null ? next.metadata() : Map.of());
@@ -509,6 +592,91 @@ public class GuardrailService {
             break;
         }
         return new OutputResult(changed ? text : answer, null, reprompts, cost);
+    }
+
+    /** One attempt as a {@code deliver-best} guardrail saw and rated it. */
+    private record Rated(String text, GuardrailVerdict verdict) {
+        int severity() {
+            return verdict.severity();
+        }
+    }
+
+    /**
+     * A {@code reprompt} guardrail that may not reprompt again: blocked, or — with
+     * {@code onExhausted: deliver-best} — its best attempt delivered.
+     */
+    private OutputResult exhausted(List<GuardrailConfig> configs, int index, GuardrailVerdict verdict, Map<Integer, Rated> best, int attempts,
+                                   List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext,
+                                   Consumer<GuardrailOutcome> onOutcome) {
+        GuardrailConfig config = configs.get(index);
+        Rated chosen = best.get(index);
+        if (!config.deliversBest() || chosen == null) {
+            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+        }
+        return deliverBest(configs, index, chosen, attempts, reprompts, cost, outputContext, onOutcome);
+    }
+
+    /**
+     * Delivers the attempt the exhausted guardrail rated best (fewest issue codes;
+     * for a guardrail without codes, the last attempt), recorded as a {@code warn}
+     * with reason {@code <reason>:delivered_best} and the reprompts sent as its
+     * retry count. A quality check giving up must never let an answer past a PII
+     * redaction or a safety check, so the attempt goes through the whole list once
+     * more with the exhausted guardrail skipped and no further reprompts: a
+     * {@code redact} still rewrites it, a {@code warn} is still recorded, and a
+     * {@code block} — or a {@code reprompt}, which may not re-ask now — blocks it.
+     */
+    private OutputResult deliverBest(List<GuardrailConfig> configs, int exhaustedIndex, Rated chosen, int attempts,
+                                     List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext,
+                                     Consumer<GuardrailOutcome> onOutcome) {
+        GuardrailConfig exhausted = configs.get(exhaustedIndex);
+        String reason = chosen.verdict().reason() != null && !chosen.verdict().reason().isBlank() ? chosen.verdict().reason() : exhausted.getType();
+        emit(onOutcome, new GuardrailOutcome(exhausted.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, reason + DELIVERED_BEST_SUFFIX,
+                attempts));
+        LOGGER.infof("Output guardrail '%s' spent its retries for task '%s' — re-screening its best attempt for delivery", exhausted.getType(),
+                outputContext.taskId());
+        String text = chosen.text();
+        for (int index = 0; index < configs.size(); index++) {
+            if (index == exhaustedIndex) {
+                continue;
+            }
+            GuardrailConfig config = configs.get(index);
+            ContentGuardrail guardrail = resolve(config, GuardrailPhase.OUTPUT);
+            if (guardrail == null) {
+                continue;
+            }
+            GuardrailAction action = GuardrailAction.parse(config.getAction());
+            Evaluation evaluation = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
+                    outputContext.messages()));
+            if (evaluation.failed()) {
+                cost += evaluation.failureCostUsd();
+                if (failsClosed(config, action)) {
+                    return blocked(config, evaluation.failureReason(), attempts, reprompts, cost, onOutcome);
+                }
+                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
+                        attempts));
+                continue;
+            }
+            GuardrailVerdict verdict = evaluation.verdict();
+            cost += verdict.costUsd();
+            if (!verdict.triggered()) {
+                continue;
+            }
+            switch (action) {
+                case WARN -> emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, verdict.reason(),
+                        attempts));
+                case REDACT -> {
+                    text = verdict.kind() == GuardrailVerdict.Kind.REWRITE ? verdict.text() : blockMessage(config, GuardrailPhase.OUTPUT);
+                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.REDACT, verdict.reason(),
+                            attempts));
+                }
+                // BLOCK, and REPROMPT: no further reprompts once a best attempt is chosen.
+                default -> {
+                    return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                }
+            }
+        }
+        return new OutputResult(text, null, reprompts, cost);
     }
 
     private OutputResult blocked(GuardrailConfig config, String reason, int attempts, List<Map<String, Object>> reprompts, double cost,
