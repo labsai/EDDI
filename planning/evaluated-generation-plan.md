@@ -388,8 +388,21 @@ A job of 150 model calls over 20 minutes is many turns, never one: the per-reque
 
 Design Phase 9 around content fingerprints: a step's fingerprint hashes its config and its inputs (including
 asset bytes). An unchanged fingerprint reuses the stored result; a changed one recomputes that step and
-everything downstream. One mechanism then gives resume after a crash, "regenerate scene 3", and upstream repair,
-and enforces "never pay twice for the same output".
+everything downstream. One mechanism then gives resume after a crash, "regenerate scene 3", and upstream repair:
+a **completed** result is never bought again.
+
+Fingerprints alone do not stop a step being paid for twice while it runs: two nodes can both see the fingerprint
+missing and both start the billed call, and a provider can bill a request whose result EDDI never committed (a
+crash between the response and the write). "At most one paid execution per fingerprint" needs three more pieces,
+each a design item of E9, not a given:
+
+- **An atomic cross-node claim** on the fingerprint before the billed call (the conversation lease and fencing
+  token are the model, [`docs/clustering.md`](../docs/clustering.md)); a node that loses the claim waits for the
+  result instead of calling.
+- **A durable result commit** under that claim, so a completed result survives the node that produced it.
+- **Provider idempotency or reconciliation**: an idempotency key derived from the fingerprint where the provider
+  accepts one, otherwise a lookup of the provider's own operation (by its id, recorded before waiting) on
+  recovery — and, where neither exists, an honest statement that a crash mid-call can cost a second call.
 
 ### E10 — Composition service (sibling project, not core)
 
