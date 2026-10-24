@@ -46,6 +46,7 @@
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Conversation Ratings](conversation-ratings.md)
+- [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)

@@ -107,6 +107,12 @@ out, and only an admin sees who rated.
 
 `read_docs("conversation-ratings")` has the scales and filters.
 
+**Alerts.** Alert rules (written in the Manager or over REST) report low ratings and
+failed turns to an inbox, Slack or a webhook. `list_alert_events` with `acknowledged`
+false is the open inbox — each event names what matched and whether each target got
+it (a `FAILED` delivery carries its last error); `acknowledge_alert_event` closes one,
+recording the user you act for, so do it only when they ask. `read_docs("alerts")`.
+
 ## Debug
 
 "Why did it say that?" and "why did it fail?" have a fixed path — conversation log →
