@@ -23,6 +23,8 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
@@ -30,6 +32,8 @@ import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ResponseFormat;
@@ -44,6 +48,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -206,7 +211,7 @@ class LlmTaskOpenAiCompatibleTest {
         llmTask.execute(memory, config(false, "jsonMode", "${vars:missing}", "vision", "maybe"));
 
         assertNull(model.requests().getFirst().responseFormat());
-        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any(), eq(true));
     }
 
     @Test
@@ -240,10 +245,10 @@ class LlmTaskOpenAiCompatibleTest {
         llmTask.attachmentForwarder = forwarder;
 
         llmTask.execute(memory, config(false, "vision", "true"));
-        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any(), eq(true));
 
         llmTask.execute(memory, config(false));
-        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any(), eq(true));
     }
 
     // ---- per-cascade-step vision ----
@@ -306,7 +311,7 @@ class LlmTaskOpenAiCompatibleTest {
         llmTask.execute(memory, cascaded(new String[]{"vision", "true"}, "openai-compatible",
                 Map.of("baseUrl", "http://text:8000/v1", "modelName", "granite", "vision", "false")));
 
-        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any(), eq(true));
         verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.AUTO), any(), any(), eq(false));
         assertTrue(promptCarriesMarker(model), "the step is re-forwarded with ITS decision (AUTO), not the task's ON");
     }
@@ -319,7 +324,7 @@ class LlmTaskOpenAiCompatibleTest {
 
         llmTask.execute(memory, cascaded(new String[]{"vision", "true"}, "openai-compatible", Map.of()));
 
-        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), eq(false));
         assertTrue(!promptCarriesMarker(model));
     }
 
@@ -333,7 +338,7 @@ class LlmTaskOpenAiCompatibleTest {
 
         llmTask.execute(memory, cfg);
 
-        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), eq(false));
         assertTrue(!promptCarriesMarker(model));
     }
 
@@ -345,7 +350,103 @@ class LlmTaskOpenAiCompatibleTest {
 
         llmTask.execute(memory, config(false, "vision", "true"));
 
-        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any());
-        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        verify(forwarder).forward(any(), eq(memory), eq("openai-compatible"), eq("granite"), eq(Support.ON), any(), any(), eq(true));
+        verify(forwarder, never()).forward(any(), any(), any(), any(), any(), any(), any(), eq(false));
+    }
+
+    // ---- per-step attachments survive the input guardrails ----
+
+    private static final String IMAGE_B64 = "QQ==";
+
+    /**
+     * A forwarder that, when vision is ON, adds an image part to the last user
+     * message.
+     */
+    private void imageForwarder() {
+        var forwarder = mock(AttachmentForwarder.class);
+        doAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(0);
+            if (inv.getArgument(4) == Support.ON) {
+                for (int i = msgs.size() - 1; i >= 0; i--) {
+                    if (msgs.get(i) instanceof UserMessage user) {
+                        var contents = new ArrayList<>(user.contents());
+                        contents.add(ImageContent.from(IMAGE_B64, "image/png"));
+                        msgs.set(i, UserMessage.from(contents));
+                        break;
+                    }
+                }
+            }
+            return null;
+        }).when(forwarder).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+        llmTask.attachmentForwarder = forwarder;
+    }
+
+    private void userSays(String text) {
+        var inputData = mock(IData.class);
+        lenient().when(currentStep.getLatestData("input")).thenReturn(inputData);
+        lenient().when(inputData.getResult()).thenReturn(text);
+        var output = new ConversationOutput();
+        output.put("input", text);
+        lenient().when(memory.getConversationOutputs()).thenReturn(List.of(output));
+    }
+
+    private static UserMessage lastUser(FaultInjectingChatModel model) {
+        var msgs = model.requests().getFirst().messages();
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i) instanceof UserMessage user) {
+                return user;
+            }
+        }
+        throw new AssertionError("no user message: " + msgs);
+    }
+
+    private static boolean hasImage(UserMessage user) {
+        return user.contents().stream().anyMatch(ImageContent.class::isInstance);
+    }
+
+    private static String text(UserMessage user) {
+        return user.contents().stream().filter(TextContent.class::isInstance).map(c -> ((TextContent) c).text())
+                .collect(Collectors.joining("|"));
+    }
+
+    private LlmConfiguration cascadedWithRedaction(String[] taskFlags, Map<String, String> stepParams) {
+        var cfg = cascaded(taskFlags, "openai-compatible", stepParams);
+        var redact = new LlmConfiguration.GuardrailConfig();
+        redact.setType("pii-redaction");
+        redact.setAction("redact");
+        cfg.tasks().getFirst().setInputGuardrails(List.of(redact));
+        llmTask.guardrailService = new GuardrailService(
+                List.of(new PiiRedactionGuardrail()), new SimpleMeterRegistry());
+        return cfg;
+    }
+
+    @Test
+    @DisplayName("input guardrails: a vision step keeps its image AND the redaction when the task is text-only")
+    void guardrailKeepsStepImageAndRedaction() throws Exception {
+        var model = liveModel();
+        imageForwarder();
+        userSays("my mail is jane@example.org");
+
+        llmTask.execute(memory, cascadedWithRedaction(new String[0],
+                Map.of("baseUrl", "http://vlm:8000/v1", "modelName", "qwen-vl", "vision", "true")));
+
+        var sent = lastUser(model);
+        assertTrue(hasImage(sent), "the step's image must survive the guardrail reapply: " + sent);
+        assertTrue(text(sent).contains("[REDACTED:email]") && !text(sent).contains("jane@example.org"), text(sent));
+    }
+
+    @Test
+    @DisplayName("input guardrails: a text-only step does not receive the task's image, and is still redacted")
+    void guardrailDoesNotLeakTaskImageToTextStep() throws Exception {
+        var model = liveModel();
+        imageForwarder();
+        userSays("my mail is jane@example.org");
+
+        llmTask.execute(memory, cascadedWithRedaction(new String[]{"vision", "true"},
+                Map.of("baseUrl", "http://text:8000/v1", "modelName", "granite", "vision", "false")));
+
+        var sent = lastUser(model);
+        assertTrue(!hasImage(sent), "the task's image must not reach a step that cannot take it: " + sent);
+        assertTrue(text(sent).contains("[REDACTED:email]") && !text(sent).contains("jane@example.org"), text(sent));
     }
 }

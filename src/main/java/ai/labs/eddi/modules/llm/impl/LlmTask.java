@@ -51,6 +51,9 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -548,6 +551,7 @@ public class LlmTask implements ILifecycleTask {
         // current message reuses the first pass when unchanged; the earlier user
         // messages of the window are screened again. Redaction rewrites what the model
         // sees; conversation memory keeps the message as the user sent it.
+        final List<ChatMessage> promptBeforeScreening = messages;
         GuardrailService.InputResult inputScreening = null;
         if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
             inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
@@ -697,7 +701,8 @@ public class LlmTask implements ILifecycleTask {
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
                         turnBudget(memory.getTurnDeadline()),
-                        (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, memory, task, resolvedType, processedParams,
+                        (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
+                                processedParams,
                                 stepType, stepParams, screenedInput));
 
                 responseContent = cascadeResult.response();
@@ -1258,11 +1263,68 @@ public class LlmTask implements ILifecycleTask {
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
         String model = resolveModelNameOf(processedParams, resolvedType);
-        if (record) {
-            attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio);
-        } else {
-            attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio, false);
+        attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio, record);
+    }
+
+    /**
+     * The input guardrails' rewrites carried onto a cascade step's own prompt.
+     * <p>
+     * Not {@code GuardrailService#reapply}: that swaps the whole last user message
+     * for the task-level screened one, which carries the TASK's attachments and so
+     * would undo the step's. Instead each text part the screening changed in the
+     * task's prompt is rewritten, by its text, in the step's message; the step's
+     * image and document parts, and any text of its own (a "model does not support
+     * images" note), are kept. Earlier messages are the task's, screened or not.
+     */
+    static List<ChatMessage> carryScreening(List<ChatMessage> forStep, List<ChatMessage> beforeScreening,
+                                            GuardrailService.InputResult screened) {
+        if (screened == null || screened.messages() == null || screened.messages() == beforeScreening) {
+            return forStep;
         }
+        List<ChatMessage> after = screened.messages();
+        List<ChatMessage> result = new ArrayList<>(forStep);
+        int stepLast = lastUserMessageIndex(forStep);
+        for (int i = 0; i < Math.min(Math.min(beforeScreening.size(), after.size()), forStep.size()); i++) {
+            if (i == stepLast || after.get(i) == beforeScreening.get(i)) {
+                continue;
+            }
+            result.set(i, after.get(i));
+        }
+        int taskLast = lastUserMessageIndex(beforeScreening);
+        if (stepLast < 0 || taskLast < 0 || taskLast >= after.size() || !(after.get(taskLast) instanceof UserMessage screenedUser)
+                || !(beforeScreening.get(taskLast) instanceof UserMessage rawUser) || rawUser.contents().size() != screenedUser.contents().size()) {
+            return result;
+        }
+        Map<String, String> rewritten = new HashMap<>();
+        for (int c = 0; c < rawUser.contents().size(); c++) {
+            if (rawUser.contents().get(c) instanceof TextContent raw && screenedUser.contents().get(c) instanceof TextContent done
+                    && !raw.text().equals(done.text())) {
+                rewritten.put(raw.text(), done.text());
+            }
+        }
+        if (rewritten.isEmpty()) {
+            return result;
+        }
+        UserMessage stepUser = (UserMessage) forStep.get(stepLast);
+        List<Content> contents = new ArrayList<>();
+        for (Content content : stepUser.contents()) {
+            if (content instanceof TextContent text && rewritten.containsKey(text.text())) {
+                contents.add(TextContent.from(rewritten.get(text.text())));
+            } else {
+                contents.add(content);
+            }
+        }
+        result.set(stepLast, stepUser.toBuilder().contents(contents).build());
+        return result;
+    }
+
+    private static int lastUserMessageIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof UserMessage) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -1284,7 +1346,8 @@ public class LlmTask implements ILifecycleTask {
      * endpoint, and any step when neither side is openai-compatible — keeps the
      * task's prompt.
      */
-    private List<ChatMessage> promptForCascadeStep(List<ChatMessage> promptWithoutAttachments, IConversationMemory memory, Task task,
+    private List<ChatMessage> promptForCascadeStep(List<ChatMessage> promptWithoutAttachments, List<ChatMessage> promptBeforeScreening,
+                                                   IConversationMemory memory, Task task,
                                                    String taskType, Map<String, String> taskParams, String stepType,
                                                    Map<String, String> stepParams, GuardrailService.InputResult screenedInput) {
         if (attachmentForwarder == null || !(OpenAiCompatibleEndpoint.isType(taskType) || OpenAiCompatibleEndpoint.isType(stepType))) {
@@ -1299,7 +1362,7 @@ public class LlmTask implements ILifecycleTask {
         List<ChatMessage> forStep = new ArrayList<>(promptWithoutAttachments);
         // The turn's errors and counts were recorded by the task-level pass.
         forwardAttachments(forStep, memory, task, stepType, stepParams, false);
-        return reapplyInputScreening(memory, task, screenedInput, forStep);
+        return carryScreening(forStep, promptBeforeScreening, screenedInput);
     }
 
     /**
