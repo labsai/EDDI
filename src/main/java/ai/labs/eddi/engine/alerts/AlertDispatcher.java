@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.alerts;
 
 import ai.labs.eddi.engine.ratings.ConversationRatingSaved;
-import io.micrometer.core.instrument.Gauge;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -56,8 +55,7 @@ public class AlertDispatcher {
             thread.setDaemon(true);
             return thread;
         }, new ThreadPoolExecutor.AbortPolicy());
-        Gauge.builder(AlertMetrics.QUEUE_DEPTH, executor, e -> e.getQueue().size()).description("Alert work waiting for the alert worker")
-                .register(metrics.registry());
+        metrics.registerQueueDepth(executor);
     }
 
     public void onRatingSaved(@Observes ConversationRatingSaved saved) {

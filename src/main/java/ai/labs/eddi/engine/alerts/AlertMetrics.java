@@ -7,11 +7,13 @@ package ai.labs.eddi.engine.alerts;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget.DeliveryType;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.util.Locale;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * Micrometer meters for alerting, exposed at {@code /q/metrics}:
@@ -50,8 +52,9 @@ public class AlertMetrics {
         this.registry = registry;
     }
 
-    MeterRegistry registry() {
-        return registry;
+    /** The queue-depth gauge of the alert worker. */
+    void registerQueueDepth(ThreadPoolExecutor executor) {
+        Gauge.builder(QUEUE_DEPTH, executor, e -> e.getQueue().size()).description("Alert work waiting for the alert worker").register(registry);
     }
 
     public void fired(AlertSource source) {
