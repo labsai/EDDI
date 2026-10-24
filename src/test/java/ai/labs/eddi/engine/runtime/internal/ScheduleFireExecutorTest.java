@@ -121,6 +121,23 @@ class ScheduleFireExecutorTest {
      * nothing was ever dead-lettered, and the deadlettered counter operators are
      * told to alert on stayed flat while a nightly agent errored for a month.
      */
+    /**
+     * The fire-time check covers every path that stores a schedule (REST, MCP,
+     * import): a fire never acts as a reserved agent-test user id.
+     */
+    @Test
+    void aScheduleRunningAsAReservedAgentTestUserIdIsNotFired() {
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("sched-1");
+        schedule.setUserId("Agent-Test:0123456789abcdef01234567:0:1");
+
+        var e = assertThrows(IllegalStateException.class, () -> ScheduleFireExecutor.scheduleUserId(schedule));
+
+        assertTrue(e.getMessage().contains("reserved"), e.getMessage());
+        schedule.setUserId("alice");
+        assertEquals("alice", ScheduleFireExecutor.scheduleUserId(schedule));
+    }
+
     @Test
     void fire_conversationEndedInError_isRecordedFailedNotCompleted() throws Exception {
         var schedule = makeCronSchedule("sched-err", "new");

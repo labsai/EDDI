@@ -270,10 +270,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Set<String> substitutedSecrets = new HashSet<>();
         // A call reached through the LLM tool path was already intercepted (and
         // recorded) by ToolLoopRunner; only a rule-triggered call is intercepted here.
-        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER);
-        // The mock the LLM tool path already chose for this call, if any.
-        final ToolMockRegistry.MockResult toolPathMock = !ruleTriggered
-                && templateDataObjects.get(ToolMockRegistry.TOOL_PATH_MOCK) instanceof ToolMockRegistry.MockResult chosen ? chosen : null;
+        //
+        // The mock the LLM tool path already chose travels as a MockResult. Anything
+        // else under that key is not a decision of ToolLoopRunner's, so the call is
+        // treated as undecided and intercepted here: mocked or refused in a test
+        // conversation, sent as usual in any other.
+        Object chosenMock = templateDataObjects.get(ToolMockRegistry.TOOL_PATH_MOCK);
+        final boolean forgedMock = chosenMock != null && !(chosenMock instanceof ToolMockRegistry.MockResult);
+        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER) || forgedMock;
+        final ToolMockRegistry.MockResult toolPathMock = !ruleTriggered && chosenMock instanceof ToolMockRegistry.MockResult chosen ? chosen : null;
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 

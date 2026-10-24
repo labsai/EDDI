@@ -12,8 +12,6 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.util.Locale;
-
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -176,11 +174,24 @@ public class OwnershipValidator {
         // tool calls would be recorded into the run's results and answered by its
         // mocks. The runner starts its conversations below this check, so nothing
         // legitimate arrives here with such an id.
-        if (requestedUserId != null && requestedUserId.strip().toLowerCase(Locale.ROOT).startsWith(AgentTestConversations.USER_ID_PREFIX)) {
+        if (AgentTestConversations.isReservedUserId(requestedUserId)) {
             LOGGER.warnf("Conversation start refused: the requested user id is in the reserved agent-test namespace");
             throw new ForbiddenException("Access denied: user ids starting with '" + AgentTestConversations.USER_ID_PREFIX
                     + "' are reserved for agent test runs");
         }
+        String resolved = resolveUserId(identity, requestedUserId);
+        // And the resolved id: a caller's own principal is what an empty request
+        // resolves to. Such a principal is refused at authentication already
+        // (ReservedPrincipals); this keeps the guarantee local.
+        if (AgentTestConversations.isReservedUserId(resolved)) {
+            LOGGER.warnf("Conversation start refused: the caller's identity is in the reserved agent-test namespace");
+            throw new ForbiddenException("Access denied: user ids starting with '" + AgentTestConversations.USER_ID_PREFIX
+                    + "' are reserved for agent test runs");
+        }
+        return resolved;
+    }
+
+    private String resolveUserId(SecurityIdentity identity, String requestedUserId) {
         if (!authEnabled) {
             return requestedUserId;
         }

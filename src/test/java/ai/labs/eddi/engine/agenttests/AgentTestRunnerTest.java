@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Expectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.PropertyExpectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.TestCase;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Turn;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.ScriptedEngine.Step;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun.AttemptResult;
@@ -35,6 +36,7 @@ import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -83,6 +85,11 @@ class AgentTestRunnerTest {
     private static AgentTestRun started(boolean keep) {
         return new AgentTestRun(RUN_ID, "bbbbbbbbbbbbbbbbbbbbbbbb", 3, "wizard", AGENT_ID, 7, AgentTestRun.Status.RUNNING, "alice", 1L, null, null,
                 null, null, null, null, null, null, null, null, keep, null, null, null);
+    }
+
+    private static AgentTestRun startedWithHeartbeat(long heartbeatAt) {
+        return new AgentTestRun(RUN_ID, "bbbbbbbbbbbbbbbbbbbbbbbb", 3, "wizard", AGENT_ID, 7, AgentTestRun.Status.RUNNING, "alice", 1L, null, null,
+                null, null, null, null, null, null, null, null, false, null, "node-a/boot0001", heartbeatAt);
     }
 
     private static Expectation actions(String... contain) {
@@ -345,21 +352,75 @@ class AgentTestRunnerTest {
      * write must be the last one: a heartbeat after it would put RUNNING back.
      */
     @Test
-    @DisplayName("a running run's heartbeat is refreshed, and nothing is written after the final record")
+    @DisplayName("a running run's heartbeat is refreshed by compare-and-swap, and nothing is written after the final record")
     void heartbeatRunsUntilTheFinalWrite() throws Exception {
         var engine = engine();
         engine.neverAnswer = true;
         var runner = new AgentTestRunner(engine.service, runStore, conversationStore, auditLedger, new SimpleMeterRegistry(), 4, 50, 20);
-        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
-        verify(runStore, timeout(5_000).atLeast(2)).update(argThat(r -> r.status() == AgentTestRun.Status.RUNNING && r.heartbeatAt() != null));
+        var result = CompletableFuture.supplyAsync(() -> runner.run(startedWithHeartbeat(5L), suite(null, null, happyPath())));
+        verify(runStore, timeout(5_000).atLeast(2)).updateIfHeartbeat(argThat(r -> r.status() == AgentTestRun.Status.RUNNING), anyLong());
 
         runner.cancel(RUN_ID, "bob");
         AgentTestRun finished = result.get(10, TimeUnit.SECONDS);
         Thread.sleep(100);
 
-        var captor = ArgumentCaptor.forClass(AgentTestRun.class);
-        verify(runStore, atLeast(3)).update(captor.capture());
-        assertEquals(finished, captor.getAllValues().getLast(), "the final record is the last write");
+        var records = ArgumentCaptor.forClass(AgentTestRun.class);
+        var expected = ArgumentCaptor.forClass(Long.class);
+        verify(runStore, atLeast(3)).updateIfHeartbeat(records.capture(), expected.capture());
+        assertEquals(finished, records.getAllValues().getLast(), "the final record is the last write");
+        // Each write expects the heartbeat the one before stored: a chain no other
+        // writer can join.
+        assertEquals(5L, expected.getAllValues().getFirst());
+        for (int i = 1; i < expected.getAllValues().size(); i++) {
+            assertEquals(records.getAllValues().get(i - 1).heartbeatAt(), expected.getAllValues().get(i));
+        }
+        verify(runStore, never()).update(any());
+    }
+
+    /**
+     * Another node saw the heartbeat stop and closed the run as ABORTED. The
+     * owner's next beat fails its compare-and-swap: it must stop the run, not write
+     * RUNNING (or its own verdict) back over what pollers already saw.
+     */
+    @Test
+    @DisplayName("a run closed by another node stops at its next heartbeat and writes nothing back")
+    void lostOwnershipStopsTheRun() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        doThrow(new IResourceStore.ResourceModifiedException("heartbeat changed")).when(runStore).updateIfHeartbeat(any(), anyLong());
+        var runner = new AgentTestRunner(engine.service, runStore, conversationStore, auditLedger, new SimpleMeterRegistry(), 4, 50, 20);
+
+        AgentTestRun run = CompletableFuture.supplyAsync(() -> runner.run(startedWithHeartbeat(5L), suite(null, null, happyPath())))
+                .get(10, TimeUnit.SECONDS);
+
+        assertNotNull(run);
+        verify(runStore, never()).update(any());
+        verify(auditLedger, never()).submit(any());
+        assertFalse(runner.isActive(RUN_ID));
+    }
+
+    /**
+     * A turn given up on can finish in the engine after its conversation was ended
+     * and deleted, and write it back: once it completes, the conversation is
+     * deleted again.
+     */
+    @Test
+    @DisplayName("a conversation whose abandoned turn finishes late is deleted again")
+    void abandonedTurnIsPurgedAgainWhenItFinishes() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = runner(engine, 4);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
+        verify(engine.service, timeout(5_000)).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+        runner.cancel(RUN_ID, "bob");
+        result.get(10, TimeUnit.SECONDS);
+        String conversationId = engine.conversations.keySet().iterator().next();
+        verify(conversationStore, times(1)).purgeAgentTestConversation(conversationId, RUN_ID);
+
+        engine.unanswered.getFirst().onComplete(null);
+
+        verify(conversationStore, timeout(15_000).times(2)).purgeAgentTestConversation(conversationId, RUN_ID);
     }
 
     @Test

@@ -205,26 +205,40 @@ public final class ToolMockRegistry {
 
         /** null: execute for real. */
         private MockResult answer(String tool, String arguments, String source, boolean withArguments) {
+            Decision decision = decide(tool, arguments, source, withArguments);
+            record(tool, arguments, source, decision.outcome());
+            return decision.result();
+        }
+
+        /** How the call would be answered; records nothing. */
+        private Decision decide(String tool, String arguments, String source, boolean withArguments) {
             if (!mockMode && !SOURCE_MEMORY.equals(source)) {
-                record(tool, arguments, source, Outcome.LIVE);
-                return null;
+                return new Decision(Outcome.LIVE, null);
             }
             ToolMock mock = find(tool, arguments, withArguments);
             if (mock != null) {
-                record(tool, arguments, source, Outcome.MOCKED);
-                return new MockResult(mock.response().effectiveHttpCode(), mock.response().body(), Outcome.MOCKED);
+                return new Decision(Outcome.MOCKED,
+                        new MockResult(mock.response().effectiveHttpCode(), mock.response().body(), Outcome.MOCKED));
             }
             if (allowsLive()) {
                 if (SOURCE_MEMORY.equals(source)) {
-                    record(tool, arguments, source, Outcome.BLOCKED);
-                    return new MockResult(NOT_EXECUTED_HTTP_CODE, MEMORY_BLOCKED_JSON, Outcome.BLOCKED);
+                    return new Decision(Outcome.BLOCKED, new MockResult(NOT_EXECUTED_HTTP_CODE, MEMORY_BLOCKED_JSON, Outcome.BLOCKED));
                 }
-                record(tool, arguments, source, Outcome.LIVE);
-                return null;
+                return new Decision(Outcome.LIVE, null);
             }
-            record(tool, arguments, source, Outcome.NOT_EXECUTED);
-            return new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED);
+            return new Decision(Outcome.NOT_EXECUTED, new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED));
         }
+    }
+
+    /**
+     * How a call is to be answered.
+     *
+     * @param outcome
+     *            the outcome to record once the call is made
+     * @param result
+     *            the answer instead of executing; null for {@link Outcome#LIVE}
+     */
+    public record Decision(Outcome outcome, MockResult result) {
     }
 
     /**
@@ -276,6 +290,39 @@ public final class ToolMockRegistry {
         return session != null
                 ? session.answer(tool, arguments, source, true)
                 : new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED);
+    }
+
+    /**
+     * How an LLM tool call of a test conversation would be answered, without
+     * recording it — for a caller that has gates of its own to pass first (budget,
+     * quota, turn deadline) and records with {@link #recordToolCall} only once the
+     * call is really made. {@code null}: not a test conversation, or an internal
+     * tool — execute it and record nothing.
+     */
+    public static Decision previewToolCall(IConversationMemory memory, String tool, String arguments, String source) {
+        String userId = memory != null ? memory.getUserId() : null;
+        if (!AgentTestConversations.isTestUserId(userId) || INTERNAL_TOOLS.contains(tool)) {
+            return null;
+        }
+        Session session = SESSIONS.get(userId);
+        return session != null
+                ? session.decide(tool, arguments, source, true)
+                : new Decision(Outcome.NOT_EXECUTED, new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED));
+    }
+
+    /**
+     * Records a call {@link #previewToolCall} decided, now that it is made. A no-op
+     * for a conversation that is not a test, or whose session is gone.
+     */
+    public static void recordToolCall(IConversationMemory memory, String tool, String arguments, String source, Outcome outcome) {
+        String userId = memory != null ? memory.getUserId() : null;
+        if (!AgentTestConversations.isTestUserId(userId) || outcome == null) {
+            return;
+        }
+        Session session = SESSIONS.get(userId);
+        if (session != null) {
+            session.record(tool, arguments, source, outcome);
+        }
     }
 
     /**

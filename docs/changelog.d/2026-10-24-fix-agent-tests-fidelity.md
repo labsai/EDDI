@@ -62,3 +62,39 @@ Review follow-ups to the agent regression harness (PR #1065).
 - A run recorded before 6.6 (no owner, no heartbeat) counts from its `startedAt`.
 
 **Files:** [`ToolLoopRunner.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolLoopRunner.java), [`MockAwareToolExecutor.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/MockAwareToolExecutor.java), [`HttpCallToolsProvider.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/HttpCallToolsProvider.java), [`ApiCallExecutor.java`](../../src/main/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutor.java), [`ToolMockRegistry.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/ToolMockRegistry.java), [`AgentTestRunner.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestRunner.java), [`AgentTestService.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestService.java), [`AgentTestRunRecovery.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestRunRecovery.java), [`ConversationPurgeService.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationPurgeService.java), [`OwnershipValidator.java`](../../src/main/java/ai/labs/eddi/engine/security/OwnershipValidator.java), [`agent-testing.md`](../agent-testing.md)
+
+## 🐛 fix(agent-tests): review follow-ups — skew-proof orphan detection, CAS heartbeats, reserved ids at schedules (2026-10-24)
+
+**Repo:** EDDI (`fix/agent-tests-fidelity`)
+
+### What changed and why
+
+- **Recovery can no longer abort a live run.** Staleness compared another node's
+  `heartbeatAt` with the local clock (clock skew or a short write outage aborted a
+  live run and deleted its conversations), and the "earlier boot of this node" rule
+  needed no heartbeat at all — two EDDI processes on one host share a host-derived
+  node id and aborted each other's runs. Now a run is an orphan only when its
+  heartbeat has not *changed* across this node's own sweeps for 3 minutes (90 s for
+  the same node id, another boot), timed on the observer's monotonic clock; the
+  sweep runs every minute.
+- **Heartbeat, abort and final write are compare-and-swaps on `heartbeatAt`**
+  (`IAgentTestRunStore.updateIfHeartbeat`, `storeIfFieldEquals`). An abort clears
+  the heartbeat; the owner's next beat then fails, and the owner stops the run and
+  writes nothing back — the record no longer flips from `ABORTED` to `RUNNING`.
+- **Abandoned turns.** A turn given up on (timeout or cancel) can finish after its
+  conversation was deleted; once it completes, the conversation is deleted again.
+- **Tool calls are recorded after the loop's gates.** A mocked httpcall tool (or a
+  live call) refused by the tool budget, tenant quota or turn deadline no longer
+  counts as a call (`ToolMockRegistry.previewToolCall` / `recordToolCall`).
+- **Reserved `agent-test:` ids** are also refused at REST schedule save and at
+  every schedule fire, and `OwnershipValidator` checks the resolved id as well as
+  the requested one.
+- **A non-`MockResult` under the tool-path mock key never mocks**: the call is
+  treated as undecided — refused in a test conversation, sent in any other.
+- **Permanent delete removes HITL tool-journal entries** too, as GDPR erasure does.
+- **Platform Operator** may cancel a run (`POST /agenttests/runs/{runId}/cancel`,
+  gated) and knows the terminal statuses; revision 37.
+- **i18n:** `ABORTED` is "interrupted" in de, es, pt, hi, th and ar, so it no longer
+  reads the same as `CANCELLED`.
+
+**Files:** [`AgentTestRunRecovery.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestRunRecovery.java), [`AgentTestRunner.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestRunner.java), [`AgentTestRunStore.java`](../../src/main/java/ai/labs/eddi/engine/agenttests/AgentTestRunStore.java), [`ToolLoopRunner.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolLoopRunner.java), [`ScheduleFireExecutor.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java), [`ConversationPurgeService.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationPurgeService.java), [`agent-testing.md`](../agent-testing.md)

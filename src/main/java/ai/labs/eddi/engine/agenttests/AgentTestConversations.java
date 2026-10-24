@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import java.util.Locale;
+
 /**
  * What marks a conversation as an agent-test conversation: its user id.
  * <p>
@@ -25,10 +27,14 @@ package ai.labs.eddi.engine.agenttests;
  * record of tool calls are keyed on these user ids, so a conversation started
  * from outside with a live run's id would join that run's session and write
  * into its results: a caller-supplied user id in this namespace is refused at
- * every external conversation start ({@code OwnershipValidator}), whoever the
- * caller and whether or not authorization is on. The runner starts its
- * conversations through {@code IConversationService} directly, below that
- * check.
+ * external conversation start ({@code OwnershipValidator}: REST, MCP, group
+ * conversations — the requested and the resolved id both), at schedule save
+ * ({@code RestScheduleStore}) and at every schedule fire
+ * ({@code ScheduleFireExecutor}), whoever the caller and whether or not
+ * authorization is on; a signed-in principal with such a name is refused at
+ * authentication ({@code ReservedPrincipals}). The runner starts its
+ * conversations through {@code IConversationService} directly, below those
+ * checks.
  *
  * @since 6.5.0
  */
@@ -46,6 +52,15 @@ public final class AgentTestConversations {
     /** A plain prefix check: the whole cost for every non-test conversation. */
     public static boolean isTestUserId(String userId) {
         return userId != null && userId.startsWith(USER_ID_PREFIX);
+    }
+
+    /**
+     * Whether a user id supplied from outside the runner falls in the reserved
+     * namespace — compared ignoring case and surrounding blanks, as
+     * {@code ReservedPrincipals} does, so no spelling of it gets through.
+     */
+    public static boolean isReservedUserId(String userId) {
+        return userId != null && userId.strip().toLowerCase(Locale.ROOT).startsWith(USER_ID_PREFIX);
     }
 
     /** The user id of one repetition of one case of a run. */

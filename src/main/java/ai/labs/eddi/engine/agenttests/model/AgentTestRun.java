@@ -96,11 +96,15 @@ public record AgentTestRun(String id, String suiteId, Integer suiteVersion, Stri
         CANCELLED
     }
 
-    /** This run, finished as {@link Status#ABORTED} with {@code reason}. */
+    /**
+     * This run, finished as {@link Status#ABORTED} with {@code reason}. The
+     * heartbeat is cleared, so the owner's next compare-and-swap on it fails and
+     * the owner learns its run was closed.
+     */
     public AgentTestRun aborted(String reason, long now) {
         return new AgentTestRun(id, suiteId, suiteVersion, suiteName, agentId, agentVersion, Status.ABORTED, startedBy, startedAt, now,
                 startedAt != null ? now - startedAt : null, totalCostUsd, maxCostPerRun, costCeilingReached, models, casesTotal, casesPassed,
-                casesFailed, cases, keepConversations, reason, ownerNode, heartbeatAt);
+                casesFailed, cases, keepConversations, reason, ownerNode, null);
     }
 
     public AgentTestRun withId(String newId) {

@@ -73,6 +73,20 @@ class AgentTestRunStoreTest {
         verify(storage).store(stored);
     }
 
+    /**
+     * The heartbeat chain and the orphan abort rely on this being one atomic CAS.
+     */
+    @Test
+    void updateIfHeartbeatIsACompareAndSwapOnHeartbeatAt() throws Exception {
+        var stored = resource(RUN_ID, null);
+        when(storage.newResource(eq(RUN_ID), eq(1), any(AgentTestRun.class))).thenReturn(stored);
+
+        store.updateIfHeartbeat(run(RUN_ID), 42L);
+
+        verify(storage).storeIfFieldEquals(stored, "heartbeatAt", 42L);
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
+    }
+
     @Test
     void readOfUnknownRunIsNotFound() {
         when(storage.read(RUN_ID, 1)).thenReturn(null);

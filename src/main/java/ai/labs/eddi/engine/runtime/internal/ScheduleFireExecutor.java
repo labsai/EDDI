@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -794,7 +795,14 @@ public class ScheduleFireExecutor {
     }
 
     /** The user a conversation this schedule starts belongs to. */
-    private static String scheduleUserId(ScheduleConfiguration schedule) {
+    static String scheduleUserId(ScheduleConfiguration schedule) {
+        // A run's tool mocks and call record are keyed on its conversations' user
+        // ids; a fire acting as one would join a live run's session. Refused here,
+        // where every fire passes, whatever path stored the schedule.
+        if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
+            throw new IllegalStateException("Schedule " + schedule.getId() + " runs as a user id in the reserved '"
+                    + AgentTestConversations.USER_ID_PREFIX + "' namespace; it is not fired. Change its userId.");
+        }
         return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
     }
 

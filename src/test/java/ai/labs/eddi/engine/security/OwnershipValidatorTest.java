@@ -166,6 +166,13 @@ class OwnershipValidatorTest {
         }
 
         @Test
+        @DisplayName("refuses a caller whose own identity resolves into the agent-test namespace")
+        void refusesAReservedResolvedIdentity() {
+            var identity = authenticatedIdentity("agent-test:0123456789abcdef01234567:0:1", false);
+            assertThrows(ForbiddenException.class, () -> new OwnershipValidator(true).validateAndResolveUserId(identity, null));
+        }
+
+        @Test
         @DisplayName("returns requestedUserId as-is when auth is disabled")
         void returnsRequestedUserId_whenAuthDisabled() {
             var validator = new OwnershipValidator(false);

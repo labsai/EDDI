@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.MockResponse;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -139,6 +141,42 @@ class ToolLoopRunnerAgentTestMockTest {
         verify(service).executeToolWrapped(any(ToolInvocation.class), any(), any(), any(), any(), anyBoolean(), eq(false), eq(false), anyInt(),
                 anyInt());
         assertEquals(Boolean.TRUE, trace.get(trace.size() - 1).get("mocked"));
+    }
+
+    /**
+     * A mock handed to an executor still has to pass the loop's own gates. One a
+     * gate refuses was never made, so it must not count as a call of the turn.
+     */
+    @Test
+    @DisplayName("a mock refused by the turn deadline before the executor runs is not recorded")
+    void mockRefusedByAGateIsNotRecorded() {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null,
+                List.of(new ToolMock("getAvailability", null, new MockResponse(200, "3"))), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        executors.put("getAvailability", new MockAwareToolExecutor() {
+            @Override
+            public String execute(ToolExecutionRequest request, Object memoryId) {
+                return "real " + executed.incrementAndGet();
+            }
+
+            @Override
+            public String executeMocked(ToolExecutionRequest request, ToolMockRegistry.MockResult mock) {
+                return "mocked " + executed.incrementAndGet();
+            }
+        });
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getUserId()).thenReturn(TEST_USER);
+        when(memory.getTurnDeadline()).thenReturn(TurnDeadline.of(Clock.systemUTC(), 0L, 1_000L, 0L));
+        var task = new LlmConfiguration.Task();
+        task.setId("t");
+
+        var result = runner.executeToolCall(ToolExecutionRequest.builder().id("c1").name("getAvailability").arguments("{}").build(), memory,
+                new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("getAvailability", "http"), 100, null, "conv-1", false, false,
+                false, task, false, List.of(), new ArrayList<>());
+
+        assertTrue(result.notExecuted(), result.raw());
+        assertEquals(0, executed.get());
+        assertEquals(List.of(), session.calls());
     }
 
     @Test

@@ -51,7 +51,7 @@ regexes are there too, as the secondary signal.
 7. The run record is updated to `PASSED`, `FAILED`, `ERROR` or `CANCELLED`, and one
    summary entry is written to the [audit ledger](audit-ledger.md)
    (`taskId: ai.labs.agenttest`). While it runs, the record's `heartbeatAt` is
-   refreshed every 30 seconds.
+   refreshed every 30 seconds (see [Known limitations](#known-limitations)).
 
 ### What a test conversation does not do
 
@@ -197,7 +197,11 @@ Exceptions:
   `unmockedToolCalls`.
 - Mocked calls cost $0, and are never served from or stored in the tool-result cache.
 - A call is recorded once, however often it is retried — a retried live call is one
-  tool call too — so a retry does not count against `maxToolCalls` again.
+  tool call too — so a retry does not count against `maxToolCalls` again. An LLM
+  tool call that goes through its executor (an httpcall tool's mock, or any call
+  the suite runs live) is recorded only once the loop's own gates — tool budget,
+  tenant quota, turn deadline — have let it through; one they refuse was never
+  made and is not counted.
 - Listing an MCP server's tools to build an LLM's tool set still happens in a test
   (it reads a schema, it does not call a tool).
 
@@ -336,20 +340,37 @@ Metrics: `eddi_agent_tests_runs_total{status}`, `eddi_agent_tests_turns_total`,
   defined in test mode*, so the two causes cannot be confused.
 - A run executes on the node that accepted it, and can be cancelled only there. If
   that node stops mid-run, the record is marked **`ABORTED`** (with the reason in
-  `error`) and the run's test conversations are deleted. Start the run again. Any
-  node sharing the database does this — at its startup and every three minutes —
-  for a run whose owner was an earlier boot of itself, or whose `heartbeatAt` is
-  more than three minutes old; so replicas that share one database without cluster
-  mode never close each other's live runs. A run recorded before the owner and
-  heartbeat fields existed counts from its `startedAt`.
+  `error`) and the run's test conversations are deleted. Start the run again.
+  Every node sharing the database checks, every minute, whether the `heartbeatAt`
+  of each `RUNNING` run it does not execute itself has *changed* since it last
+  looked; a run whose heartbeat has stood still for three minutes (90 seconds when
+  the owner carries this node's id — a restart of this process, or a second
+  process on the same host) is closed. Only equality of the owner's timestamp is
+  compared, on the observer's own clock, so clock skew between nodes does not
+  matter, and a live run is never closed while its heartbeat moves. The close is a
+  compare-and-swap on the heartbeat that stood still: a heartbeat arriving in
+  between wins. A run recorded before the owner and heartbeat fields existed is
+  closed once it has been seen unchanged for three minutes.
+- The flip side: an owner that cannot write its heartbeat for three minutes (a
+  database outage on its side) loses the run. Another node closes it, the owner's
+  next heartbeat finds the record changed, and the owner stops the run without
+  writing anything back — the record stays `ABORTED`, and no result is audited.
+- A turn that times out, or is abandoned by a cancel, may still be running in the
+  engine after its conversation was ended and deleted. When it completes (or after
+  another turn timeout), the conversation is deleted again, in case the turn wrote
+  it back.
 - Test conversations count against the tenant's conversation quota and, while a
   run is in progress, appear in conversation listings and conversation metrics —
   and in what is computed from them — like any other conversation of the agent (environment `test`, user id
   `agent-test:…`). They are deleted when the run ends unless it keeps them.
-- User ids starting with `agent-test:` are reserved: starting a conversation with
-  one through REST, MCP or a group conversation is refused with 403, for an admin
-  and with authorization off too. A run's mocks and its record of tool calls are
-  keyed on those ids, so an outside conversation must not join them.
+- User ids starting with `agent-test:` (in any case) are reserved: starting a
+  conversation with one through REST, MCP or a group conversation is refused with
+  403, for an admin and with authorization off too — whether it is requested or is
+  the caller's own identity — a schedule with one is refused when it is saved over
+  REST (400), and any schedule with one, however it was stored, is not fired. A
+  signed-in principal with such a name is refused at authentication. A run's mocks
+  and its record of tool calls are keyed on those ids, so an outside conversation
+  must not join them.
 - A mocked httpcall — rule-triggered or an LLM tool — is never *built*: its
   `${vault:}`, `${connection:}` and `${caller:}` references are not resolved, so a
   mocked call whose headers need `${caller:token}` works in a test although there

@@ -1143,17 +1143,21 @@ class ToolLoopRunner {
 
         // Agent test harness: a test conversation's tool call is answered by its
         // suite's mock (or refused) and never reaches the outside world. A no-op
-        // prefix check for every other conversation. The call is decided and recorded
-        // here, once. A refusal, and a mock for any tool whose executor has no use
-        // for it, return early; a mock for a MockAwareToolExecutor (an httpcall tool)
-        // goes through that executor below instead, so the response handling a live
-        // call gets — saveResponse, postResponse property instructions — runs on it.
+        // prefix check for every other conversation. The call is decided here and
+        // recorded once. A refusal, and a mock for any tool whose executor has no use
+        // for it, are recorded and return early; a mock for a MockAwareToolExecutor
+        // (an httpcall tool), and a call the suite runs live, go through the executor
+        // below instead — so the response handling a live call gets, saveResponse and
+        // postResponse property instructions, runs on the mock — and are recorded only
+        // once the budget, quota and deadline gates have let them through.
         String mockSource = toolSources == null ? null : toolSources.get(toolRequest.name());
-        ToolMockRegistry.MockResult mockDecision = ToolMockRegistry.decideToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+        ToolMockRegistry.Decision testDecision = ToolMockRegistry.previewToolCall(memory, toolRequest.name(), toolRequest.arguments(),
                 mockSource);
+        ToolMockRegistry.MockResult mockDecision = testDecision != null ? testDecision.result() : null;
         MockAwareToolExecutor mockingExecutor = mockDecision != null && mockDecision.outcome() == ToolMockRegistry.Outcome.MOCKED
                 && toolExecutors.get(toolRequest.name()) instanceof MockAwareToolExecutor aware ? aware : null;
         if (mockDecision != null && mockingExecutor == null) {
+            ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
             String mockedResult = ToolMockRegistry.toolResultOf(mockDecision, mockSource);
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
@@ -1274,6 +1278,10 @@ class ToolLoopRunner {
             // trace depends on them (see ToolCallTrace).
             try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
                 final ToolMockRegistry.MockResult mock = mockingExecutor != null ? mockDecision : null;
+                // Every gate passed: the call is made now, so it counts now.
+                if (testDecision != null) {
+                    ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+                }
                 toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
                         mock != null ? () -> mockingExecutor.executeMocked(toolRequest, mock) : () -> executor.execute(toolRequest, null),
                         enableRateLimiting, cacheThisCall, enableCostTracking && mock == null, rateLimit, toolTimeoutMs);
