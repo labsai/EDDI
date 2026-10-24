@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.client.agents;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.modules.llm.impl.TurnBudgetValidator;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
@@ -96,6 +97,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
 
         ((Agent) agent).setTurnDeadline(agentConfig.getTurnDeadlineMs(), agentConfig.getTurnDeadlineReserveMs());
         ((Agent) agent).setMaxCostPerConversationUsd(agentConfig.getMaxCostPerConversationUsd());
+        ((Agent) agent).setContinuationPolicy(ContinuationPolicy.of(agentConfig.getMaxContinuations(), agentConfig.getContinuationInput()));
         if (turnBudgetValidator != null) {
             turnBudgetValidator.warnIfOverBudget(agentConfig, agentId, version);
         }

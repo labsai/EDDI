@@ -31,7 +31,7 @@ import java.util.Set;
 public final class ReservedActionLint {
 
     /**
-     * The four reserved action names that carry special pipeline meaning (see
+     * The five reserved action names that carry special pipeline meaning (see
      * {@link IConversation}). An agent-authored action that near-misses one of
      * these is almost always a typo, since designers are told to use dedicated
      * identifiers instead (see docs/agent-config-authoring.md).
@@ -40,7 +40,8 @@ public final class ReservedActionLint {
             IConversation.PAUSE_CONVERSATION,
             IConversation.STOP_CONVERSATION,
             IConversation.CONVERSATION_START,
-            IConversation.CONVERSATION_END);
+            IConversation.CONVERSATION_END,
+            IConversation.CONTINUE_CONVERSATION);
 
     /** Inclusive upper bound on Levenshtein distance for a "near-miss" match. */
     private static final int NEAR_MISS_THRESHOLD = 2;

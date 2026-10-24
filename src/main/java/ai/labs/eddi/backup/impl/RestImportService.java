@@ -41,6 +41,7 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -882,6 +883,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // creation, after all extensions already landed (partial
                 // import), and surfaced as a 500 instead of a 400.
                 HitlConfigValidation.validate(agentConfig.getHitlConfig());
+                AgentStore.validateContinuation(agentConfig);
 
                 agentConfig.getWorkflows()
                         .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));

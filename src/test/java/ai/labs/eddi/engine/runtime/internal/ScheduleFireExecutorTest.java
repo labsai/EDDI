@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -1320,6 +1322,32 @@ class ScheduleFireExecutorTest {
                 "surface", "regular",
                 "conversationId", conversationId));
         return s;
+    }
+
+    // ==================== Self-continuation fires ====================
+
+    @Test
+    void fire_continuation_routesToTheHandlerWithTheDesignerInputAndLogsTheFire() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-1");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 4, 10));
+        when(handler.fire(any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+
+        var log = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals(FireStatus.FAILED.name(), log.status(), "a failed continuation is retried by the poller like any fire");
+        assertEquals("conv-9", log.conversationId());
+        assertEquals("busy", log.errorMessage());
+        verify(scheduleStore).logFire(log);
+        // Never the strategy path: no say() from the executor itself.
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     // ==================== RAG ingestion fires ====================

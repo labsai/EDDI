@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.schedule.rest;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -336,6 +337,25 @@ class RestScheduleStoreTest {
         when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
 
         Response response = rest.fireNow("h1");
+
+        assertEquals(409, response.getStatus());
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_continuationSchedule_refusedWithConflict_evenForAdmin() throws Exception {
+        // The engine armed it after a committed turn; a manual fire would run another
+        // user's job early, on the request's identity.
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        var s = new ScheduleConfiguration();
+        s.setId("c1");
+        s.setName(ConversationContinuations.scheduleName("conv-c1"));
+        s.setAgentId("agent-1");
+        s.setUserId("someone");
+        s.setMetadata(ConversationContinuations.metadata("conv-c1", 2, 5));
+        when(scheduleStore.readSchedule("c1")).thenReturn(s);
+
+        Response response = rest.fireNow("c1");
 
         assertEquals(409, response.getStatus());
         verify(fireExecutor, never()).fire(any(), any(), anyInt());

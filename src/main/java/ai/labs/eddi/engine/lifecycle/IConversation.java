@@ -19,6 +19,12 @@ public interface IConversation {
     String CONVERSATION_END = "CONVERSATION_END";
     String STOP_CONVERSATION = "STOP_CONVERSATION";
     String PAUSE_CONVERSATION = "PAUSE_CONVERSATION";
+    /**
+     * Queues the next turn of the same conversation, without user input, once this
+     * turn has been committed. Off unless the agent sets {@code maxContinuations};
+     * see {@code ConversationContinuations}.
+     */
+    String CONTINUE_CONVERSATION = "CONTINUE_CONVERSATION";
 
     IConversationMemory getConversationMemory();
 

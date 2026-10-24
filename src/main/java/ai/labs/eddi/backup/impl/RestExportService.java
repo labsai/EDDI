@@ -32,6 +32,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -1246,9 +1247,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         return userId.equals(resourceAccessGuard.currentPrincipal());
     }
 
-    /** A HITL approval-timeout schedule, which never belongs in an archive. */
-    private static boolean isHitlTimeout(ScheduleConfiguration schedule) {
-        return schedule != null && HitlSchedules.isHitlTimeout(schedule.getMetadata());
+    /**
+     * A HITL approval-timeout schedule or the pending next turn of a
+     * self-continuing conversation: runtime state of one conversation on this
+     * deployment, which never belongs in an archive.
+     */
+    private static boolean isConversationRuntimeSchedule(ScheduleConfiguration schedule) {
+        return schedule != null && (HitlSchedules.isHitlTimeout(schedule.getMetadata())
+                || ConversationContinuations.isContinuationSchedule(schedule.getMetadata()));
     }
 
     /**
@@ -1258,7 +1264,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private void addScheduleResources(List<ExportableResource> resources, String agentId) {
         try {
             for (ScheduleConfiguration schedule : scheduleStore.readSchedulesByAgentId(agentId)) {
-                if (schedule == null || schedule.getId() == null || isHitlTimeout(schedule) || !mayExportSchedule(schedule)) {
+                if (schedule == null || schedule.getId() == null || isConversationRuntimeSchedule(schedule) || !mayExportSchedule(schedule)) {
                     continue;
                 }
                 resources.add(new ExportableResource(schedule.getId(), null, SCHEDULE_EXT,
@@ -1291,7 +1297,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // import surface refuses to mint one for anybody — including admins —
                 // so writing it into the archive only produced a backup that could
                 // not be restored.
-                if (isHitlTimeout(schedule)) {
+                if (isConversationRuntimeSchedule(schedule)) {
                     continue;
                 }
                 if (!mayExportSchedule(schedule)) {

@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -491,6 +492,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                         .entity("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
+                        .build();
+            }
+            if (ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+                // The next turn of a self-continuing conversation: the engine armed it
+                // after a committed turn and runs it once, with its own input and
+                // once-only check. Firing it by hand would run another user's job early,
+                // on the request's identity rather than none.
+                LOGGER.warnf("Refused manual fire of continuation schedule %s (name=%s)", sanitize(scheduleId),
+                        sanitize(schedule.getName()));
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("This schedule is the next turn of a self-continuing conversation and cannot be fired manually. "
+                                + "It runs on its own; end or cancel the conversation to stop it.")
                         .build();
             }
             // Checked on the STORED schedule: firing one that acts as another user is
