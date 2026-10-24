@@ -37,3 +37,21 @@ Phase 1 of [the email plan](../../planning/email-channel-plan.md) (§16 "Notific
   upgrade GreenMail does not speak, and proves AUTH (PLAIN and XOAUTH2) only ever crosses the wire after it. The
   certificate is a throwaway made with the JDK's `keytool`; the production TLS path, with certificate and host-name
   checks, is what accepts it.
+
+### The message ledger (outbound)
+
+- **`IEmailMessageLedger`** (`integrations/email/ledger`) with `MongoEmailMessageLedger` (`email_message_ledger`
+  collection) and `PostgresEmailMessageLedger` (`email_message_ledger` table, created on first use), selected by
+  `eddi.datastore.type` in `DataStoreProducers`. One row per message: integration (`system` for system mail),
+  kind (`NOTIFY`; `REPLY` later), direction, RFC Message-ID, conversation, `sourceRef` (what the message is rebuilt
+  from — the pause id for a notification), idempotency key, recipient, state `PENDING → SENT | FAILED | SUPPRESSED`,
+  attempts, `nextAttemptAt`, claim token, provider response, last error, created/updated/expires. **No body,
+  subject or MIME** — a retry re-renders from the source. Two unique keys (idempotency key;
+  `(integrationId, direction, messageId)`) make an insert a cluster-wide claim. `claimDue` leases rows by a
+  conditional update (`findOneAndUpdate` per row on Mongo; `UPDATE … FOR UPDATE SKIP LOCKED … RETURNING` on
+  Postgres), and every state change is conditional on the claim token, so a taken-over claim cannot overwrite the
+  new owner's result.
+- `MongoEmailMessageLedgerIT` / `PostgresEmailMessageLedgerIT` run one shared contract against real databases
+  (Testcontainers): duplicate keys, eight concurrent inserts of one notification (one winner), two sweepers claiming
+  20 rows at once (no overlap), lease expiry and stale claims, reschedule, retention, erasure by recipient, and the
+  stored field set (no body field exists).
