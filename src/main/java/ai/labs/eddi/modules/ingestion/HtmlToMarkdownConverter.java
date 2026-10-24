@@ -137,9 +137,51 @@ public class HtmlToMarkdownConverter {
         if (html == null || html.isBlank()) {
             return "";
         }
+        Document doc = Jsoup.parse(html);
+        // Hidden content goes first, while the <style> blocks it reads are still
+        // there. Web pages get no assumed background: theirs usually comes from a
+        // stylesheet, and guessing white would delete the text of a dark page.
+        HiddenContentFilter.removeHidden(doc, false);
+        return convertDocument(doc, baseUrl, maxLength, true);
+    }
+
+    /**
+     * Converts the HTML body of an e-mail.
+     *
+     * <p>
+     * The same walk as {@link #convert(String, String, int)}, with three
+     * differences that follow from mail being written by a stranger rather than
+     * published as a page: the hidden-content pass assumes the white background and
+     * black text every mail client renders on, so white-on-white text is dropped;
+     * the walk is not scoped to {@code main}/{@code article}, since a mail
+     * template's "content" wrapper does not make the greeting above it chrome; and
+     * the {@code <title>}, which mail clients never show, is not emitted.
+     *
+     * @param html
+     *            the mail's HTML part, already stripped of quoted history if the
+     *            caller wants that
+     * @param maxLength
+     *            character cap; non-positive falls back to the default
+     */
+    public String convertMail(String html, int maxLength) {
+        if (html == null || html.isBlank()) {
+            return "";
+        }
+        return convertMail(Jsoup.parse(html), maxLength);
+    }
+
+    /**
+     * {@link #convertMail(String, int)} on an already parsed document, which it
+     * modifies.
+     */
+    public String convertMail(Document doc, int maxLength) {
+        HiddenContentFilter.removeHidden(doc, true);
+        return convertDocument(doc, null, maxLength, false);
+    }
+
+    private String convertDocument(Document doc, String baseUrl, int maxLength, boolean page) {
         int cap = maxLength > 0 ? maxLength : DEFAULT_MAX_LENGTH;
 
-        Document doc = Jsoup.parse(html);
         doc.select(PAGE_HEADER_SELECTOR).remove();
         doc.select(NOISE_SELECTOR).remove();
 
@@ -148,12 +190,14 @@ public class HtmlToMarkdownConverter {
             return "";
         }
 
-        Element main = firstMatch(doc);
-        if (main != null) {
-            root = main;
+        if (page) {
+            Element main = firstMatch(doc);
+            if (main != null) {
+                root = main;
+            }
         }
 
-        String title = doc.title();
+        String title = page ? doc.title() : null;
         StringBuilder markdown = new StringBuilder();
         if (title != null && !title.isBlank() && !containsTitle(root, title)) {
             markdown.append("# ").append(escapeMarkdown(title)).append("\n\n");
