@@ -9,8 +9,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QuoteStripperTest {
@@ -221,6 +224,23 @@ class QuoteStripperTest {
 
             assertTrue(QuoteStripper.stripHtml(doc));
             assertEquals("Done.", doc.body().text());
+        }
+
+        @Test
+        @DisplayName("deeply nested divs full of header-block bait: the Outlook search stays linear")
+        void nestedBait() {
+            StringBuilder html = new StringBuilder("<p>Reply.</p>");
+            String filler = "word ".repeat(20);
+            for (int i = 0; i < 10_000; i++) {
+                html.append("<div>From: Someone ").append(filler);
+            }
+            var doc = Jsoup.parse(html.toString());
+
+            // Asking each of the ~512 nested divs jsoup keeps for its text would read
+            // about half a gigabyte of characters.
+            boolean removed = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> QuoteStripper.stripHtml(doc));
+
+            assertFalse(removed, "no Sent/To labels: nothing to strip");
         }
 
         @Test

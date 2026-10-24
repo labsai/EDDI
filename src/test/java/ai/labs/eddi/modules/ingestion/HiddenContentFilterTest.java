@@ -222,8 +222,11 @@ class HiddenContentFilterTest {
         }
 
         @Test
-        @DisplayName("'/*' repeated over 2 MB, never closed")
+        @DisplayName("'/* ' repeated over 3 MB, never closed")
         void repeatedCommentOpeners() {
+            // With a space between them no two openers form a "*/", so a lazy
+            // /\*.*?\*/ regex scans to the end from every one of them.
+            assertStillApplied("/* ".repeat(1_000_000));
             assertStillApplied("/*".repeat(1_000_000));
         }
 
