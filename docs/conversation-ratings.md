@@ -11,8 +11,8 @@ conversation memory: memory is loaded on every turn and must stay small, and
 ratings must be aggregated across conversations.
 
 > **Status.** The backend (REST API, storage, metrics, GDPR), the Chat UI's
-> rating controls and the Manager's Feedback page are in place. MCP tools, the
-> Platform Operator and push alerts follow in later releases.
+> rating controls, the Manager's Feedback page, the MCP tools and the Platform
+> Operator's read access are in place. Push alerts follow in a later release.
 
 ## Switching ratings on
 
@@ -230,6 +230,37 @@ who rated).
   agent asks on end), so a designer can try the flow; ratings sent from there carry
   `channel: "manager"`.
 
+## MCP tools and the Platform Operator
+
+**MCP.** Four tools cover the read and triage half of `/ratings` — see
+[MCP Server](mcp-server.md#rating-tools-4):
+
+| Tool | REST counterpart |
+| --- | --- |
+| `list_conversation_ratings` | `GET /ratings` (same filters, `sort`, `index`, `limit`) |
+| `summarize_conversation_ratings` | `GET /ratings/summary` (`groupBy`) |
+| `count_ratings_needing_attention` | `GET /ratings/attention-count` |
+| `review_conversation_rating` | `PATCH /ratings/{ratingId}` |
+
+They run the same resource in-process, so the rules above hold for the MCP caller
+unchanged: tier `eddi-admin` / `eddi-editor` (`eddi-viewer` is refused), an editor
+names an agent it holds `EDIT` on, only administrators see `userId`, and the
+reviewer is the caller's principal — the same name the Feedback page records, never
+an argument. Refusals carry the REST code as `errorCode` (`AGENT_ID_REQUIRED`,
+`RATING_CHANGED`, …). Export and bulk review are REST and Manager only. The
+`eddi-admin` Claude Code skill teaches the tools.
+
+**Platform Operator.** The operator may read `GET /ratings`, `GET /ratings/summary`
+and `GET /ratings/attention-count`, and its prompt explains `ratingConfig` and its
+defaults, needs-attention, the `AGENT_ID_REQUIRED` rule and how to answer "how is
+agent X rated since version N" (the summary grouped by `agentVersion`, with each
+bucket's count — the `agentVersion` filter matches one version exactly). It holds
+**no** rating write and no export: a review records the caller as the person who
+looked at the feedback, and that judgement stays with a human on the Feedback page;
+the export is a CSV of up to 100,000 rows that no chat answer needs. Operators
+activated before this change get the reads with the upgrade the Manager offers
+(revision 37).
+
 ## Lifetime and privacy
 
 - Ratings **outlive conversation purges** (analytics); the transcript link then
@@ -241,7 +272,7 @@ who rated).
   export lists their ratings without the reviewer's identity. Processing
   restriction blocks new ratings.
 - Group conversations, the `/v1` API and channel reactions (Slack, Teams) do not
-  capture ratings yet; `/v1` and MCP clients can call the REST endpoints directly.
+  capture ratings yet; a `/v1` client can call the REST endpoints directly.
 
 ## Known limitations
 
