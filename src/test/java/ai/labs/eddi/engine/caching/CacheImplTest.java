@@ -575,6 +575,6 @@ class CacheImplTest {
 
         clock.advanceSeconds(61);
 
-        assertEquals(0, cache.size(), "a capacity check on size() must not outlast the data");
+        assertEquals(0, cache.sizeExact(), "a capacity check must not outlast the data");
     }
 }

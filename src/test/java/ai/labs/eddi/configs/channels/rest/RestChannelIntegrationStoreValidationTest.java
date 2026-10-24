@@ -5,6 +5,8 @@
 package ai.labs.eddi.configs.channels.rest;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
@@ -571,6 +573,11 @@ class RestChannelIntegrationStoreValidationTest {
             // Not in the vault yet: cannot be judged here (the router re-checks at
             // runtime).
             assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:later}"))));
+            // Another tenant's reference is never resolved at save time (no
+            // existence/length oracle).
+            when(resolver.resolveValue("${vault:other/short}")).thenReturn("a".repeat(3));
+            assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:other/short}"))));
+            verify(resolver, never()).resolveValue("${vault:other/short}");
         }
 
         @Test

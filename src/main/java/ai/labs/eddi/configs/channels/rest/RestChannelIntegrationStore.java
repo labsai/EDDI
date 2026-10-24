@@ -18,6 +18,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -98,6 +99,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private void requireUsableWebhookSecret(Map<String, String> platformConfig) {
         String reference = platformConfig == null ? null : platformConfig.get(WebhookChannelSettings.KEY_SIGNING_SECRET);
         if (secretResolver == null || reference == null) {
+            return;
+        }
+        try {
+            // Only the default tenant's vault is read at save time: resolving another
+            // tenant's reference for any editor would tell them whether that secret
+            // exists and whether it is short. Such references are left to the router's
+            // runtime check.
+            if (!SecretReference.DEFAULT_TENANT.equals(SecretReference.parse(reference.trim()).tenantId())) {
+                return;
+            }
+        } catch (IllegalArgumentException e) {
             return;
         }
         String resolved;

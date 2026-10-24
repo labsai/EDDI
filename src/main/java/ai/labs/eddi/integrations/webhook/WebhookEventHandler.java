@@ -32,6 +32,8 @@ import ai.labs.eddi.integrations.channels.HmacSignatures;
 import ai.labs.eddi.integrations.webhook.WebhookEventParser.InboundEvent;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -117,13 +119,36 @@ public class WebhookEventHandler {
     /** Metric outcome of a delivery refused for replay-protection capacity. */
     static final String OUTCOME_CAPACITY = "refused_capacity";
 
-    /** Length of the per-integration delivery window, in one-minute buckets. */
-    private static final int WINDOW_MINUTES = 10;
+    /**
+     * Length of the per-integration delivery window, in one-minute buckets: one
+     * more than the 10-minute key TTL, because a bucket is whole minutes - a
+     * delivery counted in minute m must still count at any instant its keys can
+     * still exist (until m + 10 minutes + the rest of m), or the counter forgets
+     * keys the cache still holds.
+     */
+    private static final int WINDOW_MINUTES = 11;
 
     /**
-     * Integrations tracked at most; entries with no recent delivery are dropped.
+     * Integrations tracked at most (entries also expire 11 minutes after last use).
      */
-    private static final int MAX_TRACKED_INTEGRATIONS = 10_000;
+    private static final int MAX_TRACKED_INTEGRATIONS = 100_000;
+
+    /**
+     * Deliveries in the window below which an integration does not count as
+     * "active" for the fair share, so creating many integrations that each send a
+     * single delivery cannot shrink everyone else's share.
+     */
+    static final long ACTIVE_FLOOR = 50;
+
+    /** How long the active-integration count is reused. */
+    private static final long ACTIVE_RECOUNT_MS = 5_000L;
+
+    /**
+     * Share of the cache's capacity from which every new, non-repeat delivery is
+     * refused whatever its integration holds - the last resort that keeps the cache
+     * clear of eviction even when the fair-share arithmetic is gamed.
+     */
+    private static final double HARD_STOP_FRACTION = 0.9;
 
     private static final long CAPACITY_WARN_INTERVAL_MS = 60_000L;
 
@@ -150,7 +175,14 @@ public class WebhookEventHandler {
     private final ICache<String, String> dedup;
     private final MeterRegistry meterRegistry;
     private final long dedupRefuseAt;
-    private final Map<String, DeliveryWindow> deliveries = new ConcurrentHashMap<>();
+    private final long hardStopAt;
+    private long activeFloor = ACTIVE_FLOOR;
+    private volatile long activeCount = 1;
+    private volatile long activeCountedAt = -1;
+    private final Cache<String, DeliveryWindow> deliveries = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(WINDOW_MINUTES))
+            .maximumSize(MAX_TRACKED_INTEGRATIONS)
+            .build();
     private final Map<String, Long> lastCapacityWarn = new ConcurrentHashMap<>();
     private LongSupplier clock = System::currentTimeMillis;
     private final AtomicInteger capacityWarnings = new AtomicInteger();
@@ -176,6 +208,7 @@ public class WebhookEventHandler {
             MeterRegistry meterRegistry,
             long dedupRefuseAt) {
         this.dedupRefuseAt = dedupRefuseAt;
+        this.hardStopAt = (long) (dedupRefuseAt * 2 * HARD_STOP_FRACTION);
         this.router = router;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
@@ -188,6 +221,11 @@ public class WebhookEventHandler {
     /** Test seam: capacity warnings logged so far. */
     int capacityWarningsLogged() {
         return capacityWarnings.get();
+    }
+
+    /** Test seam: the delivery count from which an integration is "active". */
+    void setActiveFloor(long floor) {
+        this.activeFloor = floor;
     }
 
     /** Test seam: the clock the per-integration windows run on. */
@@ -212,6 +250,13 @@ public class WebhookEventHandler {
             counts[slot]++;
         }
 
+        synchronized void remove(long minute) {
+            int slot = (int) (minute % WINDOW_MINUTES);
+            if (minutes[slot] == minute && counts[slot] > 0) {
+                counts[slot]--;
+            }
+        }
+
         synchronized long total(long minute) {
             long sum = 0;
             for (int i = 0; i < WINDOW_MINUTES; i++) {
@@ -224,36 +269,64 @@ public class WebhookEventHandler {
     }
 
     /**
-     * Whether a delivery that is not yet remembered may reserve keys: within the
-     * integration's own budget and, when the shared cache is past the backstop,
-     * within its fair share of it.
+     * Why a delivery that is not yet remembered may NOT reserve keys, or null when
+     * it may: over the integration's own budget, past the hard stop, or - when the
+     * shared cache is past the backstop - above its fair share. Does not log; the
+     * caller does once the refusal stands.
      */
-    private boolean admit(String integrationId, WebhookChannelSettings settings) {
+    private String refusalReason(String integrationId, WebhookChannelSettings settings) {
         long minute = clock.getAsLong() / 60_000L;
-        if (deliveries.size() > MAX_TRACKED_INTEGRATIONS) {
-            deliveries.entrySet().removeIf(entry -> entry.getValue().total(minute) == 0);
-        }
-        DeliveryWindow own = deliveries.get(integrationId);
+        DeliveryWindow own = deliveries.getIfPresent(integrationId);
         long used = own == null ? 0 : own.total(minute);
         if (used >= settings.maxDeliveriesPerWindow()) {
-            warnCapacity(integrationId, "it reached its own budget of " + settings.maxDeliveriesPerWindow()
-                    + " deliveries per 10 minutes (platformConfig.maxDeliveriesPerWindow)");
-            return false;
+            return "it reached its own budget of " + settings.maxDeliveriesPerWindow()
+                    + " deliveries per 10 minutes (platformConfig.maxDeliveriesPerWindow)";
         }
         if (dedup.size() >= dedupRefuseAt) {
-            long active = Math.max(1, deliveries.values().stream().filter(w -> w.total(minute) > 0).count());
-            long share = dedupRefuseAt / 2 / active;
-            if (used >= share) {
-                warnCapacity(integrationId, "the shared replay-protection cache is past half full and it holds " + used
-                        + " of its deliveries, above its fair share of " + share);
-                return false;
+            // The cheap estimate says the backstop may be reached; sweep before refusing.
+            int exact = dedup.sizeExact();
+            if (exact >= hardStopAt) {
+                return "the shared replay-protection cache is nearly full (" + exact + " keys)";
+            }
+            if (exact >= dedupRefuseAt) {
+                long share = dedupRefuseAt / 2 / activeIntegrations(minute);
+                if (used >= share) {
+                    return "the shared replay-protection cache is past half full and it holds " + used
+                            + " of its deliveries, above its fair share of " + share;
+                }
             }
         }
-        return true;
+        return null;
     }
 
-    private void recordDelivery(String integrationId) {
-        deliveries.computeIfAbsent(integrationId, id -> new DeliveryWindow()).add(clock.getAsLong() / 60_000L);
+    /**
+     * Integrations with at least {@code activeFloor} deliveries in the window,
+     * recounted at most every few seconds (it walks every tracked integration).
+     */
+    private long activeIntegrations(long minute) {
+        long now = clock.getAsLong();
+        if (activeCountedAt < 0 || now - activeCountedAt >= ACTIVE_RECOUNT_MS) {
+            activeCount = Math.max(1, deliveries.asMap().values().stream().filter(w -> w.total(minute) >= activeFloor).count());
+            activeCountedAt = now;
+        }
+        return activeCount;
+    }
+
+    /** Counts a delivery against the integration's budget; returns its bucket. */
+    private long recordDelivery(String integrationId) {
+        long minute = clock.getAsLong() / 60_000L;
+        deliveries.get(integrationId, id -> new DeliveryWindow()).add(minute);
+        return minute;
+    }
+
+    /**
+     * A delivery that was not accepted does not hold keys: give its budget back.
+     */
+    private void unrecordDelivery(String integrationId, long minute) {
+        DeliveryWindow window = deliveries.getIfPresent(integrationId);
+        if (window != null) {
+            window.remove(minute);
+        }
     }
 
     /**
@@ -327,7 +400,11 @@ public class WebhookEventHandler {
         if (replayKey != null) {
             keys.add(integrationId + ":sig:" + replayKey);
         }
-        if (keys.stream().noneMatch(key -> dedup.get(key) != null) && !admit(integrationId, settings)) {
+        // The common case (admitted) must cost no extra cache read - in a cluster each
+        // one is a NATS round trip - so the repeat check only runs for a refusal.
+        String refusal = refusalReason(integrationId, settings);
+        if (refusal != null && keys.stream().noneMatch(key -> dedup.get(key) != null)) {
+            warnCapacity(integrationId, refusal);
             // Reserving another key for an integration that is over its budget (or its
             // share of a nearly full cache) would end in evicting someone's key, and an
             // evicted key is a signed request that can be replayed. A repeat of
@@ -359,7 +436,7 @@ public class WebhookEventHandler {
             return new Dispatch(200, group ? null : previous, group ? previous.substring("group:".length()) : null, true, null, null);
         }
 
-        recordDelivery(integrationId);
+        long countedIn = recordDelivery(integrationId);
         Dispatch outcome;
         try {
             outcome = route(integrationId, integration, settings, event);
@@ -376,6 +453,9 @@ public class WebhookEventHandler {
                 // reservation is released rather than remembered.
                 dedup.remove(key, IN_FLIGHT);
             }
+        }
+        if (outcome.status() != 202) {
+            unrecordDelivery(integrationId, countedIn);
         }
         count(outcome.status() == 202 ? "accepted" : "refused_" + outcome.status());
         return outcome;

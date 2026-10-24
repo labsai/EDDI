@@ -265,10 +265,20 @@ the others, in two layers. First, each integration has its own budget,
 `maxDeliveriesPerWindow` (default 3000 deliveries per rolling 10 minutes on a node):
 past it, that integration's new deliveries get a retryable `503`. Second, once the
 shared cache is half full, only integrations above their fair share of it (half the
-cache divided by the number of integrations that delivered in the window) are
-refused; an integration with little traffic keeps being accepted. Repeats of
-remembered deliveries are always answered, and a refused delivery releases its keys
-so its retry is processed. Refusing instead of evicting is deliberate - an evicted
+cache divided by the number of *active* integrations - those with at least 50
+accepted deliveries in the window, so integrations that send one delivery each do
+not shrink anyone's share) are refused; an integration with little traffic keeps
+being accepted. As a last resort, once the cache is 90% full every new delivery is
+refused whatever its integration holds. Only privileged roles (`eddi-admin`,
+`eddi-editor`) can create integrations, and each one costs its sender a signing
+secret, so the guarantee is: an integration within its own budget is not refused for
+another integration's volume until the cache is 90% full, and the cache never has to
+evict a live key. The window the budget counts over (11 minutes) is longer than the
+10-minute key lifetime, so a delivery is counted for as long as its keys exist. Only
+accepted (202) deliveries spend budget - a delivery refused with 429, 503 or the like
+is given back, so a sender looping on a quota refusal keeps seeing that refusal.
+Repeats of remembered deliveries are always answered, and a refused delivery releases
+its keys so its retry is processed. Refusing instead of evicting is deliberate - an evicted
 key is a signed request that could be replayed. These refusals are counted as
 `eddi_webhook_events_total{outcome="refused_capacity"}`, apart from the `503` of an
 agent that is not deployed, and logged as a `WARN` at most once a minute per

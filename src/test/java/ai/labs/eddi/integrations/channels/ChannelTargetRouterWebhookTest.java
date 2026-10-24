@@ -14,13 +14,16 @@ import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -171,5 +174,32 @@ class ChannelTargetRouterWebhookTest {
     void sixteenCharacterSecretIsKept() throws Exception {
         assertEquals("a".repeat(16), signingSecretOf("${vault:hook}", "a".repeat(16)));
         assertEquals(0, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void weakSecretWarnsOncePerRefreshCycleAndAgainAfterAVaultChange() throws Exception {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        router.registerSecretInvalidation();
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+
+        assertNull(signingSecretOf("${vault:hook}", "a".repeat(15)));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+
+        // A second refresh with nothing changed is silent.
+        forceRefresh();
+        router.getWebhookIntegration(WEBHOOK_ID);
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+
+        // A vault change re-arms the warning: the secret may still be wrong.
+        listener.getValue().accept(new SecretReference("default", "hook"));
+        router.getWebhookIntegration(WEBHOOK_ID);
+        assertEquals(2, router.weakWebhookSecretWarningsLogged());
+    }
+
+    private void forceRefresh() throws Exception {
+        var field = ChannelTargetRouter.class.getDeclaredField("lastRefreshTime");
+        field.setAccessible(true);
+        field.setLong(router, 0L);
     }
 }
