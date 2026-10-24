@@ -165,7 +165,13 @@ public class MimeMessageParser {
         Instant date = parseDate(message, anomalies);
 
         Walk walk = new Walk(bounds, anomalies);
-        walk.visit(message, 0, walk.root);
+        try {
+            walk.visit(message, 0, walk.root);
+        } catch (RuntimeException e) {
+            // Hostile MIME must end in a refusal the caller records, never in an
+            // exception type it does not expect from a parser.
+            throw new MailParseException(MailParseException.Reason.MALFORMED, "The message structure cannot be read.", e);
+        }
 
         LoopSignals signals = new LoopSignals(signal(message, "Auto-Submitted"), signal(message, "X-Autoreply"),
                 signal(message, "X-Autorespond"), signal(message, "Precedence"), signal(message, "List-Id"),
