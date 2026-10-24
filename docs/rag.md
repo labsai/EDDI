@@ -448,7 +448,9 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 history, loses its schedule, and is **refused** by a manual run with a 409 — rather than accepted and
 then recorded as a failure.
 
-**What a run does.** Crawls within the scope, converts each page to Markdown, compares a content hash
+**What a run does.** Crawls within the scope, converts each page to Markdown — dropping content a reader
+never sees (`display:none`, zero-size or transparent text, text the colour of its inline background,
+off-screen positioning, comments), the usual carrier for prompt injection — compares a content hash
 against the last successful ingest, and re-embeds only what changed — replacing that document's chunks
 rather than adding to them. Pages that disappear from the source lose their vectors after
 `tombstoneAfterMissedRuns` consecutive *complete* runs miss them; a run that stopped at a limit
