@@ -17,6 +17,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.core.Response;
 
 /**
  * Shared utility methods for MCP tool implementations.
@@ -221,6 +222,32 @@ final class McpToolUtils {
         log.errorf(e, "%s failed [reference %s]", tool, reference);
         return errorJson(what + " with an internal error (reference " + reference + "). The details are in the server log under that reference.",
                 "INTERNAL", Map.of("reference", reference));
+    }
+
+    /**
+     * The error for a failure of an in-process REST resource that answers with
+     * EDDI's coded error body ({@code {"error": "<CODE>", "message": "…"}} — the
+     * ratings and alerts resources): the code becomes the {@code errorCode}, so an
+     * MCP client branches on it exactly as a REST client does. A permission refusal
+     * of {@code ResourceAccessGuard} (a Quarkus {@link ForbiddenException}, not a
+     * JAX-RS one) is {@code FORBIDDEN} — left to {@link #toolFailure} it is not
+     * caller-facing and would surface as {@code INTERNAL}. Anything else goes
+     * through {@link #toolFailure}.
+     */
+    static String codedFailure(Logger log, String tool, Exception e) {
+        if (e instanceof ClientErrorException clientError) {
+            Response response = clientError.getResponse();
+            Object entity = response == null ? null : response.getEntity();
+            if (entity instanceof Map<?, ?> body && body.get("error") instanceof String code) {
+                Object message = body.get("message");
+                return errorJson(message instanceof String text && !text.isBlank() ? text : code, code, null);
+            }
+        }
+        if (e instanceof ForbiddenException denied) {
+            String message = denied.getMessage();
+            return errorJson(message == null || message.isBlank() ? "Access denied" : message, "FORBIDDEN", null);
+        }
+        return toolFailure(log, tool, e);
     }
 
     /** Whether a failure is one the caller made and may be told about verbatim. */

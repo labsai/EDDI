@@ -10,20 +10,15 @@ import ai.labs.eddi.engine.api.IRestConversationRatingAdmin.ReviewRequest;
 import ai.labs.eddi.engine.api.RatingQueryParams;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
-import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.ClientErrorException;
-import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.util.Map;
-
+import static ai.labs.eddi.engine.mcp.McpToolUtils.codedFailure;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
-import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
  * MCP tools for conversation ratings — the read and triage half of
@@ -194,26 +189,10 @@ public class McpRatingTools {
     }
 
     /**
-     * A refusal of the rating resource keeps its stable code
-     * ({@code AGENT_ID_REQUIRED}, {@code RATING_CHANGED}, …) as the errorCode, so a
-     * client branches on it exactly as a REST client does on {@code error}. A
-     * permission refusal of the access guard becomes {@code FORBIDDEN}; anything
-     * else goes through {@link McpToolUtils#toolFailure}.
+     * Keeps the rating resource's error codes; see
+     * {@link McpToolUtils#codedFailure}.
      */
-    private String failure(String tool, Exception e) {
-        if (e instanceof ClientErrorException clientError) {
-            Response response = clientError.getResponse();
-            Object entity = response == null ? null : response.getEntity();
-            if (entity instanceof Map<?, ?> body && body.get("error") instanceof String code) {
-                Object message = body.get("message");
-                return errorJson(message instanceof String text && !text.isBlank() ? text : code, code, null);
-            }
-        }
-        if (e instanceof ForbiddenException denied) {
-            // ResourceAccessGuard.requireAccess: no EDIT on the agent
-            String message = denied.getMessage();
-            return errorJson(message == null || message.isBlank() ? "Access denied" : message, "FORBIDDEN", null);
-        }
-        return toolFailure(LOGGER, tool, e);
+    private static String failure(String tool, Exception e) {
+        return codedFailure(LOGGER, tool, e);
     }
 }

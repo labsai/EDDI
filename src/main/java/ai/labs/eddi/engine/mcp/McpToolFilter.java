@@ -93,7 +93,10 @@ public class McpToolFilter implements ToolFilter {
             // Conversation ratings (McpRatingTools) — same tier and agent scoping as
             // the REST /ratings resource
             "list_conversation_ratings", "summarize_conversation_ratings", "count_ratings_needing_attention",
-            "review_conversation_rating");
+            "review_conversation_rating",
+            // Alert inbox (McpAlertTools) — same tier and agent scoping as the REST
+            // /alerts/events resource
+            "list_alert_events", "acknowledge_alert_event");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {
