@@ -40,5 +40,12 @@ public enum MailAnomaly {
     /** A Content-Type that could not be parsed; the part was read as text/plain. */
     MALFORMED_CONTENT_TYPE,
     /** A part that could not be decoded and was skipped. */
-    MALFORMED_PART
+    MALFORMED_PART,
+    /**
+     * The {@code text/plain} and {@code text/html} renderings of a
+     * {@code multipart/alternative} say substantially different things. The agent
+     * reads the plain one while a person reviewing the mail sees the HTML, so a
+     * later phase should surface or refuse such a mail rather than act on it.
+     */
+    ALTERNATIVES_DIVERGE
 }

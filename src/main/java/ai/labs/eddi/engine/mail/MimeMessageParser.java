@@ -164,7 +164,7 @@ public class MimeMessageParser {
         String subject = cleanSubject(firstHeader(message, "Subject"));
         Instant date = parseDate(message, anomalies);
 
-        Walk walk = new Walk(bounds, anomalies);
+        Walk walk = new Walk(bounds, anomalies, htmlConverter);
         try {
             walk.visit(message, 0, walk.root);
         } catch (RuntimeException e) {
@@ -333,9 +333,12 @@ public class MimeMessageParser {
         String originalMessageId;
         List<DeliveryReport.Recipient> deliveryRecipients;
 
-        Walk(MailLimits limits, Set<MailAnomaly> anomalies) {
+        final HtmlToMarkdownConverter htmlConverter;
+
+        Walk(MailLimits limits, Set<MailAnomaly> anomalies, HtmlToMarkdownConverter htmlConverter) {
             this.limits = limits;
             this.anomalies = anomalies;
+            this.htmlConverter = htmlConverter;
         }
 
         void visit(MimePart part, int depth, Collected into) throws MailParseException {
@@ -443,6 +446,17 @@ public class MimeMessageParser {
             Collected chosen = alternatives.stream().filter(Collected::hasPlainText).findFirst()
                     .orElse(alternatives.stream().filter(a -> !a.html.isEmpty()).findFirst()
                             .orElse(alternatives.isEmpty() ? null : alternatives.get(0)));
+            Collected plainSide = alternatives.stream().filter(Collected::hasPlainText).findFirst().orElse(null);
+            Collected htmlSide = alternatives.stream().filter(a -> !a.html.isEmpty()).findFirst().orElse(null);
+            if (plainSide != null && htmlSide != null && plainSide != htmlSide) {
+                // The agent reads the plain part; a person checking the mail sees the
+                // HTML. Compare what each audience gets — the HTML as rendered, hidden
+                // content removed.
+                String visible = htmlConverter.convertMail(String.join("\n", htmlSide.html), Integer.MAX_VALUE);
+                if (AlternativeComparison.diverge(String.join("\n\n", plainSide.plain), visible)) {
+                    anomalies.add(MailAnomaly.ALTERNATIVES_DIVERGE);
+                }
+            }
             if (chosen != null) {
                 into.addAll(chosen);
             }

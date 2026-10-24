@@ -9,10 +9,16 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
+import org.jsoup.select.NodeFilter;
+import org.jsoup.select.NodeTraversor;
+import org.jsoup.select.NodeVisitor;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -75,6 +81,14 @@ public final class QuoteStripper {
     private static final Pattern ORIGINAL_MESSAGE = Pattern.compile(
             "^\\s*-{2,}\\s*(original message|ursprüngliche nachricht|message d'origine|mensaje original|messaggio originale)\\s*-{2,}\\s*$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /**
+     * Longer than any Outlook header block, with room for long names and subjects.
+     */
+    private static final int MAX_HEADER_BLOCK_CHARS = 4000;
+
+    /** Characters of candidate text the Outlook search may read in one document. */
+    private static final long HEADER_SEARCH_BUDGET = 2_000_000;
 
     private static final Pattern UNDERSCORE_RULE = Pattern.compile("^\\s*_{10,}\\s*$");
 
@@ -328,20 +342,61 @@ public final class QuoteStripper {
     /**
      * The deepest {@code p} or {@code div} whose text starts with Outlook's header
      * block (From, then Sent/Date, then To/Subject).
+     * <p>
+     * Linear in the document: an element's text includes all of its descendants, so
+     * asking every candidate for it costs size times depth on deeply nested markup.
+     * Subtree text sizes are computed once, bottom-up; only candidates small enough
+     * to be a header block are materialised, deepest first, within a total budget.
+     * Running out of budget means "not recognised" — the history is kept, which
+     * costs tokens, never content.
      */
-    private static Element outlookHeaderElement(Document doc) {
-        Element found = null;
-        for (Element candidate : doc.body().select("p, div")) {
-            String text = candidate.text();
-            if (text.length() < 4000 && HEADER_BLOCK_TEXT.matcher(text).matches() && (found == null || isDescendant(candidate, found))) {
-                found = candidate;
+    static Element outlookHeaderElement(Document doc) {
+        Map<Element, Integer> textLength = new IdentityHashMap<>();
+        List<Element> postOrder = new ArrayList<>();
+        NodeTraversor.traverse(new NodeVisitor() {
+            @Override
+            public void head(Node node, int depth) {
+            }
+
+            @Override
+            public void tail(Node node, int depth) {
+                if (node instanceof Element element) {
+                    long length = 0;
+                    for (Node child : element.childNodes()) {
+                        if (child instanceof TextNode text) {
+                            length += text.getWholeText().length();
+                        } else if (child instanceof Element childElement) {
+                            length += textLength.getOrDefault(childElement, 0);
+                        }
+                    }
+                    textLength.put(element, (int) Math.min(Integer.MAX_VALUE, length));
+                    if ("p".equals(element.normalName()) || "div".equals(element.normalName())) {
+                        postOrder.add(element);
+                    }
+                }
+            }
+        }, doc.body());
+        long budget = HEADER_SEARCH_BUDGET;
+        for (Element candidate : postOrder) {
+            int length = textLength.get(candidate);
+            if (length > MAX_HEADER_BLOCK_CHARS || length == 0) {
+                continue;
+            }
+            budget -= length;
+            if (budget < 0) {
+                return null;
+            }
+            // Post-order: a candidate's descendants were tried first, so the first
+            // match is the deepest one.
+            if (HEADER_BLOCK_TEXT.matcher(candidate.text()).matches()) {
+                return candidate;
             }
         }
-        return found;
+        return null;
     }
 
     private static boolean stripGmail(Document doc) {
-        List<Element> candidates = topLevel(doc.body().select("div.gmail_quote, blockquote.gmail_quote"));
+        List<Element> candidates = topLevel(doc.body(), QuoteStripper::isGmailQuote);
         if (candidates.size() != 1) {
             return false;
         }
@@ -363,7 +418,7 @@ public final class QuoteStripper {
         // history, not a second quote that would make the reply look inline.
         List<Element> attributions = new ArrayList<>();
         List<Element> candidates = new ArrayList<>();
-        for (Element candidate : topLevel(doc.body().select("blockquote[type=cite]"))) {
+        for (Element candidate : topLevel(doc.body(), QuoteStripper::isCiteBlockquote)) {
             (isAttribution(candidate.text().strip()) ? attributions : candidates).add(candidate);
         }
         if (candidates.size() != 1) {
@@ -387,31 +442,38 @@ public final class QuoteStripper {
         return true;
     }
 
-    /** The elements not nested inside another of the same list. */
-    private static List<Element> topLevel(List<Element> elements) {
+    /**
+     * The elements matching {@code predicate} that are not nested in another match
+     * — one pass that does not descend into a match, so it is linear however deeply
+     * matches nest.
+     */
+    private static List<Element> topLevel(Element root, Predicate<Element> predicate) {
         List<Element> top = new ArrayList<>();
-        for (Element element : elements) {
-            boolean nested = false;
-            for (Element other : elements) {
-                if (other != element && isDescendant(element, other)) {
-                    nested = true;
-                    break;
+        NodeTraversor.filter(new NodeFilter() {
+            @Override
+            public FilterResult head(Node node, int depth) {
+                if (node instanceof Element element && predicate.test(element)) {
+                    top.add(element);
+                    return FilterResult.SKIP_ENTIRELY;
                 }
+                return FilterResult.CONTINUE;
             }
-            if (!nested) {
-                top.add(element);
+
+            @Override
+            public FilterResult tail(Node node, int depth) {
+                return FilterResult.CONTINUE;
             }
-        }
+        }, root);
         return top;
     }
 
-    private static boolean isDescendant(Element element, Element ancestor) {
-        for (Element parent = element.parent(); parent != null; parent = parent.parent()) {
-            if (parent == ancestor) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean isGmailQuote(Element element) {
+        String tag = element.normalName();
+        return ("div".equals(tag) || "blockquote".equals(tag)) && element.hasClass("gmail_quote");
+    }
+
+    private static boolean isCiteBlockquote(Element element) {
+        return "blockquote".equals(element.normalName()) && "cite".equalsIgnoreCase(element.attr("type").strip());
     }
 
     /**
