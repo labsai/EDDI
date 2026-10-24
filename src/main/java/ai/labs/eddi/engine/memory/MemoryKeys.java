@@ -201,9 +201,10 @@ public final class MemoryKeys {
      * quota store was unavailable when the step settled, carried forward until a
      * later settle records it ({@code 0.0} afterwards). Written by
      * {@code TurnCostMeter} on the newest step only — say turns are persisted as
-     * appends, so an earlier step would never be rewritten. A new turn after an
-     * undo copies the abandoned timeline's newest value onto its step
-     * ({@code ConversationMemory.startNextStep()}), so an undo cannot lose it.
+     * appends, so an earlier step would never be rewritten. Undo and redo copy the
+     * value of the step they move aside onto the step that becomes current
+     * ({@code ConversationMemory.carryPendingCost}), so neither can lose it or
+     * revive an older one.
      *
      * @since 6.6.0
      */

@@ -160,35 +160,48 @@ public class ConversationMemory implements IConversationMemory {
      * every load and every redo through the API was refused.
      * <p>
      * <b>Spend is not undone.</b> The steps dropped here carried money that was
-     * really spent, and both cost limits read it from the steps: the agent's
-     * {@code maxCostPerConversationUsd} sums every step's {@code audit:cost}, and
-     * {@code TurnCostMeter} carries an unrecorded tenant charge forward on the
-     * newest step's {@code audit:pending_cost}. Dropping them silently made say →
-     * undo → say discard the spend — an unlimited conversation behind a public
-     * endpoint. So the new step inherits what the abandoned timeline held: its
-     * total under {@link MemoryKeys#AUDIT_DISCARDED_COST}, and its newest pending
-     * charge (a {@code 0.0} included, which says an older one was recovered and
-     * must not be charged again).
+     * really spent, and the agent's {@code maxCostPerConversationUsd} reads it from
+     * the steps (every step's {@code audit:cost}). Dropping them silently made say
+     * → undo → say discard the spend — an unlimited conversation behind a public
+     * endpoint. So the new step inherits the abandoned timeline's total under
+     * {@link MemoryKeys#AUDIT_DISCARDED_COST}. (Their tenant charge still pending
+     * is not lost either: {@link #undoLastStep()} already moved it onto the step
+     * that became current, which is now this new step's predecessor.)
      */
     public IConversationStep startNextStep() {
         double discardedSpend = 0.0;
-        IData<Object> newestPending = null;
-        // Stack order: the bottom entry was undone first and is the newest turn.
         for (IConversationStep abandoned : redoCache) {
             discardedSpend += recordedSpend(abandoned);
-            if (newestPending == null) {
-                newestPending = abandoned.getData(MemoryKeys.AUDIT_PENDING_COST);
-            }
         }
         redoCache.clear();
         IConversationStep step = startNextStep(null);
         if (discardedSpend > 0.0) {
             currentStep.storeData(new Data<>(MemoryKeys.AUDIT_DISCARDED_COST, discardedSpend));
         }
-        if (newestPending != null && newestPending.getResult() instanceof Number pending) {
-            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, pending.doubleValue()));
-        }
         return step;
+    }
+
+    /**
+     * Keep {@code TurnCostMeter}'s owed tenant charge on the current step when undo
+     * or redo changes which step that is.
+     * <p>
+     * {@code audit:pending_cost} is read from the newest step that has one: the
+     * step being settled, else the latest earlier step. Undo and redo reorder that
+     * history, so a value left behind on the step they move out of the way would be
+     * invisible (undo: it sits in the redo cache) or stale (redo: the restored
+     * step's own value predates whatever a rerun recorded on the step it replaces).
+     * Both are real money: a rerun after an undo charged an already-recovered
+     * amount a second time, and a rerun's own outage charge was lost to the older
+     * value of the step a redo brought back. The step moved aside always holds the
+     * newest value of the two, so it is copied onto the new current step — a
+     * {@code 0.0} included, which says an older charge was recovered. The undo and
+     * redo writes are full replaces, so the copy is persisted.
+     */
+    private void carryPendingCost(IConversationStep from) {
+        IData<Object> pending = from != null ? from.getData(MemoryKeys.AUDIT_PENDING_COST) : null;
+        if (pending != null && pending.getResult() instanceof Number owed) {
+            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, owed.doubleValue()));
+        }
     }
 
     /**
@@ -239,6 +252,7 @@ public class ConversationMemory implements IConversationMemory {
         conversationOutputs.pop();
         forgetPersistedStepCount();
         applyPropertyChanges(undone, true);
+        carryPendingCost(undone);
     }
 
     @Override
@@ -257,11 +271,13 @@ public class ConversationMemory implements IConversationMemory {
             throw new IllegalStateException();
         }
 
+        IConversationStep replaced = currentStep;
         previousSteps.push(currentStep);
         currentStep = (IWritableConversationStep) redoCache.pop();
         conversationOutputs.push(currentStep.getConversationOutput());
         applyPropertyChanges(currentStep, false);
         forgetPersistedStepCount();
+        carryPendingCost(replaced);
     }
 
     /**

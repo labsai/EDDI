@@ -188,6 +188,69 @@ class TurnCostMeterTest {
     }
 
     @Test
+    @DisplayName("undo → rerun: a charge already recovered on the undone step is not charged again from the rerun step")
+    void rerunAfterUndoDoesNotRechargeARecoveredCharge() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        ConversationMemory memory = (ConversationMemory) memoryWithCost(0.50);
+        meter.meterSettledStep(memory); // outage: 0.50 pending on S0
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20));
+        meter.meterSettledStep(memory); // recovered: 0.70 charged, 0.0 pending on A
+
+        memory.undoLastStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.60)); // the rerun of S0 spends 0.10 more
+        meter.meterSettledStep(memory);
+
+        verify(quotaService).recordCost(eq(TENANT), doubleThat(d -> Math.abs(d - 0.10) < 1e-12));
+        verify(quotaService, times(3)).recordCost(anyString(), anyDouble());
+    }
+
+    @Test
+    @DisplayName("undo → rerun during an outage → say: the rerun's newer pending charge wins over the undone step's older one")
+    void rerunOutageChargeAfterUndoIsNotLost() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK)
+                .thenReturn(ITenantQuotaStore.accountingUnavailable()).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        ConversationMemory memory = (ConversationMemory) memoryWithCost(0.10);
+        meter.meterSettledStep(memory); // S0 charged
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.30));
+        meter.meterSettledStep(memory); // outage: 0.30 pending on A
+
+        memory.undoLastStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20)); // rerun of S0: 0.10 more
+        meter.meterSettledStep(memory); // outage again: 0.40 pending on S0
+        memory.startNextStep(); // the next say discards A
+        meter.meterSettledStep(memory); // store back
+
+        // Once refused (the rerun's outage), once recorded (the say) — not the undone
+        // step's stale 0.30.
+        verify(quotaService, times(2)).recordCost(eq(TENANT), doubleThat(d -> Math.abs(d - 0.40) < 1e-12));
+        assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult());
+    }
+
+    @Test
+    @DisplayName("undo → rerun during an outage → redo: the redone step owes the rerun's newer charge, not its own older one")
+    void redoCarriesTheNewerPendingCharge() {
+        when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK)
+                .thenReturn(ITenantQuotaStore.accountingUnavailable()).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        ConversationMemory memory = (ConversationMemory) memoryWithCost(0.10);
+        meter.meterSettledStep(memory);
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.30));
+        meter.meterSettledStep(memory); // 0.30 pending on A
+        memory.undoLastStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20));
+        meter.meterSettledStep(memory); // 0.40 pending on S0
+
+        memory.redoLastStep();
+
+        assertEquals(0.40, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(), 1e-12);
+    }
+
+    @Test
     @DisplayName("an outage that persists across turns accumulates the pending charge instead of dropping the older part")
     void pendingAccumulatesAcrossOutages() {
         when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());

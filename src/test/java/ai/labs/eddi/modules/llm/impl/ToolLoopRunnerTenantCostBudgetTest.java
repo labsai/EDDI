@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.service.tool.ToolExecutor;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -237,6 +238,33 @@ class ToolLoopRunnerTenantCostBudgetTest {
         assertFalse(warned(OUTAGE_SENTENCE),
                 "nothing is unavailable here — the store answered; saw: " + warnings);
         assertEquals(1, warnings.size(), "one refusal, one sentence: " + warnings);
+    }
+
+    /**
+     * A check that throws (a defect — store outages come back as a result) must
+     * refuse the tool call like the model-call gate does, under its own reason,
+     * instead of escaping and failing the turn.
+     */
+    @Test
+    @DisplayName("a cost check that throws refuses the tool call as tenant_check_error, not as an outage, and does not throw")
+    void checkThatThrows_refusesAsCheckError() {
+        when(tenantQuotaService.checkCostBudget("default")).thenThrow(new IllegalStateException("bug"));
+        var trace = new ArrayList<Map<String, Object>>();
+        // The tool loop counts on the global composite, which has no registry in a
+        // unit test — attach one for the duration.
+        var registry = new SimpleMeterRegistry();
+        Metrics.globalRegistry.add(registry);
+        try {
+            String result = execute(trace);
+
+            assertTrue(result.startsWith("Error: Tenant cost budget check failed"), result);
+            verify(executor, never()).execute(any(), nullable(String.class));
+            assertEquals(1, trace.stream().filter(step -> "tool_error".equals(step.get("type"))).count(), trace.toString());
+            assertFalse(warned(OUTAGE_SENTENCE), "a defect is not a quota-store outage; saw: " + warnings);
+            assertEquals(1.0, registry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_TENANT_CHECK_ERROR).count());
+        } finally {
+            Metrics.globalRegistry.remove(registry);
+        }
     }
 
     /** An allowed check must leave the call alone — the gate is not a no-op. */

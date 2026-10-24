@@ -100,6 +100,11 @@ class ConversationCostCeilingTest {
 
         memory.undoLastStep();
         assertEquals(0.70, LlmSpendGate.conversationCost(memory), 1e-12, "an undone step's spend still counts (a rerun runs now)");
+        assertEquals(0.70, ConversationMemoryUtilities
+                .convertSimpleConversationMemory(ConversationMemoryUtilities.convertConversationMemory(memory), false, false)
+                .getConversationCost(), 1e-12, "the snapshot total does not drop between the undo and the next say");
+        assertEquals(0.70, ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(memory, false, true, List.of())
+                .getConversationCost(), 1e-12, "nor does the current-step projection's");
         memory.redoLastStep();
         assertEquals(0.70, LlmSpendGate.conversationCost(memory), 1e-12, "redo neither adds nor removes");
 
@@ -134,12 +139,17 @@ class ConversationCostCeilingTest {
         TenantQuotaService tenant = mock(TenantQuotaService.class);
         when(tenant.getDefaultTenantId()).thenReturn("default");
         when(tenant.checkCostBudget("default")).thenThrow(new IllegalStateException("driver exploded"));
-        var gate = new LlmSpendGate(tenant, new SimpleMeterRegistry());
+        var registry = new SimpleMeterRegistry();
+        var gate = new LlmSpendGate(tenant, registry);
 
         LlmSpendGate.Refusal refusal = gate.check(new ConversationMemory(CONVERSATION_ID, "agent", 1, "user"));
+        gate.check(new ConversationMemory(CONVERSATION_ID, "agent", 1, "user"));
 
-        assertNotNull(refusal);
-        assertEquals(LlmSpendGate.REASON_TENANT_ACCOUNTING_UNAVAILABLE, refusal.reason());
+        assertNotNull(refusal, "fail closed");
+        assertEquals(LlmSpendGate.REASON_TENANT_CHECK_ERROR, refusal.reason(), "a defect must not pass for a store outage");
+        assertEquals(2.0, registry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_TENANT_CHECK_ERROR).count(),
+                "counted on every refusal, even when the stack trace is rate-limited");
+        assertEquals(0.0, registry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_TENANT_ACCOUNTING_UNAVAILABLE).count());
     }
 
     @Test

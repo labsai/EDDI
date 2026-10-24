@@ -261,7 +261,8 @@ public class ConversationMemoryUtilities {
      * values are skipped: one NaN would poison the total and silently disable every
      * ceiling compared against it. A step's {@code audit:discarded_cost} — the
      * spend of undone steps a later turn discarded — is spend too and is summed
-     * with it, so an undo does not lower the total.
+     * with it. The steps still in the redo cache are added by
+     * {@link #conversationCost(List, List)}, so the total never drops on an undo.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps) {
         if (steps == null) {
@@ -292,6 +293,24 @@ public class ConversationMemoryUtilities {
             }
         }
         return found ? total : null;
+    }
+
+    /**
+     * The conversation's total spend as the snapshot reports it: the steps plus the
+     * steps an undo moved to the redo cache. Without the redo cache the total
+     * dropped between an undo and the next say — and its readers (the group cost
+     * ledger, which overwrites a member's cost with the latest total; schedule and
+     * Slack cost deltas; the Manager) saw spend vanish — while the per-conversation
+     * ceiling, which counts the redo cache, did not. {@code null} only when neither
+     * carried a cost.
+     */
+    static Double conversationCost(List<ConversationStepSnapshot> steps, List<ConversationStepSnapshot> redoCache) {
+        Double live = conversationCost(steps);
+        Double undone = conversationCost(redoCache);
+        if (live == null) {
+            return undone;
+        }
+        return undone == null ? live : live + undone;
     }
 
     private static boolean isSpendKey(String key) {
@@ -463,7 +482,7 @@ public class ConversationMemoryUtilities {
         }
 
         newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
-        newSnapshot.setConversationCost(conversationCost(allSteps));
+        newSnapshot.setConversationCost(conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;

@@ -12196,7 +12196,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached.",
+          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached, by reason. `tenant_accounting_unavailable` is a quota-store outage; `tenant_check_error` means the budget check itself threw (a defect, also counted for refused tool calls) and should never be non-zero.",
           "gridPos": {
             "h": 7,
             "w": 12,

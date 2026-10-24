@@ -9,7 +9,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -20,6 +19,8 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.OptionalDouble;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -69,6 +70,24 @@ public class LlmSpendGate {
     static final String REASON_CONVERSATION_CEILING = "conversation_ceiling";
     /** {@code reason} of a refusal because the quota store could not answer. */
     static final String REASON_TENANT_ACCOUNTING_UNAVAILABLE = "tenant_accounting_unavailable";
+    /**
+     * {@code reason} of a refusal because the tenant budget check itself threw — a
+     * defect, not a store outage. A store outage is answered by
+     * {@code TenantQuotaService} as an accounting-unavailable result (and counted
+     * on {@code eddi.tenant.quota.unavailable}); this tag keeps a bug from passing
+     * for one. Shared by this gate and the tool-call gate in
+     * {@code ToolLoopRunner}.
+     */
+    static final String REASON_TENANT_CHECK_ERROR = "tenant_check_error";
+
+    /** At most one stack trace per this interval for {@link #tenantCheckFailed}. */
+    static final long CHECK_ERROR_LOG_INTERVAL_NANOS = TimeUnit.MINUTES.toNanos(1);
+
+    /**
+     * When {@link #tenantCheckFailed} last logged with a stack; a defect fires on
+     * every turn, and one trace a minute is enough to diagnose it.
+     */
+    private static final AtomicLong lastCheckErrorLog = new AtomicLong(System.nanoTime() - CHECK_ERROR_LOG_INTERVAL_NANOS);
 
     /**
      * Why the model was not called.
@@ -127,12 +146,12 @@ public class LlmSpendGate {
             costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
         } catch (RuntimeException e) {
             // The gate runs outside LlmTask's guarded model phase, so a throw here fails
-            // the whole turn. The service already turns a store outage into a result;
-            // anything else that escapes is refused the same way — fail closed with the
-            // deterministic fallback answer, never a 500.
-            LOGGER.errorf(e, "Tenant cost budget check failed in conversation %s — refusing the model call",
-                    sanitize(memory != null ? memory.getConversationId() : null));
-            costCheck = ITenantQuotaStore.accountingUnavailable();
+            // the whole turn. The service already turns a store outage into a result, so
+            // whatever still escapes is a defect, not an outage: refused all the same
+            // (fail closed, the deterministic fallback answer, never a 500), but under
+            // its own reason so it cannot pass for one.
+            return new Refusal(REASON_TENANT_CHECK_ERROR,
+                    tenantCheckFailed(meterRegistry, memory != null ? memory.getConversationId() : null, "model call", e));
         }
         if (costCheck.allowed()) {
             return null;
@@ -186,6 +205,31 @@ public class LlmSpendGate {
             }
         }
         return total;
+    }
+
+    /**
+     * Count and log a tenant budget check that threw instead of answering, for
+     * either gate (this one, or the tool-call gate in {@code ToolLoopRunner}, which
+     * passes {@code null} for the registry and so counts on the global one — see
+     * {@link #countMidLoop}). Counted on {@value #METRIC} with
+     * {@code reason=tenant_check_error}; logged at ERROR with the stack trace at
+     * most once per {@link #CHECK_ERROR_LOG_INTERVAL_NANOS}, and without it
+     * otherwise, since a defect here fires on every turn.
+     *
+     * @return the refusal detail for the step record or the tool error result
+     */
+    static String tenantCheckFailed(MeterRegistry registry, String conversationId, String refusedWhat, RuntimeException e) {
+        (registry != null ? registry : Metrics.globalRegistry).counter(METRIC, "reason", REASON_TENANT_CHECK_ERROR).increment();
+        String detail = "Tenant cost budget check failed (" + e.getClass().getSimpleName() + ") — " + refusedWhat + " refused for safety";
+        long now = System.nanoTime();
+        long last = lastCheckErrorLog.get();
+        if (now - last >= CHECK_ERROR_LOG_INTERVAL_NANOS && lastCheckErrorLog.compareAndSet(last, now)) {
+            LOGGER.errorf(e, "%s in conversation %s (%s)", detail, sanitize(conversationId), REASON_TENANT_CHECK_ERROR);
+        } else {
+            LOGGER.errorf("%s in conversation %s (%s): %s", detail, sanitize(conversationId), REASON_TENANT_CHECK_ERROR,
+                    sanitize(String.valueOf(e.getMessage())));
+        }
+        return detail;
     }
 
     /**
