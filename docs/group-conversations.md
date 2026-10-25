@@ -823,8 +823,9 @@ the case for it:
 ```
 
 Either mode costs one moderator call per checked repeat, counted against `maxTurns` and stopped by the cost
-ceiling, and either never ends a phase on doubt: only a JSON boolean `"passed": true` stops it; prose, a
-string `"true"` or a judge failure keeps it going. The verdict is recorded as a `CONVERGENCE` transcript entry
+ceiling, and neither ends a phase on doubt: an unparseable reply or a judge failure keeps it going. What stops
+it differs. `SIMILARITY` stops once the agreement score reaches `threshold`. `VERDICT` stops only on a JSON
+boolean `"passed": true`; prose or a string `"true"` keeps it going. The verdict is recorded as a `CONVERGENCE` transcript entry
 (`Verdict: passed — …` or `Verdict: not passed — …`), which, like the similarity verdict, is not shown to the
 members. An unknown `mode` is refused at save time.
 
