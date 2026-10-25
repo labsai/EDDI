@@ -188,6 +188,55 @@ describe("HitlConfigSection", () => {
       expect(screen.getByTestId("hitl-notify-email-hint")).toHaveClass("text-destructive");
     });
 
+    it("reports an invalid list to the page, so an earlier valid edit cannot be saved under it", () => {
+      const onValidityChange = vi.fn();
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} onValidityChange={onValidityChange} />);
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+      const field = screen.getByTestId("hitl-notify-email-recipients");
+
+      fireEvent.change(field, { target: { value: "ops@example.com, lead@example.com" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+      fireEvent.change(field, { target: { value: "ops@example.com, lead@example.com, not-an-address" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.change(field, { target: { value: "ops@example.com" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("an invalid list stops counting once notifications are switched off", () => {
+      const onValidityChange = vi.fn();
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} onValidityChange={onValidityChange} />);
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "not-an-address" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("names the recipients field by its label", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByLabelText("Recipients (comma or one per line)")).toBe(screen.getByTestId("hitl-notify-email-recipients"));
+    });
+
+    it("the hint says a tool-call mail carries the redacted, shortened arguments", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      const hint = screen.getByTestId("hitl-notify-email-hint").textContent ?? "";
+      expect(hint).toContain("arguments redacted and shortened");
+      expect(hint).not.toContain("carries no conversation content");
+    });
+
     it("switching it off removes notify", () => {
       const agent: Agent = {
         hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },

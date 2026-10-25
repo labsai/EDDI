@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.hitl.HitlToolCallPreview;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -143,7 +144,13 @@ public final class HitlNotificationContent {
             case ABORT -> "then the conversation is cancelled";
             case WAIT_INDEFINITELY -> "";
         };
-        return WHEN.format(pause.pausedAt().plus(timeout)) + ", " + outcome;
+        try {
+            return WHEN.format(pause.pausedAt().plus(timeout)) + ", " + outcome;
+        } catch (DateTimeException | ArithmeticException e) {
+            // A positive duration passes config validation however large it is; one
+            // past the end of the time-line names no date, but the mail still goes.
+            return "after " + oneLine(pause.approvalTimeout(), 40) + ", " + outcome;
+        }
     }
 
     /**

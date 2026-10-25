@@ -204,6 +204,42 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("an oversized error or relay reply is stored capped on every write, not refused with the row left claimed")
+    default void oversizedFreeTextIsCapped() {
+        String longError = "RENDER: " + "e".repeat(3000);
+        String longReply = "250 " + "r".repeat(1000);
+        ledger().insertIfAbsent(entry("cap-retry", NOW.minusSeconds(1), "a@example.com"));
+        ledger().insertIfAbsent(entry("cap-done", NOW.minusSeconds(1), "b@example.com"));
+        LedgerEntry inserted = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
+                "<eddi." + UUID.randomUUID() + "@example.com>", "conv-1", "pause-1", "cap-insert", "c@example.com", State.FAILED, 1, NOW, null,
+                longReply, longError, NOW, NOW, NOW.plus(Duration.ofDays(1)));
+        assertTrue(ledger().insertIfAbsent(inserted));
+        List<LedgerEntry> claimed = ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(30), 10);
+        assertEquals(2, claimed.size());
+
+        assertTrue(ledger().reschedule(claimed.get(0).id(), claimed.get(0).claimToken(), NOW.plusSeconds(60), longError, NOW));
+        assertTrue(ledger().complete(claimed.get(1).id(), claimed.get(1).claimToken(), State.FAILED, longReply, longError, NOW));
+
+        assertEquals(longError.substring(0, IEmailMessageLedger.MAX_LAST_ERROR), ledger().findById(claimed.get(0).id()).orElseThrow().lastError());
+        LedgerEntry completed = ledger().findById(claimed.get(1).id()).orElseThrow();
+        assertEquals(State.FAILED, completed.state());
+        assertEquals(longError.substring(0, IEmailMessageLedger.MAX_LAST_ERROR), completed.lastError());
+        assertEquals(longReply.substring(0, IEmailMessageLedger.MAX_PROVIDER_ID), completed.providerId());
+        LedgerEntry stored = ledger().findById(inserted.id()).orElseThrow();
+        assertEquals(IEmailMessageLedger.MAX_LAST_ERROR, stored.lastError().length());
+        assertEquals(IEmailMessageLedger.MAX_PROVIDER_ID, stored.providerId().length());
+    }
+
+    @Test
+    @DisplayName("the cap never splits a surrogate pair")
+    default void capKeepsSurrogatePairsWhole() {
+        String value = "a".repeat(9) + new String(Character.toChars(0x1F600));
+        assertEquals("a".repeat(9), IEmailMessageLedger.cap(value, 10));
+        assertEquals(value, IEmailMessageLedger.cap(value, 11));
+        assertNull(IEmailMessageLedger.cap(null, 10));
+    }
+
+    @Test
     @DisplayName("the rate-limit count covers one recipient and kind since a point in time, suppressed rows excluded")
     default void countCreatedSince() {
         Instant hourAgo = NOW.minus(Duration.ofHours(1));

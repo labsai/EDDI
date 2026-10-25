@@ -341,6 +341,37 @@ class HitlEmailNotifierTest {
         }
 
         @Test
+        @DisplayName("a valid timeout past the end of the time-line still mails, naming the duration instead of a date")
+        void deadlineBeyondInstantRange() throws Exception {
+            notifyTo("ops@example.com");
+            snapshot.setHitlApprovalTimeout("P1000000000000D");
+
+            notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+
+            assertEquals(1, sent.size());
+            assertEquals(State.SENT, ledger.all().get(0).state());
+            String body = body(sent.get(0));
+            assertTrue(body.contains("after P1000000000000D, then it is rejected automatically"), body);
+        }
+
+        @Test
+        @DisplayName("an unexpected render failure marks the row FAILED instead of leaving it claimed")
+        void unexpectedRenderFailureFailsTheRow() throws Exception {
+            notifyTo("ops@example.com");
+            var notifier = notifier(6);
+            // Present when the row is written, gone when the mail is built: a runtime
+            // failure no render path names in a catch clause.
+            when(mailer.from()).thenReturn(Optional.of(FROM), Optional.empty());
+
+            notifier.notifyPause(CONVERSATION, PAUSE, NOW);
+
+            assertTrue(sent.isEmpty());
+            LedgerEntry row = ledger.all().get(0);
+            assertEquals(State.FAILED, row.state());
+            assertTrue(row.lastError().startsWith("RENDER: NoSuchElementException"), row.lastError());
+        }
+
+        @Test
         @DisplayName("a TOOL_CALL pause lists tool names with redacted, truncated arguments only")
         void toolCallContent() throws Exception {
             notifyTo("ops@example.com");

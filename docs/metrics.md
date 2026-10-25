@@ -696,7 +696,11 @@ eddi_email_dns_lookups_total                # TXT lookups for DKIM keys and DMAR
 
 `eddi_email_auth_total` shows whether a mailbox's correspondents can be authenticated at all: a mailbox whose mail is
 mostly `none` comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
-tampered, forwarded or list mail, or forged mail. No tag carries a domain or an address. For
+tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key lookup that fails temporarily or runs
+out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no other signature passes (if one
+does, the verdict is `pass_unaligned` instead). Such a verdict is marked temporary and the mail is retried, so a `fail`
+rise that comes with a rise in `tempfail` or `budget_exhausted` points at the resolver, not at the senders. No tag
+carries a domain or an address. For
 `eddi_email_dns_lookups_total`, `cached=true` is an answer served from the cache (no query sent); a sustained
 `tempfail` means the resolver (`eddi.email.dns.servers`) is unreachable, and `budget_exhausted` that messages carry
 more signatures than `eddi.email.dns.max-lookups-per-message` allows.

@@ -740,11 +740,16 @@ public class ConversationService implements IConversationService, UserErasurePar
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                 counterHitlPause.increment();
                 conversationHitlService.scheduleHitlTimeout(conversationId, conversationMemory);
-                firePauseCommitted(conversationId, conversationMemory);
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
+            // Announced only once the conversation is final: a failed descriptor write
+            // discards it again, and an observer (the email notifier) must not have
+            // been told about a pause that no longer exists.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                firePauseCommitted(conversationId, conversationMemory);
+            }
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
