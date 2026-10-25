@@ -364,4 +364,46 @@ interface EmailMessageLedgerContract {
         assertEquals(notification.id(), ledger().findOutboundByMessageId(notification.messageId()).orElseThrow().id());
         assertTrue(ledger().findOutboundByMessageId("<unknown@example.com>").isEmpty());
     }
+
+    static LedgerEntry reply(String integrationId, String conversationId, String key, String recipient, State state, Instant createdAt) {
+        return new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.REPLY, Direction.OUT, "<eddi." + UUID.randomUUID() + "@contoso.com>",
+                conversationId, "row-1|1|reply", key, recipient, state, 1, createdAt, null, null, null, createdAt, createdAt,
+                createdAt.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    @DisplayName("replies: a conversation's rows are found oldest first, and the per-thread count skips suppressed and other kinds")
+    default void conversationRowsAndThreadCount() {
+        LedgerEntry in = inbound("int-1", "<q1@example.com>", "alice@example.com", NOW.minusSeconds(30));
+        ledger().insertIfAbsent(in);
+        ledger().transition(in.id(), State.RECEIVED, State.TURN_SUBMITTED, "conv-9", NOW.plusSeconds(600), null, true, NOW);
+        LedgerEntry sent = reply("int-1", "conv-9", "reply:a", "alice@example.com", State.SENT, NOW.minusSeconds(20));
+        LedgerEntry suppressed = reply("int-1", "conv-9", "reply:b", "alice@example.com", State.SUPPRESSED, NOW.minusSeconds(10));
+        LedgerEntry old = reply("int-1", "conv-9", "reply:c", "alice@example.com", State.SENT, NOW.minus(Duration.ofHours(2)));
+        LedgerEntry other = reply("int-1", "conv-other", "reply:d", "alice@example.com", State.SENT, NOW);
+        for (LedgerEntry row : List.of(sent, suppressed, old, other)) {
+            assertTrue(ledger().insertIfAbsent(row));
+        }
+
+        List<LedgerEntry> rows = ledger().findByConversation("conv-9", 10);
+        assertEquals(List.of(old.id(), in.id(), sent.id(), suppressed.id()), rows.stream().map(LedgerEntry::id).toList());
+        assertEquals(2, ledger().findByConversation("conv-9", 2).size(), "bounded");
+        assertEquals(1, ledger().countByConversationSince("conv-9", Kind.REPLY, NOW.minus(Duration.ofHours(1))));
+        assertEquals(0, ledger().countByConversationSince("conv-9", Kind.NOTIFY, NOW.minus(Duration.ofHours(1))));
+        assertEquals(sent.id(), ledger().findByMessage("int-1", Direction.OUT, sent.messageId()).orElseThrow().id(), "the thread index");
+    }
+
+    @Test
+    @DisplayName("replies: a bounce moves a SENT reply to FAILED by a conditional transition, once")
+    default void bounceTransition() {
+        LedgerEntry sent = reply("int-1", "conv-9", "reply:e", "alice@example.com", State.SENT, NOW);
+        ledger().insertIfAbsent(sent);
+
+        assertTrue(ledger().transition(sent.id(), State.SENT, State.FAILED, null, null, "BOUNCED: 5.1.1", false, NOW));
+        assertFalse(ledger().transition(sent.id(), State.SENT, State.FAILED, null, null, "BOUNCED: 5.1.1", false, NOW));
+        LedgerEntry after = ledger().findById(sent.id()).orElseThrow();
+        assertEquals(State.FAILED, after.state());
+        assertEquals("BOUNCED: 5.1.1", after.lastError());
+        assertEquals("conv-9", after.conversationId());
+    }
 }

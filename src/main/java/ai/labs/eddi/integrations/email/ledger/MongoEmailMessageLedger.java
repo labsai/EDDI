@@ -82,6 +82,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.ascending(F_MESSAGE_ID), new IndexOptions().name("idx_email_ledger_message_id"));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_RECIPIENT), Indexes.ascending(F_KIND),
                 Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_inbound_sender"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
+                new IndexOptions().name("idx_email_ledger_conversation"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -208,6 +210,21 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_RECIPIENT, sender),
                 Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.gte(F_CREATED, Date.from(since)),
                 Filters.in(F_STATE, State.TURN_SUBMITTED.name(), State.DONE.name())));
+    }
+
+    @Override
+    public List<LedgerEntry> findByConversation(String conversationId, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        for (Document document : rows.find(Filters.eq(F_CONVERSATION, conversationId)).sort(Sorts.ascending(F_CREATED)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
+    public long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        return rows.countDocuments(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, kind.name()),
+                Filters.gte(F_CREATED, Date.from(since)), Filters.ne(F_STATE, State.SUPPRESSED.name())));
     }
 
     @Override

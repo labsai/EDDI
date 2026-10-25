@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -26,6 +27,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -269,6 +272,44 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             emailSupport.get().afterDelete(id);
         }
         return response;
+    }
+
+    @Override
+    public List<EmailSuppressionView> readEmailSuppressions(String id, Integer limit) {
+        requireEmailIntegrationForEdit(id);
+        return emailSupport().suppressions(id, limit == null ? 100 : limit).stream()
+                .map(s -> new EmailSuppressionView(s.addressHash(), s.domain(), s.reason(), s.createdAt() == null ? null : s.createdAt().toString()))
+                .toList();
+    }
+
+    @Override
+    public Response clearEmailSuppression(String id, EmailSuppressionView.ClearRequest request) {
+        requireEmailIntegrationForEdit(id);
+        if (request == null || request.address() == null || request.address().isBlank()) {
+            throw new BadRequestException("The body must name the address to clear: {\"address\": \"...\"}.");
+        }
+        return emailSupport().clearSuppression(id, request.address())
+                ? Response.noContent().build()
+                : Response.status(Response.Status.NOT_FOUND).build();
+    }
+
+    /**
+     * The suppression list belongs to the integration: whoever may edit it may read
+     * and clear it. A channel that is not an email integration has none (404).
+     */
+    private void requireEmailIntegrationForEdit(String id) {
+        restVersionInfo.requireEditAccess(id);
+        ChannelIntegrationConfiguration current;
+        try {
+            current = channelStore.read(id, channelStore.getCurrentResourceId(id).getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("The channel store could not be read.");
+        }
+        if (!isEmail(current)) {
+            throw new NotFoundException("Channel integration " + id + " is not an email integration.");
+        }
     }
 
     @Override

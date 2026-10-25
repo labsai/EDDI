@@ -142,6 +142,18 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
                 .count();
     }
 
+    @Override
+    public synchronized List<LedgerEntry> findByConversation(String conversationId, int limit) {
+        return rows.values().stream().filter(r -> conversationId.equals(r.conversationId())).sorted(Comparator.comparing(LedgerEntry::createdAt))
+                .limit(limit).toList();
+    }
+
+    @Override
+    public synchronized long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        return rows.values().stream().filter(r -> conversationId.equals(r.conversationId()) && r.kind() == kind && !r.createdAt().isBefore(since)
+                && r.state() != State.SUPPRESSED).count();
+    }
+
     /**
      * Test hook: replaces a row as it is (to simulate an earlier state or a crash).
      */

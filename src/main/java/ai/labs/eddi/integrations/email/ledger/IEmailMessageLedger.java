@@ -44,8 +44,15 @@ import java.util.Optional;
  * conditional {@link #transition}s. While a row is {@code RECEIVED},
  * {@code nextAttemptAt} is when a deferred mail may be tried again; while it is
  * {@code TURN_SUBMITTED}, it is the deadline after which the turn counts as
- * stranded ({@link #findDue}). Replies add {@link Kind#REPLY}; relay webhooks
- * add single-use replay tokens.
+ * stranded ({@link #findDue}).
+ * <p>
+ * <b>Replies (Phase 3).</b> A conversation-mode reply is a {@link Kind#REPLY}
+ * row, {@link Direction#OUT}, under an idempotency key derived from
+ * conversation, step and reply kind, worked like a notification (claim, lease,
+ * complete, reschedule). Its Message-ID is what a correspondent's next mail
+ * names in {@code In-Reply-To}/{@code References}, so the row is also the
+ * thread index ({@link #findByMessage} with {@link Direction#OUT}). Relay
+ * webhooks will add single-use replay tokens.
  */
 public interface IEmailMessageLedger {
 
@@ -274,6 +281,21 @@ public interface IEmailMessageLedger {
      * budget.
      */
     long countInboundTurns(String integrationId, String sender, Instant since);
+
+    /**
+     * Up to {@code limit} rows of one conversation, of any kind, direction and
+     * integration, oldest first — how conversation mode finds the mail a reply
+     * answers, the sender who started a thread and the addresses its replies went
+     * to (email plan §11).
+     */
+    List<LedgerEntry> findByConversation(String conversationId, int limit);
+
+    /**
+     * How many {@code kind} rows of {@code conversationId} were created at or after
+     * {@code since} and not {@link State#SUPPRESSED} — the per-thread reply budget
+     * ({@code maxRepliesPerThreadPerHour}), counted cluster-wide.
+     */
+    long countByConversationSince(String conversationId, Kind kind, Instant since);
 
     /** Rows addressed to {@code recipient} (normalised), for GDPR export. */
     List<LedgerEntry> findByRecipient(String recipient);

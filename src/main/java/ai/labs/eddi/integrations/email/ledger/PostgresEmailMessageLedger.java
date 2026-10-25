@@ -73,7 +73,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_rate ON email_message_ledger (recipient, kind, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -328,6 +329,39 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to count inbound email ledger rows", e);
+        }
+    }
+
+    @Override
+    public List<LedgerEntry> findByConversation(String conversationId, int limit) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE conversation_id = ? ORDER BY created_at, id LIMIT ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            statement.setInt(2, limit);
+            List<LedgerEntry> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(toEntry(rows));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger rows of a conversation", e);
+        }
+    }
+
+    @Override
+    public long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE conversation_id = ? AND kind = ? AND created_at >= ? AND state <> 'SUPPRESSED'";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            statement.setString(2, kind.name());
+            statement.setTimestamp(3, timestamp(since));
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count the email ledger rows of a conversation", e);
         }
     }
 
