@@ -613,7 +613,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           {/* Top bar actions */}
           {conversationId && (
             <>
-              {ratingProfile?.conversationRating && (
+              {ratings.profile?.conversationRating && (
                 <button
                   onClick={ratings.openCard}
                   className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -762,23 +762,23 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           ) : (
             <div className={embedded ? "py-2" : "py-4"}>
               {messages.map((msg, i) => {
-                const ratingStep = ratingProfile?.messageRating ? (ratableByPosition[i] ?? null) : null;
+                const ratingStep = ratings.profile?.messageRating ? (ratableByPosition[i] ?? null) : null;
                 return (
                   <ChatMessage
                     key={msg.id}
                     message={msg}
                     ratingStep={ratingStep}
                     rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
-                    ratingProfile={ratingProfile}
+                    ratingProfile={ratings.profile}
                     onRateStep={ratings.rateReply}
                   />
                 );
               })}
 
-              {ratings.cardOpen && ratingProfile && (
+              {ratings.cardOpen && ratings.profile && (
                 <ChatRatingCard
                   key={conversationId ?? "none"}
-                  profile={ratingProfile}
+                  profile={ratings.profile}
                   current={ratings.conversationRating}
                   onRate={ratings.rateWhole}
                   onClose={ratings.closeCard}

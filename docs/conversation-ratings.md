@@ -61,7 +61,7 @@ conversation but cannot rate one on somebody's behalf (that would forge it).
 | Method | Path | Body / result |
 | --- | --- | --- |
 | `PUT` | `/agents/{conversationId}/rating` | `{score, tags?, comment?, channel?}` → the stored rating |
-| `GET` | `/agents/{conversationId}/rating` | `{conversation, steps[]}` — restores the client's state after a reload |
+| `GET` | `/agents/{conversationId}/rating` | `{conversation, steps[], controls}` — restores the client's state after a reload; `controls` are the rating controls of the version *this conversation* runs on (null when it takes no ratings), which a resuming client shows instead of the profile's |
 | `DELETE` | `/agents/{conversationId}/rating` | 204, withdrawn (also when there was none) |
 | `PUT` | `/agents/{conversationId}/steps/{stepIndex}/rating` | `{score: 0\|1, tags?, comment?, channel?}` |
 | `DELETE` | `/agents/{conversationId}/steps/{stepIndex}/rating` | 204 |

@@ -154,6 +154,17 @@ describe("httpRatingClient", () => {
     expect(await httpRatingClient.read("c1")).toEqual({ conversation: null, steps: [] });
   });
 
+  it("reads the conversation's own controls: parsed, null when off, undefined when not sent", async () => {
+    captureFetch(200, JSON.stringify({ conversation: null, steps: [], controls: { scale: "THUMBS", conversationRating: true } }));
+    expect((await httpRatingClient.read("c1")).controls?.scale).toBe("THUMBS");
+
+    captureFetch(200, JSON.stringify({ conversation: null, steps: [], controls: null }));
+    expect((await httpRatingClient.read("c1")).controls).toBeNull();
+
+    captureFetch(200, JSON.stringify({ conversation: null, steps: [] }));
+    expect((await httpRatingClient.read("c1")).controls).toBeUndefined();
+  });
+
   it("throws the server's refusal as an ApiError", async () => {
     captureFetch(409, JSON.stringify({ error: "RATING_DISABLED", message: "off" }));
     await expect(httpRatingClient.rateConversation("c1", { score: 1 })).rejects.toBeInstanceOf(ApiError);

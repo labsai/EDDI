@@ -33,4 +33,4 @@ People chatting with an agent can now rate the conversation and, if the agent as
 
 ### What's next
 
-PR 2 (Chat UI), PR 3 (Manager Feedback page, badge on `attention-count`), PR 4 (MCP + Platform Operator), PR 5 (push alerts). The store ITs (`MongoConversationRatingStoreIT`, `PostgresConversationRatingStoreIT`) need Docker.
+The MCP rating tools ship with this backend. Next: the Chat UI and the Manager Feedback page (badge on `attention-count`) with the Platform Operator's read access, then push alerts. The store ITs (`MongoConversationRatingStoreIT`, `PostgresConversationRatingStoreIT`) need Docker.

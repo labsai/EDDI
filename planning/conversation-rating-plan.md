@@ -219,7 +219,7 @@ ConversationRating
 | `PUT /agents/{conversationId}/rating` | `{score, tags?, comment?, channel?}` → 200 with the stored rating |
 | `GET /agents/{conversationId}/rating` | the caller's conversation rating + per-step ratings (so the UI can re-render state after reload) |
 | `DELETE /agents/{conversationId}/rating` | withdraw |
-| `PUT /agents/{conversationId}/steps/{stepIndex}/rating` | `{score: 0|1, tags?, comment?}` |
+| `PUT /agents/{conversationId}/steps/{stepIndex}/rating` | `{score: 0\|1, tags?, comment?}` |
 | `DELETE /agents/{conversationId}/steps/{stepIndex}/rating` | withdraw |
 
 Implemented as a separate resource interface `IRestConversationRating` (like `IRestAgentProfile`, which also lives under `/agents/…`), not by growing `IRestAgentEngine`. Roles: `eddi-admin`, `eddi-editor`, `eddi-user` (as the profile endpoint).
@@ -232,8 +232,8 @@ Server-side checks: owner (`requireConversationOwner`), `ratingConfig` enabled o
 
 | Method / path | Purpose |
 | --- | --- |
-| `GET /ratings?agentId&agentVersion&environment&from&to&minScore&maxScore&kind=conversation|message&tag&hasComment&index&limit` | Paged list, newest first. Each row carries `canOpenTranscript` (precomputed `requireConversationRead` / `canReview`). |
-| `GET /ratings/summary?agentId&from&to&kind&groupBy=none|day|week|agentVersion|channel` | `{count, avgNormalized, distribution (thumbs: up/down; stars: 1..5), csat (share of 4–5 among five-star), thumbsUpRate, commentCount, topTags[]}` per bucket. No response rate (R2). |
+| `GET /ratings?agentId&agentVersion&environment&from&to&minScore&maxScore&kind=conversation\|message&tag&hasComment&index&limit` | Paged list, newest first. Each row carries `canOpenTranscript` (precomputed `requireConversationRead` / `canReview`). |
+| `GET /ratings/summary?agentId&from&to&kind&groupBy=none\|day\|week\|agentVersion\|channel` | `{count, avgNormalized, distribution (thumbs: up/down; stars: 1..5), csat (share of 4–5 among five-star), thumbsUpRate, commentCount, topTags[]}` per bucket. No response rate (R2). |
 | `GET /ratings/export?…` | CSV (same filter), streamed, capped at 100k rows, formula-injection escaped (R12). |
 
 ---
