@@ -120,7 +120,43 @@ public interface AlertStoreContract {
         assertNull(read.updatedBy());
     }
 
+    @Test
+    default void gdprFindsRulesByAuthorOrLastEditor() {
+        AlertRule byAlice = ruleStore().create(rule("alice wrote, bob edited", AlertScope.agent(AGENT), true));
+        AlertRule byCarol = ruleStore()
+                .create(rule("carol wrote and edited", AlertScope.agent(AGENT), true).withAudit("carol", NOW.plusSeconds(5), "carol",
+                        NOW.plusSeconds(5)));
+        AlertRule editedByAlice = ruleStore()
+                .create(rule("dave wrote, alice edited", AlertScope.agent(OTHER), true).withAudit("dave", NOW.plusSeconds(10), "alice",
+                        NOW.plusSeconds(11)));
+
+        assertEquals(List.of(editedByAlice.id(), byAlice.id()), ruleStore().findByAuthor("alice", 10).stream().map(AlertRule::id).toList(),
+                "authored or last edited, newest first");
+        assertEquals(List.of(byAlice.id()), ruleStore().findByAuthor("bob", 10).stream().map(AlertRule::id).toList());
+        assertEquals(List.of(byCarol.id()), ruleStore().findByAuthor("carol", 10).stream().map(AlertRule::id).toList());
+        assertEquals(1, ruleStore().findByAuthor("alice", 1).size(), "capped");
+        assertTrue(ruleStore().findByAuthor("nobody", 10).isEmpty());
+    }
+
     // ------------------------------------------------------------------ events
+
+    @Test
+    default void gdprFindsEventsByAcknowledger() {
+        AlertEvent a = eventStore().insert(event(AGENT, "ga", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
+        AlertEvent b = eventStore().insert(event(AGENT, "gb", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
+        AlertEvent c = eventStore().insert(event(OTHER, "gc", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
+        eventStore().insert(event(OTHER, "gd", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
+        eventStore().acknowledge(a.id(), "erin", NOW.plusSeconds(1));
+        eventStore().acknowledge(c.id(), "erin", NOW.plusSeconds(3));
+        eventStore().acknowledge(b.id(), "frank", NOW.plusSeconds(2));
+
+        List<AlertEvent> erins = eventStore().findAcknowledgedBy("erin", 10);
+        assertEquals(List.of(c.id(), a.id()), erins.stream().map(AlertEvent::id).toList(), "most recently acknowledged first");
+        assertEquals(NOW.plusSeconds(3), erins.get(0).acknowledgedAt());
+        assertEquals(List.of(b.id()), eventStore().findAcknowledgedBy("frank", 10).stream().map(AlertEvent::id).toList());
+        assertEquals(1, eventStore().findAcknowledgedBy("erin", 1).size(), "capped");
+        assertTrue(eventStore().findAcknowledgedBy("nobody", 10).isEmpty());
+    }
 
     @Test
     default void eventRoundTripsWithDeliveriesAndMatch() {

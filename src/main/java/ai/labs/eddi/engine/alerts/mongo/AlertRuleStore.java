@@ -123,6 +123,14 @@ public class AlertRuleStore implements IAlertRuleStore {
         return created + updated;
     }
 
+    @Override
+    public List<AlertRule> findByAuthor(String userId, int limit) {
+        List<AlertRule> rules = new ArrayList<>();
+        collection.find(or(eq("createdBy", userId), eq("updatedBy", userId))).sort(Sorts.descending("createdAt", "_id")).limit(limit)
+                .forEach(doc -> rules.add(fromDocument(doc)));
+        return rules;
+    }
+
     private static Bson listFilter(String agentId, boolean onlyThatAgent) {
         if (agentId == null) {
             return new Document();

@@ -313,6 +313,13 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         return update("UPDATE alert_events SET acknowledged_by = NULL WHERE acknowledged_by = ?", List.of(userId), false);
     }
 
+    @Override
+    public List<AlertEvent> findAcknowledgedBy(String userId, int limit) {
+        ensureSchema();
+        return select("SELECT " + COLUMNS + " FROM alert_events WHERE acknowledged_by = ? ORDER BY acknowledged_at DESC NULLS LAST, id DESC LIMIT ?",
+                Arrays.asList(userId, limit));
+    }
+
     static String where(AlertEventFilter f, List<Object> params) {
         List<String> clauses = new ArrayList<>();
         if (f != null) {
