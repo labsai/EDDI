@@ -192,6 +192,15 @@ class HiddenContentFilterTest {
         assertTrue(page("<table bgcolor=\"#000000\"><tr><td>DARK</td></tr></table>").contains("DARK"), "no assumed text colour on pages");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"2ex", "3ch", "1vw", "2cm", "1in"})
+    @DisplayName("a font size in a unit with no conversion, and no inherited size, keeps the text")
+    void unconvertedFontUnit(String size) {
+        String html = "<p style=\"font-size:" + size + "\">SIZED</p>";
+        assertTrue(mail(html).contains("SIZED"));
+        assertTrue(page(html).contains("SIZED"));
+    }
+
     @Test
     @DisplayName("the count reports what was removed, and a deep document does not overflow the stack")
     void countAndDepth() {
