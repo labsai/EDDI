@@ -145,7 +145,7 @@ public class LlmSpendGate {
         // The agent's own ceiling first: pure arithmetic over memory, no I/O. Calls
         // still in flight count at what they hold (nothing, outside a concurrent turn).
         OptionalDouble ceiling = memory != null ? memory.getConversationCostCeilingUsd() : OptionalDouble.empty();
-        if (ceilingApplies(ceiling)) {
+        if (memory != null && ceilingApplies(ceiling)) {
             SpendReservations reservations = memory.getSpendReservations();
             double spent = conversationCost(memory) + (reservations != null ? reservations.heldUsd() : 0.0);
             if (spent >= ceiling.getAsDouble()) {
@@ -181,7 +181,7 @@ public class LlmSpendGate {
         double pending = Double.isFinite(pendingUsd) && pendingUsd > 0.0 ? pendingUsd : 0.0;
         OptionalDouble ceiling = memory != null ? memory.getConversationCostCeilingUsd() : OptionalDouble.empty();
         SpendReservations.Reservation reservation = null;
-        if (ceilingApplies(ceiling)) {
+        if (memory != null && ceilingApplies(ceiling)) {
             double spent = conversationCost(memory) + pending;
             SpendReservations reservations = memory.getSpendReservations();
             if (reservations != null) {
