@@ -429,6 +429,12 @@ class CascadingModelExecutor {
                     if (!admission.allowed()) {
                         LOGGER.warnf("Spend check refused cascade step %d (%s); returning best so far", i, admission.refusal().reason());
                         increment("eddi.llm.cascade.ceiling.exceeded", "kind", "spend");
+                        if (bestSoFar == null) {
+                            // Nothing to return (every earlier step failed): the same path as a
+                            // refused primary call — LlmTask serves the task's fallback answer,
+                            // whatever onError says — not "no steps produced a result".
+                            throw new LlmSpendGate.SpendRefusedException(admission.refusal());
+                        }
                         return finalizeBest(bestSoFar, totals, trace, errors);
                     }
                 }

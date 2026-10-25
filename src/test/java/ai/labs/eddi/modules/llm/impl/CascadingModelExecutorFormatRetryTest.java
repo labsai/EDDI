@@ -42,6 +42,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
@@ -431,6 +432,23 @@ class CascadingModelExecutorFormatRetryTest {
         assertEquals(2, spendAsked.size(), "asked before the re-ask and before step 1");
         assertEquals(1.0, recovery("retry", FormatRetryRunner.SKIPPED_SPEND, "invalid_json"));
         assertEquals(1.0, meters.find("eddi.llm.cascade.ceiling.exceeded").tag("kind", "spend").counter().count());
+    }
+
+    @Test
+    @DisplayName("spend refused with no earlier answer: the refusal surfaces, so LlmTask serves its spend fallback")
+    void spendRefusedWithNothingToReturn() throws Exception {
+        // Step 0 fails outright (no answer at all); its cost may still have used up
+        // the ceiling. A generic "no steps produced a result" would fail the turn,
+        // where a refused primary call serves the task's fallback answer.
+        var first = FaultInjectingChatModel.script(Step.fail(new IllegalStateException("provider down")));
+        var second = FaultInjectingChatModel.script(Step.text(VALID));
+        models(first, second);
+
+        var refused = assertThrows(LlmSpendGate.SpendRefusedException.class,
+                () -> runWithSpend(cascade(plain("openai"), plain("anthropic")), task(invalidJsonRetry()), spend(0)));
+
+        assertEquals(LlmSpendGate.REASON_CONVERSATION_CEILING, refused.refusal().reason());
+        assertEquals(0, second.callCount(), "no escalation to step 1");
     }
 
     @Test
