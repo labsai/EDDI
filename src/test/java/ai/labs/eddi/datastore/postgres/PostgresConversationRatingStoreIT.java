@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,7 +48,8 @@ class PostgresConversationRatingStoreIT extends PostgresTestBase implements Conv
     void createsTheUniqueKeyAndQueryIndexes() throws Exception {
         List<String> indexes = new ArrayList<>();
         try (Connection conn = DATA_SOURCE.getConnection();
-                ResultSet rs = conn.createStatement()
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt
                         .executeQuery("SELECT indexname FROM pg_indexes WHERE tablename = '" + PostgresConversationRatingStore.TABLE + "'")) {
             while (rs.next()) {
                 indexes.add(rs.getString(1));
