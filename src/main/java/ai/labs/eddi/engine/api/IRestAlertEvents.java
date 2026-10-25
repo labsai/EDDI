@@ -27,9 +27,12 @@ import java.util.List;
  *
  * <h3>Who sees what</h3> The {@code /ratings} rule: administrators see every
  * agent's events; anyone else names an {@code agentId} and holds {@code EDIT}
- * on it ({@code AGENT_ID_REQUIRED} otherwise). An event names no user and holds
- * no conversation text; a webhook target appears by host only. A digest of a
- * rule over several agents names no agent and is an administrator's.
+ * on it ({@code AGENT_ID_REQUIRED} otherwise). An event names no user. Of the
+ * conversation it carries only a rating comment, cut to 280 characters, and an
+ * {@code OUTPUT_MATCH} value, cut to 280 characters and present only when the
+ * rule sets {@code includeValue} and the agent version has conversation review
+ * on. A webhook target appears by host only. A digest of a rule over several
+ * agents names no agent and is an administrator's.
  */
 @Path("/alerts/events")
 @Tag(name = "Alerts", description = "Alert rules and the alert inbox")
@@ -94,10 +97,12 @@ public interface IRestAlertEvents {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Acknowledge alert events in bulk",
-               description = "The listed ids (each checked like a single acknowledgement), or — without ids — every unacknowledged event "
-                       + "matching the filter (same filters and scoping as the list).")
+               description = "The listed ids (each checked like a single acknowledgement), or — when ids is left out — every "
+                       + "unacknowledged event matching the filter (same filters and scoping as the list). A present ids list is the "
+                       + "selector: an empty list or an empty entry is refused, never read as \"everything\".")
     @APIResponse(responseCode = "200", description = "How many were acknowledged.")
-    @APIResponse(responseCode = "400", description = "agentId missing for a non-administrator, or a parameter could not be read.")
+    @APIResponse(responseCode = "400", description = "agentId missing for a non-administrator, an empty ids list or entry, or a parameter "
+            + "could not be read (INVALID_PARAMETER).")
     @APIResponse(responseCode = "403", description = "The caller does not hold EDIT on an event's agent.")
     AcknowledgeResult acknowledgeEvents(@BeanParam AlertEventQueryParams query, AcknowledgeRequest request);
 

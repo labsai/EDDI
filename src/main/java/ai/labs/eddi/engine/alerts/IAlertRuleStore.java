@@ -48,4 +48,10 @@ public interface IAlertRuleStore {
      * GDPR erasure: forget {@code userId} as the author or last editor of rules.
      */
     long clearAuthor(String userId);
+
+    /**
+     * GDPR export: the rules {@code userId} created or last edited, newest first,
+     * at most {@code limit}.
+     */
+    List<AlertRule> findByAuthor(String userId, int limit);
 }

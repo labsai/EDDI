@@ -98,4 +98,10 @@ public interface IAlertEventStore {
 
     /** GDPR: forgets {@code userId} as the acknowledger of events. */
     long clearAcknowledger(String userId);
+
+    /**
+     * GDPR export: the events {@code userId} acknowledged, most recently
+     * acknowledged first, at most {@code limit}.
+     */
+    List<AlertEvent> findAcknowledgedBy(String userId, int limit);
 }

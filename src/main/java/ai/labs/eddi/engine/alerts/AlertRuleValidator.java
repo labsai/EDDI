@@ -215,6 +215,9 @@ public final class AlertRuleValidator {
         }
         try {
             URI uri = UrlValidationUtils.validateUrlSyntax(url);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                problems.add(field + ".url must be an https URL");
+            }
             if (UrlValidationUtils.isBlockedHostname(uri.getHost().toLowerCase(Locale.ROOT))) {
                 problems.add(field + ".url points at a local or internal host");
             }

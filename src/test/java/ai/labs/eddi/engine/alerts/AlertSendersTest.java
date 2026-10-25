@@ -168,6 +168,18 @@ class AlertSendersTest {
     }
 
     @Test
+    @DisplayName("only https is delivered to — a vault-reference URL that resolves to http sends nothing")
+    void httpsOnly() throws Exception {
+        when(secrets.resolveValue("${vault:hook}")).thenReturn(SECRET);
+        when(secrets.resolveValue("${vault:plain-url}")).thenReturn("http://hooks.example.com/services/T/B/token");
+        AlertDeliveryException e = assertThrows(AlertDeliveryException.class,
+                () -> senders.send(event, DeliveryTarget.webhook("${vault:plain-url}", "${vault:hook}")));
+        assertTrue(e.getMessage().contains("https"));
+        assertThrows(AlertDeliveryException.class, () -> senders.send(event, DeliveryTarget.webhook("http://hooks.example.com/x", "${vault:hook}")));
+        verify(http, never()).send(any(), any());
+    }
+
+    @Test
     @DisplayName("an inbox label of a webhook names the host only, never the path or token")
     void labelsNameTheHostOnly() {
         assertEquals("Webhook hooks.example.com", DeliveryTarget.webhook("https://hooks.example.com/services/T/B/s3cr3t?x=1", "${vault:k}").label());

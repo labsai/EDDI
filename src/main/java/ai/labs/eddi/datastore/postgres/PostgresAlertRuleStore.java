@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -195,6 +196,13 @@ public class PostgresAlertRuleStore implements IAlertRuleStore {
             }
         }
         return changed;
+    }
+
+    @Override
+    public List<AlertRule> findByAuthor(String userId, int limit) {
+        ensureSchema();
+        return select(SELECT + " WHERE created_by = ? OR updated_by = ? ORDER BY created_at DESC NULLS LAST, id DESC LIMIT ?",
+                Arrays.asList(userId, userId, limit));
     }
 
     /**

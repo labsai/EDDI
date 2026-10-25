@@ -62,7 +62,11 @@ public class OutputMatchHook {
             if (cached.isPresent()) {
                 needs = cached.get();
             } else {
-                dispatcher.submit(() -> ruleCache.loadOutputNeeds(agentId));
+                if (!dispatcher.submit(() -> ruleCache.loadOutputNeeds(agentId))) {
+                    // Alerts are off or the queue is full: the evaluation would be
+                    // dropped too, so copy nothing from the turn.
+                    return;
+                }
                 needs = OutputNeeds.ALL;
             }
             TurnSnapshot snapshot = snapshot(memory, needs);

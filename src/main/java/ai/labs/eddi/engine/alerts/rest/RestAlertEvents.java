@@ -99,7 +99,16 @@ public class RestAlertEvents implements IRestAlertEvents {
     public AcknowledgeResult acknowledgeEvents(AlertEventQueryParams query, AcknowledgeRequest request) {
         String caller = access.caller();
         Instant now = clock.instant();
-        if (request != null && request.ids() != null && !request.ids().isEmpty()) {
+        if (request != null && request.ids() != null) {
+            // A present list is the selector, never a fallback to the filter: an empty
+            // list (or a blank entry) would otherwise acknowledge everything matching.
+            if (request.ids().isEmpty()) {
+                throw AlertErrors.badRequest(AlertErrors.INVALID_PARAMETER,
+                        "ids is empty; name at least one event, or leave ids out to acknowledge by filter");
+            }
+            if (request.ids().stream().anyMatch(id -> id == null || id.isBlank())) {
+                throw AlertErrors.badRequest(AlertErrors.INVALID_PARAMETER, "ids must not contain empty entries");
+            }
             LinkedHashSet<String> ids = new LinkedHashSet<>(request.ids());
             if (ids.size() > MAX_BULK_IDS) {
                 throw AlertErrors.badRequest(AlertErrors.INVALID_PARAMETER, "At most " + MAX_BULK_IDS + " ids per request");

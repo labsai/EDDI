@@ -32,13 +32,16 @@ import static ai.labs.eddi.engine.alerts.AlertTestData.pending;
 import static ai.labs.eddi.engine.alerts.AlertTestData.withThrottle;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -127,7 +130,28 @@ class AlertMaintenanceServiceTest {
         doReturn(Optional.empty()).when(events).insert(any());
         AlertEvent e = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
         assertFalse(service.sendDigest(rule, List.of(e), NOW));
-        verify(events, never()).markDigested(any());
+        verify(events).markDigested(List.of("h0"));
+        verify(delivery, never()).deliver(any(), any());
+    }
+
+    @Test
+    @DisplayName("a crash between the digest insert and the mark heals on the next pass: the held events are marked, nothing is resent")
+    void digestCrashBetweenInsertAndMark() {
+        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.DAILY);
+        AlertEvent h0 = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
+        AlertEvent h1 = event("h1", rule, AlertEvent.State.DIGEST_PENDING, List.of());
+        // First pass: the insert succeeds, then the mark fails (the node dies there).
+        doReturn(Optional.of(h0.withId("d1"))).when(events).insert(any());
+        doThrow(new IllegalStateException("connection lost")).when(events).markDigested(any());
+        assertThrows(IllegalStateException.class, () -> service.sendDigest(rule, List.of(h0, h1), NOW));
+        verify(delivery, never()).deliver(any(), any());
+
+        // Next pass: the same held events, the digest's dedupe key is taken.
+        doReturn(Optional.empty()).when(events).insert(any());
+        doReturn(2L).when(events).markDigested(any());
+        assertFalse(service.sendDigest(rule, List.of(h0, h1), NOW.plusSeconds(60)));
+        verify(events, times(2)).markDigested(List.of("h0", "h1"));
         verify(delivery, never()).deliver(any(), any());
     }
 

@@ -31,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +52,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -149,6 +151,24 @@ class RestAlertEventsTest {
 
         when(store.acknowledgeIds(List.of("e1"), "erin", NOW)).thenReturn(1L);
         assertEquals(1L, rest.acknowledgeEvents(null, new AcknowledgeRequest(List.of("e1", "e1"))).acknowledged());
+    }
+
+    @Test
+    @DisplayName("a present ids list is the selector: empty, or with an empty entry, is a 400 and never falls back to the filter")
+    void bulkEmptyIdsRefused() {
+        when(guard.seesEverything()).thenReturn(true);
+        AlertEventQueryParams all = new AlertEventQueryParams();
+        assertError(400, AlertErrors.INVALID_PARAMETER, () -> rest.acknowledgeEvents(all, new AcknowledgeRequest(List.of())));
+        assertError(400, AlertErrors.INVALID_PARAMETER, () -> rest.acknowledgeEvents(all, new AcknowledgeRequest(List.of("e1", " "))));
+        assertError(400, AlertErrors.INVALID_PARAMETER,
+                () -> rest.acknowledgeEvents(all, new AcknowledgeRequest(Arrays.asList("e1", null))));
+        verify(store, never()).acknowledgeMatching(any(), any(), any());
+        verify(store, never()).acknowledgeIds(any(), any(), any());
+
+        // Leaving ids out (no body, or a body without ids) is the filter path.
+        rest.acknowledgeEvents(all, null);
+        rest.acknowledgeEvents(all, new AcknowledgeRequest(null));
+        verify(store, times(2)).acknowledgeMatching(any(), eq("erin"), eq(NOW));
     }
 
     @Test

@@ -53,15 +53,17 @@ public class McpAlertTools {
         this.authEnabled = authEnabled;
     }
 
-    @Tool(name = "list_alert_events", description = "List fired alerts, newest first: low ratings or comments, and turns that failed, "
-            + "were interrupted, ran past their deadline or were stopped by a cost limit — whatever the deployment's alert rules watch. "
+    @Tool(name = "list_alert_events", description = "List fired alerts, newest first: low ratings or comments, turns that failed, "
+            + "were interrupted, ran past their deadline or were stopped by a cost limit, and turns whose result matched an OUTPUT_MATCH "
+            + "condition (a property, a field of JSON output, or an action) — whatever the deployment's alert rules watch. "
             + "Each event names the rule, the agent and version, the conversation id, what matched, its delivery status per target "
-            + "(Slack, webhook) and whether it was acknowledged. No user ids and no conversation text; a rating comment appears cut to "
-            + "280 characters. acknowledged=false lists the open inbox.")
+            + "(Slack, webhook) and whether it was acknowledged. No user ids. Conversation content appears only as a rating comment "
+            + "cut to 280 characters, or an OUTPUT_MATCH value cut to 280 characters — and that value only when the rule sets "
+            + "includeValue and the agent version has conversation review on. acknowledged=false lists the open inbox.")
     public String listAlertEvents(@ToolArg(description = "Agent id. Required unless you are an administrator (an editor gets AGENT_ID_REQUIRED "
             + "without it, and needs EDIT permission on the agent)", required = false) String agentId,
                                   @ToolArg(description = "Only the events of this rule", required = false) String ruleId,
-                                  @ToolArg(description = "RATING or CONVERSATION_ERROR", required = false) String source,
+                                  @ToolArg(description = "RATING, CONVERSATION_ERROR or OUTPUT_MATCH", required = false) String source,
                                   @ToolArg(description = "false: only unacknowledged (the inbox); true: only acknowledged",
                                            required = false) Boolean acknowledged,
                                   @ToolArg(description = "PENDING, DELIVERED, FAILED, INBOX_ONLY, DIGEST_PENDING or DIGESTED",

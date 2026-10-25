@@ -228,6 +228,14 @@ public class AlertEventStore implements IAlertEventStore {
         return events.updateMany(eq("acknowledgedBy", userId), set("acknowledgedBy", null)).getModifiedCount();
     }
 
+    @Override
+    public List<AlertEvent> findAcknowledgedBy(String userId, int limit) {
+        List<AlertEvent> acknowledged = new ArrayList<>();
+        events.find(eq("acknowledgedBy", userId)).sort(Sorts.descending("acknowledgedAt", "_id")).limit(limit)
+                .forEach(doc -> acknowledged.add(fromDocument(doc)));
+        return acknowledged;
+    }
+
     private static Bson acknowledgement(String by, Instant at) {
         return combine(set("acknowledgedBy", by), set("acknowledgedAt", Date.from(at)));
     }

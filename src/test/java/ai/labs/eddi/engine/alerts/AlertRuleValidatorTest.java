@@ -64,8 +64,13 @@ class AlertRuleValidatorTest {
     }
 
     @Test
-    @DisplayName("webhooks: http(s), not local, no credentials in the URL, a vault reference for the secret")
+    @DisplayName("webhooks: https only, not local, no credentials in the URL, a vault reference for the secret")
     void webhooks() {
+        assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("http://hooks.example.com/x", "${vault:k}")),
+                "must be an https URL"));
+        assertEquals(List.of(),
+                AlertRuleValidator
+                        .validate(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("https://hooks.example.com/x", "${vault:k}"))));
         assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("ftp://x.example.com", "${vault:k}")),
                 "Only http and https"));
         assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("http://localhost:8080/x", "${vault:k}")),

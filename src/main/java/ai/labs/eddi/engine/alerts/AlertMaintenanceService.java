@@ -147,6 +147,12 @@ public class AlertMaintenanceService {
                 items, null, null, 0);
         Optional<AlertEvent> stored = eventStore.insert(digest);
         if (stored.isEmpty()) {
+            // The digest exists already: another runner sent it, or this one crashed
+            // between the insert and the mark. Mark the held events either way, or they
+            // stay DIGEST_PENDING and every pass retries a digest that never inserts.
+            // Events held after that digest was written are marked too: they stay in
+            // the inbox, but are not listed in a digest message.
+            eventStore.markDigested(ids);
             return false;
         }
         eventStore.markDigested(ids);

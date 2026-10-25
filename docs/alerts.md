@@ -81,12 +81,13 @@ schedule, both copies run; every step above is guarded by a conditional update, 
 a duplicate copy does no harm. With `eddi.schedule.enabled=false` retries and
 digests stop (first deliveries still happen).
 
-**Privacy.** A payload never carries a user id or conversation text. It names the
-rule, the agent and version, the conversation id with a Manager link, and *what*
-matched — the rule's own constants and the error kind. The one exception is a
-rating comment (the person addressed it to the team, as the rating card says),
-truncated to 280 characters. GDPR erasure of a user blanks that excerpt in every
-alert event about their ratings.
+**Privacy.** A payload never carries a user id. It names the rule, the agent and
+version, the conversation id with a Manager link, and *what* matched — the rule's
+own constants and the error kind. Conversation content appears in two cases only,
+each cut to 280 characters: a rating comment (the person addressed it to the team,
+as the rating card says), and an `OUTPUT_MATCH` value when the rule sets
+`includeValue` and the agent version has conversation review on. GDPR erasure of a
+user blanks the comment excerpt in every alert event about their ratings.
 
 ## Writing a rule
 
@@ -197,7 +198,9 @@ worker and that one turn copies all three, so no match is lost.
   that integration's bot token, so no credential lives on the rule. Text that came
   from people (the rating comment) is escaped, so it cannot mention a channel or
   inject a link.
-- **Webhook** — a JSON `POST` through EDDI's outbound HTTP client: strict SSRF
+- **Webhook** — a JSON `POST` to an **`https`** URL (a plain `http` URL is refused when
+  the rule is saved, and a `${vault:…}` URL that resolves to one is not delivered to)
+  through EDDI's outbound HTTP client: strict SSRF
   policy (no private or metadata addresses, checked on the resolved address), no
   redirects, a 10-second timeout (`eddi.alerts.webhook-timeout`), a 64 KB body cap,
   and only the first 16 KB of the answer read. Any 2xx counts as delivered. Webhook
@@ -266,7 +269,7 @@ stored.
 | `GET` | `/alerts/events/unacknowledged-count` | `{count}` — the Manager's sidebar badge |
 | `GET` | `/alerts/events/{eventId}` | One event |
 | `POST` | `/alerts/events/{eventId}/acknowledge` | Records the caller and the time; twice changes nothing |
-| `POST` | `/alerts/events/acknowledge` | `{ids: […]}` (all or nothing: each id is checked first), or no ids and the query filter |
+| `POST` | `/alerts/events/acknowledge` | `{ids: […]}` (all or nothing: each id is checked first; an empty list or entry is a 400 `INVALID_PARAMETER`), or leave `ids` out to acknowledge by the query filter |
 | `POST` | `/alerts/events/{eventId}/retry` | Failed targets back to pending, delivered now in the background (409 `NOTHING_TO_RETRY` otherwise) |
 
 An event's `state`: `PENDING` (delivering, or a target waits for its next retry),
@@ -307,14 +310,20 @@ never taken from the body.
 
 ## Privacy
 
-An alert never carries a user id or conversation text — not in the store, not in
-Slack, not in a webhook. It names the rule, the agent and version, the conversation
-id, the error kind or the rating's score, scale and tags, and the rule's own criteria
-that matched. The one exception is the rating comment, which the person addressed to
-the team running the agent (the rating card says so): it is cut to 280 characters.
-GDPR erasure of a user blanks that excerpt in every alert about their ratings, and
-forgets an administrator or editor as the acknowledger of events and the author of
-rules. Events are deleted after `eddi.alerts.event-retention` (90 days).
+An alert never carries a user id — not in the store, not in Slack, not in a
+webhook. It names the rule, the agent and version, the conversation id, the error
+kind or the rating's score, scale and tags, and the rule's own criteria that
+matched. Conversation content appears in two cases only, each cut to 280
+characters: the rating comment, which the person addressed to the team running the
+agent (the rating card says so), and the value an `OUTPUT_MATCH` rule matched — only
+when the rule sets `includeValue` and the agent version has conversation review on,
+so it is shown only where the people running the agent may read conversations anyway.
+GDPR erasure of a user blanks the comment excerpt in every alert about their ratings,
+and forgets an administrator or editor as the acknowledger of events and the author of
+rules. A GDPR export (`alerts` in its `additionalData`) lists the rules the person
+created or last edited — id, name, times and which of the two — and the events they
+acknowledged — id, rule name, source, agent, when it fired and when they acknowledged
+it — at most 10,000 of each, without naming anybody else. Events are deleted after `eddi.alerts.event-retention` (90 days).
 
 ## Operating alerts
 
