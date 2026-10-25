@@ -69,4 +69,24 @@ describe("ChatPanel — ratings", () => {
     fireEvent.click(screen.getByTestId("chat-rating-card-close"));
     expect(screen.queryByTestId("chat-rating-card")).toBeNull();
   });
+
+  it("offers the card after End, though ending clears the transcript, and rates the ended conversation", async () => {
+    let rated = "";
+    server.use(
+      http.get("*/agents/:agentId/profile", () => HttpResponse.json({ agentId: "agent1", rating: RATING })),
+      http.post("*/agents/:conversationId/endConversation", () => new HttpResponse(null, { status: 200 })),
+      http.put("*/agents/:conversationId/rating", async ({ params, request }) => {
+        rated = `${params.conversationId} ${JSON.stringify(await request.json())}`;
+        return HttpResponse.json({});
+      }),
+    );
+    renderWithProviders(<ChatPanel />);
+    await screen.findByTestId("chat-rate-conversation");
+    fireEvent.click(screen.getByTestId("end-conversation"));
+    const card = await screen.findByTestId("chat-rating-card");
+    await waitFor(() => expect(screen.queryByText("Hello there")).toBeNull());
+    expect(card).toBeInTheDocument();
+    fireEvent.click(card.querySelectorAll("[role=radio]")[3] as HTMLElement);
+    await waitFor(() => expect(rated).toBe('conv1 {"score":4,"channel":"manager"}'));
+  });
 });
