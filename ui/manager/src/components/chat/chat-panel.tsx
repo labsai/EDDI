@@ -637,7 +637,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   // The id on screen at click time, not whatever is current
                   // when the request returns.
                   endConversation.mutate(conversationId, {
-                    onSuccess: ratings.onEnded,
+                    onSuccess: (endedId) => ratings.onEnded(endedId),
                     onError: (err) =>
                       toast.error(
                         t("chat.endConversationFailed", "Could not end the conversation: {{reason}}", {
@@ -756,6 +756,18 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                     <MessageSquarePlus className="h-4 w-4" />
                     {t("commandPalette.openChat")}
                   </button>
+                )}
+                {/* Ending clears the transcript; the ended conversation's card stays. */}
+                {ratings.endedCard && (
+                  <div className="mt-6 text-start">
+                    <ChatRatingCard
+                      key={ratings.endedCard.conversationId}
+                      profile={ratings.endedCard.profile}
+                      current={ratings.endedCard.current}
+                      onRate={ratings.rateWhole}
+                      onClose={ratings.closeCard}
+                    />
+                  </div>
                 )}
               </div>
             </div>
