@@ -79,7 +79,8 @@ class ReservedPrincipalsTest {
             Map.entry("system-value:", "template value tag"),
             Map.entry("pii:", "guardrail audit reason code (PiiRedactionGuardrail: pii:<kinds>)"),
             Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"),
-            Map.entry("sha256:", "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"));
+            Map.entry("sha256:", "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"),
+            Map.entry("notify:", "email ledger idempotency key (HitlEmailNotifier)"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")
