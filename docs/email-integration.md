@@ -149,7 +149,7 @@ it did something.
 | `port` | `993` | `993` (TLS) or `143` (STARTTLS, required — never a plaintext login) |
 | `address` | — (required) | The mailbox address. Unique per deployment. Mail **from** it is always refused |
 | `folder` | `INBOX` | The one folder that is polled. Poll the folder that comes *after* the server's spam filtering |
-| `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged |
+| `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there** |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
 | `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)) |
 | `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains). Matched against the `From`, which without `requireAuthentication` anyone can forge |
@@ -163,7 +163,7 @@ it did something.
 | `inputTemplate` | see below | The turn's input, a Qute template over `mail` (at most 4000 characters) |
 | `maxTurnsPerSenderPerDay` | `50` | Turns one sender address may start per UTC day; over it, the sender's further mail waits for the next day. `0` = no limit |
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
-| `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) |
+| `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
 
 Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
@@ -248,16 +248,26 @@ waiting for an approval waits in the mailbox and is retried.
    EDDI sent from another integration or the system mailer. Then the blocklist, the allowlist and
    `requireAuthentication`. Every refusal is recorded with its reason and counted — **none is ever answered**.
 4. **Budgets** ([below](#budgets-and-quotas)).
-5. **The claim**: the row moves from `RECEIVED` to `TURN_SUBMITTED` by a conditional update; only then does the turn
-   start. The mail is marked processed after the row is written, never before.
+5. **The claim**: the row moves from `RECEIVED` to `CLAIMED` by a conditional update. Nothing has left EDDI yet.
+   Immediately before the first side effect — starting the conversation (its `CONVERSATION_START` turn may call tools),
+   a group discussion, or the turn — it moves to `TURN_SUBMITTED`, the point of no return. A mail is marked (keyword,
+   move) only once its row is past that point or refused, never before.
 6. The **turn** is queued, not awaited, so the poll moves on. A new conversation's `CONVERSATION_START` turn runs
    inline — keep email agents' start rules light. When the turn completes, the row becomes `DONE` and its cost counts
    against the day.
 
-A node that dies after the claim never runs the mail again: its row is no longer `RECEIVED`, so the next poll only
-marks it. The **inbound sweep** (`eddi.email.inbound.sweep-interval`, every 5 min) resolves rows still submitted past
-`eddi.email.inbound.stranded-after` (30 min) from the conversation's state; a row whose node stopped between the claim
-and the turn — the only window in which a mail can be lost — ends `REFUSED(stranded)`, logged and counted.
+What a crashed node leaves behind, and what happens to it:
+
+| Crash point | Row | Recovery |
+|---|---|---|
+| After the ledger write, before the claim | `RECEIVED` | The mail is unmarked and the cursor stops before it: the next poll processes it |
+| After the claim, before any side effect | `CLAIMED` | Once the claim's deadline (`eddi.email.inbound.stranded-after`, 30 min) has passed, the next poll — or the inbound sweep — gives it back to `RECEIVED`, and the mail, which was not marked or moved and is still in the polled folder above the cursor, is fetched and processed again |
+| While the conversation was being started (no conversation recorded) | `TURN_SUBMITTED` | Ambiguous — `CONVERSATION_START` may have called tools — so it is **not** run again: the next poll marks it, the sweep ends it `REFUSED(stranded)`, logs it, counts `outcome=lost` and sends the owners the once-a-day `lost` notice |
+| After the conversation was started | `TURN_SUBMITTED` + conversation | The sweep resolves it from the conversation's state (`DONE`, noting failed or awaiting approval). If the node died before the queued turn ran, the conversation shows only its start; this is not detected yet |
+
+The **inbound sweep** runs every `eddi.email.inbound.sweep-interval` (5 min). It opens no mailbox itself: the mailbox
+belongs to whichever node holds the poll schedule's cluster claim, and giving a stale claim back is enough for that
+poll to fetch the mail again.
 
 ## Budgets and quotas
 
@@ -340,6 +350,7 @@ Integrations row.
 - No reply of any kind; conversation mode is Phase 3.
 - A sender who does not sign with DKIM can only be processed with `requireAuthentication: false`, without memory.
 - Mail already in the folder when the integration is created is not processed.
+- A node that dies after starting a mail's conversation but before its queued turn ran leaves the mail recorded as done.
 - Up to `eddi.email.poll.max-messages-per-poll × 20` envelopes are listed per poll; a backlog of mail deferred
   beyond that waits until the deferred mail settles.
 

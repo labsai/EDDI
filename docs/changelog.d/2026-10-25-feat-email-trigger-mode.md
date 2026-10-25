@@ -126,6 +126,30 @@ self-removal), `EmailInboundSweeperTest`, `EmailChannelPiecesTest` (patterns, id
 ledger and mark, UIDVALIDITY change, login failure), `Mongo/PostgresEmailMailboxStateStoreIT`, and the inbound cases of
 `Mongo/PostgresEmailMessageLedgerIT`. The security guards were mutation-checked.
 
+### Review follow-up: crash recovery, keywords, type switching, a send guard
+
+- **A claimed mail that did nothing is processed again.** New inbound state `CLAIMED` between `RECEIVED` and
+  `TURN_SUBMITTED`: the claim is taken first, and `TURN_SUBMITTED` (the point of no return) is written immediately
+  before the first side effect (conversation start, group discussion, turn). A mail is marked or moved only when its
+  row is past that point or refused, and the cursor never passes an unsettled mail, so a `CLAIMED` mail is still
+  unmarked in the polled folder. A stale claim (past `eddi.email.inbound.stranded-after`) is given back to `RECEIVED` —
+  by the next poll that meets it, or by the inbound sweep — and the poll fetches and processes it again
+  (`stranded_recovered{outcome=requeued}`). The sweep deliberately opens no IMAP session: the poller owns the mailbox
+  under its schedule's cluster claim. Only `TURN_SUBMITTED` without a recorded conversation (a crash inside
+  `startConversation`, whose `CONVERSATION_START` may have called tools) stays `REFUSED(stranded)`, now also with the
+  once-a-day owner notice reason `lost`.
+- **Servers without custom keywords** (Exchange Online, some hosters): marking checks `PERMANENTFLAGS` for `\*` or
+  `$EddiProcessed`; without them — or when the server refuses the STORE anyway — no keyword is set, the poll goes on
+  (cursor + ledger), one WARN per integration per node, and the new `eddi.email.poll.marked{result}` counter (dashboard
+  panel) shows `nothing`. Not refused at save time: saving does not connect to the mailbox. The docs recommend
+  `move:<folder>` for Exchange.
+- **Manager:** switching an existing channel's type drops the old type's keys (`platformConfigForType`); switching to
+  email starts from the fixed mode/transport keys, and nothing resurfaces on a round trip.
+- **No reply path, pinned:** `EmailTriggerModeSendsNothingTest` scans `integrations/email/` and fails if anything but
+  the two staff notifiers (`EmailOwnerNotifier`, `HitlEmailNotifier`) references `SystemMailer`, an SMTP transport or the
+  outbound renderer. Phase 3 changes that test on purpose.
+- Not handled yet: a node that dies after starting a conversation but before the queued turn ran is resolved as `DONE`.
+
 ### For Phase 3 (conversation mode)
 
 - Replies are `Kind.REPLY` rows, `Direction.OUT`, with `sourceRef` = the conversation step; the loop guard already
@@ -137,7 +161,7 @@ ledger and mark, UIDVALIDITY change, login failure), `Mongo/PostgresEmailMailbox
 - `email-anon:` identities must never receive a reply (plan §9); `requireAuthentication` is forced on there.
 
 ```decision-log
-| 2026-10-25 | Email trigger mode never runs a mail twice; a node dying between the claim and the turn drops that mail (REFUSED stranded, counted) | Raw mail is not stored (plan §17), and re-running a turn can repeat tool side effects (a booked invoice booked twice) | Re-running stranded rows (needs the raw bytes kept, double side effects); marking the mailbox before the ledger write (loses mail on any failure) |
+| 2026-10-25 | Email trigger mode never runs a mail twice once a side effect may have happened; a claim that did nothing is given back and the mail, still unmarked in the mailbox, runs again | The CLAIMED state separates "nothing left EDDI" from the point of no return; only a crash while starting the conversation is ambiguous, and that one is REFUSED with an owner notice | Refusing every stranded claim (lost mail that had run nothing); re-running submitted turns (double side effects); a sweep that opens its own IMAP session (two nodes on one mailbox) |
 | 2026-10-25 | The thread mapping key of a correlated email conversation includes the sender's address | Message-IDs travel in every forward; under identityMode integration all senders share a user id, so a thread-only key lets anyone join any thread | An explicit sender field checked after lookup (one more stored fact and a check that can be forgotten); correlating by user id only (unsafe in integration mode) |
 | 2026-10-25 | Unauthenticated email senders get a one-off email-anon id with no user-memory store and no memory tool, enforced in ConversationService and ContextualToolsProvider | Their From is a claim anyone can make; memory written under it would be read by the next forger | A shared anonymous id (one sender's injection persists for all); relying on the random id never recurring (still writes orphaned memories) |
 | 2026-10-25 | Mail-server outages back off inside the poller and are COMPLETED fires with the error in the fire log | The schedule retry ladder dead-letters after a few minutes, which would silently stop a mailbox after a short outage | FAILED fires (dead-letter); SKIPPED fires (no error recorded) |
