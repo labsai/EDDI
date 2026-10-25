@@ -315,9 +315,11 @@ cost); an unpriced model counts as zero.
 
 ## The message ledger
 
-One row per inbound mail per integration (`email_message_ledger`): `RECEIVED → TURN_SUBMITTED → DONE | REFUSED`, the
-refusal or deferral reason in `lastError`. A deferred mail is `RECEIVED` with the time of its next attempt. Per mailbox,
-`email_mailbox_state` keeps the IMAP cursor (`UIDVALIDITY` plus the last settled UID), the poll back-off and the day's
+One row per inbound mail per integration (`email_message_ledger`):
+`RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED`, the refusal or deferral reason in `lastError`. A deferred mail
+is `RECEIVED` with the time of its next attempt. A mail whose turn was refused after its conversation had started (a
+quota, a busy executor, a failed submission) keeps that conversation on its row, and the retry sends the turn there:
+the conversation's `CONVERSATION_START` runs once per mail, not once per attempt. Per mailbox, `email_mailbox_state` keeps the IMAP cursor (`UIDVALIDITY` plus the last settled UID), the poll back-off and the day's
 spend. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, deduplicated by the ledger and the
 `$EddiProcessed` keyword.
 

@@ -150,6 +150,23 @@ ledger and mark, UIDVALIDITY change, login failure), `Mongo/PostgresEmailMailbox
   outbound renderer. Phase 3 changes that test on purpose.
 - Not handled yet: a node that dies after starting a conversation but before the queued turn ran is resolved as `DONE`.
 
+### Review follow-up 2: one start per mail, no partial integration list, CORS
+
+- **A retried mail reuses the conversation an earlier attempt started.** When the turn failed after
+  `startConversation` (a quota, a busy executor, a failed `say`), the row went back to `RECEIVED` and the retry started
+  a second conversation, so `CONVERSATION_START` (which may call tools) ran again — for any mail without a thread
+  mapping (`correlateThreads` off, or unauthenticated). `EmailInboundProcessor` now reads the row's `conversationId` on
+  the retry and sends the turn there; a busy one defers, an ended one starts a new conversation (as a mapped one does).
+  Chosen over refusing such mails, which would drop every mail that met a passing rate limit.
+- **`EmailIntegrationDirectory.scan()` no longer returns a partial list.** A store read failure on one integration was
+  swallowed per descriptor, so address uniqueness at save time (fail closed, 503), GDPR identity expansion and schedule
+  ensuring could silently miss it. `find()` now throws `StoreUnavailableException`, which `scan()` lets through; only an
+  unparseable descriptor is skipped.
+- **`X-Eddi-Warnings` is in `quarkus.http.cors.exposed-headers`**, so a Manager on another origin sees a channel save's
+  warnings (`CorsExposedHeadersConfigTest`).
+- Docs: the ledger lifecycle in [email-integration.md](../email-integration.md#the-message-ledger) names `CLAIMED`; the
+  Full Metrics Reference's stranded panel describes `requeued` and the current meaning of `lost`.
+
 ### For Phase 3 (conversation mode)
 
 - Replies are `Kind.REPLY` rows, `Direction.OUT`, with `sourceRef` = the conversation step; the loop guard already
