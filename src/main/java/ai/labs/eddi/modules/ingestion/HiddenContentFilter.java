@@ -351,13 +351,16 @@ public final class HiddenContentFilter {
         double amount = Double.parseDouble(matcher.group(1));
         String unit = matcher.group(2) == null ? "px" : matcher.group(2);
         double base = inherited == null ? 16.0 : inherited;
-        return switch (unit) {
-            case "px" -> amount;
-            case "pt" -> amount * 4 / 3;
-            case "em", "rem" -> amount * ("rem".equals(unit) ? 16.0 : base);
-            case "%" -> amount * base / 100;
-            default -> amount == 0 ? 0.0 : inherited;
+        // Boxed on purpose: with primitive branches the switch's type is double, and an
+        // unknown unit (ex, ch, vw, ...) without an inherited size would unbox null.
+        Double size = switch (unit) {
+            case "px" -> Double.valueOf(amount);
+            case "pt" -> Double.valueOf(amount * 4 / 3);
+            case "em", "rem" -> Double.valueOf(amount * ("rem".equals(unit) ? 16.0 : base));
+            case "%" -> Double.valueOf(amount * base / 100);
+            default -> amount == 0 ? Double.valueOf(0.0) : inherited;
         };
+        return size;
     }
 
     // ------------------------------------------------------------ CSS values
