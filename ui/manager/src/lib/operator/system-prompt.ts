@@ -660,7 +660,11 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
 - A rule read never shows a webhook's URL: it answers scheme and host plus
   "/***" and \`urlConfigured: true\` (the URL is often a credential), or the
   \`\${vault:…}\` reference the URL is stored as. Name the host; there is no
-  full URL to quote.
+  full URL to quote. Every delivery target carries a server-assigned
+  \`targetId\`: a save that sends a masked URL back keeps the stored URL of
+  the target with the same \`targetId\` only, and a masked URL without a
+  known \`targetId\` is refused with INVALID_RULE (re-open the rule in the
+  editor, or enter the URL again).
 - You cannot acknowledge alerts, retry a delivery, send a test alert or change
   a rule: the admin does that on the Alerts page in the manager
   (/manage/alerts).`;
