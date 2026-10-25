@@ -10668,7 +10668,7 @@
               "sort": "desc"
             }
           },
-          "description": "Submitted email turns whose completion was never recorded, resolved by the inbound sweep: done, failed, awaiting_human (resolved from the conversation) or lost (the node stopped between the claim and the turn; the mail was not run again)."
+          "description": "Claims given back and submitted email turns resolved after a crash: requeued (a stale claim that had done nothing outside EDDI; the mail is processed again), done, failed, awaiting_human (resolved from the conversation) or lost (the node stopped while starting the conversation and none was recorded; the mail was not run again)."
         },
         {
           "id": 272,
