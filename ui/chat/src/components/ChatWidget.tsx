@@ -795,10 +795,19 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? false,
       });
 
-      // Handle the "conversationOutputs" format (from POST /agents responses)
-      if (snapshot.conversationOutputs?.length) {
-        // Positions are server step indexes only on a full read whose lists agree.
-        const stampSteps = fullHistory && outputsCarryStepIndexes(snapshot.conversationOutputs, snapshot.conversationSteps);
+      // Handle the "conversationOutputs" format (from POST /agents responses).
+      // On a full read their positions are the server's step indexes — but only
+      // when they agree with conversationSteps. When the lists disagree, the
+      // transcript is rebuilt from the steps instead (below), which carry the
+      // person's turns and the real indexes: output-only agent messages left
+      // unstamped would all count as step 0 and key every reply rating to the
+      // greeting.
+      const outputsList = snapshot.conversationOutputs;
+      const useOutputs =
+        !!outputsList?.length &&
+        (!fullHistory || !snapshot.conversationSteps?.length || outputsCarryStepIndexes(outputsList, snapshot.conversationSteps));
+      if (useOutputs && snapshot.conversationOutputs) {
+        const stampSteps = fullHistory;
         snapshot.conversationOutputs.forEach((output, index, outputs) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
@@ -862,6 +871,14 @@ export function ChatWidget() {
             type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
             message,
           });
+        }
+        // Rebuilt from the steps although outputs exist: the latest output still
+        // carries the open input-field request and the quick replies.
+        const lastOutput = outputsList?.length ? outputsList[outputsList.length - 1] : null;
+        if (lastOutput) {
+          const field = findInputField(lastOutput.output ?? []);
+          if (field) dispatch({ type: "SET_INPUT_FIELD", field });
+          dispatch({ type: "SET_QUICK_REPLIES", replies: lastOutput.quickReplies ?? [] });
         }
       }
     },
