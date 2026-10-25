@@ -199,7 +199,8 @@ public final class AlertRuleValidator {
             return;
         }
         if (DeliveryTarget.isMaskedUrl(url)) {
-            problems.add(field + ".url is the masked value a read returns and matches no stored URL; enter the URL again");
+            problems.add(field
+                    + ".url is the masked value a read returns, and its targetId matches no stored target; send the targetId the read returned, or enter the URL again");
             return;
         }
         String trimmed = url.strip();

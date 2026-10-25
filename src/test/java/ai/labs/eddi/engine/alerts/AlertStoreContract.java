@@ -121,6 +121,16 @@ public interface AlertStoreContract {
     }
 
     @Test
+    default void targetIdsArePersisted() {
+        AlertRule withIds = rule("ids", AlertScope.agent(AGENT), true).withTargetIds();
+        AlertRule read = ruleStore().read(ruleStore().create(withIds).id()).orElseThrow();
+        assertEquals(withIds.delivery().stream().map(DeliveryTarget::targetId).toList(),
+                read.delivery().stream().map(DeliveryTarget::targetId).toList());
+        assertNull(ruleStore().read(ruleStore().create(rule("legacy", AlertScope.agent(AGENT), true)).id()).orElseThrow().delivery().get(0)
+                .targetId(), "a rule saved without ids reads back without them; the REST layer derives them");
+    }
+
+    @Test
     default void gdprFindsRulesByAuthorOrLastEditor() {
         AlertRule byAlice = ruleStore().create(rule("alice wrote, bob edited", AlertScope.agent(AGENT), true));
         AlertRule byCarol = ruleStore()

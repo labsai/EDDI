@@ -36,6 +36,14 @@ import java.util.Locale;
  * (or none) keeps the stored URL. The URL may also be a {@code ${vault:...}}
  * reference, resolved only when the alert is sent; such a reference is not a
  * secret and is shown as it is.
+ * <p>
+ * <b>Each target has a {@code targetId}</b>, assigned by the server when a rule
+ * is saved and kept across updates. It is not secret and every read returns it.
+ * An update — or a test send of a saved rule — that sends a masked or empty URL
+ * gets the stored URL of the target with the <i>same</i> {@code targetId}, and
+ * only that one: never by position or host. A rule stored before ids existed
+ * gets them on read, derived from each target (see {@link #derivedTargetId()}),
+ * so the same id comes back on every read until the next save stores it.
  *
  * @param type
  *            {@code SLACK} or {@code WEBHOOK}
@@ -48,15 +56,47 @@ import java.util.Locale;
  * @param urlConfigured
  *            set on reads only: a URL is stored (the read shows it masked);
  *            never stored
+ * @param targetId
+ *            the target's identity within its rule, assigned by the server
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured) {
+public record DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured, String targetId) {
 
     /** What replaces the path and query of a webhook URL on every read. */
     public static final String MASK_SUFFIX = "/***";
 
     public DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret) {
-        this(type, channelId, url, signingSecret, null);
+        this(type, channelId, url, signingSecret, null, null);
+    }
+
+    public DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured) {
+        this(type, channelId, url, signingSecret, urlConfigured, null);
+    }
+
+    /** The same target under another id ({@code null} to have one assigned). */
+    public DeliveryTarget withTargetId(String newTargetId) {
+        return new DeliveryTarget(type, channelId, url, signingSecret, urlConfigured, newTargetId);
+    }
+
+    /** The same target with another URL, id kept. */
+    public DeliveryTarget withUrl(String newUrl) {
+        return new DeliveryTarget(type, channelId, newUrl, signingSecret, urlConfigured, targetId);
+    }
+
+    /** Without the read-only {@code urlConfigured} flag, which is never stored. */
+    public DeliveryTarget forStorage() {
+        return new DeliveryTarget(type, channelId, url, signingSecret, null, targetId);
+    }
+
+    /**
+     * The id a target without one gets: {@code t} plus its {@link #key()}. Stable
+     * for the same target, so a rule stored before ids existed shows the same ids
+     * on every read, and its first update can match them against the stored
+     * targets.
+     */
+    @JsonIgnore
+    public String derivedTargetId() {
+        return "t" + key();
     }
 
     public enum DeliveryType {
@@ -92,12 +132,12 @@ public record DeliveryTarget(DeliveryType type, String channelId, String url, St
      */
     public DeliveryTarget masked() {
         if (type != DeliveryType.WEBHOOK || url == null || url.isBlank()) {
-            return new DeliveryTarget(type, channelId, url, signingSecret, null);
+            return new DeliveryTarget(type, channelId, url, signingSecret, null, targetId);
         }
         if (urlIsVaultReference()) {
-            return new DeliveryTarget(type, channelId, url, signingSecret, true);
+            return new DeliveryTarget(type, channelId, url, signingSecret, true, targetId);
         }
-        return new DeliveryTarget(type, channelId, origin(url) + MASK_SUFFIX, signingSecret, true);
+        return new DeliveryTarget(type, channelId, origin(url) + MASK_SUFFIX, signingSecret, true, targetId);
     }
 
     /**

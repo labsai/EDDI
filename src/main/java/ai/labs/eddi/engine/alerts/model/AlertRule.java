@@ -5,7 +5,11 @@
 package ai.labs.eddi.engine.alerts.model;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * An alert rule: which agents, which source and condition, where to deliver,
@@ -45,6 +49,41 @@ public record AlertRule(String id, String name, boolean enabled, AlertScope scop
 
     public DigestMode effectiveDigest() {
         return digest == null ? DigestMode.HOURLY : digest;
+    }
+
+    /**
+     * The rule with every target holding a {@code targetId}: a missing one gets
+     * {@link DeliveryTarget#derivedTargetId()}, or a random id when that is taken
+     * in this rule. Existing ids are kept.
+     */
+    public AlertRule withTargetIds() {
+        if (delivery == null || delivery.isEmpty()) {
+            return this;
+        }
+        Set<String> used = new HashSet<>();
+        for (DeliveryTarget target : delivery) {
+            if (target != null && target.targetId() != null && !target.targetId().isBlank()) {
+                used.add(target.targetId());
+            }
+        }
+        List<DeliveryTarget> targets = new ArrayList<>(delivery.size());
+        for (DeliveryTarget target : delivery) {
+            if (target == null || (target.targetId() != null && !target.targetId().isBlank())) {
+                targets.add(target);
+                continue;
+            }
+            String id = target.derivedTargetId();
+            while (!used.add(id)) {
+                id = "t" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            }
+            targets.add(target.withTargetId(id));
+        }
+        return withDelivery(targets);
+    }
+
+    public AlertRule withDelivery(List<DeliveryTarget> newDelivery) {
+        return new AlertRule(id, name, enabled, scope, source, condition, newDelivery, throttle, digest, createdBy, createdAt, updatedBy,
+                updatedAt);
     }
 
     public AlertRule withId(String newId) {
