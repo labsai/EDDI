@@ -340,6 +340,22 @@ class EmailConversationModeTest {
     }
 
     @Test
+    @DisplayName("older due resubmissions of a deleted integration never crowd out this integration's")
+    void resubmissionScopedToIntegration() {
+        Instant now = Instant.now();
+        for (int i = 0; i < EmailInboundSweeper.BATCH + 10; i++) {
+            Instant old = now.minus(Duration.ofDays(1)).plusSeconds(i);
+            ledger.put(new LedgerEntry("orphan-" + i, "deleted-integration", Kind.TRIGGER, Direction.IN, "<orphan." + i + "@supplier.com>",
+                    "conv-o" + i, "imap:INBOX:1:" + i, "in:orphan:" + i, ALICE, State.RECEIVED, 1, old, null, null, EmailInboundSweeper.RESUBMIT,
+                    old, old, old.plus(Duration.ofDays(30))));
+        }
+        ledger.put(new LedgerEntry("row-mine", INTEGRATION, Kind.TRIGGER, Direction.IN, "<mine@supplier.com>", "conv-7", "imap:INBOX:1:1",
+                "in:mine", ALICE, State.RECEIVED, 1, now, null, null, EmailInboundSweeper.RESUBMIT, now, now, now.plus(Duration.ofDays(30))));
+
+        assertEquals(List.of("row-mine"), processor.pendingResubmissions(INTEGRATION, now.plusSeconds(1)).stream().map(LedgerEntry::id).toList());
+    }
+
+    @Test
     @DisplayName("trigger mode never touches the reply sender, and asks only for the current step")
     void triggerModeSendsNothing() throws Exception {
         EmailReplySender replies = mock(EmailReplySender.class);

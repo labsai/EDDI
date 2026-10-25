@@ -317,6 +317,26 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE integration_id = ? AND state = 'RECEIVED' AND kind = 'TRIGGER' "
+                + "AND conversation_id IS NOT NULL AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setTimestamp(2, timestamp(now));
+            statement.setInt(3, limit);
+            List<LedgerEntry> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(toEntry(rows));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger rows due for resubmission", e);
+        }
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND recipient = ? AND kind = 'TRIGGER' AND created_at >= ? "
                 + "AND state IN ('TURN_SUBMITTED', 'DONE')";

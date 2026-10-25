@@ -135,6 +135,14 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public synchronized List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        return rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && r.state() == State.RECEIVED && r.kind() == Kind.TRIGGER
+                        && r.conversationId() != null && r.nextAttemptAt() != null && !r.nextAttemptAt().isAfter(now))
+                .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt)).limit(limit).toList();
+    }
+
+    @Override
     public synchronized long countInboundTurns(String integrationId, String sender, Instant since) {
         return rows.values().stream()
                 .filter(r -> r.integrationId().equals(integrationId) && sender.equals(r.recipient()) && r.kind() == Kind.TRIGGER

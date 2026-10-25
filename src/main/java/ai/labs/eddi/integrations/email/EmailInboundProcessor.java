@@ -513,18 +513,11 @@ public class EmailInboundProcessor {
      * Due {@code RECEIVED} rows of {@code integrationId} that already name a
      * conversation: mail to be processed again in that conversation, which the poll
      * has to find in the mailbox by its Message-ID (the cursor no longer lists it).
+     * The store filters by integration, so other integrations' due rows — a deleted
+     * integration's, which nothing polls any more — never crowd them out.
      */
     public List<LedgerEntry> pendingResubmissions(String integrationId, Instant now) {
-        List<LedgerEntry> rows = new ArrayList<>();
-        for (LedgerEntry row : ledger.findDue(Kind.TRIGGER, State.RECEIVED, now, EmailInboundSweeper.BATCH)) {
-            if (row.integrationId().equals(integrationId) && row.conversationId() != null) {
-                rows.add(row);
-                if (rows.size() >= MAX_RESUBMISSIONS_PER_POLL) {
-                    break;
-                }
-            }
-        }
-        return rows;
+        return ledger.findDueResubmissions(integrationId, now, MAX_RESUBMISSIONS_PER_POLL);
     }
 
     /**

@@ -302,6 +302,17 @@ public interface IEmailMessageLedger {
     List<LedgerEntry> findDue(Kind kind, State state, Instant now, int limit);
 
     /**
+     * Up to {@code limit} {@link Kind#TRIGGER} rows of {@code integrationId} in
+     * {@link State#RECEIVED} that already name a conversation and whose
+     * {@code nextAttemptAt} is at or before {@code now}, oldest first — the mail
+     * one integration's poll must find again by its Message-ID and submit once
+     * more. Scoped to the integration in the store, so rows nobody polls any more
+     * (a deleted integration's, an invalid one's) never take another integration's
+     * places; retention removes them.
+     */
+    List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit);
+
+    /**
      * How many {@link Kind#TRIGGER} rows of {@code integrationId} from
      * {@code sender} created at or after {@code since} reached a turn
      * ({@link State#TURN_SUBMITTED} or {@link State#DONE}) — the per-sender daily

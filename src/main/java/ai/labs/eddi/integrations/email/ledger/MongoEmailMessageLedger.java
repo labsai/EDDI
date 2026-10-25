@@ -208,6 +208,17 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        for (Document document : rows.find(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_STATE, State.RECEIVED.name()),
+                Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.ne(F_CONVERSATION, null), Filters.lte(F_NEXT, Date.from(now))))
+                .sort(Sorts.ascending(F_NEXT)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_RECIPIENT, sender),
                 Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.gte(F_CREATED, Date.from(since)),

@@ -368,6 +368,30 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("inbound: resubmissions are due RECEIVED rows of one integration that name a conversation, oldest first")
+    default void resubmissionQuery() {
+        LedgerEntry older = inbound("int-1", "<r1@example.com>", "a@example.com", NOW);
+        LedgerEntry newer = inbound("int-1", "<r2@example.com>", "a@example.com", NOW);
+        LedgerEntry noConversation = inbound("int-1", "<r3@example.com>", "a@example.com", NOW);
+        LedgerEntry notDue = inbound("int-1", "<r4@example.com>", "a@example.com", NOW);
+        LedgerEntry otherIntegration = inbound("int-2", "<r5@example.com>", "a@example.com", NOW);
+        LedgerEntry submitted = inbound("int-1", "<r6@example.com>", "a@example.com", NOW);
+        for (LedgerEntry row : List.of(older, newer, noConversation, notDue, otherIntegration, submitted)) {
+            ledger().insertIfAbsent(row);
+        }
+        ledger().transition(older.id(), State.RECEIVED, State.RECEIVED, "c1", NOW.minusSeconds(120), "resubmit", false, NOW);
+        ledger().transition(newer.id(), State.RECEIVED, State.RECEIVED, "c2", NOW.minusSeconds(60), "resubmit", false, NOW);
+        ledger().transition(noConversation.id(), State.RECEIVED, State.RECEIVED, null, NOW.minusSeconds(180), "auth_temporary", false, NOW);
+        ledger().transition(notDue.id(), State.RECEIVED, State.RECEIVED, "c4", NOW.plusSeconds(600), "resubmit", false, NOW);
+        ledger().transition(otherIntegration.id(), State.RECEIVED, State.RECEIVED, "c5", NOW.minusSeconds(300), "resubmit", false, NOW);
+        ledger().transition(submitted.id(), State.RECEIVED, State.TURN_SUBMITTED, "c6", NOW.minusSeconds(300), null, true, NOW);
+
+        assertEquals(List.of(older.id(), newer.id()), ledger().findDueResubmissions("int-1", NOW, 10).stream().map(LedgerEntry::id).toList());
+        assertEquals(List.of(older.id()), ledger().findDueResubmissions("int-1", NOW, 1).stream().map(LedgerEntry::id).toList(), "bounded");
+        assertEquals(List.of(otherIntegration.id()), ledger().findDueResubmissions("int-2", NOW, 10).stream().map(LedgerEntry::id).toList());
+    }
+
+    @Test
     @DisplayName("inbound: the per-sender count reaches only this integration's submitted or done turns since the day began")
     default void perSenderCount() {
         Instant dayStart = NOW.minus(Duration.ofHours(1));
