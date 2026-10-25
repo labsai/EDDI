@@ -408,10 +408,15 @@ public class ScheduleFireExecutor {
                 : new ContinuationFireHandler.Result(ScheduleConfiguration.FireStatus.FAILED.name(), "continuations are not available");
         var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(),
                 startedAt, Instant.now(), result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0);
+        // The handler re-asserts an interrupt it caught; park it across the fire-log
+        // write (a set flag can fail the store's connection checkout), as fire() does.
+        boolean interrupted = Thread.interrupted();
         try {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Failed to log continuation fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
         }
         return fireLog;
     }

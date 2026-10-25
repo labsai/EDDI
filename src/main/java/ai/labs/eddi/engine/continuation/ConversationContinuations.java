@@ -313,6 +313,12 @@ public class ConversationContinuations {
             return false;
         }
         ContinuationPolicy policy = memory.getContinuationPolicy();
+        if (memory.isCancelled()) {
+            // A cancel that signalled this turn found no schedule to withdraw yet; the
+            // job it cancelled must not queue its next turn now.
+            refuse(REASON_INTERRUPTED, conversationId, "the turn was cancelled before its continuation was armed");
+            return false;
+        }
         try {
             Instant now = clock.instant();
             var schedule = new ScheduleConfiguration();
@@ -329,6 +335,13 @@ public class ConversationContinuations {
             schedule.setCreatedAt(now);
             schedule.setMetadata(metadata(conversationId, number.intValue(), policy.maxContinuations()));
             createWithRetry(schedule);
+            if (memory.isCancelled()) {
+                // The cancel landed while the schedule was being written: its disarm
+                // ran before the row existed, so withdraw the row here.
+                disarm(conversationId);
+                refuse(REASON_INTERRUPTED, conversationId, "the turn was cancelled while its continuation was armed");
+                return false;
+            }
             meterRegistry.counter(METRIC_SCHEDULED).increment();
             LOGGER.infof("Continuation %d of %d scheduled for conversation %s", number.intValue(), policy.maxContinuations(),
                     sanitize(conversationId));
@@ -355,7 +368,12 @@ public class ConversationContinuations {
                     throw e;
                 }
                 LOGGER.warnf("Continuation schedule write failed (attempt %d of %d), retrying: %s", attempt, ARM_ATTEMPTS, e.toString());
-                Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
+                try {
+                    Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
             }
         }
     }

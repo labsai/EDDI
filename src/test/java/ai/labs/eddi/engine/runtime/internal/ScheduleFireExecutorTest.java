@@ -36,6 +36,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -1348,6 +1349,39 @@ class ScheduleFireExecutorTest {
         verify(scheduleStore).logFire(log);
         // Never the strategy path: no say() from the executor itself.
         verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_continuation_parksAnInterruptAcrossTheFireLogWriteAndRestoresIt() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-2");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 1, 10));
+        // The handler caught an InterruptedException and re-asserted the flag.
+        when(handler.fire(any(), any(), any(), any())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "interrupted");
+        });
+        var flagDuringLog = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            flagDuringLog.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(scheduleStore).logFire(any());
+
+        try {
+            executor.fire(schedule, "instance-1", 1);
+
+            assertFalse(flagDuringLog.get(), "the fire log is written with the interrupt parked");
+            assertTrue(Thread.currentThread().isInterrupted(), "and the interrupt is restored afterwards");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     // ==================== RAG ingestion fires ====================

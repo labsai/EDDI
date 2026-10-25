@@ -118,8 +118,9 @@ committing a turn and writing its schedule, or a schedule write that keeps faili
 committed step with `continuation:next` and no schedule: the job stops there. Nothing re-arms it
 yet. Watch `eddi_continuation_refused_total{reason="schedule_failed"}`, and for a job that stopped
 without a refusal look at its last step: `continuation:next` without a later continuation turn is
-this case. Sending the conversation a message, or a rule that continues again on the next turn,
-picks the job back up.
+this case. To pick the job back up, send the conversation a message whose turn ends in
+`CONTINUE_CONVERSATION` again: a message starts one new turn, and only a turn that emits the
+action arms the next schedule.
 
 A schedule rather than the conversation coordinator's queue, because the queue lives in memory and
 dies with its node. The schedule row survives a restart; exactly one node claims it
@@ -155,7 +156,7 @@ recorded leaves a claim that another node steals. Two guards make a re-delivery 
 | The conversation… | What happens |
 |---|---|
 | ended | Ending it through the API (`endConversation`) withdraws the pending continuation. A turn that ends it (`CONVERSATION_END`, `STOP_CONVERSATION`) arms nothing. A fire that still arrives completes without a turn (`ended`). |
-| was cancelled | `POST /agents/{conversationId}/cancel` withdraws the pending continuation — between two turns of a job this now answers `200 CANCELLED` instead of `409`. A continuation turn that is running is signalled as before, and an interrupted continuation turn stops the chain (`interrupted`). The approver's paused-only cancel never touches it. |
+| was cancelled | `POST /agents/{conversationId}/cancel` withdraws the pending continuation — between two turns of a job this now answers `200 CANCELLED` instead of `409`. A continuation turn that is running is signalled as before, and an interrupted continuation turn stops the chain (`interrupted`). So does a cancel that reaches a turn before its successor is armed, or while it is: the turn queues nothing, or withdraws what it just wrote. The approver's paused-only cancel never touches it. |
 | is paused for a human (`AWAITING_HUMAN`) | Not run (`awaiting_human`). A turn resumed from the pause may ask to continue again. |
 | was deleted or its user erased (GDPR) | Not run (`gone`). The schedule carries the owner's `userId`, so an erasure deletes it with the user's other schedules. |
 | is restricted (GDPR Art. 18) | Not run (`restricted`). |

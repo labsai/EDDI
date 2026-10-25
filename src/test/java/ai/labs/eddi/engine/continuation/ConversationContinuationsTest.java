@@ -259,6 +259,51 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("an interrupted retry pause gives up, keeps the interrupt and still reports schedule_failed")
+        void interruptedBackoff() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createSchedule(any());
+
+            Thread.currentThread().interrupt();
+            try {
+                assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+                assertTrue(Thread.currentThread().isInterrupted(), "the interrupt survives the retry pause");
+            } finally {
+                Thread.interrupted();
+            }
+            assertEquals(1.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED));
+            verify(scheduleStore, times(1)).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a turn cancelled before arming queues no successor")
+        void cancelledBeforeArming() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            memory.setCancelled(true);
+
+            assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            verify(scheduleStore, never()).createSchedule(any());
+            assertEquals(1.0, refused(ConversationContinuations.REASON_INTERRUPTED));
+        }
+
+        @Test
+        @DisplayName("a cancel that lands while the schedule is written withdraws it again")
+        void cancelledWhileArming() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doAnswer(inv -> {
+                memory.setCancelled(true);
+                return "s1";
+            }).when(scheduleStore).createSchedule(any());
+
+            assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            verify(scheduleStore).deleteSchedulesByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
+            assertEquals(1.0, refused(ConversationContinuations.REASON_INTERRUPTED));
+        }
+
+        @Test
         @DisplayName("disarm withdraws every pending continuation of the conversation, by name, and never throws")
         void disarm() throws Exception {
             doReturn(2).when(scheduleStore).deleteSchedulesByName(ConversationContinuations.scheduleName(CONVERSATION_ID));

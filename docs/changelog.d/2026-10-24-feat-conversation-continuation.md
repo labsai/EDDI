@@ -26,6 +26,8 @@ A job of many model calls (the plan's video pipeline: ~150 calls over ~20 minute
 - **A schedule write that fails for a moment is retried** (three attempts) before `schedule_failed`. The crash window between commit and arm is documented in [long-jobs.md](../long-jobs.md) with how to spot and resume a stopped job; an automatic reconciliation sweep is planned with part 2.
 - Manager: a half-typed count (`5e`, `-`) no longer silently clears `maxContinuations` and lets Save through.
 - Docs: only continuation turns are retried by their schedule (the first turn is resent by its caller); the poll interval does not guarantee a minimum delay between continuations.
+- **A cancel that races the arm wins.** A cancel that signalled a running turn found no schedule to withdraw yet, and the turn then armed one. Arming now skips a cancelled turn, and withdraws a schedule it wrote if the cancel landed during the write (`interrupted`).
+- **Interrupts are kept.** An interrupted retry pause gives up and keeps the thread's interrupt flag, and the continuation fire log is written with the interrupt parked and restored afterwards, as the other fire paths already do.
 
 ### Not in this change (planned)
 
