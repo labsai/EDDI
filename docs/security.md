@@ -679,11 +679,27 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
 author is refused.
 
-The [email channel](email-integration.md) (trigger mode) is such an author: its IMAP host is checked by this policy when
-the integration is saved and again on every poll. Its other guards — sender authentication before identity, the loop
-guard, allow/blocklists, the claim that keeps a mail from running twice, mail rendered as template *data*, executables
-never stored, unauthenticated senders without memory, the sender in the thread key (hijack guard), and no outbound
-mail at all — are described in [email-integration.md → Security](email-integration.md#security).
+The [email channel](email-integration.md) is such an author: its IMAP host — and in conversation mode its SMTP relay
+(`smtpHost`, 587 with STARTTLS required or 465 with TLS) — is checked by this policy when the integration is saved and
+again on every poll and every reply. A channel reply never goes through the operator policy or the system mailer: the
+transport refuses any endpoint that is not an author-policy SMTP endpoint, and refuses outright for an integration
+that is not in conversation mode. Its other guards — sender authentication before identity, the loop guard,
+allow/blocklists, the claim that keeps a mail from running twice, mail rendered as template *data*, executables never
+stored, unauthenticated senders without memory, the sender in the thread key (hijack guard) — are described in
+[email-integration.md → Security](email-integration.md#security).
+
+### Email replies (conversation mode)
+
+| Threat | Guard |
+|---|---|
+| Backscatter to a forged `From` | `requireAuthentication` is forced on: an unauthenticated mail never reaches a turn. The reply decision (`EmailReplyRecipients`) also requires an authenticated email identity (never `email-anon:`) and the `aligned-pass` verdict on the answered mail's step, so a reply cannot be produced even for a turn that should not have run |
+| The model choosing a recipient | No tool or output field names one. The one recipient is the authenticated `From` of the answered mail (from the ledger, cross-checked with the step); never `Cc`; the `Reply-To` only with `honorReplyTo` and exactly one address (warned at save) |
+| Thread hijack with a known Message-ID | A mail continues a conversation through EDDI's own Message-IDs only when its authenticated sender started it, or with `anyAuthenticatedParticipant` received a reply in it; everyone else gets their own conversation |
+| Reply loops | `Auto-Submitted: auto-replied` on every reply, the inbound loop guard, and `maxRepliesPerThreadPerHour` counted from the ledger |
+| Spoofed bounces suppressing someone | A delivery report counts only for a Message-ID this integration minted (random) and only for that reply's recipient |
+| Header injection | Subject, display name and addresses are refused with a line break or control character by the renderer; `fromName` is refused at save |
+| Template injection through the answer | `replyTemplate` is author text; the agent output and the subject are substituted as data by the restricted engine |
+| Duplicate or lost replies | One ledger row per (conversation, step, kind) under a unique key; first attempt inline, retries with backoff, rebuild from the conversation after a crash; no body stored |
 
 ### The operator policy — the system mailer's relay
 

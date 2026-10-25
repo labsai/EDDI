@@ -10717,6 +10717,150 @@
             }
           },
           "description": "How processed mail was marked in the mailbox: flagged ($EddiProcessed keyword), moved, flagged_not_moved (the server lacks MOVE) or nothing (the server takes no custom keywords and no move was configured, e.g. Exchange Online with processedAction flag; the cursor and the ledger still keep mail from running twice). Sustained nothing: use processedAction move:<folder>."
+        },
+        {
+          "id": 273,
+          "type": "timeseries",
+          "title": "Email replies by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 74
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (outcome) (rate(eddi_email_outbound_total{job=~\"$job\",kind=\"reply\"}[5m]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Conversation-mode replies (answers, pause notices, continuations, group syntheses): sent, retry (deferred, retried with backoff), failed (a 5xx or the last attempt; the owners are told), suppressed (the recipient bounced before), throttled (maxRepliesPerThreadPerHour reached, often a mail loop), refused (the recipient rules said no), bounced (a DSN for a sent reply), no_output (the turn had nothing to say)."
+        },
+        {
+          "id": 274,
+          "type": "timeseries",
+          "title": "Email reply latency",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 81
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum(rate(eddi_email_outbound_latency_seconds_sum{job=~\"$job\",kind=\"reply\"}[5m])) / sum(rate(eddi_email_outbound_latency_seconds_count{job=~\"$job\",kind=\"reply\"}[5m]))",
+              "legendFormat": "mean",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Mean time from a reply being queued (its ledger row written when the turn ended) to the relay accepting it, retries included. A rise means the SMTP relay is slow or failing and replies are being retried."
+        },
+        {
+          "id": 275,
+          "type": "timeseries",
+          "title": "Email suppressions added",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 81
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (reason) (increase(eddi_email_suppressions_total{job=~\"$job\"}[1h]))",
+              "legendFormat": "{{reason}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Addresses added to an integration's suppression list per hour (a reply bounced permanently). Nothing is sent to them until an administrator clears the entry (POST /channelstore/channels/{id}/email-suppressions/clear)."
         }
       ]
     },
