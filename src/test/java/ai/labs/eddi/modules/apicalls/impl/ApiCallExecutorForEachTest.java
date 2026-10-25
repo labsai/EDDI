@@ -482,6 +482,25 @@ class ApiCallExecutorForEachTest {
         }
 
         @Test
+        @DisplayName("the total budget is measured in UTF-8 bytes, not characters")
+        void totalSizeCapCountsUtf8Bytes() throws Exception {
+            // 30 characters, 60 UTF-8 bytes: by characters both bodies (60) fit 100, by
+            // bytes (120) only the first does.
+            String body = "é".repeat(30);
+            responder = request -> text(200, body);
+            ApiCall call = call("/items/{item}", forEach(1));
+            call.getForEach().setMaxTotalResponseSizeInBytes(100);
+            Map<String, Object> templateData = dataWithItems(List.of("a", "b"));
+
+            executor.execute(call, memory, templateData, SERVER);
+
+            List<Map<String, Object>> stored = stored(templateData);
+            assertEquals(body, stored.get(0).get("body"));
+            assertNull(stored.get(1).get("body"));
+            assertEquals(true, stored.get(1).get("bodyDropped"));
+        }
+
+        @Test
         @DisplayName("without a total budget, the call's maxResponseSizeInBytes applies to the array as a whole")
         void totalBudgetDefaultsToCallCap() throws Exception {
             responder = request -> text(200, "y".repeat(40));

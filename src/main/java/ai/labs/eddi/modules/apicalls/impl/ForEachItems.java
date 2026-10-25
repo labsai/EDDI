@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -143,8 +144,8 @@ final class ForEachItems {
     }
 
     /**
-     * Keeps the items' bodies, in order, until {@code budget} characters are spent;
-     * every later body is dropped (its status stays) and the item says so.
+     * Keeps the items' bodies, in order, until {@code budget} UTF-8 bytes are
+     * spent; every later body is dropped (its status stays) and the item says so.
      * Conversation memory is loaded on every turn, so the array as a whole gets the
      * budget one response would.
      */
@@ -168,22 +169,30 @@ final class ForEachItems {
             capped.add(result);
         }
         if (dropped > 0) {
-            LOGGER.warnf("forEach of http call '%s': %d item bodies not stored — together they exceed %d characters. Raise "
+            LOGGER.warnf("forEach of http call '%s': %d item bodies not stored — together they exceed %d bytes. Raise "
                     + "forEach.maxTotalResponseSizeInBytes or narrow the loop.", LogSanitizer.sanitize(callName), dropped, budget);
         }
         return capped;
     }
 
-    /** The stored size of a body, in characters of its JSON or text form. */
+    /**
+     * The stored size of a body, in UTF-8 bytes of its JSON or text form — the unit
+     * {@code maxTotalResponseSizeInBytes} is named in; a character count would let
+     * a non-ASCII body past a budget it exceeds.
+     */
     static long sizeOf(Object body, IJsonSerialization jsonSerialization) {
         if (body instanceof String text) {
-            return text.length();
+            return utf8Size(text);
         }
         try {
             String serialized = jsonSerialization != null ? jsonSerialization.serialize(body) : null;
-            return serialized != null ? serialized.length() : String.valueOf(body).length();
+            return utf8Size(serialized != null ? serialized : String.valueOf(body));
         } catch (IOException e) {
-            return String.valueOf(body).length();
+            return utf8Size(String.valueOf(body));
         }
+    }
+
+    private static long utf8Size(String text) {
+        return text.getBytes(StandardCharsets.UTF_8).length;
     }
 }
