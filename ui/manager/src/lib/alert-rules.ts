@@ -96,7 +96,8 @@ export function ruleProblems(rule: AlertRule): string[] {
   rule.delivery.forEach((target, i) => {
     if (target.type === "SLACK" && !/^[CGD][A-Z0-9]{2,30}$/.test(target.channelId ?? "")) problems.push(`delivery${i}`);
     const url = (target.url ?? "").trim();
-    const urlOk = /^https?:\/\//.test(url) || /^\$\{vault:[^}]+\}$/.test(url);
+    // https only, as the server requires; a vault reference is checked when the alert is sent.
+    const urlOk = /^https:\/\/[^/\s]+/i.test(url) || /^\$\{vault:[^}]+\}$/.test(url);
     if (target.type === "WEBHOOK" && (!urlOk || !/^\$\{vault:[^}]+\}$/.test((target.signingSecret ?? "").trim()))) {
       problems.push(`delivery${i}`);
     }

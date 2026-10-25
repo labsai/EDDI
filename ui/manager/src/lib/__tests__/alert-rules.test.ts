@@ -21,6 +21,8 @@ describe("ruleProblems — mirrors AlertRuleValidator", () => {
     expect(ruleProblems({ ...rule, delivery: [{ type: "SLACK", channelId: "#general" }] })).toEqual(["delivery0"]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "https://h.example.com", signingSecret: "plain" }] })).toEqual(["delivery0"]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "https://h.example.com", signingSecret: "${vault:k}" }] })).toEqual([]);
+    expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "http://h.example.com", signingSecret: "${vault:k}" }] })).toEqual(["delivery0"]);
+    expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "${vault:hook-url}", signingSecret: "${vault:k}" }] })).toEqual([]);
   });
 });
 

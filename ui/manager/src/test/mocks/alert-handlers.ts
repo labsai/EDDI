@@ -205,8 +205,12 @@ export const alertHandlers = [
   }),
 
   http.post("*/alerts/events/acknowledge", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { ids?: string[] };
-    const targets = body.ids?.length ? events.filter((e) => body.ids!.includes(e.id)) : filteredEvents(new URL(request.url));
+    const body = (await request.json().catch(() => ({}))) as { ids?: (string | null)[] };
+    // As on the server: a present ids list is the selector — empty, or with an empty entry, is a 400.
+    if (body.ids !== undefined && (body.ids === null || body.ids.length === 0 || body.ids.some((id) => !id || !id.trim()))) {
+      return HttpResponse.json({ error: "INVALID_PARAMETER", message: "ids must name at least one event" }, { status: 400 });
+    }
+    const targets = body.ids ? events.filter((e) => body.ids!.includes(e.id)) : filteredEvents(new URL(request.url));
     return HttpResponse.json({ acknowledged: targets.filter(acknowledge).length });
   }),
 

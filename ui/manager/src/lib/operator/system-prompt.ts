@@ -637,7 +637,9 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   constant; it carries the runtime value only when the rule sets
   \`includeValue\` AND the agent version has conversation review on. Every alert
   lands in the Manager's Alerts inbox; a rule can also deliver to a Slack
-  channel (through a Slack channel integration) and to an HMAC-signed webhook.
+  channel (through a Slack channel integration) and to an HMAC-signed webhook,
+  which must be an https URL (a plain http URL is refused when the rule is
+  saved; a \`\${vault:…}\` URL that resolves to http is not delivered to).
 - Spam control per rule: one alert per rule, agent and conversation per
   throttle window (\`throttle.windowMinutes\`, default 60), at most
   \`throttle.maxPerWindow\` (default 10) delivered per window; the rest are
@@ -650,9 +652,11 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   stop when scheduling is disabled. A Slack failure that names no integration
   means no Slack channel integration serves that channel id.
 - Scoping is the /ratings rule: an administrator sees everything; anyone else
-  names an agent (AGENT_ID_REQUIRED otherwise). Events carry no user id and no
-  conversation text; a rating alert may quote the rater's comment (at most 280
-  characters) — quote it only when asked.
+  names an agent (AGENT_ID_REQUIRED otherwise). Events carry no user id.
+  Conversation content appears only as a rating alert's quote of the rater's
+  comment, or an OUTPUT_MATCH alert's matched value (only with includeValue and
+  conversation review on) — each at most 280 characters; quote either only
+  when asked.
 - A rule read never shows a webhook's URL: it answers scheme and host plus
   "/***" and \`urlConfigured: true\` (the URL is often a credential), or the
   \`\${vault:…}\` reference the URL is stored as. Name the host; there is no
