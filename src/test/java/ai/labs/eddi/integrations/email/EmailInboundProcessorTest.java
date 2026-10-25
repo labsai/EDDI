@@ -472,6 +472,53 @@ class EmailInboundProcessorTest {
             assertEquals(State.RECEIVED, row(mail).state());
             assertEquals("quota", row(mail).lastError());
         }
+
+        @Test
+        @DisplayName("a turn refused after its conversation started is retried in that conversation: CONVERSATION_START runs once")
+        void retryAfterStartReusesTheConversation() throws Exception {
+            AtomicInteger says = new AtomicInteger();
+            doAnswer(invocation -> {
+                if (says.incrementAndGet() == 1) {
+                    throw new QuotaExceededException("tenant over its API-call rate");
+                }
+                sayConversations.add(invocation.getArgument(0));
+                handlers.add(invocation.getArgument(6));
+                return null;
+            }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(),
+                    any(ConversationResponseHandler.class));
+            EmailTestMail mail = EmailTestMail.mail();
+            Instant now = Instant.now();
+
+            assertEquals(Disposition.STOP, processor.process(context(Map.of()), mail.polled(1), now));
+            assertEquals(State.RECEIVED, row(mail).state());
+            assertEquals("conv-1", row(mail).conversationId());
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), mail.polled(1), now.plus(Duration.ofMinutes(6))));
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals(List.of("conv-1"), sayConversations);
+            assertEquals(State.TURN_SUBMITTED, row(mail).state());
+        }
+
+        @Test
+        @DisplayName("a retry whose earlier conversation has ended since starts a new one")
+        void retryAfterStartEndedConversation() throws Exception {
+            AtomicInteger says = new AtomicInteger();
+            doAnswer(invocation -> {
+                if (says.incrementAndGet() == 1) {
+                    throw new QuotaExceededException("tenant over its API-call rate");
+                }
+                sayConversations.add(invocation.getArgument(0));
+                return null;
+            }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(),
+                    any(ConversationResponseHandler.class));
+            EmailTestMail mail = EmailTestMail.mail();
+            Instant now = Instant.now();
+            processor.process(context(Map.of()), mail.polled(1), now);
+            when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.ENDED);
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), mail.polled(1), now.plus(Duration.ofMinutes(6))));
+            assertEquals(List.of("conv-2"), sayConversations);
+        }
     }
 
     @Nested

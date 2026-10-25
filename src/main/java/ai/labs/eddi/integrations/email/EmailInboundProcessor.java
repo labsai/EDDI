@@ -344,6 +344,18 @@ public class EmailInboundProcessor {
                 return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
             }
         }
+        // A retry of a mail whose conversation an earlier attempt started (the turn
+        // then failed and the row was given back): the turn goes into that
+        // conversation, so its CONVERSATION_START never runs twice for one mail.
+        if (existingConversation == null && row.conversationId() != null && target.getType() != ChannelTarget.TargetType.GROUP) {
+            ConversationState state = stateOf(row.conversationId());
+            if (state == ConversationState.IN_PROGRESS || state == ConversationState.AWAITING_HUMAN) {
+                return defer(ctx, row, now.plus(RETRY_SHORT), "conversation_busy", EmailMetrics.DEFERRED, now);
+            }
+            if (state != null && state != ConversationState.ENDED) {
+                existingConversation = row.conversationId();
+            }
+        }
 
         // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
