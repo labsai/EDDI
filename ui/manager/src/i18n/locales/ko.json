@@ -6855,6 +6855,8 @@
     "pickAgentDescription": "편집할 수 있는 에이전트의 알림을 한 번에 한 에이전트씩 보고 작성합니다.",
     "pickAgentTitle": "알림을 볼 에이전트를 선택하세요",
     "removeTarget": "대상 제거",
+    "moveTargetUp": "대상을 위로 이동",
+    "moveTargetDown": "대상을 아래로 이동",
     "retry": "다시 시도",
     "retryFailed": "재시도를 시작할 수 없습니다.",
     "retryQueued": "전송을 다시 시도하고 있습니다.",

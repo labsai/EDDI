@@ -28,3 +28,19 @@
 ### Tests
 
 New: `output-match-builder.test.tsx` (5), `lib/api/__tests__/alerts.test.ts` (3), throttle cases in `alert-rules.test.ts`, four page tests in `alerts.test.tsx` (throttle error, page clamp, selection reset on filters, fresh inbox on agent change) and the server-owned case in `schedules-regressions.test.tsx`. The alerts, schedules, operator, mocks and i18n suites: 34 files, 770 tests. Mutation check: 10 of 10 mutants killed (throttle not reported, window bound off by one, fractions accepted, empty ids widened, no page clamp, selection kept on either filter, Inbox not keyed on the agent, row Retry and Failed-fires actions for a server-owned schedule). The Playwright spec is typechecked and linted, not run.
+
+## fix(manager): carry each webhook target's targetId through the rule editor (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-manager`, PR #1139) — the Manager side of the backend's `targetId` restore (PR #1138)
+
+### What changed and why
+
+- **Types:** `DeliveryTarget.targetId` in [`lib/api/alerts.ts`](../../ui/manager/src/lib/api/alerts.ts), documented as the server's id to send back unchanged.
+- **Editor** ([`alert-rule-editor.tsx`](../../ui/manager/src/components/alerts/alert-rule-editor.tsx)): targets are edited, removed and — new — moved up or down as whole objects, so each keeps its own `targetId`; rows are keyed by it. A new target has none. Save and Send test send the ids as loaded. Two new strings (`alerts.moveTargetUp`, `alerts.moveTargetDown`) in all 11 locales.
+- **Validation:** `ruleProblems` accepts a masked URL only together with a `targetId`, so a masked URL is never sent without one.
+- **MSW** ([`alert-handlers.ts`](../../ui/manager/src/test/mocks/alert-handlers.ts)) now mirrors the server: it stores full URLs and answers reads masked, assigns ids on create (replacing client ones), restores a masked or empty URL on update and test send only from the stored target with the same `targetId`, and refuses one without a known id with 400 `INVALID_RULE`.
+- **Platform Operator:** the masked-URL paragraph explains `targetId` and the `INVALID_RULE` refusal. Revision 41 → 42.
+
+### Tests
+
+New page tests (`alerts.test.tsx`): removing one of two masked same-host webhooks sends the other with its own id, reordering moves ids with their targets, editing a masked target's secret keeps its id, a new target goes without one, a test send of a saved rule sends the ids, and saving the stored webhook rule round-trips through the mock. `alert-handlers.test.ts` (4) pins the mock's contract; `alert-rules.test.ts` covers the masked-URL check. `npm run typecheck`, the full `npm run lint` and `npm run i18n:check` (6,336 keys) pass; the alerts page, alert components, `src/lib` (operator included), `src/test/mocks` (OpenAPI contract included), schedules and i18n suites: 143 files, 2,518 tests. Mutation check: 5 of 5 killed (edit drops the id, removal re-pairs ids by position, reorder leaves ids behind, masked URL accepted without an id, mock restoring without matching the id).

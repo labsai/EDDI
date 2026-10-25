@@ -6855,6 +6855,8 @@
     "pickAgentDescription": "編集できるエージェントのアラートを、一度に 1 つのエージェントずつ表示・作成できます。",
     "pickAgentTitle": "アラートを表示するエージェントを選択してください",
     "removeTarget": "送信先を削除",
+    "moveTargetUp": "送信先を上へ移動",
+    "moveTargetDown": "送信先を下へ移動",
     "retry": "再試行",
     "retryFailed": "再試行を開始できませんでした。",
     "retryQueued": "配信を再試行しています。",

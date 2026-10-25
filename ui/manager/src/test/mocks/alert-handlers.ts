@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { AlertEvent, AlertRule, DeliveryTarget } from "@/lib/api/alerts";
+import { MASKED_URL_SUFFIX, type AlertEvent, type AlertRule, type DeliveryTarget } from "@/lib/api/alerts";
 
 /**
  * Alerts — `/alerts/rules` and `/alerts/events` against an in-memory store shaped
@@ -25,7 +25,14 @@ function labelOf(target: DeliveryTarget): string {
   }
 }
 
-export function alertRuleFixtures(): AlertRule[] {
+/** The full webhook URL the mock "server" keeps; reads only ever show it masked. */
+export const STORED_HOOK_URL = "https://hooks.example.com/services/T000/B000/s3cr3t";
+
+/**
+ * The rules as the mock stores them: full webhook URLs, every target with a
+ * server-assigned `targetId`. Reads go through {@link readForm}.
+ */
+function storedRuleFixtures(): AlertRule[] {
   return [
     {
       id: "rule-ratings",
@@ -34,7 +41,7 @@ export function alertRuleFixtures(): AlertRule[] {
       scope: { allAgents: false, agentIds: ["agent1"] },
       source: "RATING",
       condition: { maxNormalizedScore: 0.25, onComment: true },
-      delivery: [{ type: "SLACK", channelId: "C0123ABC" }],
+      delivery: [{ type: "SLACK", channelId: "C0123ABC", targetId: "t-slack-1" }],
       throttle: { windowMinutes: 60, maxPerWindow: 10 },
       digest: "HOURLY",
       createdBy: "admin",
@@ -46,13 +53,66 @@ export function alertRuleFixtures(): AlertRule[] {
       scope: { allAgents: true, agentIds: [] },
       source: "CONVERSATION_ERROR",
       condition: { errorKinds: ["TURN_ERROR", "TURN_DEADLINE"] },
-      // As the backend answers a read: the URL masked to scheme + host.
-      delivery: [{ type: "WEBHOOK", url: "https://hooks.example.com/***", signingSecret: "${vault:alert-hook}", urlConfigured: true }],
+      delivery: [{ type: "WEBHOOK", url: STORED_HOOK_URL, signingSecret: "${vault:alert-hook}", targetId: "t-hook-1" }],
       throttle: { windowMinutes: 60, maxPerWindow: 10 },
       digest: "DAILY",
       createdBy: "admin",
     },
   ];
+}
+
+/** A target as a read shows it: a literal webhook URL masked to scheme + host. */
+function maskTarget(target: DeliveryTarget): DeliveryTarget {
+  if (target.type !== "WEBHOOK" || !target.url) return { ...target, urlConfigured: null };
+  if (/^\$\{vault:[^}]+\}$/.test(target.url)) return { ...target, urlConfigured: true };
+  let origin = "https://?";
+  try {
+    origin = new URL(target.url).origin;
+  } catch {
+    /* keep the placeholder */
+  }
+  return { ...target, url: `${origin}${MASKED_URL_SUFFIX}`, urlConfigured: true };
+}
+
+function readForm(rule: AlertRule): AlertRule {
+  return { ...rule, delivery: rule.delivery.map(maskTarget) };
+}
+
+/** The rules as the backend answers a read (masked URLs, ids). */
+export function alertRuleFixtures(): AlertRule[] {
+  return storedRuleFixtures().map(readForm);
+}
+
+let nextTargetId = 1;
+
+/**
+ * Mirrors the server: a masked or empty URL is restored only from the stored
+ * target with the same `targetId`; ids the stored rule lacks are dropped and
+ * missing ones assigned. Returns an error response for a masked or empty URL
+ * nothing restores.
+ */
+function withStoredUrls(rule: AlertRule, current: AlertRule | null): AlertRule | Response {
+  const stored = new Map((current?.delivery ?? []).map((t) => [t.targetId, t]));
+  const seen = new Set<string>();
+  const delivery: DeliveryTarget[] = [];
+  for (const raw of rule.delivery) {
+    const target: DeliveryTarget = { ...raw, urlConfigured: undefined };
+    const needsStored = target.type === "WEBHOOK" && (!target.url || target.url.endsWith(MASKED_URL_SUFFIX));
+    const same = target.targetId ? stored.get(target.targetId) : undefined;
+    if (needsStored) {
+      if (!same?.url) {
+        return HttpResponse.json(
+          { error: "INVALID_RULE", message: "delivery url is the masked value a read returns, and its targetId matches no stored target" },
+          { status: 400 },
+        );
+      }
+      target.url = same.url;
+    }
+    const keepId = !!target.targetId && stored.has(target.targetId) && !seen.has(target.targetId);
+    if (keepId) seen.add(target.targetId!);
+    delivery.push({ ...target, targetId: keepId ? target.targetId : `t-new-${nextTargetId++}` });
+  }
+  return { ...rule, delivery };
 }
 
 export function alertEventFixtures(): AlertEvent[] {
@@ -113,13 +173,14 @@ export function alertEventFixtures(): AlertEvent[] {
   ];
 }
 
-let rules: AlertRule[] = alertRuleFixtures();
+let rules: AlertRule[] = storedRuleFixtures();
 let events: AlertEvent[] = alertEventFixtures();
 let nextId = 1;
 
 /** Back to the fixtures — called between tests (see setup). */
 export function resetAlertStore() {
-  rules = alertRuleFixtures();
+  rules = storedRuleFixtures();
+  nextTargetId = 1;
   events = alertEventFixtures();
   nextId = 1;
 }
@@ -155,13 +216,17 @@ export const alertHandlers = [
   http.get("*/alerts/rules", ({ request }) => {
     const agentId = new URL(request.url).searchParams.get("agentId");
     const list = agentId ? rules.filter((r) => r.scope.agentIds.includes(agentId)) : rules;
-    return HttpResponse.json({ total: list.length, index: 0, limit: 50, rules: list });
+    return HttpResponse.json({ total: list.length, index: 0, limit: 50, rules: list.map(readForm) });
   }),
 
   http.post("*/alerts/rules/test", async ({ request }) => {
-    const rule = (await request.json()) as AlertRule;
-    const refused = invalid(rule);
+    const body = (await request.json()) as AlertRule;
+    const refused = invalid(body);
     if (refused) return refused;
+    // A saved rule's masked URLs are restored by targetId, as on update.
+    const current = body.id ? (rules.find((r) => r.id === body.id) ?? null) : null;
+    const rule = withStoredUrls(body, current);
+    if (rule instanceof Response) return rule;
     return HttpResponse.json({
       deliveries: rule.delivery.map((target) => ({
         type: target.type,
@@ -173,22 +238,26 @@ export const alertHandlers = [
   }),
 
   http.post("*/alerts/rules", async ({ request }) => {
-    const rule = (await request.json()) as AlertRule;
-    const refused = invalid(rule);
+    const body = (await request.json()) as AlertRule;
+    const refused = invalid(body);
     if (refused) return refused;
+    const rule = withStoredUrls(body, null);
+    if (rule instanceof Response) return rule;
     const stored = { ...rule, id: `rule-new-${nextId++}`, createdBy: "admin", createdAt: new Date().toISOString() };
     rules = [stored, ...rules];
-    return HttpResponse.json(stored, { status: 201 });
+    return HttpResponse.json(readForm(stored), { status: 201 });
   }),
 
   http.put("*/alerts/rules/:ruleId", async ({ params, request }) => {
-    const rule = (await request.json()) as AlertRule;
-    const refused = invalid(rule);
+    const body = (await request.json()) as AlertRule;
+    const refused = invalid(body);
     if (refused) return refused;
     const index = rules.findIndex((r) => r.id === params.ruleId);
     if (index < 0) return HttpResponse.json({ error: "RULE_NOT_FOUND", message: "Alert rule not found" }, { status: 404 });
+    const rule = withStoredUrls(body, rules[index] ?? null);
+    if (rule instanceof Response) return rule;
     rules[index] = { ...rule, id: String(params.ruleId) };
-    return HttpResponse.json(rules[index]);
+    return HttpResponse.json(readForm(rules[index]));
   }),
 
   http.delete("*/alerts/rules/:ruleId", ({ params }) => {

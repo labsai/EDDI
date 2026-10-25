@@ -308,6 +308,105 @@ describe("AlertsPage — rules", () => {
     expect(screen.getByTestId("alert-rule-target-url-kept-0")).toBeInTheDocument();
   });
 
+  describe("webhook targets keep their targetId", () => {
+    const twoHooks: AlertRule = {
+      id: "rule-two",
+      name: "Two hooks",
+      enabled: true,
+      scope: { allAgents: true, agentIds: [] },
+      source: "CONVERSATION_ERROR",
+      condition: { errorKinds: ["TURN_ERROR"] },
+      delivery: [
+        { type: "WEBHOOK", url: "https://hooks.example.com/***", signingSecret: "${vault:a}", urlConfigured: true, targetId: "tA" },
+        { type: "WEBHOOK", url: "https://hooks.example.com/***", signingSecret: "${vault:b}", urlConfigured: true, targetId: "tB" },
+      ],
+      throttle: { windowMinutes: 60, maxPerWindow: 10 },
+      digest: "HOURLY",
+    };
+
+    function serveTwoHooks() {
+      const sent: { put?: AlertRule; test?: AlertRule } = {};
+      server.use(
+        http.get("*/alerts/rules", () => HttpResponse.json({ total: 1, index: 0, limit: 50, rules: [twoHooks] })),
+        http.put("*/alerts/rules/:ruleId", async ({ request }) => {
+          sent.put = (await request.json()) as AlertRule;
+          return HttpResponse.json(sent.put);
+        }),
+        http.post("*/alerts/rules/test", async ({ request }) => {
+          sent.test = (await request.json()) as AlertRule;
+          return HttpResponse.json({ deliveries: [] });
+        }),
+      );
+      return sent;
+    }
+
+    async function openTwoHooks() {
+      renderAlerts("/manage/alerts?tab=rules");
+      fireEvent.click(await screen.findByTestId("alert-rule-edit-rule-two"));
+    }
+
+    it("removing one of two masked webhooks on one host sends the other with its own targetId", async () => {
+      const sent = serveTwoHooks();
+      await openTwoHooks();
+      fireEvent.click(screen.getByTestId("alert-rule-target-remove-0"));
+      fireEvent.click(screen.getByTestId("alert-rule-save"));
+      await waitFor(() => expect(sent.put).toBeDefined());
+      expect(sent.put!.delivery.map((d) => [d.targetId, d.signingSecret])).toEqual([["tB", "${vault:b}"]]);
+    });
+
+    it("reordering keeps each target's targetId with it", async () => {
+      const sent = serveTwoHooks();
+      await openTwoHooks();
+      fireEvent.click(screen.getByTestId("alert-rule-target-down-0"));
+      fireEvent.click(screen.getByTestId("alert-rule-save"));
+      await waitFor(() => expect(sent.put).toBeDefined());
+      expect(sent.put!.delivery.map((d) => [d.targetId, d.signingSecret])).toEqual([
+        ["tB", "${vault:b}"],
+        ["tA", "${vault:a}"],
+      ]);
+    });
+
+    it("editing a masked target's other fields keeps its targetId", async () => {
+      const sent = serveTwoHooks();
+      await openTwoHooks();
+      fireEvent.change(screen.getByTestId("alert-rule-target-secret-1"), { target: { value: "${vault:b2}" } });
+      fireEvent.click(screen.getByTestId("alert-rule-save"));
+      await waitFor(() => expect(sent.put).toBeDefined());
+      expect(sent.put!.delivery.map((d) => [d.targetId, d.signingSecret])).toEqual([
+        ["tA", "${vault:a}"],
+        ["tB", "${vault:b2}"],
+      ]);
+    });
+
+    it("a new target goes without a targetId — the server assigns one", async () => {
+      const sent = serveTwoHooks();
+      await openTwoHooks();
+      fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+      fireEvent.change(screen.getByTestId("alert-rule-target-channel-2"), { target: { value: "C0123ABC" } });
+      fireEvent.click(screen.getByTestId("alert-rule-save"));
+      await waitFor(() => expect(sent.put).toBeDefined());
+      expect(sent.put!.delivery.map((d) => d.targetId ?? null)).toEqual(["tA", "tB", null]);
+    });
+
+    it("a test send of the saved rule sends the targetIds", async () => {
+      const sent = serveTwoHooks();
+      await openTwoHooks();
+      fireEvent.click(screen.getByTestId("alert-rule-test"));
+      await waitFor(() => expect(sent.test).toBeDefined());
+      expect(sent.test!.id).toBe("rule-two");
+      expect(sent.test!.delivery.map((d) => d.targetId)).toEqual(["tA", "tB"]);
+    });
+
+    it("the mock server restores the stored URL by targetId: editing and saving the stored webhook rule succeeds", async () => {
+      renderAlerts("/manage/alerts?tab=rules");
+      fireEvent.click(await screen.findByTestId("alert-rule-edit-rule-errors"));
+      fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "Broken turns (renamed)" } });
+      fireEvent.click(screen.getByTestId("alert-rule-save"));
+      await waitFor(() => expect(screen.queryByTestId("alert-rule-editor")).toBeNull());
+      expect(await screen.findByText("Broken turns (renamed)")).toBeInTheDocument();
+    });
+  });
+
   it("refuses an invalid Slack channel before sending anything", async () => {
     renderAlerts("/manage/alerts?tab=rules");
     fireEvent.click(await screen.findByTestId("alerts-new-rule"));

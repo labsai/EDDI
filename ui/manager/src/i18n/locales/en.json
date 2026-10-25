@@ -6855,6 +6855,8 @@
     "pickAgentDescription": "You see and write the alerts of the agents you can edit, one agent at a time.",
     "pickAgentTitle": "Pick an agent to see its alerts",
     "removeTarget": "Remove target",
+    "moveTargetUp": "Move target up",
+    "moveTargetDown": "Move target down",
     "retry": "Retry",
     "retryFailed": "The retry could not be started.",
     "retryQueued": "Delivery is being retried.",

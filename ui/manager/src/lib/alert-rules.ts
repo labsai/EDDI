@@ -1,4 +1,4 @@
-import { ALERT_LIMITS, type AlertCondition, type AlertRule, type MatchOp } from "@/lib/api/alerts";
+import { ALERT_LIMITS, MASKED_URL_SUFFIX, type AlertCondition, type AlertRule, type MatchOp } from "@/lib/api/alerts";
 
 /** Mirrors the backend's OutputMatchCondition grammar. */
 export const OUTPUT_MATCH_LIMITS = { maxDepth: 8, maxInValues: 50, maxValueLength: 1000 } as const;
@@ -110,7 +110,9 @@ export function ruleProblems(rule: AlertRule): string[] {
     if (target.type === "SLACK" && !/^[CGD][A-Z0-9]{2,30}$/.test(target.channelId ?? "")) problems.push(`delivery${i}`);
     const url = (target.url ?? "").trim();
     // https only, as the server requires; a vault reference is checked when the alert is sent.
-    const urlOk = /^https:\/\/[^/\s]+/i.test(url) || /^\$\{vault:[^}]+\}$/.test(url);
+    // A masked URL stands for the stored one only together with its targetId.
+    const masked = url.endsWith(MASKED_URL_SUFFIX);
+    const urlOk = (/^https:\/\/[^/\s]+/i.test(url) && (!masked || !!target.targetId)) || /^\$\{vault:[^}]+\}$/.test(url);
     if (target.type === "WEBHOOK" && (!urlOk || !/^\$\{vault:[^}]+\}$/.test((target.signingSecret ?? "").trim()))) {
       problems.push(`delivery${i}`);
     }

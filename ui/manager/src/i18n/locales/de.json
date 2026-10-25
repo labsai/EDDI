@@ -6855,6 +6855,8 @@
     "pickAgentDescription": "Du siehst und schreibst die Alarme der Agents, die du bearbeiten darfst, jeweils für einen Agent.",
     "pickAgentTitle": "Wähle einen Agent, um seine Alarme zu sehen",
     "removeTarget": "Ziel entfernen",
+    "moveTargetUp": "Ziel nach oben verschieben",
+    "moveTargetDown": "Ziel nach unten verschieben",
     "retry": "Erneut versuchen",
     "retryFailed": "Der neue Versuch konnte nicht gestartet werden.",
     "retryQueued": "Die Zustellung wird erneut versucht.",

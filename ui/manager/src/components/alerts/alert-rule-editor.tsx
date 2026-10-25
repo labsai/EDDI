@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, Send, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentPicker } from "@/components/shared/agent-picker";
@@ -50,6 +50,18 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
   const setCondition = (patch: Partial<AlertRule["condition"]>) => setRule((r) => ({ ...r, condition: { ...r.condition, ...patch } }));
   const setTarget = (i: number, patch: Partial<DeliveryTarget>) =>
     setRule((r) => ({ ...r, delivery: r.delivery.map((d, j) => (j === i ? { ...d, ...patch } : d)) }));
+
+  // Targets move and leave as whole objects, so each keeps its server-assigned
+  // targetId — the only thing a masked URL is restored by.
+  const moveTarget = (i: number, by: -1 | 1) =>
+    setRule((r) => {
+      const j = i + by;
+      if (j < 0 || j >= r.delivery.length) return r;
+      const delivery = [...r.delivery];
+      const [moved] = delivery.splice(i, 1);
+      delivery.splice(j, 0, moved!);
+      return { ...r, delivery };
+    });
 
   const changeSource = (source: AlertSource) =>
     set({ source, condition: defaultCondition(source) });
@@ -208,7 +220,7 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
         <legend className="text-sm font-medium">{t("alerts.ruleDelivery", "Deliver to")}</legend>
         <p className="text-xs text-muted-foreground">{t("alerts.inboxAlways", "Every alert lands in this inbox. Add Slack or a webhook as well:")}</p>
         {rule.delivery.map((target, i) => (
-          <div key={i} className="flex flex-wrap items-end gap-2" data-testid={`alert-rule-target-${i}`}>
+          <div key={target.targetId ?? `new-${i}`} className="flex flex-wrap items-end gap-2" data-testid={`alert-rule-target-${i}`}>
             <select
               className={selectClass}
               value={target.type}
@@ -256,6 +268,26 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
                 />
               </>
             )}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i === 0}
+              onClick={() => moveTarget(i, -1)}
+              aria-label={t("alerts.moveTargetUp", "Move target up")}
+              data-testid={`alert-rule-target-up-${i}`}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i === rule.delivery.length - 1}
+              onClick={() => moveTarget(i, 1)}
+              aria-label={t("alerts.moveTargetDown", "Move target down")}
+              data-testid={`alert-rule-target-down-${i}`}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
             <Button
               size="sm"
               variant="ghost"

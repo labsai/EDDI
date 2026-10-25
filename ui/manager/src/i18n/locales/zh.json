@@ -6855,6 +6855,8 @@
     "pickAgentDescription": "你可以查看和编写你有编辑权限的代理的告警，每次一个代理。",
     "pickAgentTitle": "选择一个代理以查看其告警",
     "removeTarget": "移除目标",
+    "moveTargetUp": "上移目标",
+    "moveTargetDown": "下移目标",
     "retry": "重试",
     "retryFailed": "无法开始重试。",
     "retryQueued": "正在重试投递。",

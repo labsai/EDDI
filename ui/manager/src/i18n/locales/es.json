@@ -6926,6 +6926,8 @@
     "pickAgentDescription": "Ves y escribes las alertas de los agentes que puedes editar, un agente a la vez.",
     "pickAgentTitle": "Elige un agente para ver sus alertas",
     "removeTarget": "Quitar destino",
+    "moveTargetUp": "Subir el destino",
+    "moveTargetDown": "Bajar el destino",
     "retry": "Reintentar",
     "retryFailed": "No se pudo iniciar el reintento.",
     "retryQueued": "Se está reintentando la entrega.",

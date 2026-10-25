@@ -65,6 +65,13 @@ export interface DeliveryTarget {
   signingSecret?: string | null;
   /** Read-only: a URL is stored (shown masked). */
   urlConfigured?: boolean | null;
+  /**
+   * The target's identity, assigned by the server and returned by every read.
+   * Send it back unchanged: a masked or empty URL is restored only from the
+   * stored target with the same id (never by position), and without it the
+   * server refuses the masked URL. A new target has none.
+   */
+  targetId?: string | null;
 }
 
 /** What replaces a webhook URL's path on every read. */

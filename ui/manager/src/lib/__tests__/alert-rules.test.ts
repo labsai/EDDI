@@ -25,6 +25,13 @@ describe("ruleProblems — mirrors AlertRuleValidator", () => {
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "${vault:hook-url}", signingSecret: "${vault:k}" }] })).toEqual([]);
   });
 
+  it("accepts a masked URL only together with its targetId", () => {
+    const rule = { ...blankRule("RATING", "agent1"), name: "x" };
+    const masked = { type: "WEBHOOK" as const, url: "https://hooks.example.com/***", signingSecret: "${vault:k}" };
+    expect(ruleProblems({ ...rule, delivery: [{ ...masked, targetId: "tA" }] })).toEqual([]);
+    expect(ruleProblems({ ...rule, delivery: [masked] })).toEqual(["delivery0"]);
+  });
+
   it("checks the throttle with the server's bounds: whole numbers, 1–1440 minutes, 1–1000 per window", () => {
     const rule = { ...blankRule("RATING", "agent1"), name: "x" };
     const withThrottle = (windowMinutes: number, maxPerWindow: number) => ruleProblems({ ...rule, throttle: { windowMinutes, maxPerWindow } });
