@@ -1,9 +1,11 @@
 # Implementation Plan — Email Support
 
-**Status:** Proposal. Nothing built. Revised once after a critical review (§2 lists what changed and why).
+**Status:** Proposal. The shared mail core and socket guard (Phase 0 and 0b: `engine/mail`, `engine/net`,
+Angus Mail) land with this plan; the email channel itself is not built by that change. Revised once after a
+critical review (§2 lists what changed and why).
 **Created:** 2026-10-24
 **Verified:** 2026-10-24 against `main` @ `5028af0a3`. Every EDDI class named here exists at that commit, and
-no mail, DNS or Markdown library is in `pom.xml` yet. The provider facts in §2 and §7 were checked against
+no mail, DNS or Markdown library was in `pom.xml` there (Phase 0 adds Angus Mail). The provider facts in §2 and §7 were checked against
 provider documentation on 2026-10-24. Re-check them at implementation time, because they drift.
 **Effort:** T-shirt sizes only — **XS** (a day or two) · **S** · **M** · **L** · **XL** (several people or a long
 stretch). Sizes are relative to each other, not commitments.
@@ -265,8 +267,11 @@ Size: **M**, mostly the test corpus (§21).
 - **Provenance** is always `SELF_ASSERTED`, so `PER_USER` connections are refused by the existing rule. The docs
   say not to set `allowUnverifiedPrincipal` for email.
 - **Reply recipient** (conversation mode): the authenticated `From`, never `Reply-To` (it is not covered by
-  DMARC) and never `Cc`. The only exception is `honorReplyTo: true` for a form relay that sends on behalf of a
-  user, and the docs warn about it.
+  DMARC) and never `Cc`. The only exception is `honorReplyTo` (default `false`) for a form relay that sends on
+  behalf of a user. When it is `true`, a reply goes to the `Reply-To` only if the message carries exactly one
+  `Reply-To` address (none or several → the authenticated `From`); the address is still checked against the
+  suppression list, never widened to `Cc`, and saving the integration with the flag raises a warning, because a
+  sender who passes DMARC chooses that recipient.
 
 ---
 
@@ -355,8 +360,14 @@ in the other mode (a reply setting on a trigger integration reads as if it did s
   conversation is replaced.
 - **Hijack guard — explicit, not implied by the user id:** a continuation is accepted only if the authenticated
   sender equals the conversation's original sender. `threadParticipants: anyAuthenticatedParticipant` also
-  admits authenticated addresses that EDDI's own outbound mail in that thread was sent to. Anyone else starts
-  their own conversation. Message-IDs travel in every forwarded mail and are not secrets.
+  admits authenticated addresses that EDDI's own outbound mail in that thread was sent to. Any other
+  authenticated sender starts their own conversation. Message-IDs travel in every forwarded mail and are not
+  secrets.
+  **Limit:** "authenticated" means an aligned pass for the sender's *domain* (§8). Someone who can send
+  DKIM-signed mail from the same domain and forges the `From` local part passes this guard, and reaches that
+  person's per-sender memory (§9) as well. Email has no mailbox-level provenance that EDDI could check; the
+  protection is the sending domain's own control over who may use which address. Where that is not enough, keep
+  sensitive data out of per-sender long-term memory.
 - **Trigger mode:** each mail is its own conversation by default. `correlateThreads: true` threads them (useful
   when a supplier sends a correction to an earlier invoice), with the same hijack guard.
 - **Routing:** `targets` triggers match the plus-tag (`support+billing@` → `billing`) and words in the subject,
@@ -370,25 +381,35 @@ in the other mode (a reply setting on a trigger integration reads as if it did s
 One store, `IEmailMessageLedger` (Mongo and Postgres twins), one row per message per integration:
 
 ```text
-{ integrationId, messageId (RFC, or SHA-256 of raw bytes when absent), direction IN|OUT,
-  conversationId, threadRoot, state, attempts, nextAttemptAt, providerId, replayToken,
-  createdAt, expiresAt }
+{ integrationId, kind (NOTIFY|REPLY|NOTICE|INBOUND), messageId (RFC, or SHA-256 of raw bytes when absent),
+  direction IN|OUT, idempotencyKey, conversationId, threadRoot, state, attempts, nextAttemptAt,
+  claimToken, providerId, replayToken, createdAt, expiresAt }
 ```
 
 - **Unique `(integrationId, direction, messageId)`** gives cluster-wide, restart-proof deduplication. Pollers see
   the same message again after a crash, and a provider retries. The webhook channel's 10-minute in-memory window
   is not enough here.
-- **Inbound states:** `RECEIVED → TURN_SUBMITTED → DONE | REFUSED(reason)`. The row is written, by a conditional
-  insert, **before** the turn is submitted. The mailbox is marked processed only after that. The result is at
-  least once, made exactly once by the unique key.
-- **Outbound states:** `PENDING → SENT | FAILED | SUPPRESSED`. Idempotency key `(conversationId, stepId, kind)`.
+- **Unique `idempotencyKey`** — for outbound rows `(conversationId, stepId, kind)`, extended by whatever else can
+  repeat a step id (the inbound row, a pause id). Rows are inserted with it before anything is sent, so a second
+  completion observer's insert fails and that observer sends nothing; the send itself runs only under the row's
+  claim (`claimToken` plus a lease in `nextAttemptAt`).
+- **Inbound states:** `RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED(reason)`. The row is written, by a
+  conditional insert, **before** the turn is submitted, and `CLAIMED → TURN_SUBMITTED` is written immediately
+  before the first side effect. The mailbox is marked processed only once the row is past that point or refused.
+  **A `RECEIVED` row, or a `CLAIMED` one whose claim has expired, is not a duplicate:** mail deferred by a budget
+  or quota (§13), or claimed by a node that died, stays in that state and the next poll claims it again. Only
+  rows past `CLAIMED` deduplicate. The result is at least once, made exactly once by the unique key.
+- **Outbound states:** `PENDING → SENT | FAILED | SUPPRESSED`.
   The first send attempt happens inline in the turn's `onComplete`. Retries come from a Quarkus
   `@Scheduled(identity=…)` sweeper that claims rows by conditional update, with exponential backoff. After N
   attempts the row is `FAILED` and the integration's owners are notified.
 - **Stranded turns:** the sweeper also finds `TURN_SUBMITTED` rows older than a threshold whose conversation step
   has completed, but which have no outbound row. That happens when the node died between turn and send. It
   renders the reply from the stored conversation snapshot. Without this, a crash silently drops a reply.
-- **Replay tokens** for Mailgun-style webhooks are stored here, single-use.
+- **Replay tokens** for Mailgun-style webhooks are stored here, single-use, on the delivery's own row. A token is
+  consumed only when that row is accepted (reaches `CLAIMED`) in the same conditional write; a delivery answered
+  with a non-2xx status (limit hit, quota, node shutting down) leaves the token unconsumed, so the provider's retry
+  of that same delivery is processed, while a replay of an accepted delivery is refused as a duplicate.
 - **Body:** never in the ledger. Inbound content lives in conversation memory, and outbound MIME is rebuilt from
   the snapshot on retry. So personal data lives in one place.
 - **Retention:** 30 days (`eddi.email.ledger-retention`). Dedup beyond that relies on the mailbox flag.

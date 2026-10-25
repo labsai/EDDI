@@ -220,6 +220,12 @@ public final class AddressNormalizer {
         StringBuilder cleaned = new StringBuilder(Math.min(decoded.length(), MAX_DISPLAY_NAME_LENGTH));
         for (int i = 0; i < decoded.length() && cleaned.length() < MAX_DISPLAY_NAME_LENGTH; i++) {
             char c = decoded.charAt(i);
+            if (c >= (char) 0x202A && c <= (char) 0x202E || c >= (char) 0x2066 && c <= (char) 0x2069) {
+                // Bidi embeddings, overrides and isolates make a name read differently
+                // from what it says ("Support <evil...>" shown as someone else) —
+                // dropped, as the parser drops them from subjects and bodies.
+                continue;
+            }
             cleaned.append(Character.isISOControl(c) || c == (char) 0x2028 || c == (char) 0x2029 ? ' ' : c);
         }
         String result = cleaned.toString().strip().replaceAll("\\s{2,}", " ");
