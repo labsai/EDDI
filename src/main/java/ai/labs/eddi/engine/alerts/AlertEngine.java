@@ -57,21 +57,29 @@ public class AlertEngine {
     private final AlertMetrics metrics;
     private final ConversationReviewPolicy reviewPolicy;
     private final IConversationRatingStore ratingStore;
+    private final AlertErasureFence erasureFence;
     private final Clock clock;
 
     @Inject
     public AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, Clock.systemUTC());
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, AlertErasureFence erasureFence) {
+        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, erasureFence, Clock.systemUTC());
     }
 
     AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
             AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, Clock clock) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, null, clock);
+        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, null, null, clock);
     }
 
     AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
             AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, Clock clock) {
+        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, null, clock);
+    }
+
+    AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
+            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, AlertErasureFence erasureFence,
+            Clock clock) {
+        this.erasureFence = erasureFence;
         this.ratingStore = ratingStore;
         this.ruleCache = ruleCache;
         this.eventStore = eventStore;
@@ -100,6 +108,9 @@ public class AlertEngine {
      * always.
      */
     boolean stillCurrent(ConversationRating rating) {
+        if (fenced(rating.userId(), rating.updatedAt())) {
+            return false;
+        }
         if (ratingStore == null || rating.id() == null) {
             return true;
         }
@@ -113,10 +124,12 @@ public class AlertEngine {
      * blanked here — before anything is delivered.
      */
     private AlertEvent afterRatingInsert(ConversationRating rating, AlertEvent stored) {
-        if (ratingStore == null || rating.id() == null || stored.match() == null || stored.match().commentExcerpt() == null) {
+        if (stored.match() == null || stored.match().commentExcerpt() == null) {
             return stored;
         }
-        if (ratingStore.readById(rating.id()).isPresent()) {
+        boolean erased = fenced(rating.userId(), rating.updatedAt())
+                || (ratingStore != null && rating.id() != null && ratingStore.readById(rating.id()).isEmpty());
+        if (!erased) {
             return stored;
         }
         eventStore.redactRatingComment(stored.id());
@@ -151,7 +164,9 @@ public class AlertEngine {
                 continue;
             }
             String value = null;
-            if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)) {
+            // Content captured before an erasure of its user started is never stored.
+            if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)
+                    && !fenced(snapshot.userId(), snapshot.capturedAt())) {
                 value = OutputMatcher.resolve(rule.condition().path(), snapshot)
                         .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
             }
@@ -159,8 +174,32 @@ public class AlertEngine {
             // it.
             String subject = value == null ? null : snapshot.userId();
             fire(rule, AlertMatch.output(OutputMatcher.describe(rule.condition()), value), snapshot.agentId(), snapshot.agentVersion(),
-                    snapshot.conversationId(), subject, UnaryOperator.identity());
+                    snapshot.conversationId(), subject, stored -> afterOutputInsert(snapshot, stored));
         }
+    }
+
+    /**
+     * After the event is written: an erasure that started while it was being
+     * written (its fence now covers the capture time) may have swept before the
+     * event existed, so the value and its subject are blanked here, before
+     * delivery.
+     */
+    private AlertEvent afterOutputInsert(TurnSnapshot snapshot, AlertEvent stored) {
+        if (stored.match() == null || stored.match().value() == null || !fenced(snapshot.userId(), snapshot.capturedAt())) {
+            return stored;
+        }
+        eventStore.redactOutputValues(snapshot.userId());
+        AlertMatch m = stored.match();
+        AlertMatch blanked = new AlertMatch(m.matched(), m.errorKind(), m.ratingId(), m.stepIndex(), m.scale(), m.score(), m.normalizedScore(),
+                m.tags(), m.commentExcerpt(), null);
+        return new AlertEvent(stored.id(), stored.ruleId(), stored.ruleName(), stored.source(), stored.kind(), stored.agentId(),
+                stored.agentVersion(), stored.conversationId(), stored.firedAt(), stored.summary(), blanked, stored.deliveries(), stored.state(),
+                stored.nextAttemptAt(), stored.dedupeKey(), stored.duplicates(), stored.digestCount(), stored.digestItems(), stored.acknowledgedBy(),
+                stored.acknowledgedAt(), stored.version(), null, stored.digestEventIds());
+    }
+
+    private boolean fenced(String userId, Instant capturedAt) {
+        return erasureFence != null && erasureFence.covers(userId, capturedAt);
     }
 
     private boolean reviewEnabled(TurnSnapshot snapshot) {
