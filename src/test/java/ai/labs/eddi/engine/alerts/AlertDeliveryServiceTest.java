@@ -8,13 +8,16 @@ import ai.labs.eddi.engine.alerts.AlertSenders.AlertDeliveryException;
 import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.Delivery;
 import ai.labs.eddi.engine.alerts.model.AlertEvent.DeliveryStatus;
+import ai.labs.eddi.engine.alerts.model.AlertMatch;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
+import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -30,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -54,6 +58,60 @@ class AlertDeliveryServiceTest {
         service = new AlertDeliveryService(store, senders, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(store.updateDelivery(any(), anyLong())).thenAnswer(inv -> Optional.of(inv.getArgument(0)));
+        // Delivery reloads the event before each send; by default the store holds it
+        // unchanged.
+        when(store.read(anyString()))
+                .thenAnswer(inv -> Optional.of(event(inv.getArgument(0), errorRule(List.of(ErrorKind.TURN_ERROR)), AlertEvent.State.PENDING,
+                        List.of())));
+    }
+
+    private static AlertEvent withMatch(AlertEvent e, AlertMatch match) {
+        return new AlertEvent(e.id(), e.ruleId(), e.ruleName(), AlertSource.RATING, e.kind(), e.agentId(), e.agentVersion(), e.conversationId(),
+                e.firedAt(), e.summary(), match, e.deliveries(), e.state(), e.nextAttemptAt(), e.dedupeKey(), e.duplicates(), e.digestCount(),
+                e.digestItems(), e.acknowledgedBy(), e.acknowledgedAt(), e.version());
+    }
+
+    private static final AlertMatch WITH_COMMENT = new AlertMatch(List.of("comment"), null, "r1", -1, "FIVE_STAR", 1, 0.0, null,
+            "It kept looping on my order number.");
+    private static final AlertMatch REDACTED = new AlertMatch(List.of("comment"), null, "r1", -1, "FIVE_STAR", 1, 0.0, null, null);
+
+    @Test
+    @DisplayName("first delivery sends the event as stored now: an excerpt blanked since the insert is not sent")
+    void sendsTheStoredVersion() throws Exception {
+        AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), SLACK);
+        AlertEvent held = withMatch(event("e1", rule, AlertEvent.State.PENDING, pending(rule)), WITH_COMMENT);
+        when(store.read("e1")).thenReturn(Optional.of(withMatch(held, REDACTED)));
+
+        service.deliver(held, rule);
+
+        ArgumentCaptor<AlertEvent> sent = ArgumentCaptor.forClass(AlertEvent.class);
+        verify(senders).send(sent.capture(), eq(SLACK));
+        assertNull(sent.getValue().match().commentExcerpt());
+    }
+
+    @Test
+    @DisplayName("a retry of a redacted event sends the redacted version")
+    void retrySendsRedacted() throws Exception {
+        AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), HOOK);
+        List<Delivery> retrying = List.of(new Delivery(HOOK.key(), HOOK.type(), HOOK.label(), DeliveryStatus.PENDING, 2, NOW, "HTTP 503", NOW));
+        AlertEvent claimed = withMatch(event("e2", rule, AlertEvent.State.PENDING, retrying), WITH_COMMENT);
+        when(store.read("e2")).thenReturn(Optional.of(withMatch(claimed, REDACTED)));
+
+        service.deliver(claimed, rule);
+
+        ArgumentCaptor<AlertEvent> sent = ArgumentCaptor.forClass(AlertEvent.class);
+        verify(senders).send(sent.capture(), eq(HOOK));
+        assertNull(sent.getValue().match().commentExcerpt());
+    }
+
+    @Test
+    @DisplayName("an event deleted since it was claimed is not sent")
+    void goneIsSkipped() throws Exception {
+        AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), SLACK);
+        when(store.read("e3")).thenReturn(Optional.empty());
+        assertEquals(Optional.empty(), service.deliver(event("e3", rule, AlertEvent.State.PENDING, pending(rule)), rule));
+        verify(senders, never()).send(any(), any());
+        verify(store, never()).updateDelivery(any(), anyLong());
     }
 
     @Test
