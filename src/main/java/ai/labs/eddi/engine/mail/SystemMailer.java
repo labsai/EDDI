@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mail;
 
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
@@ -213,6 +214,13 @@ public class SystemMailer {
             }
         }
         String connectionName = blankToNull(connection);
+        // A stored connection's name always matches this grammar, so a name that does
+        // not could never resolve: refuse it here, which disables the mailer at startup
+        // with the reason, rather than report it enabled and fail every send.
+        if (connectionName != null && !connectionName.matches(ConnectionConfiguration.NAME_GRAMMAR)) {
+            throw new IllegalArgumentException("eddi.mail.smtp.connection is not a usable connection name: it must match "
+                    + ConnectionConfiguration.NAME_GRAMMAR + " (letters, digits, '.', '_' and '-').");
+        }
         String user = blankToNull(username);
         String secret = password == null || password.isEmpty() ? null : password;
         if (connectionName != null && (user != null || secret != null)) {

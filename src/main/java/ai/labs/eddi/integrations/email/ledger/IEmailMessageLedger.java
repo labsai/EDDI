@@ -46,6 +46,33 @@ public interface IEmailMessageLedger {
     /** The integration id of mail the deployment sends itself (no channel). */
     String SYSTEM_INTEGRATION = "system";
 
+    /**
+     * The most of {@link LedgerEntry#providerId()} a store keeps (the PostgreSQL
+     * column width).
+     */
+    int MAX_PROVIDER_ID = 255;
+
+    /**
+     * The most of {@link LedgerEntry#lastError()} a store keeps (the PostgreSQL
+     * column width).
+     */
+    int MAX_LAST_ERROR = 512;
+
+    /**
+     * {@code value} cut to at most {@code max} characters, never between the two
+     * halves of a surrogate pair. Every store caps the two free-text fields with it
+     * on every write: a value over the column width made PostgreSQL refuse the
+     * update, which left the row claimed until its lease ran out and retried it
+     * forever.
+     */
+    static String cap(String value, int max) {
+        if (value == null || value.length() <= max) {
+            return value;
+        }
+        int end = Character.isHighSurrogate(value.charAt(max - 1)) ? max - 1 : max;
+        return value.substring(0, end);
+    }
+
     /** In or out. */
     enum Direction {
         IN, OUT

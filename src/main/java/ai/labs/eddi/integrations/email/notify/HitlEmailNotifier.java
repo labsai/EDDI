@@ -386,8 +386,10 @@ public class HitlEmailNotifier {
             HitlNotificationContent.Message message = HitlNotificationContent.render(context.get().pause(), approvalsUrl());
             rendered = PlainTextMailRenderer.render(new OutboundMail(mailer.from().orElseThrow(), List.of(recipient), List.of(), message.subject(),
                     message.text(), row.messageId(), null, null, OutboundMail.Kind.AUTO_GENERATED, now));
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            fail(row, context.get(), "RENDER: " + e.getMessage(), now);
+        } catch (RuntimeException e) {
+            // Any render failure is terminal for this row: escaping here would leave it
+            // PENDING, reclaimed after every lease until retention removed it.
+            fail(row, context.get(), "RENDER: " + e.getClass().getSimpleName() + ": " + truncate(e.getMessage(), 300), now);
             return;
         }
         try {

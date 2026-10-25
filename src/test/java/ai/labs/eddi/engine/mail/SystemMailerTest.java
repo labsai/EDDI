@@ -150,6 +150,18 @@ class SystemMailerTest {
         }
 
         @Test
+        @DisplayName("a connection name no stored connection could carry is refused at settings load")
+        void unusableConnectionNameIsRefused() {
+            var refused = assertThrows(IllegalArgumentException.class,
+                    () -> SystemMailer.parse("relay", 587, null, false, "a@example.com", null, "my mail", null, null));
+            assertTrue(refused.getMessage().contains("eddi.mail.smtp.connection"), refused.getMessage());
+            assertThrows(IllegalArgumentException.class,
+                    () -> SystemMailer.parse("relay", 587, null, false, "a@example.com", null, "smtp}", null, null));
+            assertEquals("exo-smtp.v2",
+                    SystemMailer.parse("relay", 587, null, false, "a@example.com", null, " exo-smtp.v2 ", null, null).connection());
+        }
+
+        @Test
         @DisplayName("the settings never print the password")
         void noPasswordInToString() {
             var settings = SystemMailer.parse("relay", 587, null, false, "a@example.com", null, null, "user", "s3cret-value");
