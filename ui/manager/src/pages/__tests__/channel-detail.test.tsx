@@ -454,3 +454,21 @@ describe("ChannelDetailPage — email integration", () => {
     expect(requests).toBe(0);
   });
 });
+
+describe("ChannelDetailPage — switching the channel type", () => {
+  it("drops the webhook keys when a webhook channel becomes an email one, and none come back", async () => {
+    const user = userEvent.setup();
+    renderChannelDetail("ch4", 1);
+    await waitFor(() => expect(screen.getByTestId("webhook-platform-fields")).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByTestId("channel-type-select"), "email");
+    expect(screen.getByTestId("email-platform-fields")).toBeInTheDocument();
+    await user.click(screen.getByText("Raw Configuration"));
+    const raw = () => JSON.parse(screen.getByText(/"channelType"/).textContent ?? "{}") as { platformConfig: Record<string, string> };
+    expect(raw().platformConfig).toEqual({ mode: "trigger", transport: "imap" });
+
+    await user.selectOptions(screen.getByTestId("channel-type-select"), "webhook");
+    expect(raw().platformConfig).toEqual({});
+    expect(screen.getByTestId("webhook-signing-secret")).toBeInTheDocument();
+  });
+});

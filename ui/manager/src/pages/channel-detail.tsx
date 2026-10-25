@@ -25,6 +25,7 @@ import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-chan
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { emailConfigProblems, withEmailFixedKeys } from "@/lib/email-channel";
+import { platformConfigForType } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
   CHANNEL_TYPES,
@@ -496,7 +497,13 @@ export function ChannelDetailPage() {
           </div>
           <div className="space-y-1">
             <label htmlFor={`${uid}-type`} className="text-xs font-medium">{t("channelDetail.type", "Channel Type")}</label>
-            <select id={`${uid}-type`} data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => setDraft({ ...draft, channelType: e.target.value })}>
+            <select id={`${uid}-type`} data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => {
+              const channelType = e.target.value;
+              if (channelType === draft.channelType) return;
+              // Keys of the old type must not reach the new type's save: the
+              // email backend refuses unknown keys outright.
+              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+            }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
           </div>
