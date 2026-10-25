@@ -192,6 +192,19 @@ class HiddenContentFilterTest {
         assertTrue(page("<table bgcolor=\"#000000\"><tr><td>DARK</td></tr></table>").contains("DARK"), "no assumed text colour on pages");
     }
 
+    @Test
+    @DisplayName("hex colours: short, long and alpha forms parse to the same channels")
+    void hexColours() {
+        assertEquals(new HiddenContentFilter.Rgb(0x1a, 0x2b, 0x3c), HiddenContentFilter.colour("#1A2B3C"));
+        assertEquals(new HiddenContentFilter.Rgb(0xaa, 0xbb, 0xcc), HiddenContentFilter.colour("#abc"));
+        assertEquals(new HiddenContentFilter.Rgb(0xaa, 0xbb, 0xcc), HiddenContentFilter.colour("#abcf"));
+        assertEquals(new HiddenContentFilter.Rgb(0xff, 0x00, 0x80), HiddenContentFilter.colour("#ff008000"));
+        assertNull(HiddenContentFilter.colour("#abcde"));
+        assertFalse(mail("<p style=\"color:#00000000\">ALPHA8</p>").contains("ALPHA8"), "8-digit hex with zero alpha is transparent");
+        assertFalse(mail("<p style=\"color:#0000\">ALPHA4</p>").contains("ALPHA4"), "4-digit hex with zero alpha is transparent");
+        assertTrue(mail("<p style=\"color:#000000ff\">OPAQUE</p>").contains("OPAQUE"));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"2ex", "3ch", "1vw", "2cm", "1in"})
     @DisplayName("a font size in a unit with no conversion, and no inherited size, keeps the text")
