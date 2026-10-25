@@ -13,10 +13,19 @@ import { API_BASE, cleanupResource, extractIdFromLocation } from "../integration
  */
 const CHAT_BASE = `http://localhost:${Number(process.env.EDDI_PORT) || 7070}`;
 
-async function createRatedAgent(request: APIRequestContext) {
+type ResourceRef = ReturnType<typeof extractIdFromLocation>;
+
+/** What setup created so far — filled in as each resource exists, so cleanup works after a partial failure. */
+interface Created {
+  workflow?: ResourceRef;
+  agent?: ResourceRef;
+}
+
+async function createRatedAgent(request: APIRequestContext, created: Created) {
   const workflow = await request.post(`${API_BASE}/workflowstore/workflows`, { data: { workflowSteps: [] } });
   expect(workflow.status()).toBe(201);
   const workflowLocation = workflow.headers()["location"]!;
+  created.workflow = extractIdFromLocation(workflowLocation);
   const agentRes = await request.post(`${API_BASE}/agentstore/agents`, {
     data: {
       workflows: [workflowLocation],
@@ -30,6 +39,7 @@ async function createRatedAgent(request: APIRequestContext) {
   });
   expect(agentRes.status()).toBe(201);
   const agent = extractIdFromLocation(agentRes.headers()["location"]!);
+  created.agent = agent;
   const deploy = await request.post(`${API_BASE}/administration/production/deploy/${agent.id}?version=${agent.version}`);
   expect([200, 202]).toContain(deploy.status());
   await expect
@@ -41,7 +51,7 @@ async function createRatedAgent(request: APIRequestContext) {
       { timeout: 30_000 },
     )
     .toBe("READY");
-  return { agent, workflow: extractIdFromLocation(workflowLocation) };
+  return agent;
 }
 
 async function attentionCount(request: APIRequestContext): Promise<number> {
@@ -53,23 +63,32 @@ async function attentionCount(request: APIRequestContext): Promise<number> {
 test.describe("Ratings — Chat UI to Feedback triage (full stack)", () => {
   test.describe.configure({ timeout: 180_000, mode: "serial" });
 
-  let created: Awaited<ReturnType<typeof createRatedAgent>> | null = null;
+  const created: Created = {};
 
   test.beforeAll(async ({ request }) => {
     await waitForBackend(request);
-    created = await createRatedAgent(request);
+    await createRatedAgent(request, created);
   });
 
   test.afterAll(async ({ request }) => {
-    if (created) {
-      await request.post(`${API_BASE}/administration/production/undeploy/${created.agent.id}?version=${created.agent.version}`);
-      await cleanupResource(request, "agentstore/agents", created.agent.id, created.agent.version);
-      await cleanupResource(request, "workflowstore/workflows", created.workflow.id, created.workflow.version);
+    // Every step on its own: one failing cleanup must not leave the others behind.
+    const { agent, workflow } = created;
+    // An agent that never got deployed answers the undeploy with an error, which is ignored.
+    if (agent) {
+      await request
+        .post(`${API_BASE}/administration/production/undeploy/${agent.id}?version=${agent.version}`)
+        .catch(() => undefined);
+    }
+    if (agent) {
+      await cleanupResource(request, "agentstore/agents", agent.id, agent.version).catch(() => undefined);
+    }
+    if (workflow) {
+      await cleanupResource(request, "workflowstore/workflows", workflow.id, workflow.version).catch(() => undefined);
     }
   });
 
   test("a low rating with a comment lands in Needs attention, and reviewing it clears it", async ({ page, request }) => {
-    const agentId = created!.agent.id;
+    const agentId = created.agent!.id;
     const before = await attentionCount(request);
 
     // 1. Rate in the Chat UI.
