@@ -20,3 +20,25 @@
 ### Tests
 
 448 unit tests across the alert, output-match, REST, MCP, step-runner and GDPR classes pass, among them the new `AlertGdprParticipantTest`, `RestAlertEventsTest.bulkEmptyIdsRefused`, `AlertMaintenanceServiceTest.digestCrashBetweenInsertAndMark`, `OutputMatchHookTest.cacheMissLoaderRefused`, `OutputMatcherTest.emptyActionsAreAbsent` and `AlertSendersTest.httpsOnly`. Store ITs: 32/32 (16 MongoDB + 16 PostgreSQL, with the two new contract cases). The doc and style guards pass. Mutation check: 9 of 9 mutants killed — http accepted at save, an http vault URL delivered to, an empty export, another person's acknowledgement exported, the lastEditor role lost, a dedupe hit leaving events pending, a refused loader submit still snapshotting, an empty ids list falling back to the filter, a blank id entry accepted.
+
+## fix(alerts): erasable output values, queued rating alerts, exact digest recovery, targetId-based URL restore (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138) — the second round of review findings
+
+### What changed and why
+
+- **OUTPUT_MATCH values can be erased.** An event that stores a matched value (only with `includeValue` and conversation review on) also records the conversation owner in an internal field, `AlertEvent.subjectUserId`. It is `@JsonIgnore`d, written by both stores and never read back, so no REST row, MCP answer, operator answer, Slack message or webhook payload can carry it (asserted on the serialized row and on both payloads). Events without a stored value never get it. `AlertGdprParticipant.erase` blanks the value and the field (`IAlertEventStore.redactOutputValues`, partial index on both stores); the owner's export lists those values (value, conversation, time) under `outputMatchValues` — their own conversation content, as the ratings export lists their ratings.
+- **A rating alert queued across an erasure.** `AlertEngine.evaluateRating` re-reads the rating first and skips it when it is gone or its `updatedAt` changed (the newer save has its own alert). After the event is written it re-reads again; if the rating was erased in between, the event's excerpt is blanked (`redactRatingComment`) before anything is delivered. No per-user lock.
+- **Digest recovery marks exactly what the digest covers.** The digest records the held event ids it covers (`digestEventIds`, internal, at most the 500-event batch); on a dedupe hit the maintenance pass reads that digest (`findByDedupeKey`) and marks only those ids, so events held later stay `DIGEST_PENDING` for the next digest.
+- **Webhook URLs are restored by `targetId`, never by position or host.** Every delivery target gets a server-assigned `targetId`, kept across updates and returned by every read. An update or test send that sends a masked or empty URL keeps the stored URL of the target with the same `targetId` only; a masked or empty URL without a known id is a 400 `INVALID_RULE`; a new target must bring a real URL; ids the stored rule does not have (and all ids on a create) are replaced. Removing or reordering two masked targets on one host no longer hands one target the other's URL.
+- [Alerts → Privacy](../alerts.md#privacy) now says what is stored: the acknowledger's id (shown in the inbox, never sent out) and the internal subject id of a stored output value, both until erasure or retention.
+
+### Design decisions
+
+- **Rules saved before ids existed need no migration.** A target without an id gets `t` + its existing hashed `key()` on every read — the same id each time — so the first update of such a rule matches the ids the client read, and that save stores them. Both stores already persist targets as JSON, so `targetId` is stored without a schema change.
+- **The subject id is write-only.** Erasure and the export query by it in the store; no read maps it back into an event, which is a stronger guarantee than hiding it at each serializer.
+- **A digest written before covered ids existed** would match nothing on a dedupe hit. Alerts have not shipped, so no such digest exists outside development databases.
+
+### Tests
+
+477 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR and rating classes pass, including the new `AlertPrivacyRaceTest` (both race orderings, the subject recorded only with a value, never serialized or sent) and the `targetId` cases in `RestAlertRulesTest` (remove one of two same-host targets, reorder, new target, unknown id refused, client ids replaced, legacy rule). Store ITs: alert stores 20/20 on MongoDB and on PostgreSQL (new contract cases: erasable subject, covered ids and `findByDedupeKey`, one-event excerpt redaction, persisted `targetId`), rating stores 15/15 on each. Mutation check: 9 of 9 for the erasure, race and digest changes, 5 of 5 for the `targetId` match.

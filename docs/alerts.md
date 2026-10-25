@@ -220,9 +220,18 @@ Content-Type: application/json
 (`hooks.slack.com/services/…`), so no read ever returns one — not the rule list, not a
 single read, not the answer to a create or update, not a test send, not MCP, not the
 Platform Operator, and not to administrators either. A read answers scheme and host
-plus `/***` and `"urlConfigured": true`. On update, sending that masked value back
-(or no URL) keeps the stored URL; a new value replaces it; a masked value that matches
-no stored webhook on that host is refused (`INVALID_RULE`, enter the URL again). The
+plus `/***` and `"urlConfigured": true`. Every target also carries a `targetId`,
+assigned by the server when the rule is saved, kept across updates and returned by
+every read (it is not secret). On update, sending the masked value back (or no URL)
+together with the target's `targetId` keeps that target's stored URL — matched by
+the id alone, never by position or host, so removing or reordering targets cannot
+hand one target another's URL. A new value replaces the stored one; a new target
+(no `targetId`) must bring a real URL; a masked or empty URL whose `targetId` is
+missing or unknown is refused (`INVALID_RULE`). Ids are the server's: an unknown id
+on a target with a real URL is replaced, and a create assigns all of them. A rule
+saved before ids existed shows ids derived from each target, the same on every read,
+so its first update matches them and the save stores them. A test send of a saved
+rule restores URLs the same way. The
 URL may instead be a `${vault:…}` reference (`"url": "${vault:alert-hook-url}"`):
 resolved only when the alert is sent, shown as the reference, and — like the signing
 secret — an unresolvable one means no delivery.
@@ -310,20 +319,39 @@ never taken from the body.
 
 ## Privacy
 
-An alert never carries a user id — not in the store, not in Slack, not in a
-webhook. It names the rule, the agent and version, the conversation id, the error
-kind or the rating's score, scale and tags, and the rule's own criteria that
-matched. Conversation content appears in two cases only, each cut to 280
-characters: the rating comment, which the person addressed to the team running the
-agent (the rating card says so), and the value an `OUTPUT_MATCH` rule matched — only
-when the rule sets `includeValue` and the agent version has conversation review on,
-so it is shown only where the people running the agent may read conversations anyway.
-GDPR erasure of a user blanks the comment excerpt in every alert about their ratings,
-and forgets an administrator or editor as the acknowledger of events and the author of
-rules. A GDPR export (`alerts` in its `additionalData`) lists the rules the person
-created or last edited — id, name, times and which of the two — and the events they
-acknowledged — id, rule name, source, agent, when it fired and when they acknowledged
-it — at most 10,000 of each, without naming anybody else. Events are deleted after `eddi.alerts.event-retention` (90 days).
+**What leaves EDDI.** No Slack message or webhook payload carries a user id, and no
+inbox read (REST, MCP, the operator) carries the id of anybody who chatted. An alert names the rule, the agent and version,
+the conversation id, the error kind or the rating's score, scale and tags, and the
+rule's own criteria that matched. Conversation content appears in two cases only,
+each cut to 280 characters: the rating comment, which the person addressed to the
+team running the agent (the rating card says so), and the value an `OUTPUT_MATCH`
+rule matched — only when the rule sets `includeValue` and the agent version has
+conversation review on, so it is shown only where the people running the agent may
+read conversations anyway.
+
+**What is stored.** A stored event keeps two user ids: the administrator or editor
+who acknowledged it (`acknowledgedBy` — shown in the inbox to the people running
+agents, never sent to Slack or a webhook), and — on an event that stores an
+`OUTPUT_MATCH` value, and only there — the id of the person whose conversation the
+value came from, an internal field the stores write and never read back, so it is
+never shown or sent. Both stay
+until GDPR erasure or until the event is deleted after `eddi.alerts.event-retention`
+(90 days).
+
+**GDPR erasure** of a user blanks the comment excerpt in every alert about their
+ratings, blanks every `OUTPUT_MATCH` value stored from their conversations (and the
+internal id with it), and forgets an administrator or editor as the acknowledger of
+events and the author of rules. A rating alert still waiting in the alert queue when
+the rating is erased is not written (the rating is read again first), and one written
+in the moment between that check and the erasure has its excerpt blanked before it is
+delivered.
+
+**A GDPR export** (`alerts` in its `additionalData`) lists, for a person who runs
+agents, the rules they created or last edited — id, name, times and which of the two —
+and the events they acknowledged — id, rule name, source, agent, when it fired and
+when they acknowledged it; for a person who chatted, the `OUTPUT_MATCH` values stored
+from their conversations — the value, the conversation and when it was recorded. At
+most 10,000 of each, without naming anybody else.
 
 ## Operating alerts
 
