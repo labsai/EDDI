@@ -21,12 +21,18 @@ import java.util.Map;
  *            the turn's actions; {@code null} when no rule reads them
  */
 public record TurnSnapshot(String conversationId, String agentId, Integer agentVersion, Map<String, Object> properties, String outputText,
-        List<String> actions) {
+        List<String> actions, String userId) {
 
     /** The longest output that is copied (and parsed as JSON). */
     public static final int MAX_OUTPUT_CHARS = 64 * 1024;
 
     public TurnSnapshot {
         properties = properties == null ? Map.of() : properties;
+    }
+
+    /** A snapshot without the conversation owner. */
+    public TurnSnapshot(String conversationId, String agentId, Integer agentVersion, Map<String, Object> properties, String outputText,
+            List<String> actions) {
+        this(conversationId, agentId, agentVersion, properties, outputText, actions, null);
     }
 }

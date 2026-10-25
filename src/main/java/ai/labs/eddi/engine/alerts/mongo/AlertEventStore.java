@@ -49,6 +49,7 @@ import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
 import static com.mongodb.client.model.Updates.setOnInsert;
+import static com.mongodb.client.model.Updates.unset;
 
 /**
  * MongoDB implementation of {@link IAlertEventStore}: events in
@@ -89,6 +90,8 @@ public class AlertEventStore implements IAlertEventStore {
                 new IndexOptions().name("idx_alertevent_rule_state"));
         events.createIndex(Indexes.compoundIndex(Indexes.ascending("acknowledgedAt"), Indexes.ascending("agentId")),
                 new IndexOptions().name("idx_alertevent_unacknowledged"));
+        events.createIndex(Indexes.ascending("subjectUserId"),
+                new IndexOptions().name("idx_alertevent_subject").partialFilterExpression(exists("subjectUserId", true)));
         events.createIndex(Indexes.ascending("match.ratingId"),
                 new IndexOptions().name("idx_alertevent_rating").partialFilterExpression(exists("match.ratingId", true)));
         windows.createIndex(Indexes.ascending("expiresAt"), new IndexOptions().name("idx_alertwindow_ttl").expireAfter(0L, TimeUnit.SECONDS));
@@ -236,6 +239,30 @@ public class AlertEventStore implements IAlertEventStore {
         return acknowledged;
     }
 
+    @Override
+    public Optional<AlertEvent> findByDedupeKey(String dedupeKey) {
+        return Optional.ofNullable(events.find(eq("dedupeKey", dedupeKey)).first()).map(AlertEventStore::fromDocument);
+    }
+
+    @Override
+    public long redactOutputValues(String userId) {
+        return events.updateMany(eq("subjectUserId", userId), combine(unset("match.value"), unset("subjectUserId"))).getModifiedCount();
+    }
+
+    @Override
+    public List<AlertEvent> findOutputValuesBySubject(String userId, int limit) {
+        List<AlertEvent> found = new ArrayList<>();
+        events.find(eq("subjectUserId", userId)).sort(Sorts.descending("firedAt", "_id")).limit(limit)
+                .forEach(doc -> found.add(fromDocument(doc)));
+        return found;
+    }
+
+    @Override
+    public long redactRatingComment(String eventId) {
+        return events.updateOne(and(eq("_id", eventId), exists("match.commentExcerpt", true)), unset("match.commentExcerpt"))
+                .getModifiedCount();
+    }
+
     private static Bson acknowledgement(String by, Instant at) {
         return combine(set("acknowledgedBy", by), set("acknowledgedAt", Date.from(at)));
     }
@@ -297,6 +324,14 @@ public class AlertEventStore implements IAlertEventStore {
         doc.put("acknowledgedBy", event.acknowledgedBy());
         doc.put("acknowledgedAt", date(event.acknowledgedAt()));
         doc.put("version", event.version());
+        if (event.subjectUserId() != null) {
+            // Absent unless set: the index is partial on existence, and most events have
+            // none.
+            doc.put("subjectUserId", event.subjectUserId());
+        }
+        if (event.digestEventIds() != null) {
+            doc.put("digestEventIds", event.digestEventIds());
+        }
         return doc;
     }
 
@@ -313,7 +348,7 @@ public class AlertEventStore implements IAlertEventStore {
                 AlertEvent.State.valueOf(doc.getString("state")), instant(doc.getDate("nextAttemptAt")), doc.getString("dedupeKey"),
                 duplicates == null ? 0 : duplicates.intValue(), digestCount == null ? null : digestCount.intValue(),
                 doc.getList("digestItems", String.class), doc.getString("acknowledgedBy"), instant(doc.getDate("acknowledgedAt")),
-                version == null ? 0L : version.longValue());
+                version == null ? 0L : version.longValue(), null, doc.getList("digestEventIds", String.class));
     }
 
     private static List<Document> deliveries(List<Delivery> deliveries) {

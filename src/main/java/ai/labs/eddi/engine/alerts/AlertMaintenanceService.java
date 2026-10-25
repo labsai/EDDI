@@ -141,18 +141,22 @@ public class AlertMaintenanceService {
         }
         String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
         String summary = rule.name() + ": " + held.size() + " alert" + (held.size() == 1 ? "" : "s") + " held back by the throttle";
+        // The covered ids are the held batch, at most DIGEST_BATCH long.
+        String dedupeKey = "digest|" + rule.id() + "|" + held.get(0).id();
         AlertEvent digest = new AlertEvent(null, rule.id(), rule.name(), rule.source(), AlertEvent.Kind.DIGEST, agentId, null, null, now,
                 summary, null, deliveries, deliveries.isEmpty() ? AlertEvent.State.INBOX_ONLY : AlertEvent.State.PENDING,
-                deliveries.isEmpty() ? null : now.plus(settings.claimLease()), "digest|" + rule.id() + "|" + held.get(0).id(), 0, held.size(),
-                items, null, null, 0);
+                deliveries.isEmpty() ? null : now.plus(settings.claimLease()), dedupeKey, 0, held.size(), items, null, null, 0, null, ids);
         Optional<AlertEvent> stored = eventStore.insert(digest);
         if (stored.isEmpty()) {
             // The digest exists already: another runner sent it, or this one crashed
-            // between the insert and the mark. Mark the held events either way, or they
-            // stay DIGEST_PENDING and every pass retries a digest that never inserts.
-            // Events held after that digest was written are marked too: they stay in
-            // the inbox, but are not listed in a digest message.
-            eventStore.markDigested(ids);
+            // between the insert and the mark. Mark exactly the events that digest
+            // covers, or they stay DIGEST_PENDING and every pass retries a digest that
+            // never inserts; events held after it was written wait for the next one.
+            eventStore.findByDedupeKey(dedupeKey).map(AlertEvent::digestEventIds).ifPresent(covered -> {
+                if (!covered.isEmpty()) {
+                    eventStore.markDigested(covered);
+                }
+            });
             return false;
         }
         eventStore.markDigested(ids);

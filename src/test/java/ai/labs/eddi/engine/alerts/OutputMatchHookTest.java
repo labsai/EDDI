@@ -76,6 +76,7 @@ class OutputMatchHookTest {
         when(memory.getAgentId()).thenReturn(AGENT);
         when(memory.getAgentVersion()).thenReturn(2);
         when(memory.getConversationId()).thenReturn(CONVERSATION);
+        when(memory.getUserId()).thenReturn("owner-1");
         IConversationProperties props = mock(IConversationProperties.class);
         when(props.toMap()).thenReturn(properties);
         when(memory.getConversationProperties()).thenReturn(props);
@@ -119,6 +120,7 @@ class OutputMatchHookTest {
         assertEquals(Set.of("escalate", "order"), snapshot.properties().keySet());
         assertNull(snapshot.outputText(), "no rule reads the output");
         assertEquals(List.of("handoff_requested"), snapshot.actions());
+        assertEquals("owner-1", snapshot.userId(), "carried only to be recorded with a stored value");
         // Detached: a later change to the live values does not reach the snapshot.
         ((Map<String, Object>) live.get("order")).put("id", 8);
         assertEquals(7, ((Map<?, ?>) snapshot.properties().get("order")).get("id"));

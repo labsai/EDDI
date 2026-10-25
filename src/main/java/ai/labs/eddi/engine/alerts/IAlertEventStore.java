@@ -104,4 +104,28 @@ public interface IAlertEventStore {
      * acknowledged first, at most {@code limit}.
      */
     List<AlertEvent> findAcknowledgedBy(String userId, int limit);
+
+    /** The event holding this dedupe key, if any (a digest's recovery). */
+    Optional<AlertEvent> findByDedupeKey(String dedupeKey);
+
+    /**
+     * GDPR erasure: blanks the stored {@code OUTPUT_MATCH} value of every event
+     * that came from a conversation of {@code userId}, and forgets the subject.
+     *
+     * @return how many events changed
+     */
+    long redactOutputValues(String userId);
+
+    /**
+     * GDPR export: the events holding a stored {@code OUTPUT_MATCH} value from a
+     * conversation of {@code userId}, newest first, at most {@code limit}. The
+     * subject itself is not part of the returned events.
+     */
+    List<AlertEvent> findOutputValuesBySubject(String userId, int limit);
+
+    /**
+     * Blanks one event's rating comment excerpt — a rating erased while its alert
+     * was being written.
+     */
+    long redactRatingComment(String eventId);
 }

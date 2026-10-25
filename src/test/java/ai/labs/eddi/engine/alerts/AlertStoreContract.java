@@ -141,6 +141,59 @@ public interface AlertStoreContract {
     // ------------------------------------------------------------------ events
 
     @Test
+    default void outputValueSubjectIsInternalAndErasable() {
+        AlertEvent template = event(AGENT, "s1", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent mine = eventStore().insert(withOutput(template, "s1", "call me at once", "owner-1")).orElseThrow();
+        AlertEvent theirs = eventStore().insert(withOutput(template, "s2", "their value", "owner-2")).orElseThrow();
+        AlertEvent noValue = eventStore().insert(withOutput(template, "s3", null, null)).orElseThrow();
+
+        assertNull(eventStore().read(mine.id()).orElseThrow().subjectUserId(), "the subject is written, never read back");
+        assertEquals("call me at once", eventStore().read(mine.id()).orElseThrow().match().value());
+        assertEquals(List.of(mine.id()), eventStore().findOutputValuesBySubject("owner-1", 10).stream().map(AlertEvent::id).toList());
+        assertTrue(eventStore().findOutputValuesBySubject("nobody", 10).isEmpty());
+
+        assertEquals(1, eventStore().redactOutputValues("owner-1"));
+        AlertEvent erased = eventStore().read(mine.id()).orElseThrow();
+        assertNull(erased.match().value());
+        assertEquals(List.of("properties.note exists"), erased.match().matched(), "only the value goes");
+        assertTrue(eventStore().findOutputValuesBySubject("owner-1", 10).isEmpty(), "the subject goes with it");
+        assertEquals(0, eventStore().redactOutputValues("owner-1"));
+        assertEquals("their value", eventStore().read(theirs.id()).orElseThrow().match().value());
+        assertNull(eventStore().read(noValue.id()).orElseThrow().match().value());
+    }
+
+    private static AlertEvent withOutput(AlertEvent t, String dedupeKey, String value, String subject) {
+        return new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.OUTPUT_MATCH, t.kind(), t.agentId(), t.agentVersion(),
+                t.conversationId(), t.firedAt(), "Escalations", AlertMatch.output("properties.note exists", value), t.deliveries(), t.state(),
+                t.nextAttemptAt(), dedupeKey, 0, null, null, null, null, 0, subject, null);
+    }
+
+    @Test
+    default void digestCoveredIdsRoundTripAndFindByDedupeKey() {
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent digest = eventStore().insert(new AlertEvent(null, t.ruleId(), t.ruleName(), t.source(), AlertEvent.Kind.DIGEST, null,
+                null, null, NOW, "2 held", null, List.of(), AlertEvent.State.INBOX_ONLY, null, "digest|r|h0", 0, 2, List.of("a", "b"), null,
+                null, 0, null, List.of("h0", "h1"))).orElseThrow();
+        AlertEvent found = eventStore().findByDedupeKey("digest|r|h0").orElseThrow();
+        assertEquals(digest.id(), found.id());
+        assertEquals(List.of("h0", "h1"), found.digestEventIds());
+        assertTrue(eventStore().findByDedupeKey("digest|r|none").isEmpty());
+        assertNull(eventStore().read(eventStore().insert(event(AGENT, "y", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow().id())
+                .orElseThrow().digestEventIds());
+    }
+
+    @Test
+    default void redactOneRatingComment() {
+        AlertEvent a = eventStore().insert(event(AGENT, "ra", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
+        AlertEvent b = eventStore().insert(event(AGENT, "rb", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
+        assertEquals(1, eventStore().redactRatingComment(a.id()));
+        assertNull(eventStore().read(a.id()).orElseThrow().match().commentExcerpt());
+        assertEquals(0.0, eventStore().read(a.id()).orElseThrow().match().normalizedScore());
+        assertEquals("It took forever", eventStore().read(b.id()).orElseThrow().match().commentExcerpt());
+        assertEquals(0, eventStore().redactRatingComment(a.id()));
+    }
+
+    @Test
     default void gdprFindsEventsByAcknowledger() {
         AlertEvent a = eventStore().insert(event(AGENT, "ga", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
         AlertEvent b = eventStore().insert(event(AGENT, "gb", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();

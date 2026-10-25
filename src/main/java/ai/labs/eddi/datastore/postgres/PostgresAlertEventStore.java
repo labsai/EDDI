@@ -80,7 +80,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
                 digest_items TEXT[],
                 acknowledged_by VARCHAR(255),
                 acknowledged_at TIMESTAMPTZ,
-                version BIGINT NOT NULL DEFAULT 0
+                version BIGINT NOT NULL DEFAULT 0,
+                subject_user_id VARCHAR(255),
+                digest_event_ids TEXT[]
             )
             """;
 
@@ -99,11 +101,12 @@ public class PostgresAlertEventStore implements IAlertEventStore {
             "CREATE INDEX IF NOT EXISTS idx_alert_events_rule_state ON alert_events (rule_id, state, fired_at)",
             "CREATE INDEX IF NOT EXISTS idx_alert_events_unacknowledged ON alert_events (agent_id) WHERE acknowledged_at IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_events_rating ON alert_events (rating_id) WHERE rating_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS idx_alert_events_subject ON alert_events (subject_user_id) WHERE subject_user_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_windows_expiry ON alert_windows (expires_at)"};
 
     private static final String COLUMNS = "id, rule_id, rule_name, source, kind, agent_id, agent_version, conversation_id, fired_at, summary, "
             + "match::text, deliveries::text, state, next_attempt_at, dedupe_key, duplicates, digest_count, digest_items, acknowledged_by, "
-            + "acknowledged_at, version";
+            + "acknowledged_at, version, digest_event_ids";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -119,6 +122,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         }
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_EVENTS);
+            // Columns added after the table first shipped on development branches.
+            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS subject_user_id VARCHAR(255)");
+            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS digest_event_ids TEXT[]");
             stmt.execute(CREATE_WINDOWS);
             for (String index : CREATE_INDEXES) {
                 stmt.execute(index);
@@ -136,8 +142,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         AlertEvent stored = event.withId(new ObjectId().toHexString()).withVersion(0);
         String sql = "INSERT INTO alert_events (id, rule_id, rule_name, source, kind, agent_id, agent_version, conversation_id, fired_at, "
                 + "summary, match, rating_id, deliveries, state, next_attempt_at, dedupe_key, duplicates, digest_count, digest_items, "
-                + "acknowledged_by, acknowledged_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, "
-                + "?, ?, 0) ON CONFLICT (dedupe_key) DO NOTHING";
+                + "acknowledged_by, acknowledged_at, version, subject_user_id, digest_event_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                + "?::jsonb, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING";
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             int inserted;
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -162,6 +168,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
                 ps.setArray(19, stored.digestItems() == null ? null : conn.createArrayOf("text", stored.digestItems().toArray(new String[0])));
                 ps.setString(20, stored.acknowledgedBy());
                 ps.setObject(21, timestamp(stored.acknowledgedAt()));
+                ps.setString(22, stored.subjectUserId());
+                ps.setArray(23,
+                        stored.digestEventIds() == null ? null : conn.createArrayOf("text", stored.digestEventIds().toArray(new String[0])));
                 inserted = ps.executeUpdate();
             }
             if (inserted > 0) {
@@ -320,6 +329,34 @@ public class PostgresAlertEventStore implements IAlertEventStore {
                 Arrays.asList(userId, limit));
     }
 
+    @Override
+    public Optional<AlertEvent> findByDedupeKey(String dedupeKey) {
+        ensureSchema();
+        List<AlertEvent> found = select("SELECT " + COLUMNS + " FROM alert_events WHERE dedupe_key = ?", List.of(dedupeKey));
+        return found.isEmpty() ? Optional.empty() : Optional.of(found.get(0));
+    }
+
+    @Override
+    public long redactOutputValues(String userId) {
+        ensureSchema();
+        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE subject_user_id = ?", List.of(userId),
+                false);
+    }
+
+    @Override
+    public List<AlertEvent> findOutputValuesBySubject(String userId, int limit) {
+        ensureSchema();
+        return select("SELECT " + COLUMNS + " FROM alert_events WHERE subject_user_id = ? ORDER BY fired_at DESC, id DESC LIMIT ?",
+                Arrays.asList(userId, limit));
+    }
+
+    @Override
+    public long redactRatingComment(String eventId) {
+        ensureSchema();
+        return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE id = ? AND match->>'commentExcerpt' IS NOT NULL",
+                List.of(eventId), false);
+    }
+
     static String where(AlertEventFilter f, List<Object> params) {
         List<String> clauses = new ArrayList<>();
         if (f != null) {
@@ -407,6 +444,7 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         int digestCount = rs.getInt("digest_count");
         boolean noDigestCount = rs.wasNull();
         Array items = rs.getArray("digest_items");
+        Array covered = rs.getArray("digest_event_ids");
         return new AlertEvent(rs.getString("id"), rs.getString("rule_id"), rs.getString("rule_name"),
                 source == null ? null : AlertSource.valueOf(source), AlertEvent.Kind.valueOf(rs.getString("kind")), rs.getString("agent_id"),
                 noVersion ? null : agentVersion, rs.getString("conversation_id"), instant(rs.getObject("fired_at", OffsetDateTime.class)),
@@ -414,7 +452,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
                 AlertJson.read(rs.getString("deliveries"), DELIVERIES), AlertEvent.State.valueOf(rs.getString("state")),
                 instant(rs.getObject("next_attempt_at", OffsetDateTime.class)), rs.getString("dedupe_key"), rs.getInt("duplicates"),
                 noDigestCount ? null : digestCount, items == null ? null : Arrays.asList((String[]) items.getArray()),
-                rs.getString("acknowledged_by"), instant(rs.getObject("acknowledged_at", OffsetDateTime.class)), rs.getLong("version"));
+                rs.getString("acknowledged_by"), instant(rs.getObject("acknowledged_at", OffsetDateTime.class)), rs.getLong("version"), null,
+                covered == null ? null : Arrays.asList((String[]) covered.getArray()));
     }
 
     private static void setNullableInt(PreparedStatement ps, int index, Integer value) throws SQLException {

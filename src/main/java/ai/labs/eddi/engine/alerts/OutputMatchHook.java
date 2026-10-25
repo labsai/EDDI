@@ -105,8 +105,10 @@ public class OutputMatchHook {
                 actions = data == null || data.getResult() == null ? List.of() : List.copyOf(data.getResult());
             }
         }
+        // The owner travels only to be recorded with a stored value, for GDPR erasure;
+        // it is never shown or sent.
         return new TurnSnapshot(memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), Map.copyOf(properties), output,
-                actions);
+                actions, memory.getUserId());
     }
 
     /**
