@@ -36,6 +36,17 @@ public class EmailIntegrationDirectory {
 
     static final Duration CACHE_TTL = Duration.ofSeconds(60);
 
+    /**
+     * The channel store could not be read. {@link #scan()} lets it through rather
+     * than skipping the integration: a partial list would let address uniqueness,
+     * GDPR identity expansion and schedule ensuring silently miss one.
+     */
+    public static final class StoreUnavailableException extends IllegalStateException {
+        public StoreUnavailableException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     /** One email integration, at its current version. */
     public record EmailIntegration(String id, ChannelIntegrationConfiguration configuration, EmailChannelSettings settings) {
     }
@@ -70,11 +81,14 @@ public class EmailIntegrationDirectory {
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Optional.empty();
         } catch (IResourceStore.ResourceStoreException e) {
-            throw new IllegalStateException("The channel store could not be read", e);
+            throw new StoreUnavailableException("The channel store could not be read", e);
         }
     }
 
-    /** Every email integration, read now. */
+    /**
+     * Every email integration, read now. A descriptor that cannot be parsed is
+     * skipped; a store failure throws, never a partial list.
+     */
     public List<EmailIntegration> scan() {
         List<EmailIntegration> found = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -87,6 +101,8 @@ public class EmailIntegrationDirectory {
                         continue;
                     }
                     find(resourceId.getId()).ifPresent(found::add);
+                } catch (StoreUnavailableException e) {
+                    throw e;
                 } catch (RuntimeException e) {
                     LOGGER.debugf("Skipping a channel descriptor while listing email integrations: %s", e.getMessage());
                 }
