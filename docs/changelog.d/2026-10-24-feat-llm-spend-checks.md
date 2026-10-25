@@ -22,7 +22,8 @@ already spent and not yet recorded (earlier attempts at their prices; the primar
 a reprompt; earlier cascade steps before an escalation; the tool loop's tool cost before its final
 re-ask). A refused re-ask is skipped (`eddi.llm.recovery{outcome="skipped_spend"}`) and the reply is
 handled as unresolved; a refused escalation returns the cascade's best answer so far
-(`eddi.llm.cascade.ceiling.exceeded{kind="spend"}`); a refused reprompt degrades to the existing
+(`eddi.llm.cascade.ceiling.exceeded{kind="spend"}`) — or, when no earlier step produced one, raises the
+spend refusal so `LlmTask` serves the task's fallback answer, as for a refused primary call; a refused reprompt degrades to the existing
 "no reprompt could start" block; a refused classifier call is "could not decide" with the new audit
 reason `spend_refused`, so its `failMode` applies. Every refusal is counted by the existing
 `eddi.llm.spend.refused{reason}` with the existing reasons — no new meter.
@@ -31,7 +32,11 @@ reason `spend_refused`, so its `failMode` applies. Every refusal is counted by t
 expected cost of each admitted call until it is closed; `LlmSpendGate.check` and `admit` both count
 what is held. It is per conversation and per node — exact for the ceiling, because a conversation's
 turns are serialized (coordinator; conversation lease in a cluster) and the ceiling is computed from the
-conversation's own steps, not from the cluster `COSTS` KV. The tenant budget is read, not reserved.
+conversation's own steps, not from the cluster `COSTS` KV. The tenant budget is read, not reserved —
+but its check now adds the turn's unsettled spend (the current step's `audit:cost` not yet metered,
+plus the running task's unrecorded spend), through a new `TenantQuotaService.checkCostBudget(tenantId,
+pendingUsd)`: the monthly counter is charged only when a turn settles, so without it every paid call of
+a turn was compared with the counter as it stood before the turn.
 `LlmSpendGate.admit(memory, pendingUsd, expectedUsd)` and `TaskSpend` (a `PaidCallGate`) are the
 entry points for E5 (`forEach`) and E7 (media).
 
@@ -71,6 +76,7 @@ revision 37.
 
 - The cascade's `judge_model` confidence call is still unchecked (it is priced through the cascade's run
   cost and the next step's check sees it).
-- Tenant-level reservations would need the quota store; concurrent conversations can each complete one
-  call past the tenant budget.
+- Tenant-level reservations would need the quota store: a turn's own spend is now counted, but another
+  conversation's unsettled turn is not, so concurrent conversations can each complete one call past the
+  tenant budget.
 - Operator revision 37 will collide with other open branches that bump it; re-bump at merge.

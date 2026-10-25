@@ -20,7 +20,11 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.OptionalDouble;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_METERED_COST;
+import static org.mockito.ArgumentMatchers.doubleThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -51,7 +55,7 @@ class LlmSpendGateAdmitTest {
     void setUp() {
         tenantQuotaService = mock(TenantQuotaService.class);
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("default");
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK);
         gate = new LlmSpendGate(tenantQuotaService, meterRegistry);
         memory = mock(IConversationMemory.class);
         reservations = new SpendReservations();
@@ -92,7 +96,7 @@ class LlmSpendGateAdmitTest {
                 assertEquals(LlmSpendGate.REASON_CONVERSATION_CEILING, admission.refusal().reason());
             }
             assertEquals(1.0, refusals(LlmSpendGate.REASON_CONVERSATION_CEILING));
-            verify(tenantQuotaService, never()).checkCostBudget(anyString());
+            verify(tenantQuotaService, never()).checkCostBudget(anyString(), anyDouble());
         }
 
         @Test
@@ -177,7 +181,7 @@ class LlmSpendGateAdmitTest {
         @DisplayName("a spent tenant budget refuses and releases the reservation the ceiling granted")
         void tenantRefusalReleases() {
             ceiling(1.00);
-            when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.denied("Monthly cost budget exceeded"));
+            when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.denied("Monthly cost budget exceeded"));
 
             var admission = gate.admit(memory, 0.0, 0.30);
 
@@ -189,9 +193,32 @@ class LlmSpendGateAdmitTest {
         }
 
         @Test
+        @DisplayName("the tenant check sees what this turn spent and the counter has not been charged yet")
+        @SuppressWarnings("unchecked")
+        void tenantSeesUnsettledTurnSpend() {
+            // The monthly counter is charged when the turn settles: this step has cost
+            // $0.30, of which $0.10 was metered at an earlier settle (a HITL pause), and
+            // the running task has $0.25 not yet in audit:cost.
+            IConversationMemory.IWritableConversationStep step = mock(IConversationMemory.IWritableConversationStep.class);
+            IData<Object> cost = mock(IData.class);
+            when(cost.getResult()).thenReturn(0.30);
+            IData<Object> metered = mock(IData.class);
+            when(metered.getResult()).thenReturn(0.10);
+            when(step.getData(AUDIT_COST)).thenReturn((IData) cost);
+            when(step.getData(AUDIT_METERED_COST)).thenReturn((IData) metered);
+            when(memory.getCurrentStep()).thenReturn(step);
+
+            gate.admit(memory, 0.25, 0.0);
+            gate.check(memory);
+
+            verify(tenantQuotaService).checkCostBudget(eq("default"), doubleThat(v -> Math.abs(v - 0.45) < EPS));
+            verify(tenantQuotaService).checkCostBudget(eq("default"), doubleThat(v -> Math.abs(v - 0.20) < EPS));
+        }
+
+        @Test
         @DisplayName("a quota store that cannot answer refuses (fail closed)")
         void accountingUnavailable() {
-            when(tenantQuotaService.checkCostBudget("default")).thenReturn(ITenantQuotaStore.accountingUnavailable());
+            when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());
 
             var admission = gate.admit(memory, 0.0, 0.0);
 

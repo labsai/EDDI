@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.OptionalDouble;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -88,7 +90,7 @@ class ConversationCostCeilingTest {
     void gateRefusesAtTheCeiling() {
         TenantQuotaService tenant = mock(TenantQuotaService.class);
         when(tenant.getDefaultTenantId()).thenReturn("default");
-        when(tenant.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK);
+        when(tenant.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK);
         var gate = new LlmSpendGate(tenant, new SimpleMeterRegistry());
         ConversationMemory memory = new ConversationMemory(CONVERSATION_ID, "agent", 1, "user");
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.30));

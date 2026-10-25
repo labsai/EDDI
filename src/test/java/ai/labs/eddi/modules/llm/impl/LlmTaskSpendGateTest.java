@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
 
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LLM_SPEND_REFUSED_PREFIX;
@@ -145,7 +146,7 @@ class LlmTaskSpendGateTest {
                 new CallerIdentityContext(null, null));
         tenantQuotaService = mock(TenantQuotaService.class);
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("default");
-        lenient().when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK);
+        lenient().when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK);
         llmTask.spendGate = new LlmSpendGate(tenantQuotaService, meterRegistry);
     }
 
@@ -186,7 +187,8 @@ class LlmTaskSpendGateTest {
     void spentTenantBudgetSkipsTheModel() throws Exception {
         var model = new CountingModel();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble()))
+                .thenReturn(QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
         var task = task();
         var v = new ResponseValidation();
         v.setFallbackMessage("Budget reached, please contact support.");
@@ -206,7 +208,7 @@ class LlmTaskSpendGateTest {
     void unavailableAccountingRefuses() throws Exception {
         var model = new CountingModel();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(ITenantQuotaStore.accountingUnavailable());
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());
 
         run(task());
 
@@ -262,7 +264,7 @@ class LlmTaskSpendGateTest {
         assertEquals(ResponseValidation.DEFAULT_FALLBACK_MESSAGE, templateData.get("taskA"));
         verify(dataFactory).createData(eq(LLM_SPEND_REFUSED_PREFIX + "taskA"),
                 argThat(r -> r instanceof Map<?, ?> m && LlmSpendGate.REASON_CONVERSATION_CEILING.equals(m.get("reason"))));
-        verify(tenantQuotaService, never()).checkCostBudget(anyString());
+        verify(tenantQuotaService, never()).checkCostBudget(anyString(), anyDouble());
     }
 
     @Test
@@ -386,7 +388,7 @@ class LlmTaskSpendGateTest {
         var model = new CountingModel();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
         // allowed for the primary call, spent by the time the reprompt would start
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK,
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK,
                 QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
 
         run(repromptingJsonTask());

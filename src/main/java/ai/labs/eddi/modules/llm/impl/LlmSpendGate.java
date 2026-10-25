@@ -152,7 +152,7 @@ public class LlmSpendGate {
                 return refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent));
             }
         }
-        Refusal tenant = tenantRefusal();
+        Refusal tenant = tenantRefusal(unmeteredStepCost(memory));
         return tenant != null ? refused(memory, tenant) : null;
     }
 
@@ -194,7 +194,7 @@ public class LlmSpendGate {
                 return Admission.refused(refused(memory, ceilingRefusal(ceiling.getAsDouble(), spent)));
             }
         }
-        Refusal tenant = tenantRefusal();
+        Refusal tenant = tenantRefusal(unmeteredStepCost(memory) + pending);
         if (tenant != null) {
             if (reservation != null) {
                 reservation.close();
@@ -208,12 +208,20 @@ public class LlmSpendGate {
         return new Refusal(REASON_CONVERSATION_CEILING, String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", ceiling, spent));
     }
 
-    /** The tenant budget's verdict: null when the budget allows spending. */
-    private Refusal tenantRefusal() {
+    /**
+     * The tenant budget's verdict: null when the budget allows spending.
+     *
+     * @param unsettledUsd
+     *            spend this turn has made that the tenant's monthly counter has not
+     *            been charged yet — the counter is charged when the turn settles,
+     *            so without it every paid call of a turn would be compared against
+     *            the counter as it stood before the turn
+     */
+    private Refusal tenantRefusal(double unsettledUsd) {
         if (tenantQuotaService == null) {
             return null;
         }
-        var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+        var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId(), unsettledUsd);
         if (costCheck.allowed()) {
             return null;
         }
@@ -236,6 +244,26 @@ public class LlmSpendGate {
      * this turn already spent). Memory holds every step, so this is a walk over
      * in-memory data, no I/O.
      */
+    /**
+     * The current step's priced spend not yet charged to the tenant's monthly
+     * counter: its {@code audit:cost} less {@code audit:metered_cost}, the same
+     * difference {@code TurnCostMeter} charges at settle. Exact-key lookups —
+     * {@code getLatestData} would prefix-match.
+     */
+    static double unmeteredStepCost(IConversationMemory memory) {
+        var step = memory != null ? memory.getCurrentStep() : null;
+        if (step == null) {
+            return 0.0;
+        }
+        double delta = number(step.getData(MemoryKeys.AUDIT_COST)) - number(step.getData(MemoryKeys.AUDIT_METERED_COST));
+        // !(delta > 0), not delta <= 0: NaN fails every comparison.
+        return Double.isFinite(delta) && delta > 0.0 ? delta : 0.0;
+    }
+
+    private static double number(IData<?> data) {
+        return data != null && data.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : 0.0;
+    }
+
     static double conversationCost(IConversationMemory memory) {
         double total = 0.0;
         var steps = memory.getAllSteps();

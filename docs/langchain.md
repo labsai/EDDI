@@ -2100,8 +2100,11 @@ a classifier its prompt at its input price, nothing when unpriced — so calls t
 That reservation is per conversation and lives with the conversation on the node that runs its
 turn — a conversation's turns are serialized, by the coordinator and in a cluster by the
 conversation lease — so it is exact for the ceiling. The tenant budget is shared by every
-conversation and node and is only read, never reserved: concurrent conversations can each complete
-one call past it. Unset
+conversation and node and is only read, never reserved. Its monthly counter is charged when a turn
+settles, so the check adds what the current turn has spent and the counter has not seen yet (the
+step's `audit:cost` not yet metered, plus the running task's unrecorded spend): later paid calls of
+the same turn see the turn's own spend. What it cannot see is another conversation's unsettled
+turn, so concurrent conversations can each complete one call past the budget. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
 unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
 refuses every model call, priced or not, since the spend so far already equals it. This is
