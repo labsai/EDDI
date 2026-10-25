@@ -1076,8 +1076,18 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  onValidityChange,
+}: AgentSectionProps & {
+  /**
+   * Told whether the recipients box holds a list that cannot be saved. An
+   * invalid list is never written to the draft, so an earlier valid edit would
+   * otherwise stay in the draft and be saved while the field shows an error —
+   * the page refuses to save while this is true.
+   */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const recipientsId = useId();
 
   const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
   const enabled = !!agent.hitlConfig;
@@ -1165,6 +1175,11 @@ export const HitlConfigSection = memo(function HitlConfigSection({
     }
   }
   const recipientsError = notifyOn ? recipientsProblem() : null;
+  const recipientsInvalid = recipientsError !== null;
+  useEffect(() => {
+    onValidityChange?.(recipientsInvalid);
+    return () => onValidityChange?.(false);
+  }, [recipientsInvalid, onValidityChange]);
 
   return (
     <EditorSection
@@ -1320,10 +1335,11 @@ export const HitlConfigSection = memo(function HitlConfigSection({
               </label>
               {notifyOn && (
                 <div className="mt-3">
-                  <label className="mb-1 block text-[10px] text-muted-foreground">
+                  <label htmlFor={recipientsId} className="mb-1 block text-[10px] text-muted-foreground">
                     {t("agentDetail.hitlNotifyRecipients", "Recipients (comma or one per line)")}
                   </label>
                   <textarea
+                    id={recipientsId}
                     value={recipientsDraft}
                     onChange={(e) => commitRecipients(e.target.value)}
                     disabled={disabled}
@@ -1339,7 +1355,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                     {recipientsError ??
                       t(
                         "agentDetail.hitlNotifyHint",
-                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page, carries no conversation content, and cannot approve anything.",
+                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page and cannot approve anything. It carries no user messages or agent replies; for a tool-call pause it lists the pending tools with their arguments redacted and shortened.",
                       )}
                   </p>
                 </div>

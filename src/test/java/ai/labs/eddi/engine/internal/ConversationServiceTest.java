@@ -57,6 +57,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.InputData;
@@ -433,6 +434,57 @@ class ConversationServiceTest {
             // belongs to nobody. It must not outlive the failed start.
             verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
             verify(conversationStateCache).remove(CONVERSATION_ID);
+        }
+
+        @SuppressWarnings("unchecked")
+        private Event<HitlPauseCommittedEvent> stubPausedStart(boolean descriptorFails) throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = mock(Event.class);
+            conversationService.hitlPauseCommittedEvent = pauseCommitted;
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+            doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
+            doReturn(conversation).when(agent).startConversation(eq(USER_ID), any(), any(), isNull());
+            doReturn(memory).when(conversation).getConversationMemory();
+            doReturn(ConversationState.AWAITING_HUMAN).when(memory).getConversationState();
+            doReturn(Instant.parse("2026-10-25T10:00:00Z")).when(memory).getHitlPausedAt();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
+            doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            if (descriptorFails) {
+                doThrow(new ResourceStoreException("descriptor write failed"))
+                        .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+            }
+            return pauseCommitted;
+        }
+
+        @Test
+        @DisplayName("a pause on the start turn is announced once the descriptor is written")
+        void startPause_isAnnouncedAfterDescriptor() throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = stubPausedStart(false);
+
+            conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>());
+
+            var order = inOrder(conversationSetup, pauseCommitted);
+            order.verify(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+            order.verify(pauseCommitted).fireAsync(any());
+        }
+
+        @Test
+        @DisplayName("a start-turn pause whose conversation is discarded for a failed descriptor is never announced")
+        void startPause_isNotAnnouncedWhenDescriptorFails() throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = stubPausedStart(true);
+
+            assertThrows(ResourceStoreException.class,
+                    () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+            verify(pauseCommitted, never()).fireAsync(any());
         }
     }
 
