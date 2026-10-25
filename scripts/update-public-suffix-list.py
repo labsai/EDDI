@@ -19,6 +19,7 @@ a newly added public suffix changes which domains align.
 
 import hashlib
 import json
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -37,9 +38,16 @@ HEADER = """# Provenance of public_suffix_list.dat, the Public Suffix List bundl
 """
 
 
+ALLOWED_PREFIXES = ("https://api.github.com/", "https://raw.githubusercontent.com/")
+REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+
+
 def fetch(url):
+    # Only the two fixed GitHub https origins: no file:, no custom scheme, no other host.
+    if not url.startswith(ALLOWED_PREFIXES):
+        sys.exit(f"Refusing to fetch {url}: not an allowed https GitHub URL.")
     request = urllib.request.Request(url, headers={"User-Agent": "eddi-psl-refresh"})
-    with urllib.request.urlopen(request, timeout=60) as response:
+    with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - scheme and host checked above
         return response.read()
 
 
@@ -47,6 +55,8 @@ def main(argv):
     if not DATA.parent.is_dir():
         sys.exit("Run from the repository root.")
     ref = argv[1] if len(argv) > 1 else "main"
+    if not REF.fullmatch(ref):
+        sys.exit(f"Not a branch name or commit sha: {ref!r}")
     commit = json.loads(fetch(f"https://api.github.com/repos/{REPO}/commits/{ref}"))
     sha = commit["sha"]
     date = commit["commit"]["committer"]["date"]
