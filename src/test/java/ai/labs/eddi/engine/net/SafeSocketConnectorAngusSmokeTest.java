@@ -70,11 +70,11 @@ class SafeSocketConnectorAngusSmokeTest {
 
     private void serve(String capabilities) {
         serverThread = new Thread(() -> {
-            try (Socket client = server.accept()) {
+            try (Socket client = server.accept();
+                    OutputStream out = client.getOutputStream();
+                    BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.US_ASCII))) {
                 connections.incrementAndGet();
                 client.setSoTimeout(5000);
-                OutputStream out = client.getOutputStream();
-                BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.US_ASCII));
                 out.write(("* OK [CAPABILITY " + capabilities + "] smoke test ready\r\n").getBytes(StandardCharsets.US_ASCII));
                 out.flush();
                 String line;
