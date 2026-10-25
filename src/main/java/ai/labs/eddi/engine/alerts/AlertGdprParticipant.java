@@ -17,15 +17,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * GDPR erasure and export for alerting. Alert events name no end user — the
- * comment excerpts of a user's ratings are blanked by the rating participant,
- * which can still find them — so what is left is the people who run agents: the
- * administrator or editor who acknowledged an event, or wrote a rule.
+ * GDPR erasure and export for alerting.
  * <p>
- * Erasure forgets them there. The export lists the rules they created or last
- * edited (with which of the two) and the events they acknowledged — never the
- * name of anybody else involved (the other author, another acknowledger), and
- * none of an event's content beyond its rule, source, agent and times.
+ * <b>End users.</b> The comment excerpts of a user's ratings are blanked by the
+ * rating participant, which can still find them through the ratings. An
+ * {@code OUTPUT_MATCH} value stored from a user's conversation (only with
+ * {@code includeValue} and conversation review on) is recorded with an internal
+ * subject id, so erasure blanks the value and the id; the user's export lists
+ * those values, which are their own conversation content.
+ * <p>
+ * <b>People who run agents.</b> The administrator or editor who acknowledged an
+ * event, or wrote a rule, is forgotten there. The export lists the rules they
+ * created or last edited (with which of the two) and the events they
+ * acknowledged — never the name of anybody else involved, and none of an
+ * event's content beyond its rule, source, agent and times.
  */
 @ApplicationScoped
 public class AlertGdprParticipant implements IGdprParticipant {
@@ -38,6 +43,12 @@ public class AlertGdprParticipant implements IGdprParticipant {
      * {@code lastEditor}.
      */
     public record ExportedRule(String id, String name, Instant createdAt, Instant updatedAt, List<String> roles) {
+    }
+
+    /**
+     * A value an OUTPUT_MATCH alert stored from one of the user's conversations.
+     */
+    public record ExportedOutputValue(String value, String conversationId, Instant firedAt) {
     }
 
     /** An event the user acknowledged. */
@@ -61,7 +72,7 @@ public class AlertGdprParticipant implements IGdprParticipant {
 
     @Override
     public long erase(String userId) {
-        return eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
+        return eventStore.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
     }
 
     @Override
@@ -89,12 +100,19 @@ public class AlertGdprParticipant implements IGdprParticipant {
                         event.agentId(), event.firedAt(), event.acknowledgedAt()));
             }
         }
-        if (rules.isEmpty() && acknowledged.isEmpty()) {
+        List<ExportedOutputValue> outputValues = new ArrayList<>();
+        for (AlertEvent event : eventStore.findOutputValuesBySubject(userId, MAX_EXPORTED)) {
+            if (event.match() != null && event.match().value() != null) {
+                outputValues.add(new ExportedOutputValue(event.match().value(), event.conversationId(), event.firedAt()));
+            }
+        }
+        if (rules.isEmpty() && acknowledged.isEmpty() && outputValues.isEmpty()) {
             return null;
         }
         Map<String, Object> export = new LinkedHashMap<>();
         export.put("rules", rules);
         export.put("acknowledgedEvents", acknowledged);
+        export.put("outputMatchValues", outputValues);
         return export;
     }
 }

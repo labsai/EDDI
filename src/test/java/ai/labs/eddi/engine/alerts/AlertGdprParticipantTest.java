@@ -61,7 +61,9 @@ class AlertGdprParticipantTest {
     void erase() {
         when(events.clearAcknowledger("erin")).thenReturn(3L);
         when(rules.clearAuthor("erin")).thenReturn(2L);
-        assertEquals(5L, participant.erase("erin"));
+        when(events.redactOutputValues("erin")).thenReturn(4L);
+        assertEquals(9L, participant.erase("erin"));
+        verify(events).redactOutputValues("erin");
         verify(events).clearAcknowledger("erin");
         verify(rules).clearAuthor("erin");
     }
@@ -87,11 +89,26 @@ class AlertGdprParticipantTest {
         List<ExportedAcknowledgement> acks = (List<ExportedAcknowledgement>) export.get("acknowledgedEvents");
         assertEquals(List.of(new ExportedAcknowledgement("e1", "Broken turns", "CONVERSATION_ERROR", AGENT, NOW, NOW.plusSeconds(300))), acks);
 
+        assertEquals(List.of(), export.get("outputMatchValues"));
+
         String rendered = export.toString();
         assertFalse(rendered.contains("frank"), "another author is not named");
         assertFalse(rendered.contains("gina"), "another author is not named");
         assertFalse(rendered.contains("summary with details"), "no event content");
         assertFalse(rendered.contains(CONVERSATION), "no conversation id");
+    }
+
+    @Test
+    @DisplayName("an end user's export lists the output-match values stored from their conversations — value, conversation, time")
+    @SuppressWarnings("unchecked")
+    void exportsOwnOutputValues() {
+        AlertEvent withValue = new AlertEvent("e5", RULE_ID, "Escalations", AlertSource.OUTPUT_MATCH, AlertEvent.Kind.ALERT, AGENT, 2,
+                CONVERSATION, NOW, "summary", AlertMatch.output("properties.note exists", "call me"), List.of(), AlertEvent.State.INBOX_ONLY, null,
+                "k5", 0, null, null, null, null, 1);
+        when(events.findOutputValuesBySubject("rater-1", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(withValue));
+        Map<String, Object> export = (Map<String, Object>) participant.export("rater-1");
+        assertEquals(List.of(new AlertGdprParticipant.ExportedOutputValue("call me", CONVERSATION, NOW)), export.get("outputMatchValues"));
+        assertFalse(export.toString().contains("Escalations"), "no rule internals");
     }
 
     @Test

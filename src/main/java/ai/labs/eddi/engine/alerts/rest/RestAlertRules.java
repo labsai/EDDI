@@ -24,7 +24,11 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -89,7 +93,7 @@ public class RestAlertRules implements IRestAlertRules {
 
     @Override
     public Response createRule(AlertRule body) {
-        AlertRule rule = forStorage(body);
+        AlertRule rule = assignTargetIds(forStorage(body), null);
         validate(rule);
         access.requireWritable(rule);
         Instant now = clock.instant();
@@ -105,7 +109,7 @@ public class RestAlertRules implements IRestAlertRules {
     public AlertRule updateRule(String ruleId, AlertRule body) {
         AlertRule current = existing(ruleId);
         access.requireWritable(current);
-        AlertRule rule = restoreUrls(forStorage(body), current);
+        AlertRule rule = assignTargetIds(restoreUrls(forStorage(body), current), current);
         validate(rule);
         access.requireWritable(rule);
         String caller = access.caller();
@@ -169,54 +173,68 @@ public class RestAlertRules implements IRestAlertRules {
         if (rule == null) {
             return null;
         }
-        List<DeliveryTarget> targets = rule.delivery().stream()
-                .map(t -> t == null ? null : new DeliveryTarget(t.type(), t.channelId(), t.url(), t.signingSecret(), null))
-                .toList();
+        List<DeliveryTarget> targets = rule.delivery().stream().map(t -> t == null ? null : t.forStorage()).toList();
         return withDelivery(rule, targets);
     }
 
     /**
      * Puts the stored URL back into every webhook target the client sent without
-     * one or with the masked value a read returned: the stored target at the same
-     * position if it is a webhook on the same host, otherwise the only stored
-     * webhook on that host. A new value replaces the stored one. A masked URL that
-     * matches nothing stays masked and fails validation.
+     * one or with the masked value a read returned — from the stored target with
+     * the same {@code targetId}, and only from that one. A target without an id, or
+     * with an id the stored rule does not have, gets nothing back: its masked or
+     * empty URL then fails validation. A new value replaces the stored one.
      */
     static AlertRule restoreUrls(AlertRule rule, AlertRule current) {
         if (rule == null || current == null) {
             return rule;
         }
-        List<DeliveryTarget> stored = current.delivery();
+        Map<String, DeliveryTarget> stored = new HashMap<>();
+        for (DeliveryTarget target : current.withTargetIds().delivery()) {
+            if (target != null) {
+                stored.putIfAbsent(target.targetId(), target);
+            }
+        }
         List<DeliveryTarget> targets = new ArrayList<>();
-        for (int i = 0; i < rule.delivery().size(); i++) {
-            DeliveryTarget t = rule.delivery().get(i);
-            boolean keep = t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK
+        for (DeliveryTarget t : rule.delivery()) {
+            boolean needsStoredUrl = t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK
                     && (t.url() == null || t.url().isBlank() || DeliveryTarget.isMaskedUrl(t.url()));
-            if (!keep) {
-                targets.add(t);
-                continue;
-            }
-            String host = t.url() == null || t.url().isBlank() ? null : DeliveryTarget.hostOf(t.url());
-            String restored = null;
-            if (i < stored.size() && isLiteralWebhook(stored.get(i))
-                    && (host == null || host.equals(DeliveryTarget.hostOf(stored.get(i).url())))) {
-                restored = stored.get(i).url();
-            } else if (host != null) {
-                List<DeliveryTarget> sameHost = stored.stream()
-                        .filter(candidate -> isLiteralWebhook(candidate) && host.equals(DeliveryTarget.hostOf(candidate.url())))
-                        .toList();
-                if (sameHost.size() == 1) {
-                    restored = sameHost.get(0).url();
-                }
-            }
-            targets.add(restored == null ? t : new DeliveryTarget(t.type(), null, restored, t.signingSecret(), null));
+            DeliveryTarget same = needsStoredUrl && t.targetId() != null ? stored.get(t.targetId()) : null;
+            boolean restorable = same != null && same.type() == DeliveryTarget.DeliveryType.WEBHOOK && same.url() != null
+                    && !same.url().isBlank() && !DeliveryTarget.isMaskedUrl(same.url());
+            targets.add(restorable ? t.withUrl(same.url()) : t);
         }
         return withDelivery(rule, targets);
     }
 
-    private static boolean isLiteralWebhook(DeliveryTarget t) {
-        return t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK && t.url() != null && !t.urlIsVaultReference()
-                && !DeliveryTarget.isMaskedUrl(t.url());
+    /**
+     * Ids are the server's: an id the stored rule does not have (or any id on a
+     * create), or one used twice in the body, is dropped, and every target without
+     * an id gets one. Runs after {@link #restoreUrls}, so a dropped id cannot pull
+     * a stored URL.
+     */
+    static AlertRule assignTargetIds(AlertRule rule, AlertRule current) {
+        if (rule == null) {
+            return null;
+        }
+        Set<String> known = new HashSet<>();
+        if (current != null) {
+            for (DeliveryTarget target : current.withTargetIds().delivery()) {
+                if (target != null) {
+                    known.add(target.targetId());
+                }
+            }
+        }
+        Set<String> seen = new HashSet<>();
+        List<DeliveryTarget> targets = new ArrayList<>();
+        for (DeliveryTarget t : rule.delivery()) {
+            if (t == null) {
+                targets.add(null);
+                continue;
+            }
+            boolean keep = t.targetId() != null && known.contains(t.targetId()) && seen.add(t.targetId());
+            targets.add(keep ? t : t.withTargetId(null));
+        }
+        return withDelivery(rule, targets).withTargetIds();
     }
 
     private static AlertRule withDelivery(AlertRule rule, List<DeliveryTarget> targets) {

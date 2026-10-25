@@ -128,12 +128,16 @@ public class AlertAccess {
      */
     public AlertRule redact(AlertRule rule) {
         boolean admin = isAdmin();
-        List<DeliveryTarget> targets = rule.delivery().stream().map(t -> {
+        // Every read shows each target's id; a rule stored before ids existed gets
+        // the derived ones, the same on every read until its next save stores them.
+        List<DeliveryTarget> targets = rule.withTargetIds().delivery().stream().map(t -> {
             if (t == null || t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
                 return t;
             }
             DeliveryTarget masked = t.masked();
-            return admin ? masked : new DeliveryTarget(masked.type(), masked.channelId(), masked.url(), null, masked.urlConfigured());
+            return admin
+                    ? masked
+                    : new DeliveryTarget(masked.type(), masked.channelId(), masked.url(), null, masked.urlConfigured(), masked.targetId());
         }).toList();
         return new AlertRule(rule.id(), rule.name(), rule.enabled(), rule.scope(), rule.source(), rule.condition(), targets, rule.throttle(),
                 rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());

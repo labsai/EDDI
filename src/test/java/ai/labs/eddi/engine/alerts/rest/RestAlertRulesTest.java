@@ -295,20 +295,131 @@ class RestAlertRulesTest {
         }
 
         @Test
-        @DisplayName("an update that sends the masked value back, or none, keeps the stored URL; a new value replaces it")
+        @DisplayName("an update that sends the masked value back, or none, under the target's id keeps the stored URL; a new value replaces it")
         void updateKeepsOrReplaces() {
             asAdmin();
             when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), secretHook)));
+            String id = rest.readRule(RULE_ID).delivery().get(0).targetId();
             ArgumentCaptor<AlertRule> updated = ArgumentCaptor.forClass(AlertRule.class);
 
-            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}")));
-            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook(null, "${vault:hook}")));
-            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://other.example.com/new", "${vault:hook}")));
+            rest.updateRule(RULE_ID,
+                    scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}").withTargetId(id)));
+            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook(null, "${vault:hook}").withTargetId(id)));
+            rest.updateRule(RULE_ID,
+                    scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://other.example.com/new", "${vault:hook}").withTargetId(id)));
 
             verify(store, times(3)).update(updated.capture());
             assertEquals(secretHook.url(), updated.getAllValues().get(0).delivery().get(0).url());
             assertEquals(secretHook.url(), updated.getAllValues().get(1).delivery().get(0).url());
             assertEquals("https://other.example.com/new", updated.getAllValues().get(2).delivery().get(0).url());
+            for (AlertRule saved : updated.getAllValues()) {
+                assertEquals(id, saved.delivery().get(0).targetId(), "the id is kept across updates");
+            }
+        }
+
+        private final DeliveryTarget hookA = DeliveryTarget.webhook("https://hooks.example.com/services/AAA/" + TOKEN, "${vault:a}")
+                .withTargetId("tA");
+        private final DeliveryTarget hookB = DeliveryTarget.webhook("https://hooks.example.com/services/BBB/other", "${vault:b}")
+                .withTargetId("tB");
+
+        private AlertRule twoSameHost() {
+            AlertRule stored = scoped(AlertScope.agent(AGENT), hookA, hookB);
+            when(store.read(RULE_ID)).thenReturn(Optional.of(stored));
+            return stored;
+        }
+
+        private AlertRule savedAfter(AlertRule body) {
+            rest.updateRule(RULE_ID, body);
+            ArgumentCaptor<AlertRule> updated = ArgumentCaptor.forClass(AlertRule.class);
+            verify(store).update(updated.capture());
+            return updated.getValue();
+        }
+
+        @Test
+        @DisplayName("two masked targets on one host: removing the first keeps the second's own URL, not the removed one's")
+        void removeOneOfTwoSameHost() {
+            asAdmin();
+            twoSameHost();
+            AlertRule read = rest.readRule(RULE_ID);
+            DeliveryTarget second = read.delivery().get(1);
+            assertEquals("tB", second.targetId());
+            AlertRule saved = savedAfter(scoped(AlertScope.agent(AGENT), second));
+            assertEquals(List.of(hookB.url()), saved.delivery().stream().map(DeliveryTarget::url).toList());
+            assertEquals("tB", saved.delivery().get(0).targetId());
+        }
+
+        @Test
+        @DisplayName("two masked targets on one host, reordered: each keeps its own URL")
+        void reorder() {
+            asAdmin();
+            twoSameHost();
+            AlertRule read = rest.readRule(RULE_ID);
+            AlertRule saved = savedAfter(scoped(AlertScope.agent(AGENT), read.delivery().get(1), read.delivery().get(0)));
+            assertEquals(List.of(hookB.url(), hookA.url()), saved.delivery().stream().map(DeliveryTarget::url).toList());
+            assertEquals(List.of("tB", "tA"), saved.delivery().stream().map(DeliveryTarget::targetId).toList());
+        }
+
+        @Test
+        @DisplayName("a new target gets an id from the server and must bring a real URL — a masked one without an id is refused")
+        void newTarget() {
+            asAdmin();
+            twoSameHost();
+            AlertRule read = rest.readRule(RULE_ID);
+            DeliveryTarget fresh = DeliveryTarget.webhook("https://hooks.example.com/services/CCC/new", "${vault:c}");
+            AlertRule saved = savedAfter(scoped(AlertScope.agent(AGENT), read.delivery().get(0), read.delivery().get(1), fresh));
+            assertEquals(hookA.url(), saved.delivery().get(0).url());
+            assertEquals(fresh.url(), saved.delivery().get(2).url());
+            String freshId = saved.delivery().get(2).targetId();
+            assertFalse(freshId == null || freshId.isBlank() || freshId.equals("tA") || freshId.equals("tB"));
+
+            assertError(400, AlertErrors.INVALID_RULE, () -> rest.updateRule(RULE_ID,
+                    scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:c}"))));
+        }
+
+        @Test
+        @DisplayName("a masked or empty URL under an id the stored rule does not have is refused — never guessed by host or position")
+        void unknownTargetIdRefused() {
+            asAdmin();
+            twoSameHost();
+            assertError(400, AlertErrors.INVALID_RULE, () -> rest.updateRule(RULE_ID,
+                    scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:a}").withTargetId("tZ"))));
+            assertError(400, AlertErrors.INVALID_RULE, () -> rest.updateRule(RULE_ID,
+                    scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook(null, "${vault:a}").withTargetId("tZ"))));
+            verify(store, never()).update(any());
+        }
+
+        @Test
+        @DisplayName("a client cannot choose ids: an unknown id on a real URL is replaced, and a create drops every id")
+        void idsAreTheServers() {
+            asAdmin();
+            twoSameHost();
+            AlertRule saved = savedAfter(scoped(AlertScope.agent(AGENT),
+                    DeliveryTarget.webhook("https://hooks.example.com/services/DDD/x", "${vault:d}").withTargetId("tA-forged")));
+            assertFalse("tA-forged".equals(saved.delivery().get(0).targetId()));
+
+            rest.createRule(scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/services/EEE/x", "${vault:e}")
+                    .withTargetId("tA")));
+            ArgumentCaptor<AlertRule> created = ArgumentCaptor.forClass(AlertRule.class);
+            verify(store).create(created.capture());
+            assertEquals(created.getValue().delivery().get(0).derivedTargetId(), created.getValue().delivery().get(0).targetId());
+        }
+
+        @Test
+        @DisplayName("a rule stored before ids existed: reads show the same derived ids, and its first update restores by them")
+        void legacyRuleWithoutIds() {
+            asAdmin();
+            DeliveryTarget legacyA = DeliveryTarget.webhook("https://hooks.example.com/services/AAA/" + TOKEN, "${vault:a}");
+            DeliveryTarget legacyB = DeliveryTarget.webhook("https://hooks.example.com/services/BBB/other", "${vault:b}");
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), legacyA, legacyB)));
+            AlertRule first = rest.readRule(RULE_ID);
+            AlertRule again = rest.readRule(RULE_ID);
+            assertEquals(first.delivery().stream().map(DeliveryTarget::targetId).toList(),
+                    again.delivery().stream().map(DeliveryTarget::targetId).toList(), "stable across reads");
+            assertFalse(first.delivery().get(0).targetId().equals(first.delivery().get(1).targetId()));
+
+            AlertRule saved = savedAfter(scoped(AlertScope.agent(AGENT), first.delivery().get(1)));
+            assertEquals(legacyB.url(), saved.delivery().get(0).url());
+            assertEquals(first.delivery().get(1).targetId(), saved.delivery().get(0).targetId(), "the derived id is stored from now on");
         }
 
         @Test
@@ -330,8 +441,9 @@ class RestAlertRulesTest {
         void testSendRestoresAndEchoesHost() throws Exception {
             asAdmin();
             when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), secretHook)));
-            AlertRule edited = scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}"))
-                    .withId(RULE_ID);
+            String id = rest.readRule(RULE_ID).delivery().get(0).targetId();
+            AlertRule edited = scoped(AlertScope.agent(AGENT),
+                    DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}").withTargetId(id)).withId(RULE_ID);
 
             TestResult result = rest.testRule(edited);
 
@@ -340,6 +452,12 @@ class RestAlertRulesTest {
             assertEquals(secretHook.url(), sent.getValue().url());
             noTokenIn(result);
             assertEquals("Webhook hooks.example.com", result.deliveries().get(0).label());
+
+            // Without the id, the test send of a saved rule restores nothing and is
+            // refused.
+            AlertRule noId = scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}"))
+                    .withId(RULE_ID);
+            assertError(400, AlertErrors.INVALID_RULE, () -> rest.testRule(noId));
         }
 
         @Test

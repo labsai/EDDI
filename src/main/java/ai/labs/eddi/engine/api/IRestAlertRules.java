@@ -36,6 +36,13 @@ import java.util.List;
  * Access is checked against the stored rule on update and delete as well. An
  * editor lists the rules of an agent they name; a webhook target is shown to
  * them by host only. No role hierarchy in REST: the roles are enumerated.
+ *
+ * <h3>Webhook URLs and {@code targetId}</h3> A read never returns a webhook
+ * URL: it answers scheme and host plus {@code /***}. Every delivery target
+ * carries a server-assigned {@code targetId}; an update or test send that
+ * returns a masked or empty URL keeps the stored URL of the target with the
+ * same {@code targetId}, and a masked or empty URL without a known id is
+ * refused.
  */
 @Path("/alerts/rules")
 @Tag(name = "Alerts", description = "Alert rules and the alert inbox")
@@ -87,7 +94,8 @@ public interface IRestAlertRules {
     @Path("/{ruleId}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(summary = "Replace an alert rule")
+    @Operation(summary = "Replace an alert rule", description = "A webhook target sent with its masked URL (or none) keeps the stored URL "
+            + "of the target with the same targetId; without a known targetId it is refused. New targets get a targetId from the server.")
     @APIResponse(responseCode = "200", description = "The updated rule.")
     @APIResponse(responseCode = "400", description = "The rule is not valid (INVALID_RULE).")
     @APIResponse(responseCode = "403", description = "The caller may not change this rule, or the new one.")
