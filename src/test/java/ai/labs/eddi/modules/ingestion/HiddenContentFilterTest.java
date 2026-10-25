@@ -308,5 +308,74 @@ class HiddenContentFilterTest {
         assertNull(HiddenStylesheetRules.rightmostCompound("p::after"));
         assertEquals(Set.of("abc"), HiddenStylesheetRules.rightmostCompound(".\\61 bc").classes());
         assertEquals(2, HiddenStylesheetRules.splitTopLevel(".a, :is(.b, .c)").size());
+        assertEquals(Set.of("data-q"), compound.attributes());
+        assertEquals(1, compound.structural().size());
+        assertEquals(Set.of("lang"), HiddenStylesheetRules.rightmostCompound("[ LANG |= x-hidden ]").attributes());
+    }
+
+    @Nested
+    @DisplayName("mail: a hiding rule that names no tag, id or class does not empty the mail")
+    class ReducedSelectors {
+
+        private String styled(String rule, String body) {
+            return mail("<style>" + rule + "</style>" + body);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"[hidden]{display:none}", "*[hidden]{display:none}", "[lang=x-hidden]{display:none}",
+                "[data-x]{display:none}", ":empty{display:none}", "div:empty{display:none}", "p:empty{display:none}"})
+        void bodySurvives(String rule) {
+            String out = styled(rule, "<div><p>VISIBLE</p><p></p></div>");
+            assertTrue(out.contains("VISIBLE"), rule + " emptied the mail: " + out);
+        }
+
+        @Test
+        @DisplayName("an attribute rule hides exactly the elements with that attribute")
+        void attributeRule() {
+            String out = styled("[data-x]{display:none}", "<p>KEPT</p><p data-x=\"1\">GONE</p>");
+            assertTrue(out.contains("KEPT"));
+            assertFalse(out.contains("GONE"));
+        }
+
+        @Test
+        @DisplayName("structural pseudo-classes hide exactly the matching positions")
+        void structuralRules() {
+            String list = "<ul><li>ONE</li><li>TWO</li><li>THREE</li><li>FOUR</li></ul>";
+            String first = styled("li:first-child{display:none}", list);
+            assertFalse(first.contains("ONE"));
+            assertTrue(first.contains("TWO") && first.contains("FOUR"));
+            String last = styled("li:last-child{display:none}", list);
+            assertFalse(last.contains("FOUR"));
+            assertTrue(last.contains("ONE"));
+            String even = styled("li:nth-child(even){display:none}", list);
+            assertTrue(even.contains("ONE") && even.contains("THREE"));
+            assertFalse(even.contains("TWO") || even.contains("FOUR"));
+            String fromEnd = styled("li:nth-last-child(-n+2){display:none}", list);
+            assertTrue(fromEnd.contains("ONE") && fromEnd.contains("TWO"));
+            assertFalse(fromEnd.contains("THREE") || fromEnd.contains("FOUR"));
+            String only = styled("span:only-child{display:none}", "<p><span>ALONE</span></p><p><span>A</span><span>B</span></p>");
+            assertFalse(only.contains("ALONE"));
+            assertTrue(only.contains("A") && only.contains("B"));
+        }
+
+        @Test
+        @DisplayName("a pseudo-class this reader does not evaluate still widens the match (fails toward removing)")
+        void unknownPseudoWidens() {
+            String out = styled("p:nth-of-type(2){display:none}", "<p>FIRST</p><p>SECOND</p>");
+            assertFalse(out.contains("FIRST") || out.contains("SECOND"));
+        }
+
+        @Test
+        @DisplayName("positions stay linear on a very wide parent")
+        void wideParent() {
+            StringBuilder wide = new StringBuilder("<div>");
+            for (int i = 0; i < 100_000; i++) {
+                wide.append("<span>s</span>");
+            }
+            wide.append("<span>LAST</span></div>");
+            String html = "<style>span:nth-child(3n+1){display:none} span:last-child{display:none}</style>" + wide;
+            String out = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> mail(html));
+            assertFalse(out.contains("LAST"));
+        }
     }
 }
