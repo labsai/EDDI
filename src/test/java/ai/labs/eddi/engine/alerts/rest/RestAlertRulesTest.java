@@ -24,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
@@ -50,6 +51,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -183,7 +185,8 @@ class RestAlertRulesTest {
 
             AlertRule seen = rest.listRules(AGENT, 0, 20).rules().get(0);
 
-            assertEquals("https://hooks.example.com/…", seen.delivery().get(0).url());
+            assertEquals("https://hooks.example.com/***", seen.delivery().get(0).url());
+            assertEquals(Boolean.TRUE, seen.delivery().get(0).urlConfigured());
             assertNull(seen.delivery().get(0).signingSecret());
             verify(store).list(AGENT, true, 0, 20);
         }
@@ -209,7 +212,7 @@ class RestAlertRulesTest {
             verify(store).create(any());
             verify(guard, never()).requireAccess(anyString(), any(), anyString());
             when(store.list(null, false, 0, 20)).thenReturn(List.of(scoped(new AlertScope(true, List.of()), HOOK)));
-            assertEquals(HOOK.url(), rest.listRules(null, 0, 20).rules().get(0).delivery().get(0).url());
+            assertEquals("https://hooks.example.com/***", rest.listRules(null, 0, 20).rules().get(0).delivery().get(0).url());
         }
 
         @Test
@@ -246,6 +249,107 @@ class RestAlertRulesTest {
             assertEquals("admin", updated.createdBy());
             assertEquals("erin", updated.updatedBy());
             assertError(404, AlertErrors.RULE_NOT_FOUND, () -> rest.updateRule("6aba70011a25f8be7920e0ff", updated));
+        }
+    }
+
+    @Nested
+    @DisplayName("webhook URLs are secrets — never returned, for administrators either")
+    class WebhookUrls {
+
+        private static final String TOKEN = "T000/B000/s3cr3tT0k3n";
+        private final DeliveryTarget secretHook = DeliveryTarget.webhook("https://hooks.example.com/services/" + TOKEN + "?x=1", "${vault:hook}");
+
+        private void noTokenIn(Object response) throws Exception {
+            String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(response);
+            assertFalse(json.contains("s3cr3tT0k3n"), json);
+            assertFalse(json.contains("services"), json);
+        }
+
+        @Test
+        @DisplayName("list, single read, create and update all answer the masked URL with urlConfigured")
+        void everyReadIsMasked() throws Exception {
+            asAdmin();
+            AlertRule stored = scoped(AlertScope.agent(AGENT), secretHook);
+            when(store.list(null, false, 0, 20)).thenReturn(List.of(stored));
+            when(store.read(RULE_ID)).thenReturn(Optional.of(stored));
+
+            noTokenIn(rest.listRules(null, 0, 20));
+            AlertRule read = rest.readRule(RULE_ID);
+            noTokenIn(read);
+            assertEquals("https://hooks.example.com/***", read.delivery().get(0).url());
+            assertEquals(Boolean.TRUE, read.delivery().get(0).urlConfigured());
+            noTokenIn(rest.createRule(scoped(AlertScope.agent(AGENT), secretHook)).getEntity());
+            noTokenIn(rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), secretHook)));
+        }
+
+        @Test
+        @DisplayName("the stored rule keeps the full URL, and the read-only flag is never stored")
+        void storedWhole() {
+            asAdmin();
+            DeliveryTarget withFlag = new DeliveryTarget(secretHook.type(), null, secretHook.url(), secretHook.signingSecret(), true);
+            rest.createRule(scoped(AlertScope.agent(AGENT), withFlag));
+            ArgumentCaptor<AlertRule> created = ArgumentCaptor.forClass(AlertRule.class);
+            verify(store).create(created.capture());
+            assertEquals(secretHook.url(), created.getValue().delivery().get(0).url());
+            assertNull(created.getValue().delivery().get(0).urlConfigured());
+        }
+
+        @Test
+        @DisplayName("an update that sends the masked value back, or none, keeps the stored URL; a new value replaces it")
+        void updateKeepsOrReplaces() {
+            asAdmin();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), secretHook)));
+            ArgumentCaptor<AlertRule> updated = ArgumentCaptor.forClass(AlertRule.class);
+
+            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}")));
+            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook(null, "${vault:hook}")));
+            rest.updateRule(RULE_ID, scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://other.example.com/new", "${vault:hook}")));
+
+            verify(store, times(3)).update(updated.capture());
+            assertEquals(secretHook.url(), updated.getAllValues().get(0).delivery().get(0).url());
+            assertEquals(secretHook.url(), updated.getAllValues().get(1).delivery().get(0).url());
+            assertEquals("https://other.example.com/new", updated.getAllValues().get(2).delivery().get(0).url());
+        }
+
+        @Test
+        @DisplayName("a masked URL of another host matches nothing and is refused, never stored masked")
+        void unmatchedMaskIsRefused() {
+            asAdmin();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), secretHook)));
+            assertError(400, AlertErrors.INVALID_RULE,
+                    () -> rest.updateRule(RULE_ID,
+                            scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://evil.example.com/***", "${vault:hook}"))));
+            assertError(400, AlertErrors.INVALID_RULE,
+                    () -> rest.createRule(scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}"))));
+            verify(store, never()).update(any());
+            verify(store, never()).create(any());
+        }
+
+        @Test
+        @DisplayName("a test send of a saved rule restores the stored URL for the sender, and echoes only the host")
+        void testSendRestoresAndEchoesHost() throws Exception {
+            asAdmin();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), secretHook)));
+            AlertRule edited = scoped(AlertScope.agent(AGENT), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:hook}"))
+                    .withId(RULE_ID);
+
+            TestResult result = rest.testRule(edited);
+
+            ArgumentCaptor<DeliveryTarget> sent = ArgumentCaptor.forClass(DeliveryTarget.class);
+            verify(senders).send(any(), sent.capture());
+            assertEquals(secretHook.url(), sent.getValue().url());
+            noTokenIn(result);
+            assertEquals("Webhook hooks.example.com", result.deliveries().get(0).label());
+        }
+
+        @Test
+        @DisplayName("a vault reference is accepted as the URL itself and shown as it is")
+        void vaultUrl() {
+            asAdmin();
+            DeliveryTarget vaultHook = DeliveryTarget.webhook("${vault:alert-hook-url}", "${vault:hook}");
+            AlertRule created = (AlertRule) rest.createRule(scoped(AlertScope.agent(AGENT), vaultHook)).getEntity();
+            assertEquals("${vault:alert-hook-url}", created.delivery().get(0).url());
+            assertEquals(Boolean.TRUE, created.delivery().get(0).urlConfigured());
         }
     }
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.schedule.rest;
 
 import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -322,6 +323,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             // be able to mutate it (e.g. push its nextFire far out to defeat an
             // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
             // request body that omits the metadata cannot bypass the check.
+            Response systemGuard = rejectSystemSchedule(stored, "update");
+            if (systemGuard != null) {
+                return systemGuard;
+            }
+
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
@@ -977,6 +983,36 @@ public class RestScheduleStore implements IRestScheduleStore {
         return null;
     }
 
+    /**
+     * Refuses changing a system schedule — the {@code alerts-maintenance} schedule,
+     * or any schedule carrying the {@code alertType} metadata — for everyone,
+     * administrators included: 409 {@code SYSTEM_SCHEDULE}. Judged on the STORED
+     * row. The server recreates the schedule on startup and on every alert-rule
+     * save as a backstop, but deleting or disabling it would silently stop alert
+     * retries and digests until then. Firing it manually stays allowed (it only
+     * runs the maintenance pass).
+     */
+    private static Response rejectSystemSchedule(ScheduleConfiguration stored, String operation) {
+        if (stored == null || !isSystemSchedule(stored)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of the system schedule %s", operation, sanitize(stored.getName()));
+        return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(ErrorResponses.body(SYSTEM_SCHEDULE,
+                        "The " + stored.getName() + " schedule is managed by the server and cannot be changed or deleted (" + operation
+                                + "). It runs alert retries, digests and retention."))
+                .build();
+    }
+
+    /** Error code of a refused change to a system-managed schedule. */
+    public static final String SYSTEM_SCHEDULE = "SYSTEM_SCHEDULE";
+
+    /** Whether the schedule is managed by the server itself. */
+    public static boolean isSystemSchedule(ScheduleConfiguration schedule) {
+        return schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata())
+                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null);
+    }
+
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
         if (isHitlSchedule(schedule)) {
             LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
@@ -1230,6 +1266,10 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (stored == null) {
             return null; // absent — let the downstream operation surface its own 404/no-op
+        }
+        Response systemGuard = rejectSystemSchedule(stored, operation);
+        if (systemGuard != null) {
+            return systemGuard;
         }
         Response hitlGuard = requireAdminForHitl(stored, operation);
         if (hitlGuard != null) {

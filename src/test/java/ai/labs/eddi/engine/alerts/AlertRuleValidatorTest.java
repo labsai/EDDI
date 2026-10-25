@@ -97,4 +97,15 @@ class AlertRuleValidatorTest {
         assertTrue(reports(new AlertRule(null, " ", true, base.scope(), base.source(), base.condition(), List.of(), null, null, null, null,
                 null, null), "name is required"));
     }
+
+    @Test
+    @DisplayName("a webhook URL may be a vault reference; the masked value a read returns is never accepted")
+    void vaultAndMaskedUrls() {
+        assertEquals(List.of(), AlertRuleValidator.validate(errorRule(List.of(ErrorKind.TURN_ERROR),
+                DeliveryTarget.webhook("${vault:alert-hook-url}", "${vault:k}"))));
+        assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("https://hooks.example.com/***", "${vault:k}")),
+                "masked value"));
+        assertTrue(reports(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.webhook("${vault:broken", "${vault:k}")),
+                "vault reference must be"));
+    }
 }

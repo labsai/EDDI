@@ -14,7 +14,6 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -122,28 +121,22 @@ public class AlertAccess {
     }
 
     /**
-     * The rule as this caller may see it: an administrator sees it whole; for
-     * anyone else a webhook target shows only its scheme and host, and no secret
-     * reference.
+     * The rule as a read returns it, to anyone — administrators included: a literal
+     * webhook URL masked to scheme and host (see {@link DeliveryTarget#masked()}),
+     * because the URL is often itself a bearer credential. A non-administrator also
+     * does not get the signing secret's vault reference.
      */
     public AlertRule redact(AlertRule rule) {
-        if (isAdmin() || rule.delivery().stream().noneMatch(t -> t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK)) {
-            return rule;
-        }
-        List<DeliveryTarget> targets = rule.delivery().stream()
-                .map(t -> t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK ? DeliveryTarget.webhook(origin(t.url()), null) : t)
-                .toList();
+        boolean admin = isAdmin();
+        List<DeliveryTarget> targets = rule.delivery().stream().map(t -> {
+            if (t == null || t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
+                return t;
+            }
+            DeliveryTarget masked = t.masked();
+            return admin ? masked : new DeliveryTarget(masked.type(), masked.channelId(), masked.url(), null, masked.urlConfigured());
+        }).toList();
         return new AlertRule(rule.id(), rule.name(), rule.enabled(), rule.scope(), rule.source(), rule.condition(), targets, rule.throttle(),
                 rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
-    }
-
-    static String origin(String url) {
-        try {
-            URI uri = URI.create(url);
-            return uri.getScheme() + "://" + uri.getHost() + "/…";
-        } catch (RuntimeException e) {
-            return "…";
-        }
     }
 
     static String blankToNull(String value) {

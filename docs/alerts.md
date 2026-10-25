@@ -163,6 +163,17 @@ X-Eddi-Alert-Id: 6aba70011a25f8be7920e0ee
 Content-Type: application/json
 ```
 
+**A webhook URL is a secret.** Many embed a bearer token in the path or query
+(`hooks.slack.com/services/…`), so no read ever returns one — not the rule list, not a
+single read, not the answer to a create or update, not a test send, not MCP, not the
+Platform Operator, and not to administrators either. A read answers scheme and host
+plus `/***` and `"urlConfigured": true`. On update, sending that masked value back
+(or no URL) keeps the stored URL; a new value replaces it; a masked value that matches
+no stored webhook on that host is refused (`INVALID_RULE`, enter the URL again). The
+URL may instead be a `${vault:…}` reference (`"url": "${vault:alert-hook-url}"`):
+resolved only when the alert is sent, shown as the reference, and — like the signing
+secret — an unresolvable one means no delivery.
+
 Verify by recomputing the MAC over the **raw** body and comparing in constant time,
 and reject a `t` more than five minutes away. `signingSecret` must be a
 `${vault:…}` reference; a secret that cannot be resolved stops the delivery (it is
@@ -239,7 +250,8 @@ never taken from the body.
   same scoping, the acknowledger from the MCP caller's identity) — see
   [MCP Server](mcp-server.md#alert-tools-2).
 - The Platform Operator reads `GET /alerts/events`, `/alerts/events/unacknowledged-count`,
-  `/alerts/rules` and `/alerts/rules/{ruleId}`. It cannot acknowledge, retry, send a
+  `/alerts/rules` and `/alerts/rules/{ruleId}` — with webhook URLs masked, so it never
+  holds a usable URL. It cannot acknowledge, retry, send a
   test or change a rule: acknowledging is a person's statement, and the other three
   send real messages or decide where alert content goes.
 
@@ -268,9 +280,12 @@ rules. Events are deleted after `eddi.alerts.event-retention` (90 days).
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call |
 | `eddi.alerts.manager-url` | — | The Manager's base URL, for links in delivered alerts |
 
-- The `alerts-maintenance` schedule appears in the schedule list. Deleting it stops
-  retries and digests until the next restart or rule save, which recreate it; a
-  schedule created by hand with `alertType` metadata is refused.
+- The `alerts-maintenance` schedule appears in the schedule list as system-managed.
+  Updating, deleting, enabling, disabling or dismissing it — over REST or the MCP
+  `delete_schedule` tool, administrators included — is refused with 409
+  `SYSTEM_SCHEDULE`; firing it by hand is allowed (it runs one maintenance pass). A
+  schedule created by hand with `alertType` metadata is refused. As a backstop, the
+  server recreates the schedule on startup and on every rule save.
 - Metrics: `eddi_alerts_*` — see [Metrics](metrics.md#alert-metrics). A Grafana
   alert-rule example on failed deliveries and a dropping queue is in the
   [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).

@@ -88,7 +88,8 @@ public class RestAlertRules implements IRestAlertRules {
     }
 
     @Override
-    public Response createRule(AlertRule rule) {
+    public Response createRule(AlertRule body) {
+        AlertRule rule = forStorage(body);
         validate(rule);
         access.requireWritable(rule);
         Instant now = clock.instant();
@@ -97,13 +98,14 @@ public class RestAlertRules implements IRestAlertRules {
         ruleCache.invalidate();
         maintenanceSchedule.ensure();
         LOGGER.infof("[ALERTS] '%s' created alert rule %s (%s)", sanitize(caller), stored.id(), stored.source());
-        return Response.created(URI.create("/alerts/rules/" + stored.id())).entity(stored).build();
+        return Response.created(URI.create("/alerts/rules/" + stored.id())).entity(access.redact(stored)).build();
     }
 
     @Override
-    public AlertRule updateRule(String ruleId, AlertRule rule) {
+    public AlertRule updateRule(String ruleId, AlertRule body) {
         AlertRule current = existing(ruleId);
         access.requireWritable(current);
+        AlertRule rule = restoreUrls(forStorage(body), current);
         validate(rule);
         access.requireWritable(rule);
         String caller = access.caller();
@@ -114,7 +116,7 @@ public class RestAlertRules implements IRestAlertRules {
         ruleCache.invalidate();
         maintenanceSchedule.ensure();
         LOGGER.infof("[ALERTS] '%s' updated alert rule %s", sanitize(caller), sanitize(ruleId));
-        return updated;
+        return access.redact(updated);
     }
 
     @Override
@@ -128,7 +130,17 @@ public class RestAlertRules implements IRestAlertRules {
     }
 
     @Override
-    public TestResult testRule(AlertRule rule) {
+    public TestResult testRule(AlertRule body) {
+        AlertRule rule = forStorage(body);
+        if (rule != null && rule.id() != null) {
+            // Testing a saved rule from the editor sends its URLs back masked: fill
+            // them in from the stored rule, which the caller must be allowed to change.
+            AlertRule current = ruleStore.read(rule.id()).orElse(null);
+            if (current != null) {
+                access.requireWritable(current);
+                rule = restoreUrls(rule, current);
+            }
+        }
         validate(rule);
         access.requireWritable(rule);
         String agentId = rule.scope().singleAgent();
@@ -147,6 +159,69 @@ public class RestAlertRules implements IRestAlertRules {
             }
         }
         return new TestResult(results);
+    }
+
+    /**
+     * The body without the read-only {@code urlConfigured} flags, which are never
+     * stored.
+     */
+    static AlertRule forStorage(AlertRule rule) {
+        if (rule == null) {
+            return null;
+        }
+        List<DeliveryTarget> targets = rule.delivery().stream()
+                .map(t -> t == null ? null : new DeliveryTarget(t.type(), t.channelId(), t.url(), t.signingSecret(), null))
+                .toList();
+        return withDelivery(rule, targets);
+    }
+
+    /**
+     * Puts the stored URL back into every webhook target the client sent without
+     * one or with the masked value a read returned: the stored target at the same
+     * position if it is a webhook on the same host, otherwise the only stored
+     * webhook on that host. A new value replaces the stored one. A masked URL that
+     * matches nothing stays masked and fails validation.
+     */
+    static AlertRule restoreUrls(AlertRule rule, AlertRule current) {
+        if (rule == null || current == null) {
+            return rule;
+        }
+        List<DeliveryTarget> stored = current.delivery();
+        List<DeliveryTarget> targets = new ArrayList<>();
+        for (int i = 0; i < rule.delivery().size(); i++) {
+            DeliveryTarget t = rule.delivery().get(i);
+            boolean keep = t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK
+                    && (t.url() == null || t.url().isBlank() || DeliveryTarget.isMaskedUrl(t.url()));
+            if (!keep) {
+                targets.add(t);
+                continue;
+            }
+            String host = t.url() == null || t.url().isBlank() ? null : DeliveryTarget.hostOf(t.url());
+            String restored = null;
+            if (i < stored.size() && isLiteralWebhook(stored.get(i))
+                    && (host == null || host.equals(DeliveryTarget.hostOf(stored.get(i).url())))) {
+                restored = stored.get(i).url();
+            } else if (host != null) {
+                List<DeliveryTarget> sameHost = stored.stream()
+                        .filter(candidate -> isLiteralWebhook(candidate) && host.equals(DeliveryTarget.hostOf(candidate.url())))
+                        .toList();
+                if (sameHost.size() == 1) {
+                    restored = sameHost.get(0).url();
+                }
+            }
+            targets.add(restored == null ? t : new DeliveryTarget(t.type(), null, restored, t.signingSecret(), null));
+        }
+        return withDelivery(rule, targets);
+    }
+
+    private static boolean isLiteralWebhook(DeliveryTarget t) {
+        return t != null && t.type() == DeliveryTarget.DeliveryType.WEBHOOK && t.url() != null && !t.urlIsVaultReference()
+                && !DeliveryTarget.isMaskedUrl(t.url());
+    }
+
+    private static AlertRule withDelivery(AlertRule rule, List<DeliveryTarget> targets) {
+        return new AlertRule(rule.id(), rule.name(), rule.enabled(), rule.scope(), rule.source(), rule.condition(), targets,
+                rule.throttle(), rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
     }
 
     private AlertRule existing(String ruleId) {

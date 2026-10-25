@@ -188,6 +188,17 @@ public final class AlertRuleValidator {
             problems.add(field + ".url is required");
             return;
         }
+        if (DeliveryTarget.isMaskedUrl(url)) {
+            problems.add(field + ".url is the masked value a read returns and matches no stored URL; enter the URL again");
+            return;
+        }
+        String trimmed = url.strip();
+        if (trimmed.startsWith("${vault:")) {
+            if (!trimmed.endsWith("}") || !SecretReference.isVaultReference(trimmed)) {
+                problems.add(field + ".url: a vault reference must be ${vault:...}");
+            }
+            return;
+        }
         if (url.length() > MAX_URL_LENGTH) {
             problems.add(field + ".url may be at most " + MAX_URL_LENGTH + " characters");
             return;

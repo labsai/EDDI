@@ -601,6 +601,26 @@ class RestScheduleStoreExpandedTest {
         }
 
         @Test
+        @DisplayName("the stored alerts-maintenance schedule cannot be updated, deleted, disabled, enabled or dismissed — 409 SYSTEM_SCHEDULE")
+        @SuppressWarnings("unchecked")
+        void systemScheduleIsProtected() throws Exception {
+            var stored = makeHeartbeatSchedule("sys");
+            stored.setName("alerts-maintenance");
+            stored.setAgentId(null);
+            stored.setMetadata(Map.of("alertType", "alert_maintenance"));
+            when(scheduleStore.readSchedule("sys")).thenReturn(stored);
+            var body = makeHeartbeatSchedule("sys");
+
+            for (Response response : List.of(sut.updateSchedule("sys", body), sut.deleteSchedule("sys"), sut.disableSchedule("sys"),
+                    sut.enableSchedule("sys"), sut.dismissDeadLetter("sys"))) {
+                assertEquals(409, response.getStatus());
+                assertEquals("SYSTEM_SCHEDULE", ((Map<String, String>) response.getEntity()).get("error"));
+            }
+            verify(scheduleStore, never()).deleteSchedule("sys");
+            verify(scheduleStore, never()).updateSchedule(eq("sys"), any());
+        }
+
+        @Test
         @DisplayName("should reject both cronExpression and oneTimeAt")
         void cronAndOneTime() {
             var s = new ScheduleConfiguration();

@@ -116,11 +116,24 @@ public class AlertSenders {
         String timestamp = Long.toString(clock.instant().getEpochSecond());
         String signature = HmacSignatures.hmacSha256Hex(secret, timestamp.getBytes(StandardCharsets.UTF_8),
                 ".".getBytes(StandardCharsets.UTF_8), body);
+        String url = target.url();
+        if (target.urlIsVaultReference()) {
+            // Resolved only now, never stored or shown resolved; the same rule as the
+            // signing secret: unresolvable means no delivery.
+            url = secretResolver.resolveValue(url.strip());
+            if (url == null || url.isBlank() || SecretReference.isVaultReference(url)) {
+                throw new AlertDeliveryException("The webhook URL could not be resolved from the vault");
+            }
+        }
         URI uri;
         try {
-            uri = URI.create(target.url());
+            uri = URI.create(url.strip());
         } catch (IllegalArgumentException e) {
             throw new AlertDeliveryException("The webhook URL is not valid");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("https") || scheme.equalsIgnoreCase("http"))) {
+            throw new AlertDeliveryException("The webhook URL is not an http(s) URL");
         }
         OutboundRequest request = OutboundRequest.builder(Profile.DEFAULT, uri).method("POST", RequestBody.ofBytes(body))
                 .header("Content-Type", "application/json").header(WebhookSignatureVerifier.EDDI_SIGNATURE_HEADER,

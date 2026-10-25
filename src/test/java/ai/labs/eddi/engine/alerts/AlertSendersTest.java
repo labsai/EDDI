@@ -145,4 +145,33 @@ class AlertSendersTest {
         when(slack.postBlocksMessage(anyString(), anyString(), isNull(), anyList(), anyString())).thenThrow(new SlackDeliveryException("429"));
         assertThrows(AlertDeliveryException.class, () -> senders.send(event, DeliveryTarget.slack("C0123ABC")));
     }
+
+    @Test
+    @DisplayName("a vault-reference URL is resolved only at send time; an unresolvable one sends nothing")
+    @SuppressWarnings("unchecked")
+    void vaultReferenceUrl() throws Exception {
+        when(secrets.resolveValue("${vault:hook}")).thenReturn(SECRET);
+        when(secrets.resolveValue("${vault:hook-url}")).thenReturn("https://hooks.example.com/services/T/B/token");
+        when(http.send(any(), any())).thenReturn(new OutboundResponse<>(200, "OK", Map.of(), URI.create("https://hooks.example.com"),
+                List.of(), new byte[0], false));
+
+        senders.send(event, DeliveryTarget.webhook("${vault:hook-url}", "${vault:hook}"));
+        ArgumentCaptor<OutboundRequest> sent = ArgumentCaptor.forClass(OutboundRequest.class);
+        verify(http).send(sent.capture(), any());
+        assertEquals("https://hooks.example.com/services/T/B/token", sent.getValue().uri().toString());
+
+        when(secrets.resolveValue("${vault:missing}")).thenReturn("${vault:missing}");
+        AlertDeliveryException e = assertThrows(AlertDeliveryException.class,
+                () -> senders.send(event, DeliveryTarget.webhook("${vault:missing}", "${vault:hook}")));
+        assertTrue(e.getMessage().contains("URL could not be resolved"));
+        verify(http).send(any(), any());
+    }
+
+    @Test
+    @DisplayName("an inbox label of a webhook names the host only, never the path or token")
+    void labelsNameTheHostOnly() {
+        assertEquals("Webhook hooks.example.com", DeliveryTarget.webhook("https://hooks.example.com/services/T/B/s3cr3t?x=1", "${vault:k}").label());
+        assertEquals("https://hooks.example.com/***",
+                DeliveryTarget.webhook("https://hooks.example.com/services/T/B/s3cr3t?x=1", "${vault:k}").masked().url());
+    }
 }
