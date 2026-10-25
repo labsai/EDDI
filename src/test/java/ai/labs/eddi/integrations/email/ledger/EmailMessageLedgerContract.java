@@ -288,7 +288,10 @@ interface EmailMessageLedgerContract {
         ledger().insertIfAbsent(row);
         Instant deadline = NOW.plus(Duration.ofMinutes(30));
 
-        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.TURN_SUBMITTED, null, deadline, null, true, NOW));
+        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.CLAIMED, null, deadline, null, true, NOW));
+        assertFalse(State.CLAIMED.isTerminal());
+        assertEquals(1, ledger().findDue(Kind.TRIGGER, State.CLAIMED, deadline, 10).size(), "a stale claim is found");
+        assertTrue(ledger().transition(row.id(), State.CLAIMED, State.TURN_SUBMITTED, null, deadline, null, false, NOW));
         assertFalse(ledger().transition(row.id(), State.RECEIVED, State.TURN_SUBMITTED, null, deadline, null, true, NOW), "claimed twice");
         assertTrue(ledger().transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, "conv-9", deadline, null, false, NOW));
 

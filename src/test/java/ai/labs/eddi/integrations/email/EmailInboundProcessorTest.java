@@ -237,6 +237,38 @@ class EmailInboundProcessorTest {
         }
 
         @Test
+        @DisplayName("a crash after the claim but before the point of no return (stale CLAIMED): the mail is processed again, once")
+        void staleClaimIsRequeued() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail();
+            Instant now = Instant.now();
+            ledger.put(new LedgerEntry("row-1", INTEGRATION, Kind.TRIGGER, Direction.IN, mail.messageId(), null, "imap:INBOX:1:1",
+                    EmailInboundProcessor.inboundKey(INTEGRATION, mail.messageId()), "alice@supplier.com", State.CLAIMED, 1,
+                    now.minusSeconds(1), null, null, null, now, now, now.plus(Duration.ofDays(30))));
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), mail.polled(1), now));
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals(1, inputs.size());
+            assertEquals(State.TURN_SUBMITTED, row(mail).state());
+            assertEquals(2, row(mail).attempts(), "the new claim is counted");
+        }
+
+        @Test
+        @DisplayName("a live claim of another poll is left alone: not downloaded, not marked, no turn")
+        void liveClaimIsLeftAlone() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail();
+            Instant now = Instant.now();
+            ledger.put(new LedgerEntry("row-1", INTEGRATION, Kind.TRIGGER, Direction.IN, mail.messageId(), null, "imap:INBOX:1:1",
+                    EmailInboundProcessor.inboundKey(INTEGRATION, mail.messageId()), "alice@supplier.com", State.CLAIMED, 1,
+                    now.plusSeconds(600), null, null, null, now, now, now.plus(Duration.ofDays(30))));
+            EmailTestMail.Polled polled = mail.polled(1);
+
+            assertEquals(Disposition.DEFERRED, processor.process(context(Map.of()), polled, now));
+            assertEquals(0, polled.fetches.get());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
         @DisplayName("routing: the plus-tag wins, then a subject word, then the default")
         void routing() throws Exception {
             String billing = "0b0b0b0b0b0b0b0b0b0b0b0b";

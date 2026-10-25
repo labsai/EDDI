@@ -40,9 +40,9 @@ import java.util.Optional;
  * <p>
  * <b>Inbound (Phase 2).</b> A trigger-mode mail is a {@link Kind#TRIGGER} row,
  * {@link Direction#IN}, keyed by its Message-ID, moving
- * {@code RECEIVED → TURN_SUBMITTED → DONE | REFUSED} through conditional
- * {@link #transition}s. While a row is {@code RECEIVED}, {@code nextAttemptAt}
- * is when a deferred mail may be tried again; while it is
+ * {@code RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED} through
+ * conditional {@link #transition}s. While a row is {@code RECEIVED},
+ * {@code nextAttemptAt} is when a deferred mail may be tried again; while it is
  * {@code TURN_SUBMITTED}, it is the deadline after which the turn counts as
  * stranded ({@link #findDue}). Replies add {@link Kind#REPLY}; relay webhooks
  * add single-use replay tokens.
@@ -91,7 +91,17 @@ public interface IEmailMessageLedger {
          * {@code nextAttemptAt}.
          */
         RECEIVED,
-        /** Inbound: the turn was claimed and submitted; waiting for it to finish. */
+        /**
+         * Inbound: claimed by one poll, nothing done outside EDDI yet — no conversation
+         * started, no turn submitted, the mail not marked. A claim past its deadline
+         * (the node died) goes back to {@link #RECEIVED} and the mail, still unmarked
+         * in the polled folder, is fetched again.
+         */
+        CLAIMED,
+        /**
+         * Inbound: past the point of no return — the conversation is being started or
+         * the turn submitted; waiting for it to finish.
+         */
         TURN_SUBMITTED,
         /** Inbound: the turn ran (or was resolved by the stranded sweep). Terminal. */
         DONE,
@@ -102,7 +112,7 @@ public interface IEmailMessageLedger {
         REFUSED;
 
         public boolean isTerminal() {
-            return this != PENDING && this != RECEIVED && this != TURN_SUBMITTED;
+            return this != PENDING && this != RECEIVED && this != CLAIMED && this != TURN_SUBMITTED;
         }
     }
 

@@ -28,6 +28,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Maintenance for the inbound side of the email channel, as a Quarkus
  * {@code @Scheduled(identity=…)} job (email plan §12).
  * <p>
+ * <b>Stale claims.</b> A {@code CLAIMED} row past its deadline did nothing
+ * outside EDDI and goes back to {@code RECEIVED}; its mail is still unmarked in
+ * the polled folder, so the next poll fetches and processes it
+ * ({@code outcome=requeued}).
+ * <p>
  * <b>Stranded turns.</b> An inbound row moves to {@code TURN_SUBMITTED} with a
  * deadline ({@code eddi.email.inbound.stranded-after}, default 30 min) and to
  * {@code DONE} from the turn's completion callback. A row still submitted past
@@ -39,11 +44,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * waiting for a human (AWAITING_HUMAN): the turn ran — {@code DONE}, the state
  * noted ({@code outcome=done|failed|awaiting_human});</li>
  * <li>still IN_PROGRESS: the deadline moves on, the turn is not touched;</li>
- * <li>no conversation recorded, or it is gone: the node died between the claim
- * and the turn. The mail is <b>not</b> run again — its raw bytes are not kept,
- * and running a turn twice could repeat tool side effects — and the row ends
- * {@code REFUSED(stranded)} ({@code outcome=lost}). This is the one window in
- * which a mail can be dropped; it is logged at WARN with the ledger id.</li>
+ * <li>no conversation recorded, or it is gone: the node died while starting the
+ * conversation, whose {@code CONVERSATION_START} turn may already have called
+ * tools. The mail is <b>not</b> run again — that could repeat side effects —
+ * and the row ends {@code REFUSED(stranded)} ({@code outcome=lost}), logged at
+ * WARN with the ledger id, and the integration's owners get the once-a-day
+ * {@code lost} notice.</li>
  * </ul>
  * Each resolution is a conditional transition, so several nodes running the
  * sweep at once resolve each row once.
@@ -63,17 +69,19 @@ public class EmailInboundSweeper {
     private final IConversationService conversationService;
     private final EmailIntegrationDirectory directory;
     private final EmailPollScheduler scheduler;
+    private final EmailOwnerNotifier ownerNotifier;
     private final EmailMetrics metrics;
     private final Duration strandedAfter;
 
     @Inject
     public EmailInboundSweeper(IEmailMessageLedger ledger, IConversationService conversationService, EmailIntegrationDirectory directory,
-            EmailPollScheduler scheduler, MeterRegistry meterRegistry,
+            EmailPollScheduler scheduler, EmailOwnerNotifier ownerNotifier, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.email.inbound.stranded-after", defaultValue = "30m") Duration strandedAfter) {
         this.ledger = ledger;
         this.conversationService = conversationService;
         this.directory = directory;
         this.scheduler = scheduler;
+        this.ownerNotifier = ownerNotifier;
         this.metrics = new EmailMetrics(meterRegistry);
         this.strandedAfter = strandedAfter == null || strandedAfter.isNegative() || strandedAfter.isZero() ? Duration.ofMinutes(30) : strandedAfter;
     }
@@ -95,10 +103,25 @@ public class EmailInboundSweeper {
     }
 
     /**
-     * Resolves submitted turns past their deadline. Returns how many were resolved.
+     * Gives stale claims back and resolves submitted turns past their deadline.
+     * Returns how many rows were changed.
      */
     int resolveStranded(Instant now) {
         int resolved = 0;
+        // A CLAIMED row did nothing outside EDDI. Its mail was not marked or moved
+        // (only a settled row is), and the poll cursor never passes an unsettled mail,
+        // so the mail is still in the polled folder at or above the cursor: giving the
+        // row back to RECEIVED is enough for the next poll to fetch and process it
+        // again. The sweep opens no IMAP session of its own — the mailbox belongs to
+        // whichever node holds its poll schedule's cluster claim.
+        for (LedgerEntry row : ledger.findDue(Kind.TRIGGER, State.CLAIMED, now, BATCH)) {
+            if (ledger.transition(row.id(), State.CLAIMED, State.RECEIVED, null, null, "requeued_stale_claim", false, now)) {
+                resolved++;
+                metrics.stranded("requeued");
+                LOGGER.infof("Email integration %s: inbound mail %s was claimed by a poll that never finished; the next poll processes it again",
+                        sanitize(row.integrationId()), row.id());
+            }
+        }
         for (LedgerEntry row : ledger.findDue(Kind.TRIGGER, State.TURN_SUBMITTED, now, BATCH)) {
             ConversationState state = null;
             boolean missing = row.conversationId() == null;
@@ -117,8 +140,10 @@ public class EmailInboundSweeper {
                 if (ledger.transition(row.id(), State.TURN_SUBMITTED, State.REFUSED, null, null, "stranded", false, now)) {
                     resolved++;
                     metrics.stranded("lost");
-                    LOGGER.warnf("Email integration %s: inbound mail %s was claimed but its turn never started (the node stopped in between); "
-                            + "it is not run again", sanitize(row.integrationId()), row.id());
+                    LOGGER.warnf("Email integration %s: inbound mail %s passed the point of no return but no conversation was recorded (the "
+                            + "node stopped while starting it); it may have partly run, so it is not run again", sanitize(row.integrationId()),
+                            row.id());
+                    notifyLost(row, now);
                 }
                 continue;
             }
@@ -137,6 +162,16 @@ public class EmailInboundSweeper {
             }
         }
         return resolved;
+    }
+
+    private void notifyLost(LedgerEntry row, Instant now) {
+        try {
+            var integration = directory.find(row.integrationId());
+            ownerNotifier.notifyOnce(row.integrationId(), integration.map(i -> i.configuration().getName()).orElse(null),
+                    integration.map(EmailIntegrationDirectory.EmailIntegration::settings).orElse(null), EmailOwnerNotifier.Reason.LOST, now);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not notify the owners of a lost mail: %s", e.getMessage());
+        }
     }
 
     /**

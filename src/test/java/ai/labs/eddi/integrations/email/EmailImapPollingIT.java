@@ -73,6 +73,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -268,6 +269,75 @@ class EmailImapPollingIT {
 
         assertTrue(turns.isEmpty(), "the turn already ran on the crashed node");
         assertTrue(inbox().get(0).getFlags().contains(MailTransport.PROCESSED_KEYWORD));
+    }
+
+    private LedgerEntry crashedRow(EmailTestMail mail, State state, String conversationId, Instant deadline) {
+        Instant now = Instant.now();
+        LedgerEntry row = new LedgerEntry("crashed-" + state, ID, Kind.TRIGGER, Direction.IN, mail.messageId(), conversationId, "imap:INBOX:1:1",
+                EmailInboundProcessor.inboundKey(ID, mail.messageId()), "alice@supplier.com", state, 1, deadline, null, null, null, now, now,
+                now.plus(Duration.ofDays(30)));
+        ledger.put(row);
+        return row;
+    }
+
+    @Test
+    @DisplayName("a crash after the claim, before any side effect: the stale claim is given back and the unmarked mail runs once")
+    void crashAfterClaimBeforeSideEffects() throws Exception {
+        poll();
+        EmailTestMail mail = EmailTestMail.mail();
+        deliver(mail);
+        crashedRow(mail, State.CLAIMED, null, Instant.now().minusSeconds(1));
+
+        poll();
+
+        assertEquals(1, turns.size(), "nothing had left EDDI, so the mail is processed again");
+        assertTrue(inbox().get(0).getFlags().contains(MailTransport.PROCESSED_KEYWORD));
+        poll();
+        assertEquals(1, turns.size(), "and only once");
+    }
+
+    @Test
+    @DisplayName("a live claim is left unmarked; once the sweep gives it back, the next poll fetches it from the mailbox and runs it")
+    void sweepRequeuesClaimForNextPoll() throws Exception {
+        poll();
+        EmailTestMail mail = EmailTestMail.mail();
+        deliver(mail);
+        Instant deadline = Instant.now().plusSeconds(600);
+        crashedRow(mail, State.CLAIMED, null, deadline);
+
+        poll();
+        assertTrue(turns.isEmpty());
+        assertFalse(inbox().get(0).getFlags().contains(MailTransport.PROCESSED_KEYWORD), "a claimed mail is never marked");
+
+        EmailOwnerNotifier notifier = mock(EmailOwnerNotifier.class);
+        var sweeper = new EmailInboundSweeper(ledger, conversations, directory, mock(EmailPollScheduler.class), notifier, new SimpleMeterRegistry(),
+                Duration.ofMinutes(30));
+        assertEquals(1, sweeper.resolveStranded(deadline.plusSeconds(1)));
+        poll();
+
+        assertEquals(1, turns.size());
+        assertTrue(inbox().get(0).getFlags().contains(MailTransport.PROCESSED_KEYWORD));
+    }
+
+    @Test
+    @DisplayName("a crash while starting the conversation (no conversation recorded): marked, never run again, REFUSED with a lost notice")
+    void crashWhileStartingConversation() throws Exception {
+        poll();
+        EmailTestMail mail = EmailTestMail.mail();
+        deliver(mail);
+        LedgerEntry row = crashedRow(mail, State.TURN_SUBMITTED, null, Instant.now().plusSeconds(600));
+
+        poll();
+        assertTrue(turns.isEmpty(), "it may have partly run: never again");
+        assertTrue(inbox().get(0).getFlags().contains(MailTransport.PROCESSED_KEYWORD));
+
+        EmailOwnerNotifier notifier = mock(EmailOwnerNotifier.class);
+        var sweeper = new EmailInboundSweeper(ledger, conversations, directory, mock(EmailPollScheduler.class), notifier, new SimpleMeterRegistry(),
+                Duration.ofMinutes(30));
+        sweeper.resolveStranded(Instant.now().plusSeconds(601));
+
+        assertEquals(State.REFUSED, ledger.findById(row.id()).orElseThrow().state());
+        verify(notifier).notifyOnce(eq(ID), any(), any(), eq(EmailOwnerNotifier.Reason.LOST), any());
     }
 
     @Test

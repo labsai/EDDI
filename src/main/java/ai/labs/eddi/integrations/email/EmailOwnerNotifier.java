@@ -68,7 +68,9 @@ public class EmailOwnerNotifier {
     public enum Reason {
         BUDGET("budget", "its daily cost budget (dailyCostBudgetUsd) is used up; new mail waits until the next UTC day"), THROTTLED("throttled",
                 "a sender reached maxTurnsPerSenderPerDay; that sender's further mail waits until the next UTC day"), QUOTA("quota",
-                        "the tenant quota refused a new conversation or turn; mail waits for the next poll");
+                        "the tenant quota refused a new conversation or turn; mail waits for the next poll"), LOST("lost",
+                                "a node stopped while it was starting the turn of a mail, so that mail may have partly run and is not run again; "
+                                        + "check the email ledger rows in state REFUSED with reason stranded");
 
         private final String id;
         private final String text;

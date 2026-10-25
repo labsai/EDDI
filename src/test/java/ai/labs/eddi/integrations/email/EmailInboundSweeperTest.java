@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +39,7 @@ class EmailInboundSweeperTest {
     IConversationService conversations;
     EmailIntegrationDirectory directory;
     EmailPollScheduler scheduler;
+    EmailOwnerNotifier ownerNotifier;
     EmailInboundSweeper sweeper;
     Instant now = Instant.now();
 
@@ -47,12 +49,18 @@ class EmailInboundSweeperTest {
         conversations = mock(IConversationService.class);
         directory = mock(EmailIntegrationDirectory.class);
         scheduler = mock(EmailPollScheduler.class);
-        sweeper = new EmailInboundSweeper(ledger, conversations, directory, scheduler, new SimpleMeterRegistry(), Duration.ofMinutes(30));
+        ownerNotifier = mock(EmailOwnerNotifier.class);
+        sweeper = new EmailInboundSweeper(ledger, conversations, directory, scheduler, ownerNotifier, new SimpleMeterRegistry(),
+                Duration.ofMinutes(30));
     }
 
     private LedgerEntry submitted(String id, String conversationId, Instant deadline) {
+        return row(id, State.TURN_SUBMITTED, conversationId, deadline);
+    }
+
+    private LedgerEntry row(String id, State state, String conversationId, Instant deadline) {
         var row = new LedgerEntry(id, "int-1", Kind.TRIGGER, Direction.IN, "<" + id + "@x.com>", conversationId, "imap:INBOX:1:1", "in:" + id,
-                "a@x.com", State.TURN_SUBMITTED, 1, deadline, null, null, null, now, now, now.plus(Duration.ofDays(30)));
+                "a@x.com", state, 1, deadline, null, null, null, now, now, now.plus(Duration.ofDays(30)));
         ledger.put(row);
         return row;
     }
@@ -83,6 +91,22 @@ class EmailInboundSweeperTest {
         assertEquals(State.REFUSED, ledger.findById("lost").orElseThrow().state());
         assertEquals("stranded", ledger.findById("gone").orElseThrow().lastError());
         assertEquals(State.TURN_SUBMITTED, ledger.findById("fresh").orElseThrow().state(), "not past its deadline");
+        verify(ownerNotifier, times(2)).notifyOnce(eq("int-1"), any(), any(), eq(EmailOwnerNotifier.Reason.LOST), any());
+    }
+
+    @Test
+    @DisplayName("a stale claim (nothing done outside EDDI) is given back to RECEIVED for the next poll; a live one is left alone")
+    void requeuesStaleClaims() {
+        row("stale", State.CLAIMED, null, now.minusSeconds(1));
+        row("live", State.CLAIMED, null, now.plusSeconds(600));
+
+        assertEquals(1, sweeper.resolveStranded(now));
+
+        var requeued = ledger.findById("stale").orElseThrow();
+        assertEquals(State.RECEIVED, requeued.state());
+        assertEquals(null, requeued.nextAttemptAt(), "due at once");
+        assertEquals(State.CLAIMED, ledger.findById("live").orElseThrow().state());
+        verify(ownerNotifier, never()).notifyOnce(any(), any(), any(), any(), any());
     }
 
     @Test

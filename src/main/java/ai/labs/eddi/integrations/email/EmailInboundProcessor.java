@@ -97,10 +97,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code email:<id>}; unauthenticated (only with
  * {@code requireAuthentication: false}) → a one-off {@code email-anon:} id with
  * no memory, never correlated with anything.</li>
- * <li>The claim {@code RECEIVED → TURN_SUBMITTED} (conditional), then the
- * conversation and the turn. A crash after the claim never runs the turn a
- * second time: the row is no longer {@code RECEIVED}, so a re-poll only marks
- * the mail, and the stranded sweep resolves the row
+ * <li>The claim {@code RECEIVED → CLAIMED} (conditional). Nothing has left EDDI
+ * yet, so a claim whose node died is given back after its deadline and the mail
+ * — still unmarked in the polled folder, the cursor held before it — is fetched
+ * and processed again. Then the point of no return
+ * {@code CLAIMED → TURN_SUBMITTED}, immediately before the conversation is
+ * started (its {@code CONVERSATION_START} turn may call tools) or the turn is
+ * submitted. A crash after that never runs the mail a second time: a re-poll
+ * only marks it, and the stranded sweep resolves the row
  * ({@link EmailInboundSweeper}).</li>
  * </ol>
  * <b>Mail is data.</b> The turn's input is the author's {@code inputTemplate}
@@ -203,7 +207,7 @@ public class EmailInboundProcessor {
         if (envelopeId != null) {
             Optional<LedgerEntry> existing = ledger.findByMessage(id, Direction.IN, envelopeId);
             if (existing.isPresent()) {
-                Disposition known = dispositionOf(existing.get(), now);
+                Disposition known = requeueOrDisposition(existing.get(), now);
                 if (known != null) {
                     if (known == Disposition.SETTLED) {
                         count(ctx, EmailMetrics.DUPLICATE);
@@ -252,14 +256,18 @@ public class EmailInboundProcessor {
                 count(ctx, EmailMetrics.DEFERRED);
                 return Disposition.DEFERRED;
             }
-            Disposition known = dispositionOf(existing.get(), now);
+            Disposition known = requeueOrDisposition(existing.get(), now);
             if (known != null) {
                 if (known == Disposition.SETTLED) {
                     count(ctx, EmailMetrics.DUPLICATE);
                 }
                 return known;
             }
-            row = existing.get();
+            row = ledger.findById(existing.get().id()).orElse(existing.get());
+            if (row.state() != State.RECEIVED) {
+                count(ctx, EmailMetrics.DEFERRED);
+                return Disposition.DEFERRED;
+            }
         }
 
         // 5. Who sent it — or rather, whether the From can be believed.
@@ -337,14 +345,22 @@ public class EmailInboundProcessor {
             }
         }
 
-        // 10. The claim. From here on the turn runs at most once.
+        // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
+        // back and the (unmarked) mail processed again.
         Instant deadline = now.plus(strandedAfter);
-        if (!ledger.transition(row.id(), State.RECEIVED, State.TURN_SUBMITTED, null, deadline, null, true, now)) {
-            count(ctx, EmailMetrics.DUPLICATE);
-            return Disposition.SETTLED;
+        if (!ledger.transition(row.id(), State.RECEIVED, State.CLAIMED, null, deadline, null, true, now)) {
+            count(ctx, EmailMetrics.DEFERRED);
+            return Disposition.DEFERRED;
         }
         int attempt = row.attempts() + 1;
         String input = renderInput(settings.inputTemplate(), mailData(parsed, List.of(), true));
+        // 11. The point of no return, immediately before the first side effect (a
+        // conversation's CONVERSATION_START turn, a group discussion, the turn). From
+        // here on the mail runs at most once.
+        if (!ledger.transition(row.id(), State.CLAIMED, State.TURN_SUBMITTED, null, deadline, null, false, now)) {
+            count(ctx, EmailMetrics.DEFERRED);
+            return Disposition.DEFERRED;
+        }
         try {
             if (target.getType() == ChannelTarget.TargetType.GROUP) {
                 // A group takes a question, not a context map: the rendered input is all
@@ -429,12 +445,31 @@ public class EmailInboundProcessor {
      * deferred (not due yet), or null when it is due and must be processed now.
      */
     static Disposition dispositionOf(LedgerEntry row, Instant now) {
-        if (row.state() == State.RECEIVED) {
+        if (row.state() == State.RECEIVED || row.state() == State.CLAIMED) {
+            // A live claim belongs to the poll that holds it: leave the mail alone (and
+            // unmarked). A claim past its deadline is due again — the caller requeues it.
             return row.nextAttemptAt() != null && row.nextAttemptAt().isAfter(now) ? Disposition.DEFERRED : null;
         }
         // TURN_SUBMITTED, DONE, REFUSED: the turn ran, runs, or was decided against —
         // never again. (TURN_SUBMITTED after a crash is the stranded sweep's.)
         return Disposition.SETTLED;
+    }
+
+    /**
+     * {@link #dispositionOf}, after giving a stale claim back: a {@code CLAIMED}
+     * row past its deadline did nothing outside EDDI, so it returns to
+     * {@code RECEIVED} and this mail is processed again now.
+     */
+    private Disposition requeueOrDisposition(LedgerEntry row, Instant now) {
+        Disposition known = dispositionOf(row, now);
+        if (known == null && row.state() == State.CLAIMED
+                && ledger.transition(row.id(), State.CLAIMED, State.RECEIVED, null, null, "requeued_stale_claim", false, now)) {
+            metrics.stranded("requeued");
+            LOGGER.infof("Email integration %s: mail %s was claimed by a poll that never finished; processing it again",
+                    sanitize(row.integrationId()),
+                    row.id());
+        }
+        return known;
     }
 
     private String startConversation(String agentId, String userId, String integrationId, String intent) throws Exception {
