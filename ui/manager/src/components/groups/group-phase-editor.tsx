@@ -343,7 +343,17 @@ export function GroupPhaseEditor({
                       const mode = e.target.value as ConvergenceMode;
                       // Switching back to SIMILARITY raises a VERDICT minRepeats of 1
                       // to that mode's floor — normalizeConvergence applies it.
-                      patchConvergence(idx, { mode });
+                      // Switching to VERDICT lowers a minRepeats still at the
+                      // SIMILARITY default to VERDICT's floor, so the moderator reviews
+                      // the first repeat as the mode's note says; a larger value the
+                      // admin chose is kept.
+                      const lowerDefault =
+                        mode === "VERDICT" &&
+                        (convergence.minRepeats ?? CONVERGENCE_MIN_REPEATS_FLOOR) === CONVERGENCE_MIN_REPEATS_FLOOR;
+                      patchConvergence(
+                        idx,
+                        lowerDefault ? { mode, minRepeats: convergenceMinRepeatsFloor("VERDICT") } : { mode },
+                      );
                     }}
                     className={inputCls}
                     data-testid={`phase-convergence-mode-${idx}`}

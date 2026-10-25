@@ -384,5 +384,36 @@ describe("GroupPhaseEditor", () => {
       expect(convergence.mode).toBe("SIMILARITY");
       expect(convergence.minRepeats).toBe(2);
     });
+
+    it("switching to VERDICT lowers the SIMILARITY default to 1 without touching the field", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "VERDICT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const convergence = savedConfig().phases![0]!.convergence!;
+      expect(convergence.mode).toBe("VERDICT");
+      expect(convergence.minRepeats).toBe(1);
+    });
+
+    it("switching to VERDICT keeps a minRepeats the admin raised above the default", () => {
+      const config = makeConfig({
+        phases: [
+          phase("Discussion", {
+            repeats: 4,
+            convergence: { enabled: true, minRepeats: 3, threshold: 0.8, judge: "MODERATOR", mode: "SIMILARITY" },
+          }),
+        ],
+      });
+      renderWithProviders(
+        <GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "VERDICT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(3);
+    });
   });
 });
