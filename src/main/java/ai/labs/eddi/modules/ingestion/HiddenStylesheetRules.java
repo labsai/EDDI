@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import org.jsoup.nodes.Comment;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
@@ -13,6 +14,7 @@ import org.jsoup.select.NodeTraversor;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -32,10 +34,12 @@ import java.util.Set;
  * <li><b>Never a bypass.</b> Nothing is truncated or capped in a way that would
  * let a rule placed "after the limit" go unread. Where exactness would cost
  * more than linear time, the match <em>over</em>-approximates: a rule is
- * matched by its rightmost compound selector alone (ancestors, attribute
- * filters and structural pseudo-classes ignored), and an element that more than
- * {@link #MAX_CANDIDATES} rules could apply to is treated as hidden. Both can
- * only remove more than a browser would hide, never less.</li>
+ * matched by its rightmost compound selector alone (ancestors ignored;
+ * attribute filters by the attribute's presence; {@code :empty}, {@code :root}
+ * and the {@code -child} positions exactly, other pseudo-classes ignored), and
+ * an element that more than {@link #MAX_CANDIDATES} rules could apply to is
+ * treated as hidden. Both can only remove more than a browser would hide, never
+ * less.</li>
  * </ul>
  * Rules inside {@code @media} and other at-blocks are skipped (they apply only
  * in some viewports, and responsive mail hides one of two copies of the same
@@ -60,21 +64,88 @@ final class HiddenStylesheetRules {
     }
 
     /**
-     * One compound selector: an optional tag, an optional id, and classes. All
-     * lower-case.
+     * Where an element sits among its parent's element children: {@code index}
+     * counts from 1, {@code total} is the number of element siblings including
+     * itself. Counted during the one traversal, so evaluating it is O(1).
      */
-    record Compound(String tag, String id, Set<String> classes) {
-        boolean matches(Element element, Set<String> ownClasses) {
+    record Position(int index, int total) {
+    }
+
+    /**
+     * A structural pseudo-class this reader evaluates exactly, all as {@code an+b}
+     * positions: {@code :first-child} is {@code NTH 0 1}, {@code :last-child}
+     * {@code NTH_LAST 0 1}.
+     */
+    record Structural(Kind kind, int a, int b) {
+        enum Kind {
+            NTH, NTH_LAST, EMPTY, ROOT
+        }
+
+        boolean matches(Element element, Position position) {
+            return switch (kind) {
+                case NTH -> isNth(position.index());
+                case NTH_LAST -> isNth(position.total() - position.index() + 1);
+                case EMPTY -> isEmpty(element);
+                case ROOT -> element.parent() == null || element.parent() instanceof Document;
+            };
+        }
+
+        private boolean isNth(int index) {
+            if (a == 0) {
+                return index == b;
+            }
+            int offset = index - b;
+            return offset % a == 0 && offset / a >= 0;
+        }
+
+        /** CSS {@code :empty}: no child nodes but comments. */
+        private static boolean isEmpty(Element element) {
+            for (Node child : element.childNodes()) {
+                if (!(child instanceof Comment)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    /**
+     * One compound selector: an optional tag, an optional id, classes, the names of
+     * the attributes its attribute filters test, and the structural pseudo-classes
+     * this reader evaluates. All lower-case.
+     * <p>
+     * An attribute filter is matched by the attribute's presence alone (its value
+     * test is ignored, which widens the match). Pseudo-classes outside
+     * {@link Structural} are ignored, as before. Without the presence test, a reset
+     * rule such as {@code [hidden]{display:none}} — common in mail templates —
+     * reduced to "every element", matched {@code <body>} and emptied the mail.
+     */
+    record Compound(String tag, String id, Set<String> classes, Set<String> attributes, List<Structural> structural) {
+        Compound(String tag, String id, Set<String> classes) {
+            this(tag, id, classes, Set.of(), List.of());
+        }
+
+        boolean matches(Element element, Set<String> ownClasses, Position position) {
             if (tag != null && !tag.equals(element.normalName())) {
                 return false;
             }
             if (id != null && !id.equals(element.id().toLowerCase(Locale.ROOT))) {
                 return false;
             }
-            if (classes.isEmpty()) {
-                return true;
+            if (!classes.isEmpty() && !ownClasses.containsAll(classes)) {
+                return false;
             }
-            return ownClasses.containsAll(classes);
+            for (String attribute : attributes) {
+                if (!element.hasAttr(attribute)) {
+                    return false;
+                }
+            }
+            for (Structural pseudo : structural) {
+                if (!pseudo.matches(element, position)) {
+                    return false;
+                }
+            }
+            return true;
         }
     }
 
@@ -101,7 +172,7 @@ final class HiddenStylesheetRules {
             return byId.isEmpty() && byClass.isEmpty() && byTag.isEmpty() && universal.isEmpty();
         }
 
-        boolean hides(Element element) {
+        boolean hides(Element element, Position position) {
             List<List<Compound>> candidates = new ArrayList<>();
             int count = 0;
             Set<String> ownClasses = new HashSet<>();
@@ -125,7 +196,7 @@ final class HiddenStylesheetRules {
             }
             for (List<Compound> list : candidates) {
                 for (Compound compound : list) {
-                    if (compound.matches(element, ownClasses)) {
+                    if (compound.matches(element, ownClasses, position)) {
                         return true;
                     }
                 }
@@ -152,12 +223,19 @@ final class HiddenStylesheetRules {
             return 0;
         }
         List<Element> hidden = new ArrayList<>();
+        // Element children seen so far, per parent: the position of each element in
+        // O(1), in document order. A hidden element is counted too, so its later
+        // siblings keep their real positions.
+        Map<Element, int[]> seen = new IdentityHashMap<>();
         NodeTraversor.filter(new NodeFilter() {
             @Override
             public FilterResult head(Node node, int depth) {
-                if (node instanceof Element element && index.hides(element)) {
-                    hidden.add(element);
-                    return FilterResult.SKIP_ENTIRELY;
+                if (node instanceof Element element) {
+                    Position position = position(element, seen);
+                    if (index.hides(element, position)) {
+                        hidden.add(element);
+                        return FilterResult.SKIP_ENTIRELY;
+                    }
                 }
                 return FilterResult.CONTINUE;
             }
@@ -169,6 +247,18 @@ final class HiddenStylesheetRules {
         }, doc.body() == null ? doc : doc.body());
         hidden.forEach(Element::remove);
         return hidden.size();
+    }
+
+    private static Position position(Element element, Map<Element, int[]> seen) {
+        Element parent = element.parent();
+        if (parent == null) {
+            return new Position(1, 1);
+        }
+        // The first child of a parent seen here is normally its first element child
+        // (an O(1) lookup); only the traversal root may start mid-list.
+        int[] count = seen.computeIfAbsent(parent, p -> new int[]{element.elementSiblingIndex()});
+        count[0]++;
+        return new Position(count[0], parent.childrenSize());
     }
 
     /**
@@ -364,6 +454,8 @@ final class HiddenStylesheetRules {
         String tag = null;
         String id = null;
         Set<String> classes = new LinkedHashSet<>();
+        Set<String> attributes = new LinkedHashSet<>();
+        List<Structural> structural = new ArrayList<>();
         int i = 0;
         if (compound.charAt(0) == '*') {
             i = 1;
@@ -387,8 +479,14 @@ final class HiddenStylesheetRules {
                 }
                 i = end[0];
             } else if (c == '[') {
-                // An attribute filter only narrows the match; ignoring it widens it.
-                i = skipBalanced(compound, i, '[', ']');
+                // Matched by the attribute's presence; the value test is ignored,
+                // which only widens the match.
+                int close = skipBalanced(compound, i, '[', ']');
+                String attribute = attributeName(compound.substring(i + 1, Math.max(i + 1, close - 1)));
+                if (attribute != null) {
+                    attributes.add(attribute);
+                }
+                i = close;
             } else if (c == ':') {
                 if (i + 1 < compound.length() && compound.charAt(i + 1) == ':') {
                     return null;
@@ -399,15 +497,87 @@ final class HiddenStylesheetRules {
                     return null;
                 }
                 i = end[0];
+                String argument = null;
                 if (i < compound.length() && compound.charAt(i) == '(') {
-                    i = skipBalanced(compound, i, '(', ')');
+                    int close = skipBalanced(compound, i, '(', ')');
+                    argument = compound.substring(i + 1, Math.max(i + 1, close - 1));
+                    i = close;
                 }
+                // Anything else is ignored: that widens the match, never narrows it.
+                structural.addAll(structural(pseudo, argument));
             } else {
                 // Something this reader does not know: match more, not less.
                 i++;
             }
         }
-        return new Compound(tag, id, Set.copyOf(classes));
+        return new Compound(tag, id, Set.copyOf(classes), Set.copyOf(attributes), List.copyOf(structural));
+    }
+
+    /** The attribute name of an attribute filter's contents, lower-cased. */
+    private static String attributeName(String filter) {
+        int start = 0;
+        while (start < filter.length() && Character.isWhitespace(filter.charAt(start))) {
+            start++;
+        }
+        int end = start;
+        while (end < filter.length() && "=~|^$*]".indexOf(filter.charAt(end)) < 0 && !Character.isWhitespace(filter.charAt(end))) {
+            end++;
+        }
+        return end > start ? filter.substring(start, end).toLowerCase(Locale.ROOT) : null;
+    }
+
+    /**
+     * The structural pseudo-classes evaluated exactly; an unknown one, or an
+     * {@code an+b} that does not parse (such as {@code 2 of .x}), yields nothing
+     * and is ignored.
+     */
+    private static List<Structural> structural(String pseudo, String argument) {
+        return switch (pseudo) {
+            case "empty" -> List.of(new Structural(Structural.Kind.EMPTY, 0, 0));
+            case "root" -> List.of(new Structural(Structural.Kind.ROOT, 0, 0));
+            case "first-child" -> List.of(new Structural(Structural.Kind.NTH, 0, 1));
+            case "last-child" -> List.of(new Structural(Structural.Kind.NTH_LAST, 0, 1));
+            case "only-child" -> List.of(new Structural(Structural.Kind.NTH, 0, 1), new Structural(Structural.Kind.NTH_LAST, 0, 1));
+            case "nth-child" -> nth(Structural.Kind.NTH, argument);
+            case "nth-last-child" -> nth(Structural.Kind.NTH_LAST, argument);
+            default -> List.of();
+        };
+    }
+
+    /**
+     * {@code odd}, {@code even}, {@code b}, {@code an}, {@code an+b}, {@code -n+b}.
+     */
+    static List<Structural> nth(Structural.Kind kind, String argument) {
+        if (argument == null) {
+            return List.of();
+        }
+        String expression = argument.replace(" ", "").toLowerCase(Locale.ROOT);
+        if ("odd".equals(expression)) {
+            return List.of(new Structural(kind, 2, 1));
+        }
+        if ("even".equals(expression)) {
+            return List.of(new Structural(kind, 2, 0));
+        }
+        if (expression.isEmpty() || expression.length() > 20) {
+            return List.of();
+        }
+        try {
+            int n = expression.indexOf('n');
+            if (n < 0) {
+                return List.of(new Structural(kind, 0, Integer.parseInt(expression)));
+            }
+            String coefficient = expression.substring(0, n);
+            int a = switch (coefficient) {
+                case "", "+" -> 1;
+                case "-" -> -1;
+                default -> Integer.parseInt(coefficient);
+            };
+            String rest = expression.substring(n + 1);
+            int b = rest.isEmpty() ? 0 : Integer.parseInt(rest.startsWith("+") ? rest.substring(1) : rest);
+            return List.of(new Structural(kind, a, b));
+        } catch (NumberFormatException e) {
+            return List.of();
+        }
     }
 
     private static boolean isNameStart(char c) {
