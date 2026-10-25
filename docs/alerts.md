@@ -346,11 +346,12 @@ events and the author of rules.
 Alert work waits in a queue, so content captured before an erasure can reach the
 store after it. The erasure's first step therefore puts up a short-lived **fence**
 for the user on every node (through the same cluster stop broadcast the conversation
-service uses): an `OUTPUT_MATCH` value or rating comment captured before the erasure
-started is not stored — the alert still fires, without it — and an event written
-while the fence went up has its value or excerpt blanked before it is delivered. A
-queued rating alert also reads the rating again and is dropped when the rating is
-gone or has changed. A fence lasts 15 minutes, far longer than the queue takes to
+service uses). An `OUTPUT_MATCH` value captured before the erasure started is not
+stored — that alert still fires, without the value. A rating alert for a rating
+given before the erasure started is dropped altogether: no event is written or
+sent. A queued rating alert also reads the rating again and is dropped when the
+rating is gone or has changed. An event written while the fence went up has its
+value or excerpt blanked before it is delivered. A fence lasts 15 minutes, far longer than the queue takes to
 drain; it only ever holds back content captured *before* the erasure, so a later
 conversation of a reused id is not affected.
 
