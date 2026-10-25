@@ -60,7 +60,8 @@ function mockBackend({
   state = "READY",
   stored = { conversation: null, steps: [] } as unknown,
   rateStatus = 200,
-}: { rating?: unknown; state?: string; stored?: unknown; rateStatus?: number } = {}) {
+  snapshot,
+}: { rating?: unknown; state?: string; stored?: unknown; rateStatus?: number; snapshot?: unknown } = {}) {
   const calls: Call[] = [];
   globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const href = String(url);
@@ -79,6 +80,7 @@ function mockBackend({
       }
       return new Response(method === "DELETE" ? null : "{}", { status: method === "DELETE" ? 204 : 200 });
     }
+    if (snapshot) return new Response(JSON.stringify(snapshot), { status: 200 });
     return new Response(
       JSON.stringify({
         conversationId: "conv-1",
@@ -149,6 +151,33 @@ describe("ChatWidget ratings", () => {
     expect(await screen.findByTestId("rating-card")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("rating-card-close"));
     expect(screen.queryByTestId("rating-card")).toBeNull();
+  });
+
+  it("rebuilds from the steps when a full read's lists disagree, so the last reply rates its own step", async () => {
+    const step = (data: Array<{ key: string; value: unknown }>) => ({ conversationStep: data, timestamp: "2026-10-25T10:00:00Z" });
+    const calls = mockBackend({
+      rating: { ...RATING, conversationRating: false },
+      snapshot: {
+        conversationId: "conv-1",
+        conversationState: "READY",
+        // Two outputs against three steps: their positions cannot be trusted.
+        conversationOutputs: [
+          { output: [{ type: "text", text: "Hello, how can I help?" }], quickReplies: [] },
+          { output: [{ type: "text", text: "Second answer" }], quickReplies: [] },
+        ],
+        conversationSteps: [
+          step([{ key: "output:text:P:1", value: ["Hello, how can I help?"] }]),
+          step([{ key: "input:initial", value: "first question" }, { key: "output:text:P:1", value: ["First answer"] }]),
+          step([{ key: "input:initial", value: "second question" }, { key: "output:text:P:1", value: ["Second answer"] }]),
+        ],
+      },
+    });
+    renderWidget();
+    await screen.findByText("Second answer");
+    const thumbs = await screen.findAllByTestId("step-rating-up");
+    fireEvent.click(thumbs[thumbs.length - 1]);
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    expect(calls.find((c) => c.method === "PUT")?.url).toContain("/agents/conv-1/steps/2/rating");
   });
 
   it("restores the stored rating of the greeting's step", async () => {
