@@ -120,6 +120,16 @@ Provider data residency: [PRIVACY.md](../PRIVACY.md); provider BAAs:
 
 ---
 
+## Other outbound recipients
+
+Besides the LLM provider, these leave the deployment as a side effect of a feature, not of a conversation's content:
+
+| Recipient | When | What it receives | Notes |
+|---|---|---|---|
+| **DNS resolver** (`eddi.email.dns.servers`, else the system's resolvers) | Mail sender authentication checks a received message ([security.md](security.md#mail-sender-authentication--dkim-and-dmarc)) | TXT queries naming the signing domain and selector of each DKIM signature (`<selector>._domainkey.<d>`) and the `From` domain or its organisational domain (`_dmarc.<domain>`) — so the resolver, and the authoritative servers it asks, learn which domains mail arrived from and when. Never an address, a local part, a subject or a body | Answers are cached (TTL-honouring, capped at `eddi.email.dns.cache-max-ttl`), which also limits how often a sender's domain is queried. Queries are plain DNS, unencrypted; point `eddi.email.dns.servers` at a resolver inside the deployment's network to keep them there |
+
+---
+
 ## Data Store Inventory
 
 | Data Store | Contains PII | Encryption | Retention | On GDPR erasure | Regulatory Notes |
