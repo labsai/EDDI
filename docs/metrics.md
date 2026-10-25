@@ -699,11 +699,12 @@ mostly `none` comes from senders that do not sign (only an aligned pass is authe
 tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key lookup that fails temporarily or runs
 out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no other signature passes (if one
 does, the verdict is `pass_unaligned` instead). Such a verdict is marked temporary and the mail is retried, so a `fail`
-rise that comes with a rise in `tempfail` or `budget_exhausted` points at the resolver, not at the senders. No tag
-carries a domain or an address. For
+rise that comes with a rise in `tempfail` points at DNS, and one that comes with `budget_exhausted` at the lookup
+limit, rather than at the senders. No tag carries a domain or an address. For
 `eddi_email_dns_lookups_total`, `cached=true` is an answer served from the cache (no query sent); a sustained
-`tempfail` means the resolver (`eddi.email.dns.servers`) is unreachable, and `budget_exhausted` that messages carry
-more signatures than `eddi.email.dns.max-lookups-per-message` allows.
+`tempfail` means TXT lookups are failing temporarily, of which an unreachable resolver (`eddi.email.dns.servers`) is
+one possible cause; `budget_exhausted` is a local limit, not a DNS failure: a message needed more DKIM key and DMARC
+record lookups than `eddi.email.dns.max-lookups-per-message` allows, and the lookups past it were not sent.
 
 **Email channel** ([email-integration.md](email-integration.md#metrics)):
 
