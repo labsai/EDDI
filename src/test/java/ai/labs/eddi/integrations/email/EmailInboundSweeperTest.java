@@ -6,13 +6,16 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
+import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,8 +23,10 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -120,5 +125,83 @@ class EmailInboundSweeperTest {
 
         assertEquals(1, sweeper.ensureSchedules());
         verify(scheduler, never()).ensure(eq("bad"), any());
+    }
+
+    private static SimpleConversationMemorySnapshot conversation(String... mailIds) {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        var start = new ConversationOutput();
+        start.put("output", List.of("Hello."));
+        snapshot.getConversationOutputs().add(start);
+        for (String mailId : mailIds) {
+            var step = new ConversationOutput();
+            step.put("output", List.of("An answer."));
+            step.put("context", new HashMap<>(Map.of("mail", Map.of("messageId", mailId))));
+            snapshot.getConversationOutputs().add(step);
+        }
+        return snapshot;
+    }
+
+    @Test
+    @DisplayName("a conversation that was started but never ran the mail's turn: the mail is handed back once, keeping its conversation")
+    void resubmitsMissingTurnOnce() throws Exception {
+        submitted("lost-turn", "c-started", now.minusSeconds(1));
+        submitted("ran", "c-ran", now.minusSeconds(1));
+        submitted("ended", "c-ended", now.minusSeconds(1));
+        when(conversations.getConversationState("c-started")).thenReturn(ConversationState.READY);
+        when(conversations.getConversationState("c-ran")).thenReturn(ConversationState.READY);
+        when(conversations.getConversationState("c-ended")).thenReturn(ConversationState.ENDED);
+        when(conversations.readConversation("c-started", true, false, List.of())).thenReturn(conversation());
+        when(conversations.readConversation("c-ran", true, false, List.of())).thenReturn(conversation("<ran@x.com>"));
+        when(conversations.readConversation("c-ended", true, false, List.of())).thenReturn(conversation());
+
+        assertEquals(3, sweeper.resolveStranded(now));
+
+        var handedBack = ledger.findById("lost-turn").orElseThrow();
+        assertEquals(State.RECEIVED, handedBack.state());
+        assertEquals("c-started", handedBack.conversationId(), "it runs in the conversation that was started for it");
+        assertEquals(EmailInboundSweeper.RESUBMIT, handedBack.lastError());
+        assertEquals(State.DONE, ledger.findById("ran").orElseThrow().state(), "its step is there: it ran");
+        assertEquals(State.DONE, ledger.findById("ended").orElseThrow().state(), "an ended conversation is not resubmitted into");
+        assertEquals(0, sweeper.resolveStranded(now.plusSeconds(1)), "a second sweep finds nothing to do");
+        verify(ownerNotifier, never()).notifyOnce(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("conversation mode: a stranded mail whose step is there gets its reply rebuilt before the row is closed")
+    void rebuildsReply() throws Exception {
+        submitted("answered", "c-answered", now.minusSeconds(1));
+        when(conversations.getConversationState("c-answered")).thenReturn(ConversationState.READY);
+        var snapshot = conversation("<answered@x.com>");
+        when(conversations.readConversation("c-answered", true, false, List.of())).thenReturn(snapshot);
+        var configuration = EmailInboundProcessorTest.integration(Map.of("mode", "conversation", "smtpHost", "smtp.contoso.com"));
+        var settings = EmailChannelSettings.from(configuration.getPlatformConfig());
+        when(directory.find("int-1")).thenReturn(Optional.of(new EmailIntegration("int-1", configuration, settings)));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.ensureFor(any(), any(), any(), any())).thenReturn(true);
+        sweeper.replies = replies;
+
+        sweeper.resolveStranded(now);
+
+        verify(replies).ensureFor(eq(settings), any(), eq(snapshot), eq(now));
+        assertEquals(State.DONE, ledger.findById("answered").orElseThrow().state());
+    }
+
+    @Test
+    @DisplayName("trigger mode: no reply is ever rebuilt")
+    void triggerModeRebuildsNothing() throws Exception {
+        submitted("answered", "c-answered", now.minusSeconds(1));
+        when(conversations.getConversationState("c-answered")).thenReturn(ConversationState.READY);
+        when(conversations.readConversation("c-answered", true, false, List.of())).thenReturn(conversation("<answered@x.com>"));
+        var configuration = EmailInboundProcessorTest.integration(Map.of());
+        when(directory.find("int-1"))
+                .thenReturn(Optional.of(new EmailIntegration("int-1", configuration, EmailChannelSettings.from(configuration.getPlatformConfig()))));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        sweeper.replies = replies;
+
+        sweeper.resolveStranded(now);
+
+        verify(replies, never()).ensureFor(any(), any(), any(), any());
+        assertEquals(State.DONE, ledger.findById("answered").orElseThrow().state());
     }
 }

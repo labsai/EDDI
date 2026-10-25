@@ -19,7 +19,7 @@ import java.util.Optional;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Keeps one poll schedule per trigger-mode email integration: a
+ * Keeps one poll schedule per email integration (both modes poll): a
  * {@code HEARTBEAT} every {@code pollSeconds}, named
  * {@code email-poll:<integrationId>} and tagged with
  * {@link EmailPollSchedules#metadata}. Created and replaced when the
@@ -54,7 +54,7 @@ public class EmailPollScheduler {
     public void sync(String integrationId, EmailChannelSettings settings) throws IResourceStore.ResourceStoreException {
         String name = EmailPollSchedules.scheduleName(integrationId);
         scheduleStore.deleteSchedulesByName(name);
-        if (settings == null || settings.mode() != EmailChannelSettings.Mode.TRIGGER) {
+        if (settings == null || settings.mode() == null) {
             return;
         }
         scheduleStore.createSchedule(build(integrationId, settings));

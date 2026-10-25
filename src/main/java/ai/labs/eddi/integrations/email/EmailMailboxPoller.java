@@ -131,7 +131,7 @@ public class EmailMailboxPoller {
         EmailIntegration integration = found.get();
         List<String> errors = EmailChannelSettings.validate(integration.configuration().getPlatformConfig());
         EmailChannelSettings settings = integration.settings();
-        if (!errors.isEmpty() || settings.mode() != EmailChannelSettings.Mode.TRIGGER) {
+        if (!errors.isEmpty() || settings.mode() == null) {
             LOGGER.errorf("Email integration %s is not polled: its configuration does not validate: %s", sanitize(integrationId),
                     sanitize(String.join(" ", errors)));
             return new PollReport(true, "The integration's configuration does not validate.");
@@ -148,7 +148,7 @@ public class EmailMailboxPoller {
             return fail(integrationId, settings, new MailboxException(MailboxException.Category.CONNECTION, e.getClass().getSimpleName(), e),
                     started);
         } finally {
-            metrics.pollDuration(integrationId, settings.transport(), outcome, Duration.between(started, Instant.now()));
+            metrics.pollDuration(integrationId, settings, outcome, Duration.between(started, Instant.now()));
         }
     }
 
@@ -175,12 +175,13 @@ public class EmailMailboxPoller {
                 stateStore.saveCursor(id, settings.folder(), uidValidity, lastUid, since, started);
                 return new PollReport(false, "Cursor initialised; mail delivered from now on is processed.");
             }
+            int resubmitted = resubmit(context, session, settings);
             since = state.get().since();
             lastUid = state.get().lastUid();
             if (state.get().uidValidity() != uidValidity) {
                 LOGGER.warnf("Email integration %s: UIDVALIDITY of '%s' changed — rescanning the folder, deduplicated by the ledger",
                         sanitize(id), sanitize(settings.folder()));
-                metrics.cursorReset(id, settings.transport());
+                metrics.cursorReset(id, settings);
                 lastUid = 0;
             }
             long settledUpTo = lastUid;
@@ -211,7 +212,7 @@ public class EmailMailboxPoller {
                     // Only now: the ledger row exists, so a re-poll can never re-run it.
                     try {
                         var result = session.markProcessed(message, settings);
-                        metrics.marked(id, settings.transport(), result.name().toLowerCase(Locale.ROOT));
+                        metrics.marked(id, settings, result.name().toLowerCase(Locale.ROOT));
                         marked++;
                     } catch (MailboxException e) {
                         LOGGER.warnf("Email integration %s: could not mark a processed message (%s); the ledger keeps it from running "
@@ -231,8 +232,77 @@ public class EmailMailboxPoller {
                 }
             }
             stateStore.saveCursor(id, settings.folder(), uidValidity, settledUpTo, since, Instant.now());
-            return new PollReport(false, processed + " processed, " + marked + " marked, " + deferred + " deferred");
+            return new PollReport(false,
+                    processed + " processed, " + marked + " marked, " + deferred + " deferred"
+                            + (resubmitted > 0 ? ", " + resubmitted + " resubmitted" : ""));
         }
+    }
+
+    /**
+     * Mail handed back for a conversation it was already in — its turn never ran
+     * (see {@link EmailInboundSweeper}), or submitting it failed after the
+     * conversation was started. It was marked or moved already, so the cursor no
+     * longer lists it: it is found again by its Message-ID, in the polled folder or
+     * the move folder, and processed once more, in that conversation. Mail that
+     * cannot be found any more is refused as lost.
+     *
+     * @return how many were found and processed
+     */
+    int resubmit(IntegrationContext context, MailboxSession session, EmailChannelSettings settings) throws MailboxException {
+        int done = 0;
+        for (var row : processor.pendingResubmissions(context.integrationId(), Instant.now())) {
+            var found = session.findByMessageId(row.messageId(), settings, settings.maxMessageBytes());
+            if (found.isEmpty()) {
+                processor.resubmissionLost(context, row, Instant.now());
+                continue;
+            }
+            processor.process(context, refetched(row.messageId(), found.get()), Instant.now());
+            done++;
+        }
+        return done;
+    }
+
+    /** A message found again, as the processor reads one. */
+    static MailboxMessage refetched(String messageId, MailTransport.FoundMessage found) {
+        return new MailboxMessage() {
+            @Override
+            public long uid() {
+                return -1;
+            }
+
+            @Override
+            public String envelopeMessageId() {
+                return messageId;
+            }
+
+            @Override
+            public long size() {
+                return found.raw().length;
+            }
+
+            @Override
+            public Instant internalDate() {
+                return found.internalDate();
+            }
+
+            @Override
+            public boolean alreadyProcessed() {
+                return false;
+            }
+
+            @Override
+            public String sourceRef() {
+                return found.sourceRef();
+            }
+
+            @Override
+            public byte[] fetchRaw(long maxBytes) throws MailboxException {
+                if (found.raw().length > maxBytes) {
+                    throw new MailboxException(MailboxException.Category.TOO_LARGE, "The message is larger than " + maxBytes + " bytes.", null);
+                }
+                return found.raw();
+            }
+        };
     }
 
     private PollReport fail(String integrationId, EmailChannelSettings settings, MailboxException e, Instant now) {
