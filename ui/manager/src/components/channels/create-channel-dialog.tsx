@@ -6,6 +6,9 @@ import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
+import { EmailPlatformFields } from "./email-settings";
+import { emailConfigProblems, initialEmailPlatformConfig, withEmailFixedKeys } from "@/lib/email-channel";
+import { toastChannelWarnings } from "@/lib/email-channel-messages";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { isEmptyOrReference } from "@/lib/channel-secrets";
 import { StepDots } from "@/components/shared/step-dots";
@@ -43,6 +46,7 @@ export function CreateChannelDialog({
   const [botToken, setBotToken] = useState("");
   const [signingSecret, setSigningSecret] = useState("");
   const [signatureScheme, setSignatureScheme] = useState("eddi-v1");
+  const [emailConfig, setEmailConfig] = useState<Record<string, string>>(initialEmailPlatformConfig);
   const [targetAgentId, setTargetAgentId] = useState(defaultAgentId ?? "");
 
   const reset = useCallback(() => {
@@ -53,10 +57,12 @@ export function CreateChannelDialog({
     setBotToken("");
     setSigningSecret("");
     setSignatureScheme("eddi-v1");
+    setEmailConfig(initialEmailPlatformConfig());
     setTargetAgentId(defaultAgentId ?? "");
   }, [defaultAgentId]);
 
   const isWebhook = channelType === "webhook";
+  const isEmail = channelType === "email";
   const stepIndex = STEPS.indexOf(step);
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
@@ -70,6 +76,8 @@ export function CreateChannelDialog({
         // A webhook is authenticated by its signature alone, so its secret is
         // required (the backend refuses to save one without it).
         if (isWebhook) return signingSecret.trim().length > 0 && isEmptyOrReference(signingSecret);
+        // The backend re-checks every rule; this only spares a round trip.
+        if (isEmail) return emailConfigProblems(emailConfig).length === 0;
         return channelId.trim().length > 0 && isEmptyOrReference(botToken) && isEmptyOrReference(signingSecret);
       case "target": return targetAgentId.trim().length > 0;
     }
@@ -82,7 +90,9 @@ export function CreateChannelDialog({
     const config: ChannelIntegrationConfiguration = {
       name: name.trim(),
       channelType,
-      platformConfig: isWebhook
+      platformConfig: isEmail
+        ? withEmailFixedKeys(emailConfig)
+        : isWebhook
         ? { signingSecret: signingSecret.trim(), signatureScheme }
         : {
             channelId: channelId.trim(),
@@ -96,6 +106,7 @@ export function CreateChannelDialog({
     try {
       const result = await createMutation.mutateAsync(config);
       const location = result?.location ?? "";
+      toastChannelWarnings(result?.warnings ?? [], t);
       const match = location.match(/channels\/([^?]+)/);
       const newId = match?.[1] ?? "";
       onCreated?.(newId);
@@ -193,7 +204,10 @@ export function CreateChannelDialog({
               </div>
             </>
           )}
-          {step === "credentials" && !isWebhook && (
+          {step === "credentials" && isEmail && (
+            <EmailPlatformFields platformConfig={emailConfig} onChange={setEmailConfig} />
+          )}
+          {step === "credentials" && !isWebhook && !isEmail && (
             <>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground" htmlFor="create-channel-id">
@@ -222,7 +236,9 @@ export function CreateChannelDialog({
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-700 dark:text-amber-300">
-                    {isWebhook
+                    {isEmail
+                      ? t("emailChannel.defaultTargetHint", "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.")
+                      : isWebhook
                       ? t("webhook.defaultTargetHint", "The default target handles every event that no other target's event type matches. You can add more targets after creation.")
                       : t("channels.defaultTargetHint", "The default target handles all messages that don't match a trigger keyword. You can add more targets after creation.")}
                   </p>

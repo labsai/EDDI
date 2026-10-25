@@ -4,7 +4,7 @@ import { seg } from "./path-segment";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export const CHANNEL_TYPES = ["slack", "webhook"] as const;
+export const CHANNEL_TYPES = ["slack", "webhook", "email"] as const;
 
 /** Signature schemes of a `webhook` channel integration (backend default: eddi-v1). */
 export const WEBHOOK_SIGNATURE_SCHEMES = ["eddi-v1", "github", "generic-hmac"] as const;
@@ -83,20 +83,59 @@ export function getChannel(
   );
 }
 
-export function createChannel(
-  config: ChannelIntegrationConfiguration,
-): Promise<{ location: string }> {
-  return api.post<{ location: string }>("/channelstore/channels", config);
+/**
+ * The response header a channel-integration save carries advice in. The save
+ * succeeded (201 / 200); the value is a comma-separated list of stable codes,
+ * absent when there are none — e.g. `email.open-trigger`,
+ * `email.tools-without-approvals`.
+ */
+export const CHANNEL_WARNINGS_HEADER = "X-Eddi-Warnings";
+
+/** The codes in an `X-Eddi-Warnings` value: trimmed, blanks and repeats dropped. */
+export function parseChannelWarnings(value: string | null | undefined): string[] {
+  if (!value) return [];
+  const codes: string[] = [];
+  for (const raw of value.split(",")) {
+    const code = raw.trim();
+    if (code && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
 }
 
-export function updateChannel(
+/** What a channel save answers: where the new version lives, and any save-time warnings. */
+export interface ChannelSaveResult {
+  location: string;
+  warnings: string[];
+}
+
+function toSaveResult(response: {
+  data: { location?: string } | undefined;
+  headers: Headers;
+}): ChannelSaveResult {
+  return {
+    location: response.data?.location ?? "",
+    warnings: parseChannelWarnings(response.headers.get(CHANNEL_WARNINGS_HEADER)),
+  };
+}
+
+export async function createChannel(
+  config: ChannelIntegrationConfiguration,
+): Promise<ChannelSaveResult> {
+  return toSaveResult(
+    await api.postWithResponse<{ location?: string } | undefined>("/channelstore/channels", config),
+  );
+}
+
+export async function updateChannel(
   id: string,
   version: number,
   config: ChannelIntegrationConfiguration,
-): Promise<{ location: string }> {
-  return api.put(
-    `/channelstore/channels/${seg(id)}?version=${version}`,
-    config,
+): Promise<ChannelSaveResult> {
+  return toSaveResult(
+    await api.putWithResponse<{ location?: string } | undefined>(
+      `/channelstore/channels/${seg(id)}?version=${version}`,
+      config,
+    ),
   );
 }
 
