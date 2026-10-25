@@ -139,12 +139,41 @@ describe("useChatRatings", () => {
     act(() => result.current.closeCard());
     rerender({ messages: replies(3) });
     expect(result.current.cardOpen).toBe(false);
-    act(() => result.current.onEnded());
-    expect(result.current.cardOpen).toBe(false);
+    act(() => result.current.onEnded("conv-1"));
+    expect(result.current.endedCard).toBeNull();
 
     const ended = renderHook(() => useChatRatings("conv-2", profile(), [msg("agent", "Hi")]));
-    act(() => ended.result.current.onEnded());
-    expect(ended.result.current.cardOpen).toBe(true);
+    await waitFor(() => expect(ended.result.current.profile).not.toBeNull());
+    act(() => ended.result.current.onEnded("conv-2"));
+    expect(ended.result.current.endedCard?.conversationId).toBe("conv-2");
+  });
+
+  it("keeps the ended conversation's card after ending clears the transcript, and rates that conversation", async () => {
+    const puts: string[] = [];
+    server.use(
+      http.put("*/agents/:conversationId/rating", ({ params }) => {
+        puts.push(String(params.conversationId));
+        return HttpResponse.json({});
+      }),
+    );
+    const { result, rerender } = renderHook(({ id }: { id: string | null }) => useChatRatings(id, profile(), [msg("agent", "Hi")]), {
+      initialProps: { id: "conv-3" as string | null },
+    });
+    await waitFor(() => expect(result.current.profile).not.toBeNull());
+    // Ending clears the open conversation before the mutation's onSuccess runs.
+    rerender({ id: null });
+    act(() => result.current.onEnded("conv-3"));
+    expect(result.current.endedCard).toMatchObject({ conversationId: "conv-3", current: null });
+
+    await act(async () => {
+      expect(await result.current.rateWhole({ score: 4 })).toBe(true);
+    });
+    expect(puts).toEqual(["conv-3"]);
+    expect(result.current.endedCard?.current?.score).toBe(4);
+
+    // Opening another conversation replaces the ended one's card.
+    rerender({ id: "conv-4" });
+    await waitFor(() => expect(result.current.endedCard).toBeNull());
   });
 
   it("does nothing for an agent that asks for no ratings", async () => {
