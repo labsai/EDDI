@@ -647,9 +647,10 @@ const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
   names an agent (AGENT_ID_REQUIRED otherwise). Events carry no user id and no
   conversation text; a rating alert may quote the rater's comment (at most 280
   characters) — quote it only when asked.
-- A rule read shows a webhook's URL and the vault reference of its signing
-  secret, never the secret. Do not repeat a webhook URL in your answer (it can
-  carry a token); name its host.
+- A rule read never shows a webhook's URL: it answers scheme and host plus
+  "/***" and \`urlConfigured: true\` (the URL is often a credential), or the
+  \`\${vault:…}\` reference the URL is stored as. Name the host; there is no
+  full URL to quote.
 - You cannot acknowledge alerts, retry a delivery, send a test alert or change
   a rule: the admin does that on the Alerts page in the manager
   (/manage/alerts).`;

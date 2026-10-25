@@ -318,8 +318,9 @@ export const READ_ENDPOINTS: readonly string[] = [
   // - Rule writes (`POST /alerts/rules`, `PUT`/`DELETE /alerts/rules/{ruleId}`): a
   //   rule decides where alert content goes; that stays the admin's, on the
   //   Alerts page.
-  // A rule read shows a webhook's URL and the name of its vault secret (never the
-  // secret); the prompt tells the operator not to repeat a webhook URL.
+  // A rule read never returns a webhook URL (it is often a bearer credential):
+  // the backend masks it to scheme + host for every caller, administrators and
+  // so this operator included. Signing secrets are vault references, never values.
   "GET /alerts/events",
   "GET /alerts/events/unacknowledged-count",
   "GET /alerts/rules",

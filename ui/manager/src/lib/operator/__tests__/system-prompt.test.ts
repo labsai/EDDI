@@ -1188,7 +1188,7 @@ describe("alerts", () => {
       expect(body).toContain("Alerts (rules that tell people when something needs them):");
       expect(body).toContain("TURN_DEADLINE");
       expect(body).toContain("alerts-maintenance");
-      expect(body).toContain("Do not repeat a webhook URL");
+      expect(body).toContain("never shows a webhook's URL");
       expect(body).toContain("You cannot acknowledge alerts");
     }
   });
