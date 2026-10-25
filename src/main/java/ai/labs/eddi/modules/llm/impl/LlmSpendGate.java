@@ -170,6 +170,19 @@ public class LlmSpendGate {
      * closed, so a concurrent call sees it. Close the admission in a
      * {@code finally} once the call is over and its cost is in the caller's pending
      * figure (or in memory).
+     * <p>
+     * <b>Closing early is safe only for sequential callers.</b> Today's callers —
+     * the format re-ask, the cascade escalation, guardrail reprompts and the
+     * classifier — close as soon as the call is over, with its actual cost only in
+     * their task-local pending figure, not yet in {@code audit:cost}. That is exact
+     * because every paid call of one task runs after the previous one and passes
+     * the earlier ones in {@code pendingUsd}, and a conversation's turns are
+     * serialized. A caller that runs paid calls <em>concurrently</em> (a
+     * {@code forEach} fan-out, parallel media generation) must not do this: it must
+     * {@link SpendReservations.Reservation#settle settle} each call to its actual
+     * cost and keep the reservation open until the cost is recorded in memory, or a
+     * sibling admitted in between is checked against spend that leaves the finished
+     * call out.
      *
      * @param pendingUsd
      *            what this task has spent so far and not yet recorded
