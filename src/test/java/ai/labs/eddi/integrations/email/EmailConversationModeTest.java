@@ -89,6 +89,7 @@ class EmailConversationModeTest {
 
     InMemoryEmailMessageLedger ledger;
     InMemoryEmailSuppressionStore suppressions;
+    InMemoryEmailMailboxStateStore stateStore;
     IConversationService conversations;
     EmailInboundProcessor processor;
     Map<String, MailAuthentication> verdicts;
@@ -140,7 +141,8 @@ class EmailConversationModeTest {
             return null;
         }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
         Instance<IAttachmentStore> attachments = mock(Instance.class);
-        processor = new EmailInboundProcessor(ledger, new InMemoryEmailMailboxStateStore(), new MimeMessageParser(new HtmlToMarkdownConverter()),
+        stateStore = new InMemoryEmailMailboxStateStore();
+        processor = new EmailInboundProcessor(ledger, stateStore, new MimeMessageParser(new HtmlToMarkdownConverter()),
                 authenticator, conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
                 new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), attachments, mock(EmailOwnerNotifier.class),
                 new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
@@ -341,6 +343,24 @@ class EmailConversationModeTest {
         complete(1, "Second answer.");
         assertEquals(1, sent.size(), "never to a suppressed address");
         assertTrue(ledger.all().stream().anyMatch(r -> r.kind() == Kind.REPLY && r.state() == State.SUPPRESSED));
+    }
+
+    @Test
+    @DisplayName("a reply that cannot be queued still counts the turn's cost, and leaves the row for the stranded sweep")
+    void costWhenReplyCannotBeQueued() throws Exception {
+        EmailReplySender failing = mock(EmailReplySender.class);
+        when(failing.onTurnCompleted(any(), any(), any(), any(), any(), any())).thenThrow(new IllegalStateException("ledger unavailable"));
+        processor.replies = failing;
+        EmailTestMail mail = EmailTestMail.mail();
+        processor.process(context(Map.of()), mail.polled(1), Instant.now());
+
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationCost(0.4);
+        handlers.get(0).onComplete(snapshot);
+
+        assertEquals(0.4, stateStore.read(INTEGRATION).orElseThrow().spentUsd(), 1e-9, "the turn's cost counts against the day");
+        assertEquals(State.TURN_SUBMITTED, inbound(mail).state(), "the sweep rebuilds the reply");
     }
 
     @Test

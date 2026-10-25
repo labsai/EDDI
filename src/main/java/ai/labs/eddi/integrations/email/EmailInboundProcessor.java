@@ -606,15 +606,26 @@ public class EmailInboundProcessor {
     }
 
     /**
-     * The turn finished: in conversation mode hand its output to the reply sender
-     * (before the row is closed, so a crash in between leaves a row the stranded
-     * sweep rebuilds the reply for), record its cost against the day's budget, and
+     * The turn finished: record its cost against the day's budget, in conversation
+     * mode hand its output to the reply sender (before the row is closed, so a
+     * crash in between leaves a row the stranded sweep rebuilds the reply for), and
      * close the row.
      */
     void completed(IntegrationContext ctx, LedgerEntry row, String conversationId, SimpleConversationMemorySnapshot snapshot, double costBefore,
                    boolean skipped) {
         String integrationId = ctx.integrationId();
         Instant now = Instant.now();
+        // The cost first: it is recorded once, here — the stranded sweep that rebuilds
+        // a reply which could not be queued below never sees the turn's cost.
+        try {
+            double after = snapshot != null && snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0;
+            double delta = after - costBefore;
+            if (Double.isFinite(delta) && delta > 0.0) {
+                stateStore.addSpend(integrationId, now.atZone(ZoneOffset.UTC).toLocalDate().toString(), delta, now);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email integration %s: the cost of mail %s could not be recorded: %s", sanitize(integrationId), row.id(), e.getMessage());
+        }
         if (!skipped && ctx.settings().replies() && replies != null) {
             try {
                 LedgerEntry current = ledger.findById(row.id()).orElse(row);
@@ -625,15 +636,6 @@ public class EmailInboundProcessor {
                         e.getMessage());
                 return;
             }
-        }
-        try {
-            double after = snapshot != null && snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0;
-            double delta = after - costBefore;
-            if (Double.isFinite(delta) && delta > 0.0) {
-                stateStore.addSpend(integrationId, now.atZone(ZoneOffset.UTC).toLocalDate().toString(), delta, now);
-            }
-        } catch (RuntimeException e) {
-            LOGGER.warnf("Email integration %s: the cost of mail %s could not be recorded: %s", sanitize(integrationId), row.id(), e.getMessage());
         }
         ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
         String note = skipped
