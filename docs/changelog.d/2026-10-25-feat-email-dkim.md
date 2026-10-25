@@ -18,6 +18,13 @@ The sender-authentication slice of [the email plan](../../planning/email-channel
   singleton header (`DUPLICATE_SINGLETON_HEADER`): an unsigned second `From` or `Subject` added above a validly signed
   one is not hashed, so the signature still verifies, while clients show the forged one.
 - `MailAuthentication` gains `reason`, `temporary` and `signatures` (the two-argument constructor stays).
+- **Judged as of delivery:** `authenticate(raw, parsed, Instant deliveredAt, fallback)` evaluates `x=` and the
+  future-`t=` check at the delivery instant — the transport passes the mailbox server's `INTERNALDATE`, the receiving
+  server's own clock, never a sender header — so a short `x=` does not expire while the mail waits for the poller or
+  the cost budget. The instant is clamped to `[now − eddi.email.dkim.max-delivery-age, now]` (new property, default
+  `7d`): a later value is now, an older one is the cap boundary, so a broken or forged value can neither revive an
+  ancient signature nor postdate one. Without it, signatures are judged at the current time, as before.
+  `DkimVerifier.verify(raw, budget, evaluatedAt)` takes the instant unclamped.
 - **Provider fallback**: `authenticate(raw, parsed, SignedProviderVerdict)`, an interface for a verdict delivered under
   a signature the transport checked (SES over SNS). Consulted only when the local check could not run (no raw bytes,
   or every key lookup failed temporarily); never over a local fail, none or pass; alignment is still EDDI's. No
@@ -67,19 +74,21 @@ The sender-authentication slice of [the email plan](../../planning/email-channel
 - [`security.md` → Mail Sender Authentication](../security.md#mail-sender-authentication--dkim-and-dmarc): the rules,
   what an aligned pass proves and does not (the domain, not the person; forwarded and list mail; no ARC; no SPF), the
   PSL refresh and the dnsjava resolver switch. [`configuration-reference.md` → Email](../configuration-reference.md#email)
-  lists the five properties.
+  lists the six properties. [`compliance-data-flow.md` → Other outbound recipients](../compliance-data-flow.md#other-outbound-recipients):
+  the DNS resolver learns the signing domains, selectors and `From` domains of received mail.
 
 ### Tests
 
-- `DkimVerifierTest` (59): the RFC 8463 Appendix A message and key records stored as fixtures
+- `DkimVerifierTest` (60): the RFC 8463 Appendix A message and key records stored as fixtures
   (`src/test/resources/mail/dkim/`, byte exact) — both signatures pass, also with LF endings; body, header, second-`From`
   tampering and re-folding. The RFC 6376 §3.4.6 canonicalisation example, signed over the canonical text the RFC
   prints. Self-signed RSA-2048 and Ed25519 messages (`DkimTestSigner`, a regex-based signer written independently of
   the verifier) in all canonicalisations, with folded headers, trailing whitespace, 8-bit text, empty and header-only
   bodies; every refusal above; DNS outcomes; bounds.
-- `SenderAuthenticatorTest` (27): verdicts, DMARC through the facade (subdomain relaxed/strict, org-domain fallback,
+- `SenderAuthenticatorTest` (31): verdicts, DMARC through the facade (subdomain relaxed/strict, org-domain fallback,
   `d=co.uk`, DMARC tempfail), header injection (second `From`, two mailboxes, no `From`, second `Subject`, mismatched
-  bytes, and each of the two From guards on its own against a parser that disagrees), provider fallback, 300 random inputs, and a hostile message (5000 header lines, 50 signatures × 100 `h=`
+  bytes, and each of the two From guards on its own against a parser that disagrees), judging as of delivery
+  (expired since delivery passes; a delivery instant older than the cap or in the future is clamped), provider fallback, 300 random inputs, and a hostile message (5000 header lines, 50 signatures × 100 `h=`
   names, 10 MB body) within a 5 s budget.
 - `DmarcAlignmentTest` (9), `PublicSuffixListTest` (24), `MailDnsResolverTest` (13; three run dnsjava against a
   loopback UDP server built in the test).
@@ -89,8 +98,7 @@ The sender-authentication slice of [the email plan](../../planning/email-channel
 
 - Call `authenticate` with the transport's bytes right after parsing; keep `temporary` in mind (leave the message
   for the next poll rather than treating a DNS outage as an unauthenticated sender).
-- `x=` expiry is judged at verification time, not at delivery time: a message polled long after delivery whose
-  signature has meanwhile expired fails.
+- Pass the mailbox server's `INTERNALDATE` as `deliveredAt`; without it, `x=` is judged at processing time.
 - `eddi.email.auth` carries only `result`. Prometheus requires one tag set per meter name, so per-integration tags
   mean moving the counter to the channel layer rather than adding tags here.
 - No real-world signed mail (Gmail, Outlook.com, Exchange Online, a list) is in the corpus yet (§21); add it with

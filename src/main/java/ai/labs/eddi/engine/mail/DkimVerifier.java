@@ -22,6 +22,7 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
@@ -173,6 +174,25 @@ public class DkimVerifier {
      *            DNS lookups this message may still cause
      */
     public Verification verify(byte[] raw, MailDnsResolver.Budget budget) {
+        return verify(raw, budget, null);
+    }
+
+    /**
+     * Verifies every DKIM signature, judging {@code x=} (expiry) and {@code t=}
+     * (not in the future) against a given instant instead of the clock.
+     * <p>
+     * The instant is taken as is: bounding it (never after now, never before a
+     * maximum age) is the caller's job — {@link SenderAuthenticator} does it.
+     *
+     * @param raw
+     *            the message as the transport delivered it
+     * @param budget
+     *            DNS lookups this message may still cause
+     * @param evaluatedAt
+     *            the instant the timestamps are judged at, or null for now
+     */
+    public Verification verify(byte[] raw, MailDnsResolver.Budget budget, Instant evaluatedAt) {
+        long at = (evaluatedAt != null ? evaluatedAt : clock.instant()).getEpochSecond();
         if (raw == null || raw.length == 0) {
             return new Verification(List.of(), 0, 0, "the message is empty");
         }
@@ -189,7 +209,7 @@ public class DkimVerifier {
         List<DkimResult> results = new ArrayList<>();
         Map<Canon, byte[]> bodyHashes = new EnumMap<>(Canon.class);
         for (int i = 0; i < signatures.size() && i < MAX_SIGNATURES; i++) {
-            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget));
+            results.add(verifyOne(message, signatures.get(i), bodyHashes, budget, at));
         }
         return new Verification(results, signatures.size(), fromCount, null);
     }
@@ -198,7 +218,8 @@ public class DkimVerifier {
     // One signature
     // ---------------------------------------------------------------------
 
-    private DkimResult verifyOne(ParsedMessage message, int fieldIndex, Map<Canon, byte[]> bodyHashes, MailDnsResolver.Budget budget) {
+    private DkimResult verifyOne(ParsedMessage message, int fieldIndex, Map<Canon, byte[]> bodyHashes, MailDnsResolver.Budget budget,
+                                 long evaluatedAtSecond) {
         Field field = message.fields.get(fieldIndex);
         String value = field.value();
         if (value.length() > MAX_SIGNATURE_FIELD_LENGTH) {
@@ -275,7 +296,7 @@ public class DkimVerifier {
                 return sig.fail("i= is not within d=");
             }
         }
-        DkimResult timing = checkTimestamps(sig, tags.value("t"), tags.value("x"));
+        DkimResult timing = checkTimestamps(sig, tags.value("t"), tags.value("x"), evaluatedAtSecond);
         if (timing != null) {
             return timing;
         }
@@ -375,7 +396,7 @@ public class DkimVerifier {
         }
     }
 
-    private DkimResult checkTimestamps(Sig sig, String t, String x) {
+    private static DkimResult checkTimestamps(Sig sig, String t, String x, long now) {
         Long signed = null;
         if (t != null) {
             signed = timestamp(t);
@@ -390,7 +411,6 @@ public class DkimVerifier {
                 return sig.fail("x= is not a timestamp");
             }
         }
-        long now = clock.instant().getEpochSecond();
         long skew = CLOCK_SKEW.toSeconds();
         if (signed != null && signed > now + skew) {
             return sig.fail("t= is in the future");

@@ -384,6 +384,21 @@ class DkimVerifierTest {
         }
 
         @Test
+        @DisplayName("x= and t= are judged at the instant passed in, not at the clock")
+        void evaluatedAt() {
+            long now = NOW.getEpochSecond();
+            byte[] expiredNow = sign(standardMessage(), new Options().extraTags("t=" + (now - 7200) + "; x=" + (now - 3600)));
+            byte[] signedLater = sign(standardMessage(), new Options().extraTags("t=" + (now - 600)));
+            FakeDns dns = dnsFor(rsa2048());
+            DkimVerifier verifier = new DkimVerifier(dns.resolver(), CLOCK);
+
+            assertEquals(Outcome.PASS,
+                    verifier.verify(expiredNow, dns.resolver().newBudget(), NOW.minusSeconds(5400)).results().get(0).outcome());
+            DkimResult beforeSigning = verifier.verify(signedLater, dns.resolver().newBudget(), NOW.minusSeconds(3600)).results().get(0);
+            assertFail(beforeSigning, "future");
+        }
+
+        @Test
         @DisplayName("t= in the future, or x= before t=, fails")
         void timestampSanity() {
             long now = NOW.getEpochSecond();

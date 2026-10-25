@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Random;
@@ -38,7 +39,7 @@ class SenderAuthenticatorTest {
     private SenderAuthenticator authenticator(FakeDns dns) {
         MailDnsResolver resolver = dns.resolver(registry);
         return new SenderAuthenticator(new DkimVerifier(resolver, DkimVerifierTest.CLOCK), new DmarcAlignment(resolver), resolver,
-                registry);
+                registry, Duration.ofDays(7), DkimVerifierTest.CLOCK);
     }
 
     private static FakeDns keys() {
@@ -290,6 +291,69 @@ class SenderAuthenticatorTest {
             byte[] signed = sign(standardMessage(), new Options());
             InboundMail other = parse(standardMessage());
             assertEquals(Verdict.FAIL, authenticator(keys()).authenticate(signed, other).verdict());
+        }
+    }
+
+    @Nested
+    @DisplayName("judged as of delivery")
+    class Delivery {
+
+        private final long now = DkimVerifierTest.NOW.getEpochSecond();
+
+        private byte[] signed(long t, long x) {
+            return sign(standardMessage(), new Options().extraTags("t=" + t + "; x=" + x));
+        }
+
+        private MailAuthentication at(byte[] raw, Instant deliveredAt) {
+            return authenticator(keys()).authenticate(raw, parse(raw), deliveredAt, null);
+        }
+
+        @Test
+        @DisplayName("a short x= that has expired since delivery still passes when judged at the delivery instant")
+        void expiredSinceDelivery() {
+            byte[] raw = signed(now - 2 * 86_400, now - 3600);
+
+            assertEquals(Verdict.FAIL, authenticator(keys()).authenticate(raw, parse(raw)).verdict(), "without a delivery instant");
+            assertEquals(Verdict.FAIL, at(raw, null).verdict(), "a null delivery instant means now");
+            assertEquals(Verdict.ALIGNED_PASS, at(raw, DkimVerifierTest.NOW.minus(Duration.ofDays(1))).verdict());
+        }
+
+        @Test
+        @DisplayName("a delivery instant older than max-delivery-age is clamped to it: an ancient signature stays expired")
+        void tooOldIsClamped() {
+            // Valid until 8 days ago; claimed delivered 10 days ago; judged at 7 days ago.
+            byte[] raw = signed(now - 11 * 86_400, now - 8 * 86_400);
+
+            MailAuthentication auth = at(raw, DkimVerifierTest.NOW.minus(Duration.ofDays(10)));
+
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertTrue(auth.reason().contains("expired"), auth.reason());
+            // Inside the window, the same kind of signature passes.
+            byte[] recent = signed(now - 6 * 86_400, now - 5 * 86_400);
+            assertEquals(Verdict.ALIGNED_PASS, at(recent, DkimVerifierTest.NOW.minus(Duration.ofDays(6))).verdict());
+        }
+
+        @Test
+        @DisplayName("a delivery instant in the future is clamped to now: a postdated signature stays in the future")
+        void futureIsClamped() {
+            byte[] raw = signed(now + 86_400, now + 10 * 86_400);
+
+            MailAuthentication auth = at(raw, DkimVerifierTest.NOW.plus(Duration.ofDays(2)));
+
+            assertEquals(Verdict.FAIL, auth.verdict());
+            assertTrue(auth.reason().contains("future"), auth.reason());
+        }
+
+        @Test
+        @DisplayName("the effective instant is the delivery instant bounded to [now - max age, now]")
+        void effectiveInstant() {
+            SenderAuthenticator authenticator = authenticator(keys());
+            Instant n = DkimVerifierTest.NOW;
+            assertEquals(n, authenticator.effectiveInstant(null));
+            assertEquals(n, authenticator.effectiveInstant(n.plusSeconds(1)));
+            assertEquals(n.minusSeconds(3600), authenticator.effectiveInstant(n.minusSeconds(3600)));
+            assertEquals(n.minus(Duration.ofDays(7)), authenticator.effectiveInstant(n.minus(Duration.ofDays(30))));
+            assertEquals(n.minus(Duration.ofDays(7)), authenticator.effectiveInstant(n.minus(Duration.ofDays(7))));
         }
     }
 

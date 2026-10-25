@@ -9,8 +9,12 @@ import ai.labs.eddi.engine.mail.MailAuthentication.Verdict;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -71,12 +75,32 @@ public class SenderAuthenticator {
     private final MailDnsResolver dns;
     private final MeterRegistry meterRegistry;
 
+    /** How far back a delivery instant may reach unless configured otherwise. */
+    static final Duration DEFAULT_MAX_DELIVERY_AGE = Duration.ofDays(7);
+
+    private final Clock clock;
+    private final Duration maxDeliveryAge;
+
     @Inject
+    public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.email.dkim.max-delivery-age", defaultValue = "7d") Duration maxDeliveryAge) {
+        this(dkim, dmarc, dns, meterRegistry, maxDeliveryAge, Clock.systemUTC());
+    }
+
+    /** Defaults: a 7-day maximum delivery age and the system clock. */
     public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry) {
+        this(dkim, dmarc, dns, meterRegistry, DEFAULT_MAX_DELIVERY_AGE, Clock.systemUTC());
+    }
+
+    /** For tests: any maximum age, any clock. */
+    public SenderAuthenticator(DkimVerifier dkim, DmarcAlignment dmarc, MailDnsResolver dns, MeterRegistry meterRegistry,
+            Duration maxDeliveryAge, Clock clock) {
         this.dkim = Objects.requireNonNull(dkim, "dkim");
         this.dmarc = Objects.requireNonNull(dmarc, "dmarc");
         this.dns = Objects.requireNonNull(dns, "dns");
         this.meterRegistry = meterRegistry;
+        this.maxDeliveryAge = maxDeliveryAge == null || maxDeliveryAge.isNegative() ? DEFAULT_MAX_DELIVERY_AGE : maxDeliveryAge;
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     /**
@@ -104,9 +128,35 @@ public class SenderAuthenticator {
      *            a verified provider verdict, or null
      */
     public MailAuthentication authenticate(byte[] raw, InboundMail parsed, SignedProviderVerdict fallback) {
+        return authenticate(raw, parsed, null, fallback);
+    }
+
+    /**
+     * Authenticates a message whose signatures are judged as of its delivery: a
+     * short {@code x=} that was valid when the mailbox server accepted the mail
+     * does not expire while the mail waits to be polled or for a budget.
+     * <p>
+     * {@code deliveredAt} must come from the receiving side — the mailbox server's
+     * INTERNALDATE, a provider's receive timestamp — never from a header the sender
+     * wrote. It is still bounded, so a broken or forged value cannot revive an old
+     * signature or postdate one: it is never later than now and never earlier than
+     * now minus {@code eddi.email.dkim.max-delivery-age} (default 7 days); outside
+     * that window the nearest edge is used.
+     *
+     * @param raw
+     *            the raw bytes, or null when the transport does not have them
+     * @param parsed
+     *            the parsed message
+     * @param deliveredAt
+     *            when the receiving server accepted the message, or null to judge
+     *            as of now
+     * @param fallback
+     *            a verified provider verdict, or null
+     */
+    public MailAuthentication authenticate(byte[] raw, InboundMail parsed, Instant deliveredAt, SignedProviderVerdict fallback) {
         MailAuthentication result;
         try {
-            result = evaluate(raw, parsed, fallback);
+            result = evaluate(raw, parsed, effectiveInstant(deliveredAt), fallback);
         } catch (RuntimeException e) {
             // Nothing in a message may turn into an exception for the caller.
             LOGGER.warnf("Sender authentication failed internally (%s); the message is treated as unauthenticated",
@@ -117,7 +167,20 @@ public class SenderAuthenticator {
         return result;
     }
 
-    private MailAuthentication evaluate(byte[] raw, InboundMail parsed, SignedProviderVerdict fallback) {
+    /**
+     * The instant timestamps are judged at: {@code deliveredAt} clamped to [now -
+     * max age, now].
+     */
+    Instant effectiveInstant(Instant deliveredAt) {
+        Instant now = clock.instant();
+        if (deliveredAt == null || deliveredAt.isAfter(now)) {
+            return now;
+        }
+        Instant earliest = now.minus(maxDeliveryAge);
+        return deliveredAt.isBefore(earliest) ? earliest : deliveredAt;
+    }
+
+    private MailAuthentication evaluate(byte[] raw, InboundMail parsed, Instant evaluatedAt, SignedProviderVerdict fallback) {
         if (parsed == null) {
             return fail("no parsed message", false, List.of());
         }
@@ -132,7 +195,7 @@ public class SenderAuthenticator {
         if (raw.length != parsed.rawSize()) {
             return fail("the raw bytes are not the message that was parsed", false, List.of());
         }
-        DkimVerifier.Verification verification = dkim.verify(raw, budget);
+        DkimVerifier.Verification verification = dkim.verify(raw, budget, evaluatedAt);
         if (verification.messageFailure() != null) {
             return fail(verification.messageFailure(), false, List.of());
         }
