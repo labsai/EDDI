@@ -391,6 +391,27 @@ class RestConversationRatingTest {
         }
 
         @Test
+        @DisplayName("GET carries the controls of the version the conversation runs on, not the latest one")
+        void controlsFollowTheConversationsVersion() {
+            // The snapshot pins version 2; version 3 (what a new conversation would get) is
+            // off.
+            when(policy.ratingConfigOf(AGENT, 3)).thenReturn(Optional.empty());
+
+            ConversationRatings ratings = rest.readRatings(CONVERSATION);
+
+            assertEquals("FIVE_STAR", ratings.controls().scale());
+            verify(policy).ratingConfigOf(AGENT, 2);
+        }
+
+        @Test
+        @DisplayName("GET carries no controls when the conversation's version takes no ratings")
+        void noControlsWhenTheVersionIsOff() {
+            when(policy.ratingConfigOf(AGENT, 2)).thenReturn(Optional.empty());
+
+            assertNull(rest.readRatings(CONVERSATION).controls());
+        }
+
+        @Test
         @DisplayName("withdrawing deletes and answers 204, also when nothing was there")
         void withdraw() {
             when(store.delete(CONVERSATION, -1)).thenReturn(true);

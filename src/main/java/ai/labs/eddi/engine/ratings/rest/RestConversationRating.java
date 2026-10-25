@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.RatingConfig.Scale;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.api.IRestAgentProfile.RatingProfile;
 import ai.labs.eddi.engine.api.IRestConversationRating;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -32,6 +33,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -130,7 +132,25 @@ public class RestConversationRating implements IRestConversationRating {
                 steps.add(stored.withoutReview());
             }
         }
-        return new ConversationRatings(conversation, steps);
+        return new ConversationRatings(conversation, steps, controlsOf(conversationId));
+    }
+
+    /**
+     * The rating controls of the version this conversation runs on — resolved the
+     * same way {@link #rate} resolves it, so a client never shows a control whose
+     * write would be refused. Null when that version takes no ratings, or when the
+     * conversation can no longer be resolved (a read must not fail for it).
+     */
+    private RatingProfile controlsOf(String conversationId) {
+        try {
+            ConversationDescriptor descriptor = liveDescriptor(conversationId);
+            ConversationMemorySnapshot snapshot = loadSnapshot(conversationId);
+            String agentId = snapshot != null && snapshot.getAgentId() != null ? snapshot.getAgentId() : agentIdOf(descriptor);
+            Integer agentVersion = snapshot != null && snapshot.getAgentVersion() != null ? snapshot.getAgentVersion() : agentVersionOf(descriptor);
+            return ratingPolicy.ratingConfigOf(agentId, agentVersion).map(RatingProfile::of).orElse(null);
+        } catch (WebApplicationException e) {
+            return null;
+        }
     }
 
     @Override

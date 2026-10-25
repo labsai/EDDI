@@ -70,7 +70,9 @@ public class RestAgentProfile implements IRestAgentProfile {
                 notice = reviewPolicy.noticeFor(agentId, agent.getAgentVersion()).orElse(null);
                 // Like the notice, the rating controls follow the version a new
                 // conversation would run on; ratings are later checked against the
-                // version the conversation actually ran on.
+                // version the conversation actually ran on. A client resuming a
+                // conversation takes the controls of that version from
+                // GET /agents/{conversationId}/rating instead.
                 rating = ratingPolicy.ratingConfigOf(agentId, agent.getAgentVersion()).map(RatingProfile::of).orElse(null);
             }
         } catch (Exception e) {
