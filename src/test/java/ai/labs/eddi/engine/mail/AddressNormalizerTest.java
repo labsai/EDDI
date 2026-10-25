@@ -95,6 +95,17 @@ class AddressNormalizerTest {
     }
 
     @Test
+    @DisplayName("a display name drops bidi embeddings, overrides and isolates")
+    void displayNameBidi() {
+        char rlo = (char) 0x202E;
+        char lri = (char) 0x2066;
+        char pdi = (char) 0x2069;
+        assertEquals("Support gpj.exe", AddressNormalizer.cleanDisplayName("Support " + rlo + "gpj.exe"));
+        assertEquals("Alice", AddressNormalizer.cleanDisplayName(lri + "Alice" + pdi));
+        assertNull(AddressNormalizer.cleanDisplayName(String.valueOf(rlo)));
+    }
+
+    @Test
     @DisplayName("groups are flattened and invalid members counted")
     void groups() {
         var parsed = AddressNormalizer.parseList("Team: a@example.com, b@example.org;, undisclosed-recipients:;");
