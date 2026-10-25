@@ -36,6 +36,8 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -182,12 +184,26 @@ public class ImapMailTransport implements MailTransport {
     }
 
     /** One open folder. */
-    private static final class ImapSession implements MailboxSession {
+    /**
+     * Integrations already warned, per node, that their server takes no keywords /
+     * has no MOVE — one WARN per integration, not one per poll.
+     */
+    static final Set<String> WARNED_NO_KEYWORDS = ConcurrentHashMap.newKeySet();
+    static final Set<String> WARNED_NO_MOVE = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Whether a folder's {@code PERMANENTFLAGS} let EDDI store its keyword:
+     * {@code \*} (any keyword), or the keyword named explicitly. Exchange Online
+     * and some hosters allow neither.
+     */
+    static boolean keywordAllowed(Flags permanent) {
+        return permanent != null && (permanent.contains(Flags.Flag.USER) || permanent.contains(PROCESSED_KEYWORD));
+    }
+
+    static final class ImapSession implements MailboxSession {
         private final String integrationId;
         private final IMAPStore store;
         private final IMAPFolder folder;
-        private boolean warnedNoMove;
-        private boolean warnedNoKeywords;
 
         ImapSession(String integrationId, IMAPStore store, IMAPFolder folder) {
             this.integrationId = integrationId;
@@ -258,22 +274,25 @@ public class ImapMailTransport implements MailTransport {
             IMAPMessage imap = ((ImapMessage) message).message;
             try {
                 boolean flagged = false;
-                Flags permanent = folder.getPermanentFlags();
-                if (permanent != null && permanent.contains(Flags.Flag.USER)) {
-                    folder.setFlags(new Message[]{imap}, new Flags(PROCESSED_KEYWORD), true);
-                    flagged = true;
-                } else if (!warnedNoKeywords) {
-                    warnedNoKeywords = true;
-                    LOGGER.warnf("Email integration %s: the IMAP server does not accept keywords on folder '%s', so processed mail cannot be "
-                            + "flagged; EDDI relies on its cursor and message ledger. Use processedAction 'move:<folder>' to see "
-                            + "processed mail leave the folder.", sanitize(integrationId), sanitize(settings.folder()));
+                if (keywordAllowed(folder.getPermanentFlags())) {
+                    try {
+                        folder.setFlags(new Message[]{imap}, new Flags(PROCESSED_KEYWORD), true);
+                        flagged = true;
+                    } catch (MessagingException refused) {
+                        // A server that advertises keywords and still refuses the STORE: the
+                        // same degradation as one that does not advertise them.
+                        warnNoKeywords(settings);
+                    }
+                } else {
+                    // Degrade, never fail the poll: the UID cursor and the message ledger keep
+                    // a mail from running twice; the keyword only spares a re-download.
+                    warnNoKeywords(settings);
                 }
                 if (!settings.movesProcessed()) {
                     return flagged ? MarkResult.FLAGGED : MarkResult.NOTHING;
                 }
                 if (!store.hasCapability("MOVE")) {
-                    if (!warnedNoMove) {
-                        warnedNoMove = true;
+                    if (WARNED_NO_MOVE.add(integrationId)) {
                         LOGGER.warnf("Email integration %s: the IMAP server does not support MOVE, so processed mail stays in '%s' "
                                 + "(EDDI never copies and deletes).", sanitize(integrationId), sanitize(settings.folder()));
                     }
@@ -287,6 +306,15 @@ public class ImapMailTransport implements MailTransport {
                 return MarkResult.MOVED;
             } catch (MessagingException e) {
                 throw new MailboxException(MailboxException.Category.CONNECTION, "Marking a message processed failed: " + rootMessage(e), e);
+            }
+        }
+
+        private void warnNoKeywords(EmailChannelSettings settings) {
+            if (WARNED_NO_KEYWORDS.add(integrationId)) {
+                LOGGER.warnf("Email integration %s: the IMAP server does not accept the keyword %s on folder '%s' (PERMANENTFLAGS), so processed "
+                        + "mail cannot be flagged. Polling goes on: the cursor and the message ledger keep every mail from running twice. Use "
+                        + "processedAction 'move:<folder>' (recommended for Exchange Online) to see processed mail leave the folder.",
+                        sanitize(integrationId), PROCESSED_KEYWORD, sanitize(settings.folder()));
             }
         }
 
@@ -305,8 +333,8 @@ public class ImapMailTransport implements MailTransport {
         }
     }
 
-    private static final class ImapMessage implements MailboxMessage {
-        private final IMAPMessage message;
+    static final class ImapMessage implements MailboxMessage {
+        final IMAPMessage message;
         private final long uid;
         private final long uidValidity;
         private final String folderName;

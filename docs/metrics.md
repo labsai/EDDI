@@ -707,7 +707,8 @@ more signatures than `eddi.email.dns.max-lookups-per-message` allows.
 eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger), outcome (processed|duplicate|unauthenticated|blocked|loop|throttled|budget|too_large|parse_error|deferred|unroutable|failed)
 eddi_email_poll_duration_seconds            # One mailbox poll (timer); tags: integration, transport, mode, outcome (ok|error)
 eddi_email_poll_cursor_resets_total         # UIDVALIDITY changes that restarted a folder scan; tags: integration, transport, mode
-eddi_email_ledger_stranded_recovered_total  # Submitted turns resolved by the inbound sweep; tag: outcome (done|failed|awaiting_human|lost)
+eddi_email_poll_marked_total                # Processed mail marked in the mailbox; tags: integration, transport, mode, result (flagged|moved|flagged_not_moved|nothing)
+eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost)
 ```
 
 `integration` is the channel integration's resource id, never an address. `processed` means a turn was submitted;
@@ -716,8 +717,11 @@ is not deployed, a busy conversation); `throttled` and `budget` mail waits for t
 the integration's owners hear about it once a day (`eddi_email_outbound_total{kind="notice"}` when a system mailer is
 configured). Every refusal (`unauthenticated`, `blocked`, `loop`, `too_large`, `parse_error`, `unroutable`) is recorded
 in the email ledger and never answered. A `poll_duration` with `outcome=error` is a failed poll (connection, login,
-folder); the integration backs off on its own. `stranded_recovered{outcome="lost"}` counts mail whose node stopped
-between claiming it and starting its turn: it is not run again.
+folder); the integration backs off on its own. `poll_marked{result="nothing"}` means the server takes no custom
+keywords (Exchange Online, some hosters) and no move is configured: polling continues on the cursor and the ledger, and
+`processedAction: move:<folder>` is the fix. `stranded_recovered{outcome="requeued"}` is a claim whose node died before
+anything left EDDI — the mail was processed again; `outcome="lost"` is mail whose node stopped while starting its
+conversation: it is not run again, and the integration's owners get the `lost` notice.
 
 ### Platform Operator Metrics
 

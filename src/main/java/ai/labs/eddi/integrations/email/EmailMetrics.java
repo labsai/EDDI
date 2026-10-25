@@ -24,6 +24,7 @@ public final class EmailMetrics {
     public static final String POLL_DURATION = "eddi.email.poll.duration";
     public static final String CURSOR_RESETS = "eddi.email.poll.cursor_resets";
     public static final String STRANDED = "eddi.email.ledger.stranded_recovered";
+    public static final String MARKED = "eddi.email.poll.marked";
 
     /** Inbound outcomes, a bounded set. */
     public static final String PROCESSED = "processed";
@@ -63,6 +64,17 @@ public final class EmailMetrics {
         if (registry != null) {
             Counter.builder(CURSOR_RESETS).description("Mailbox cursor resets (UIDVALIDITY changed)").tag("integration", integrationId)
                     .tag("transport", transport).tag("mode", "trigger").register(registry).increment();
+        }
+    }
+
+    /**
+     * What marking a processed mail did: flagged, moved, flagged_not_moved, nothing
+     * (the server takes no keywords and no move was asked for).
+     */
+    public void marked(String integrationId, String transport, String result) {
+        if (registry != null) {
+            Counter.builder(MARKED).description("Processed mail marked in the mailbox, by what the server allowed").tag("integration", integrationId)
+                    .tag("transport", transport).tag("mode", "trigger").tag("result", result).register(registry).increment();
         }
     }
 

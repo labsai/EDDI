@@ -10669,6 +10669,54 @@
             }
           },
           "description": "Submitted email turns whose completion was never recorded, resolved by the inbound sweep: done, failed, awaiting_human (resolved from the conversation) or lost (the node stopped between the claim and the turn; the mail was not run again)."
+        },
+        {
+          "id": 272,
+          "type": "timeseries",
+          "title": "Processed mail marking",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 74
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (result) (rate(eddi_email_poll_marked_total{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{result}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "How processed mail was marked in the mailbox: flagged ($EddiProcessed keyword), moved, flagged_not_moved (the server lacks MOVE) or nothing (the server takes no custom keywords and no move was configured, e.g. Exchange Online with processedAction flag; the cursor and the ledger still keep mail from running twice). Sustained nothing: use processedAction move:<folder>."
         }
       ]
     },

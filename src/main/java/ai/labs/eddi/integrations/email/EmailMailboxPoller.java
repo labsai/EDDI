@@ -25,6 +25,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -209,7 +210,8 @@ public class EmailMailboxPoller {
                 if (disposition == Disposition.SETTLED) {
                     // Only now: the ledger row exists, so a re-poll can never re-run it.
                     try {
-                        session.markProcessed(message, settings);
+                        var result = session.markProcessed(message, settings);
+                        metrics.marked(id, settings.transport(), result.name().toLowerCase(Locale.ROOT));
                         marked++;
                     } catch (MailboxException e) {
                         LOGGER.warnf("Email integration %s: could not mark a processed message (%s); the ledger keeps it from running "
