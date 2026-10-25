@@ -72,19 +72,36 @@ class ContinuationFireHandlerTest {
         return snapshot;
     }
 
-    /** The turn answers with this state (or as skipped). */
+    /**
+     * The turn answers with this state (or as skipped). A completed turn is also
+     * stored, as the real step runner does after the reply: the stored conversation
+     * then carries the continuation's marker.
+     */
     private void turnSettles(ConversationState state, boolean skipped) throws Exception {
+        turnSettles(state, skipped, true);
+    }
+
+    private void turnSettles(ConversationState state, boolean skipped, boolean storedAfterwards) throws Exception {
         doAnswer(inv -> {
             ConversationResponseHandler responseHandler = inv.getArgument(6);
+            InputData input = inv.getArgument(4);
             var answer = new SimpleConversationMemorySnapshot();
             answer.setConversationState(state);
             if (skipped) {
                 responseHandler.onSkipped(answer);
             } else {
+                if (storedAfterwards) {
+                    doReturn(stored(state, numberOf(input))).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+                }
                 responseHandler.onComplete(answer);
             }
             return null;
         }).when(conversationService).say(eq(CONVERSATION_ID), any(), any(), any(), any(InputData.class), anyBoolean(), any());
+    }
+
+    /** The continuation number the fire put on the turn's input. */
+    private static Integer numberOf(InputData input) {
+        return input.getContinuationNumber() != null ? input.getContinuationNumber() : 1;
     }
 
     private double refused(String reason) {
@@ -118,6 +135,18 @@ class ContinuationFireHandlerTest {
             var context = input.getValue().getContext().get(ConversationContinuations.CONTEXT_KEY);
             assertEquals(Map.of("number", 3, "max", 5), context.getValue());
             assertEquals(1.0, run());
+        }
+
+        @Test
+        @DisplayName("a turn that answered but was not stored fails, so the schedule retries")
+        void answeredButNotStored() throws Exception {
+            doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            turnSettles(ConversationState.READY, false, false);
+
+            var result = handler.fire(metadata(1), null, "", TIMEOUT);
+
+            assertEquals(FireStatus.FAILED.name(), result.status());
+            assertEquals(0.0, run(), "not counted as a run");
         }
 
         @Test

@@ -19,6 +19,14 @@ A job of many model calls (the plan's video pipeline: ~150 calls over ~20 minute
 - **Manager:** a **Self-continuation** section on the agent page beside Limits (`maxContinuations` with the backend's 0..10000 bound, refusing to save an invalid count; `continuationInput`), i18n in all 11 locales ([`agent-config-sections.tsx`](../../ui/manager/src/components/editors/agent-config-sections.tsx), [`continuation.ts`](../../ui/manager/src/lib/continuation.ts)).
 - **Platform Operator:** the prompt explains self-continuation, its schedule, step records and metrics, and maps the `long-jobs` page; revision **36 → 37**. Other open branches also bump `operator-revision.json` — operator PRs land one at a time.
 
+### Review fixes
+
+- **Only the engine arms a continuation.** REST schedule create, update and ZIP import accepted the `continuationType` marker, and a fire runs a turn in the conversation its metadata names — so a client that may create schedules could inject a turn into another user's conversation. The marker is now refused (`400`, for everyone, like the HITL-timeout and ingestion markers), and a fire whose schedule `userId` does not own the conversation runs nothing (`owner_mismatch`, a new refusal reason) ([`RestScheduleStore`](../../src/main/java/ai/labs/eddi/engine/schedule/rest/RestScheduleStore.java), [`ContinuationFireHandler`](../../src/main/java/ai/labs/eddi/engine/continuation/ContinuationFireHandler.java)).
+- **A fire is `COMPLETED` only for a turn that was stored.** The reply reaches the handler before the persist; the handler now confirms the turn's marker is in the stored conversation (re-checked for about two seconds) and fails the fire otherwise, so the schedule retries it.
+- **A schedule write that fails for a moment is retried** (three attempts) before `schedule_failed`. The crash window between commit and arm is documented in [long-jobs.md](../long-jobs.md) with how to spot and resume a stopped job; an automatic reconciliation sweep is planned with part 2.
+- Manager: a half-typed count (`5e`, `-`) no longer silently clears `maxContinuations` and lets Save through.
+- Docs: only continuation turns are retried by their schedule (the first turn is resent by its caller); the poll interval does not guarantee a minimum delay between continuations.
+
 ### Not in this change (planned)
 
 Part 2 of E8 — parking a turn on an external long-running operation (the HITL pause machinery with a machine as the resolver, a poll schedule bound to the `pauseId`, an optional signed webhook to resolve it sooner) — and the async video provider (needs E6/E7).

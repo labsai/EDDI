@@ -61,6 +61,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -295,6 +296,14 @@ class ConversationServiceContinuationTest {
         @DisplayName("fire twice (a stolen claim): the second fire reads the committed marker and the pipeline runs once")
         void fireTwiceRunsOnce() throws Exception {
             runCoordinatorInline();
+            // A store that reads back what it was last given: the fire confirms the turn
+            // committed by finding its marker there.
+            var latest = new AtomicReference<>(snapshot(1));
+            doAnswer(inv -> latest.get()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doAnswer(inv -> {
+                latest.set(inv.getArgument(0));
+                return CONVERSATION_ID;
+            }).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
             var handler = new ContinuationFireHandler(conversationService, conversationMemoryStore,
                     conversationService.conversationContinuations);
             var metadata = ConversationContinuations.metadata(CONVERSATION_ID, 1, 3);

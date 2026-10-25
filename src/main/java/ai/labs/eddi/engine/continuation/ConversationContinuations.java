@@ -84,6 +84,11 @@ public class ConversationContinuations {
 
     private static final Logger LOGGER = Logger.getLogger(ConversationContinuations.class);
 
+    /** Attempts at writing a continuation's schedule after its turn committed. */
+    static final int ARM_ATTEMPTS = 3;
+    /** Pause before each retry of that write, times the attempt number. */
+    static final long ARM_RETRY_BACKOFF_MS = 100;
+
     /** Step key: the number of the continuation this turn ran as. */
     public static final String STEP_NUMBER = "continuation:number";
     /** Step key: the number of the continuation this turn asked for and got. */
@@ -323,7 +328,7 @@ public class ConversationContinuations {
             schedule.setEnabled(true);
             schedule.setCreatedAt(now);
             schedule.setMetadata(metadata(conversationId, number.intValue(), policy.maxContinuations()));
-            scheduleStore.createSchedule(schedule);
+            createWithRetry(schedule);
             meterRegistry.counter(METRIC_SCHEDULED).increment();
             LOGGER.infof("Continuation %d of %d scheduled for conversation %s", number.intValue(), policy.maxContinuations(),
                     sanitize(conversationId));
@@ -331,6 +336,27 @@ public class ConversationContinuations {
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Writes the schedule, retrying a failed write a few times with a short pause.
+     * The turn is already committed with its decision, so a write that fails for a
+     * moment would otherwise stop the job; a write that keeps failing is reported
+     * by the caller as {@code schedule_failed}.
+     */
+    private void createWithRetry(ScheduleConfiguration schedule) throws Exception {
+        for (int attempt = 1;; attempt++) {
+            try {
+                scheduleStore.createSchedule(schedule);
+                return;
+            } catch (Exception e) {
+                if (attempt >= ARM_ATTEMPTS) {
+                    throw e;
+                }
+                LOGGER.warnf("Continuation schedule write failed (attempt %d of %d), retrying: %s", attempt, ARM_ATTEMPTS, e.toString());
+                Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
+            }
         }
     }
 

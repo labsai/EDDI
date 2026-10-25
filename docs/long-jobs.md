@@ -9,7 +9,9 @@ ordinary turns of one conversation**, and the conversation is the job's log:
 - every phase is a turn — traced, audited, priced, persisted, visible in the Manager;
 - the job's state is the conversation's properties and the previous step's actions, which
   behaviour rules route on, so the job is a state machine written in configuration;
-- a crash loses at most the turn that was running, and that turn is retried.
+- a crash loses at most the turn that was running. A *continuation* turn is retried by its
+  schedule; the first turn of a job — the one a caller sent — has no schedule behind it, so the
+  caller sends it again (an `Idempotency-Key` makes that safe).
 
 What makes this possible is **self-continuation**: a turn can ask for the next turn of the same
 conversation, and the engine starts it without user input.
@@ -107,7 +109,17 @@ can tell a continuation from a user turn with a `contextmatcher` on `selfContinu
 A continuation is decided before the asking turn is persisted — the outcome is part of the
 committed step: `continuation:next` (the number scheduled) or `continuation:refused` (why not) —
 and armed only **after** the commit, as a one-shot schedule due immediately. A turn that paused,
-failed, was cancelled, lost its cluster lease or could not be stored arms nothing.
+failed, was cancelled, lost its cluster lease or could not be stored arms nothing. A schedule write
+that fails is retried a few times on the spot; one that keeps failing is counted
+(`schedule_failed`) and logged.
+
+**The one window that is not recovered automatically.** A node that dies in the moment between
+committing a turn and writing its schedule, or a schedule write that keeps failing, leaves a
+committed step with `continuation:next` and no schedule: the job stops there. Nothing re-arms it
+yet. Watch `eddi_continuation_refused_total{reason="schedule_failed"}`, and for a job that stopped
+without a refusal look at its last step: `continuation:next` without a later continuation turn is
+this case. Sending the conversation a message, or a rule that continues again on the next turn,
+picks the job back up.
 
 A schedule rather than the conversation coordinator's queue, because the queue lives in memory and
 dies with its node. The schedule row survives a restart; exactly one node claims it
@@ -172,7 +184,9 @@ the resolver — a status poll bound to the pause, or a signed webhook that reso
 continuation turns instead: one turn starts the operation and stores its id in a property, and
 each following turn checks the status once and emits `CONTINUE_CONVERSATION` again until it is
 done. Every check is a short, traced turn; `maxContinuations` bounds the number of checks and the
-poll interval spaces them at least 15 seconds apart.
+schedule poller checks for due continuations every `eddi.schedule.poll-interval` (15 s by default),
+which does not guarantee a minimum delay between them: another node can pick a new continuation
+up on its own next tick.
 
 ## See also
 

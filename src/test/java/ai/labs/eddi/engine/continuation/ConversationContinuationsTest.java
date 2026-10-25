@@ -243,6 +243,19 @@ class ConversationContinuationsTest {
 
             assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
             assertEquals(1.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED));
+            verify(scheduleStore, times(ConversationContinuations.ARM_ATTEMPTS)).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a write that fails for a moment is retried, and the continuation is armed")
+        void transientStoreFailure() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doThrow(new IResourceStore.ResourceStoreException("blip")).doReturn("s1").when(scheduleStore).createSchedule(any());
+
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            assertEquals(0.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED));
+            verify(scheduleStore, times(2)).createSchedule(any());
         }
 
         @Test

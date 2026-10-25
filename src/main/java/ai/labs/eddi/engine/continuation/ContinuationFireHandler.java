@@ -72,6 +72,14 @@ public class ContinuationFireHandler {
 
     private static final Logger LOGGER = Logger.getLogger(ContinuationFireHandler.class);
 
+    /**
+     * How often, and how far apart, a fire looks for its turn in the stored
+     * conversation after the reply arrived: about two seconds in all, enough for
+     * the persist that follows the reply.
+     */
+    static final int COMMIT_CHECK_ATTEMPTS = 20;
+    static final long COMMIT_CHECK_INTERVAL_MS = 100;
+
     /** Prefix of the automatic {@code Idempotency-Key} of a continuation turn. */
     public static final String IDEMPOTENCY_KEY_PREFIX = "eddi-continuation-";
 
@@ -210,9 +218,42 @@ public class ContinuationFireHandler {
             return stop(ConversationContinuations.REASON_INTERRUPTED, conversationId,
                     "continuation " + number + " was interrupted; the chain stops");
         }
+        // The reply reaches this handler before the turn is stored (renderOutput runs
+        // inside the pipeline; the persist follows). A store that then fails would
+        // leave a fire recorded COMPLETED for a turn that never committed — and,
+        // since the successor is armed only after a successful store, a stopped
+        // chain. Confirm the turn's marker reached the stored conversation; if it did
+        // not, fail so the schedule retries (the marker and the Idempotency-Key keep
+        // the retry to one run if the store was merely slow).
+        if (!committed(conversationId, number)) {
+            return Result.failed("Continuation " + number + " answered, but its turn was not found in the stored conversation; retried");
+        }
         continuations.countRun();
         LOGGER.infof("Continuation %d of conversation %s ran (state %s)", number, sanitize(conversationId), state);
         return Result.completed();
+    }
+
+    /**
+     * Whether continuation {@code number}'s marker is in the stored conversation,
+     * re-checked briefly: the turn's store can still be in progress when its reply
+     * arrives.
+     */
+    private boolean committed(String conversationId, int number) throws InterruptedException, IResourceStore.ResourceStoreException {
+        for (int attempt = 0; attempt < COMMIT_CHECK_ATTEMPTS; attempt++) {
+            if (attempt > 0) {
+                Thread.sleep(COMMIT_CHECK_INTERVAL_MS);
+            }
+            ConversationMemorySnapshot snapshot;
+            try {
+                snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                return false;
+            }
+            if (snapshot != null && ConversationContinuations.ranIn(snapshot, number)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
