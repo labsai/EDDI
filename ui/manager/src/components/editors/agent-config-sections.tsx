@@ -1093,7 +1093,11 @@ export const ContinuationSection = memo(function ContinuationSection({
   const max = agent.maxContinuations;
 
   const [text, setText] = useState(() => (max === undefined ? "" : String(max)));
-  const parsed = parseMaxContinuations(text);
+  // A number input reports half-typed text ("5e", "-") as "" — which would read as
+  // "off" and silently drop the field while the box still shows the text — so it
+  // is tracked apart, as in LimitsSection.
+  const [badInput, setBadInput] = useState(false);
+  const parsed = badInput ? { ok: false as const } : parseMaxContinuations(text);
   const invalid = !parsed.ok;
   useEffect(() => {
     onValidityChange?.(invalid);
@@ -1104,13 +1108,15 @@ export const ContinuationSection = memo(function ContinuationSection({
     setText((prev) => {
       const p = parseMaxContinuations(prev);
       if (p.ok && p.value === max) return prev;
+      setBadInput(false);
       return max === undefined ? "" : String(max);
     });
   }, [max]);
 
-  function commitMax(next: string) {
+  function commitMax(next: string, bad: boolean) {
     setText(next);
-    const p = parseMaxContinuations(next);
+    setBadInput(bad);
+    const p = bad ? ({ ok: false } as const) : parseMaxContinuations(next);
     if (!p.ok) return;
     // Off is the field being absent, never a stored 0 the author did not type.
     const { maxContinuations: _unset, ...rest } = agent;
@@ -1155,7 +1161,7 @@ export const ContinuationSection = memo(function ContinuationSection({
             value={text}
             placeholder={t("agentDetail.continuationOff", "Off")}
             disabled={disabled}
-            onChange={(e) => commitMax(e.target.value)}
+            onChange={(e) => commitMax(e.target.value, e.target.validity?.badInput === true)}
             aria-invalid={invalid || undefined}
             aria-describedby={hintId}
             className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 aria-invalid:border-destructive"

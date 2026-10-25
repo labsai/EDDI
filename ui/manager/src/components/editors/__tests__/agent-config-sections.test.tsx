@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import {
   SecurityIdentitySection,
@@ -811,6 +811,21 @@ describe("ContinuationSection", () => {
     expect(screen.getByTestId("max-continuations-invalid")).toBeInTheDocument();
     expect(onValidityChange).toHaveBeenLastCalledWith(true);
     expect(mockOnChange).not.toHaveBeenLastCalledWith(expect.objectContaining({ maxContinuations: 10001 }));
+  });
+
+  it("a half-typed number keeps the stored count and blocks Save, instead of switching continuation off", () => {
+    const onValidityChange = vi.fn();
+    renderWithProviders(
+      <ContinuationSection agent={{ ...baseAgent, maxContinuations: 5 }} onChange={mockOnChange} onValidityChange={onValidityChange} />,
+    );
+    const input = screen.getByTestId("max-continuations");
+    // What a browser reports for "5e" in a number input: an empty value, with badInput set.
+    Object.defineProperty(input, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect(mockOnChange).not.toHaveBeenCalled();
+    expect(onValidityChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByTestId("max-continuations-invalid")).toBeInTheDocument();
   });
 
   it("writes the input as a literal and drops it when emptied", async () => {
