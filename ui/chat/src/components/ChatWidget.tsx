@@ -48,7 +48,7 @@ import { useRatings } from "@/hooks/useRatings";
 import { lastStepIndex, ratableSteps } from "@/rating-steps";
 import { RatingCard } from "./RatingCard";
 import { buildAttachmentContext } from "@/api/attachments-api";
-import { stepsToMessages } from "@/api/snapshot";
+import { outputsCarryStepIndexes, stepsToMessages } from "@/api/snapshot";
 import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import { PausedCard } from "./PausedCard";
@@ -797,6 +797,8 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
+        // Positions are server step indexes only on a full read whose lists agree.
+        const stampSteps = fullHistory && outputsCarryStepIndexes(snapshot.conversationOutputs, snapshot.conversationSteps);
         snapshot.conversationOutputs.forEach((output, index, outputs) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
@@ -816,7 +818,7 @@ export function ChatWidget() {
             // A full read lists every step, so the position is the server's
             // step index (reply ratings are keyed by it). A turn response
             // carries only its own step, at index 0, and is counted instead.
-            const message = makeAgentMessage(text, undefined, fullHistory ? index : undefined);
+            const message = makeAgentMessage(text, undefined, stampSteps ? index : undefined);
             dispatch({
               type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
               message,
@@ -826,7 +828,7 @@ export function ChatWidget() {
           if (images.length && !dedupe) {
             dispatch({
               type: "ADD_MESSAGE",
-              message: makeAgentMessage("", images, fullHistory ? index : undefined),
+              message: makeAgentMessage("", images, stampSteps ? index : undefined),
             });
           }
         });

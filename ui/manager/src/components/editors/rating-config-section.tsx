@@ -46,6 +46,12 @@ export const RatingConfigSection = memo(function RatingConfigSection({
   const enabled = config.enabled === true;
   const conversation = config.conversationRating ?? {};
   const comment = config.comment ?? {};
+  // A field holding an invalid value stays visible even after its switch is
+  // turned off: the value is still saved and still blocks the save, so the
+  // editor must be able to see and correct it.
+  const showSettings = enabled || invalid;
+  const showConversation = conversation.enabled !== false || !!errors.promptText || !!errors.askAfterTurns;
+  const showComment = comment.enabled === true || !!errors.maxLength || !!errors.askBelowScore;
 
   function patch(next: AgentRatingConfig) {
     onChange({ ...agent, ratingConfig: next });
@@ -114,7 +120,7 @@ export const RatingConfigSection = memo(function RatingConfigSection({
           {t("agentDetail.rating.enable", "Ask people to rate their conversations")}
         </label>
 
-        {enabled && (
+        {showSettings && (
           <div className="space-y-4 ps-5">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-[10px] text-muted-foreground">
@@ -162,7 +168,7 @@ export const RatingConfigSection = memo(function RatingConfigSection({
                 />
                 {t("agentDetail.rating.conversationEnable", "Offer a rating card for the conversation")}
               </label>
-              {conversation.enabled !== false && (
+              {showConversation && (
                 <div className="space-y-2">
                   <label className="block text-[10px] text-muted-foreground">
                     {t("agentDetail.rating.prompt", "Question on the card (empty for the standard wording)")}
@@ -236,7 +242,7 @@ export const RatingConfigSection = memo(function RatingConfigSection({
                 />
                 {t("agentDetail.rating.commentEnable", "Accept a free-text comment")}
               </label>
-              {comment.enabled === true && (
+              {showComment && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="block text-[10px] text-muted-foreground">
                     {t("agentDetail.rating.maxLength", "Longest comment (characters, at most 4000)")}

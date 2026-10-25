@@ -112,10 +112,33 @@ describe("Agent feedback strip", () => {
     await waitFor(() => expect(container.querySelector("[data-testid=agent-feedback-strip]")).toBeNull());
   });
 
-  it("renders nothing when the caller may not read the ratings", async () => {
-    server.use(http.get("*/ratings/summary", () => new HttpResponse(null, { status: 403 })));
+  it("renders nothing when the caller may not read the ratings, and does not poll the count", async () => {
+    let counted = false;
+    server.use(
+      http.get("*/ratings/summary", () => new HttpResponse(null, { status: 403 })),
+      http.get("*/ratings/attention-count", () => {
+        counted = true;
+        return HttpResponse.json({ count: 1 });
+      }),
+    );
     const { container } = renderWithProviders(<AgentFeedbackStrip agentId="agent1" ratingsEnabled />);
     await waitFor(() => expect(container.querySelector("[data-testid=agent-feedback-strip]")).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(counted).toBe(false);
+  });
+
+  it("fetches nothing for a role that may not open the Feedback page", async () => {
+    let asked = false;
+    server.use(
+      http.get("*/ratings/*", () => {
+        asked = true;
+        return HttpResponse.json({});
+      }),
+    );
+    const { container } = withAuth(<AgentFeedbackStrip agentId="agent1" ratingsEnabled />, { ...editorAuth, roles: ["eddi-viewer"] });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(asked).toBe(false);
+    expect(container.querySelector("[data-testid=agent-feedback-strip]")).toBeNull();
   });
 });
 
