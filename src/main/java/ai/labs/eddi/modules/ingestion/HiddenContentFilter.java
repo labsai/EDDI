@@ -442,9 +442,17 @@ public final class HiddenContentFilter {
         if (hex.matches() && (hex.group(1).length() == 4 || hex.group(1).length() == 8)) {
             String digits = hex.group(1);
             String alpha = digits.length() == 4 ? digits.substring(3) + digits.substring(3) : digits.substring(6);
-            return Integer.parseInt(alpha, 16) <= 12;
+            return hexPair(alpha.charAt(0), alpha.charAt(1)) <= 12;
         }
         return false;
+    }
+
+    /**
+     * Two hex digits as a byte value. Callers pass digits {@code HEX} already
+     * matched, so there is nothing to fail on.
+     */
+    private static int hexPair(char high, char low) {
+        return Character.digit(high, 16) * 16 + Character.digit(low, 16);
     }
 
     static Rgb colour(String value) {
@@ -460,13 +468,12 @@ public final class HiddenContentFilter {
         if (hex.matches()) {
             String digits = hex.group(1);
             if (digits.length() == 3 || digits.length() == 4) {
-                return new Rgb(Integer.parseInt("" + digits.charAt(0) + digits.charAt(0), 16),
-                        Integer.parseInt("" + digits.charAt(1) + digits.charAt(1), 16),
-                        Integer.parseInt("" + digits.charAt(2) + digits.charAt(2), 16));
+                return new Rgb(hexPair(digits.charAt(0), digits.charAt(0)), hexPair(digits.charAt(1), digits.charAt(1)),
+                        hexPair(digits.charAt(2), digits.charAt(2)));
             }
             if (digits.length() == 6 || digits.length() == 8) {
-                return new Rgb(Integer.parseInt(digits.substring(0, 2), 16), Integer.parseInt(digits.substring(2, 4), 16),
-                        Integer.parseInt(digits.substring(4, 6), 16));
+                return new Rgb(hexPair(digits.charAt(0), digits.charAt(1)), hexPair(digits.charAt(2), digits.charAt(3)),
+                        hexPair(digits.charAt(4), digits.charAt(5)));
             }
             return null;
         }
