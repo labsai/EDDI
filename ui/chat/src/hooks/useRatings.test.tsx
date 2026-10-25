@@ -62,6 +62,30 @@ describe("useRatings", () => {
     expect(restored.read).toHaveBeenCalledWith("conv-1");
   });
 
+  it("renders the conversation's own controls once the server names them", async () => {
+    // The profile follows the version a new conversation would get (thumbs);
+    // this conversation runs on one that asks for stars and no reply ratings.
+    const pinned = { scale: "FIVE_STAR", conversationRating: true, messageRating: false, askOnEnd: true, askAfterTurns: 0 };
+    const c = client({ read: vi.fn().mockResolvedValue({ conversation: null, steps: [], controls: parseRatingProfile(pinned) }) });
+    const { result } = setup({ client: c, profile: profile({ scale: "THUMBS", messageRating: true }) });
+    await waitFor(() => expect(result.current.profile?.scale).toBe("FIVE_STAR"));
+    expect(result.current.profile?.messageRating).toBe(false);
+  });
+
+  it("shows no card when the conversation's version takes no ratings, whatever the profile says", async () => {
+    const c = client({ read: vi.fn().mockResolvedValue({ conversation: null, steps: [], controls: null }) });
+    const { result } = setup({ client: c, conversationState: "ENDED" });
+    await waitFor(() => expect(result.current.profile).toBeNull());
+    act(() => result.current.openCard());
+    expect(result.current.cardOpen).toBe(false);
+  });
+
+  it("keeps the profile's controls when an older server does not name the conversation's", async () => {
+    const { result } = setup();
+    await act(async () => {});
+    expect(result.current.profile?.scale).toBe("FIVE_STAR");
+  });
+
   it("does nothing at all without a rating profile", async () => {
     const c = client();
     const { result } = setup({ client: c, profile: null, conversationState: "ENDED" });

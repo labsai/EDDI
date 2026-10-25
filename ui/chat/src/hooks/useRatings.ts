@@ -73,6 +73,12 @@ export interface Ratings {
   closeCard: () => void;
   /** A refused rating's notice, or null. */
   toast: string | null;
+  /**
+   * The controls to render: those of the version this conversation runs on
+   * once the server has said (they decide what a rating write accepts), the
+   * profile's until then or when an older server does not say.
+   */
+  profile: RatingProfile | null;
 }
 
 export function useRatings({ client, conversationId, profile, messages, conversationState }: UseRatingsArgs): Ratings {
@@ -81,6 +87,8 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   const [restoredFor, setRestoredFor] = useState<string | null>(null);
   const [cardOpen, setCardOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  /** The conversation's own controls; undefined until (or unless) the server says. */
+  const [controls, setControls] = useState<RatingProfile | null | undefined>(undefined);
 
   const conversationRef = useRef(conversationId);
   conversationRef.current = conversationId;
@@ -93,7 +101,12 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   /** Prompted in this page, whatever storage managed to keep. */
   const promptedRef = useRef<Set<string>>(new Set());
 
+  // Reading starts from the profile, so an agent that asks for no ratings costs
+  // no request. A conversation pinned to an older version that took ratings
+  // while the current one does not therefore shows none — rare, since resuming
+  // moves pinned conversations onto the current version.
   const enabled = !!profile && !!conversationId;
+  const effective = controls !== undefined ? controls : profile;
 
   /* Restore on open / switch. */
   useEffect(() => {
@@ -101,6 +114,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
     setStepRatings({});
     setCardOpen(false);
     setRestoredFor(null);
+    setControls(undefined);
     if (!enabled || !conversationId) return;
     let cancelled = false;
     clientRef.current
@@ -111,6 +125,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
         const byStep: Record<number, StoredRating> = {};
         for (const rating of ratings.steps) byStep[rating.stepIndex] = rating;
         setStepRatings(byStep);
+        setControls(ratings.controls);
       })
       .catch(() => {
         // An older server without the endpoint, or nothing rated: start empty.
@@ -234,19 +249,19 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   /* When the card offers itself. */
   const replies = useMemo(() => agentReplyCount(messages), [messages]);
   useEffect(() => {
-    if (!profile?.conversationRating || !conversationId || cardOpen) return;
+    if (!effective?.conversationRating || !conversationId || cardOpen) return;
     // Wait for the restore, so somebody who already rated is not asked again.
     if (restoredFor !== conversationId || conversationRating) return;
     if (promptedRef.current.has(conversationId)) return;
     const memory = readMemory(conversationId);
     if (memory.prompted || memory.dismissed) return;
-    const ended = profile.askOnEnd && conversationState === "ENDED";
-    const enoughReplies = profile.askAfterTurns > 0 && replies >= profile.askAfterTurns;
+    const ended = effective.askOnEnd && conversationState === "ENDED";
+    const enoughReplies = effective.askAfterTurns > 0 && replies >= effective.askAfterTurns;
     if (ended || enoughReplies) {
       markPrompted(conversationId);
       setCardOpen(true);
     }
-  }, [profile, conversationId, cardOpen, restoredFor, conversationRating, conversationState, replies, markPrompted]);
+  }, [effective, conversationId, cardOpen, restoredFor, conversationRating, conversationState, replies, markPrompted]);
 
   return {
     conversationRating,
@@ -255,9 +270,10 @@ export function useRatings({ client, conversationId, profile, messages, conversa
     rateConversation,
     withdrawConversation,
     clearStep,
-    cardOpen: cardOpen && !!profile?.conversationRating,
+    cardOpen: cardOpen && !!effective?.conversationRating,
     openCard,
     closeCard,
     toast,
+    profile: effective,
   };
 }

@@ -182,6 +182,11 @@ export interface OwnRating {
 export interface OwnRatings {
   conversation: OwnRating | null;
   steps: OwnRating[];
+  /**
+   * The rating controls of the version this conversation runs on — null when
+   * it takes no ratings, undefined when the server did not say (an older one).
+   */
+  controls?: RatingProfile | null;
 }
 
 /** How the Manager's chat names itself to the server. */
@@ -199,7 +204,8 @@ function ratingBody(input: RatingInput) {
 
 export async function readOwnRatings(conversationId: string): Promise<OwnRatings> {
   const result = await api.get<OwnRatings>(`/agents/${seg(conversationId)}/rating`);
-  return { conversation: result?.conversation ?? null, steps: result?.steps ?? [] };
+  const controls = result && Object.prototype.hasOwnProperty.call(result, "controls") ? (result.controls ?? null) : undefined;
+  return { conversation: result?.conversation ?? null, steps: result?.steps ?? [], controls };
 }
 
 export function rateConversation(conversationId: string, input: RatingInput): Promise<OwnRating> {

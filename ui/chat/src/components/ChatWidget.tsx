@@ -1957,7 +1957,7 @@ export function ChatWidget() {
     <div className="chat-root">
       <ChatHeader
         onRateConversation={
-          state.ratingProfile?.conversationRating && state.conversationId ? ratings.openCard : undefined
+          ratings.profile?.conversationRating && state.conversationId ? ratings.openCard : undefined
         }
       />
       {state.reviewNotice && (
@@ -1993,7 +1993,7 @@ export function ChatWidget() {
         ) : (
           <>
             {state.messages.map((msg, i) => {
-              const ratingStep = state.ratingProfile?.messageRating ? ratableByPosition[i] : null;
+              const ratingStep = ratings.profile?.messageRating ? ratableByPosition[i] : null;
               return (
                 <MessageBubble
                   key={msg.id}
@@ -2004,16 +2004,16 @@ export function ChatWidget() {
                   agentName={state.agentName}
                   ratingStep={ratingStep}
                   rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
-                  ratingProfile={state.ratingProfile}
+                  ratingProfile={ratings.profile}
                   onRateStep={ratings.rateStep}
                 />
               );
             })}
 
-            {ratings.cardOpen && state.ratingProfile && !isPaused && (
+            {ratings.cardOpen && ratings.profile && !isPaused && (
               <RatingCard
                 key={state.conversationId ?? "none"}
-                profile={state.ratingProfile}
+                profile={ratings.profile}
                 current={ratings.conversationRating}
                 onSubmit={ratings.rateConversation}
                 onWithdraw={ratings.withdrawConversation}
