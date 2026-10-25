@@ -74,6 +74,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.ITurnAbandonment;
@@ -2278,7 +2279,8 @@ public class ConversationService implements IConversationService, UserErasurePar
     void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
         // Agent-test conversations never wrote user memory, so an undo has nothing to
         // revert.
-        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())) {
+        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())
+                || ReservedPrincipals.hasNoPersistentMemory(memory.getUserId())) {
             return;
         }
         var changes = ConversationMemory.propertyChanges(step);
@@ -2421,7 +2423,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         // without a store, Conversation skips loadUserProperties at init and
         // storePropertiesPermanently at every turn end. A test must not change what
         // real users have stored, nor pass or fail because of it.
-        final IUserMemoryStore memoryStore = AgentTestConversations.isTestUserId(userId) ? null : userMemoryStore;
+        // An unauthenticated email sender (email-anon:...) is treated the same way: its
+        // identity is a forgeable claim, so it must get no memory to read or write —
+        // neither through the properties lifecycle nor through the LLM memory tool.
+        final boolean noMemory = AgentTestConversations.isTestUserId(userId) || ReservedPrincipals.hasNoPersistentMemory(userId);
+        final IUserMemoryStore memoryStore = noMemory ? null : userMemoryStore;
+        final boolean toolsEnabled = memoryToolsEnabled && !ReservedPrincipals.hasNoPersistentMemory(userId);
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
@@ -2435,7 +2442,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             @Override
             public boolean isMemoryToolsEnabled() {
-                return memoryToolsEnabled;
+                return toolsEnabled;
             }
 
             @Override

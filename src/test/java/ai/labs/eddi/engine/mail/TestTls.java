@@ -27,9 +27,9 @@ import java.util.concurrent.TimeUnit;
  * production code path, with certificate and host-name checks on — accepts this
  * certificate and nothing else.
  */
-final class TestTls {
+public final class TestTls {
 
-    static final String PASSWORD = "changeit";
+    public static final String PASSWORD = "changeit";
 
     private static Path keystore;
 
@@ -37,7 +37,7 @@ final class TestTls {
     }
 
     /** The PKCS12 keystore holding the server key and certificate. */
-    static synchronized Path keystore() throws IOException, InterruptedException {
+    public static synchronized Path keystore() throws IOException, InterruptedException {
         if (keystore != null) {
             return keystore;
         }
@@ -70,7 +70,7 @@ final class TestTls {
     }
 
     /** A server-side context presenting the test certificate. */
-    static SSLContext serverContext() throws Exception {
+    public static SSLContext serverContext() throws Exception {
         KeyManagerFactory keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         keys.init(load(), PASSWORD.toCharArray());
         SSLContext context = SSLContext.getInstance("TLS");
@@ -79,7 +79,7 @@ final class TestTls {
     }
 
     /** A client context that trusts the test certificate only. */
-    static SSLContext clientContext() throws Exception {
+    public static SSLContext clientContext() throws Exception {
         Certificate certificate = load().getCertificate("mail");
         KeyStore trust = KeyStore.getInstance("PKCS12");
         trust.load(null, null);
@@ -92,7 +92,7 @@ final class TestTls {
     }
 
     /** Runs {@code body} with {@link #clientContext()} as the JVM default. */
-    static <T> T trustingDefault(ThrowingSupplier<T> body) throws Exception {
+    public static <T> T trustingDefault(ThrowingSupplier<T> body) throws Exception {
         SSLContext previous = SSLContext.getDefault();
         SSLContext.setDefault(clientContext());
         try {
@@ -103,7 +103,7 @@ final class TestTls {
     }
 
     @FunctionalInterface
-    interface ThrowingSupplier<T> {
+    public interface ThrowingSupplier<T> {
         T get() throws Exception;
     }
 }

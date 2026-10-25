@@ -536,10 +536,12 @@ Full guide: [slack-integration.md](slack-integration.md).
 
 ### Email
 
-There is no email channel yet. These settings govern the **system mailer** — the deployment's one SMTP sender, used
-today for [HITL email notifications](hitl.md#email-notifications) — its outbound message ledger, the mail socket
-guard the coming IMAP/SMTP transports will connect through, and the DNS lookups of sender authentication (DKIM and
-DMARC) that the email channel will use. Details:
+These settings govern the **system mailer** — the deployment's one SMTP sender, used for
+[HITL email notifications](hitl.md#email-notifications) and the email channel's owner notices — the email message
+ledger, the mail socket guard every IMAP/SMTP connection goes through, the DNS lookups of sender authentication (DKIM
+and DMARC), and the polling of [email channel integrations](email-integration.md) (trigger mode). An email
+integration's own settings are its `platformConfig`, listed in [email-integration.md](email-integration.md#every-key).
+Details:
 [security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector),
 [security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
 
@@ -566,6 +568,10 @@ DMARC) that the email channel will use. Details:
 | `eddi.email.dns.cache-max-entries` | `10000` | Size of the TXT answer cache shared by all mailboxes |
 | `eddi.email.dns.cache-max-ttl` | `1h` | Longest time an answer is cached; shorter record TTLs (and, for a missing name, the zone's SOA minimum) are honoured. Temporary failures are never cached |
 | `eddi.email.dkim.max-delivery-age` | `7d` | When a transport passes the time the mailbox server accepted a message (IMAP `INTERNALDATE`), DKIM `x=` (expiry) and `t=` (not in the future) are judged at that instant, so a short-lived signature that was valid on delivery still verifies when the mail is processed later. The instant is never taken as later than now nor earlier than now minus this, so a broken or forged value cannot revive an old signature; without one, signatures are judged at the current time |
+| `eddi.email.poll.max-messages-per-poll` | `50` | Mails one poll of one mailbox processes at most; the rest wait for the next poll. Mails that are still deferred (a budget, a temporary authentication result) do not count |
+| `eddi.email.poll.max-duration` | `2m` | Time one poll may spend before it stops starting new mails. Keep it well below `eddi.schedule.fire-timeout` |
+| `eddi.email.inbound.stranded-after` | `30m` | How long a mail's turn may stay submitted without its completion being recorded before the inbound sweep resolves it from the conversation's state (a lost completion, e.g. a node that died). A mail is never run twice |
+| `eddi.email.inbound.sweep-interval` | `5m` | How often each instance runs the inbound sweep: stranded turns, and re-creating a missing poll schedule |
 | `eddi.email.dns.max-lookups-per-message` | `10` | Network lookups one message may cause (cache hits are free): one per DKIM signature, at most 5 of which are evaluated, plus up to two for DMARC. Past it, the remaining checks are temporary failures |
 
 ### OpenAI-compatible API
