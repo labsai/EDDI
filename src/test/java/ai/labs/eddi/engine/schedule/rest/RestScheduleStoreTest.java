@@ -137,6 +137,39 @@ class RestScheduleStoreTest {
         assertNotNull(created.getNextFire());
     }
 
+    /**
+     * A body carrying the continuation marker: a forged one would make the fire
+     * handler run a turn in the conversation it names, which may be anyone's.
+     */
+    private static ScheduleConfiguration forgedContinuation() {
+        var s = new ScheduleConfiguration();
+        s.setAgentId("agent-1");
+        s.setName("continuation");
+        s.setMessage("go on");
+        s.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+        s.setMetadata(ConversationContinuations.metadata("victims-conversation", 1, 5));
+        return s;
+    }
+
+    @Test
+    void create_rejectsTheContinuationMarker_evenForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+
+        Response response = rest.createSchedule(forgedContinuation());
+
+        assertEquals(400, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains(ConversationContinuations.METADATA_TYPE_KEY));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void update_rejectsTheContinuationMarker() throws Exception {
+        Response response = rest.updateSchedule("s1", forgedContinuation());
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
     @Test
     void create_rejectsMissingAgentId() {
         var schedule = new ScheduleConfiguration();

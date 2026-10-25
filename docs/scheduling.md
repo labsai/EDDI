@@ -549,7 +549,11 @@ handler by its metadata:
 | Self-continuation | `continuation-<conversationId>` | Runs the next turn of a conversation that asked for it with `CONTINUE_CONVERSATION` — see [Long Jobs](long-jobs.md) |
 
 Neither can be fired by hand (`409`), and neither is exported with its agent: both belong to one
-conversation on this deployment, not to the agent's configuration. A continuation is disabled by an
+conversation on this deployment, not to the agent's configuration. A create, update or import whose
+body carries either marker (`hitlType: hitl_timeout`, `continuationType: conversation_continuation`)
+is refused with `400` for everyone: a forged one would act on a conversation the caller may not own.
+A continuation fire also checks that the schedule's `userId` owns the conversation, and runs nothing
+otherwise (`owner_mismatch`). A continuation is disabled by an
 undeploy and re-enabled by the next deploy like the agent's own schedules; a failed continuation fire
 is retried with the normal backoff and dead-lettered after `eddi.schedule.max-retries`.
 

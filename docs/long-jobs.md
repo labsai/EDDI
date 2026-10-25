@@ -117,6 +117,13 @@ starts still runs through `say`: the coordinator orders it behind any other turn
 conversation, in cluster mode under the [conversation lease](clustering.md), with quotas, audit
 and the turn deadline.
 
+### Only the engine arms a continuation
+
+A continuation schedule names a conversation, and its fire runs a turn there. So the marker is
+refused on every schedule write from outside (REST create, update and ZIP import answer `400`), and
+a fire runs only when the schedule's `userId` — the owner the engine stamped when it armed it — is
+the conversation's owner; anything else completes without a turn (`owner_mismatch`).
+
 ### Once only
 
 Schedule delivery is at least once: a node that dies after the turn ran but before the fire was

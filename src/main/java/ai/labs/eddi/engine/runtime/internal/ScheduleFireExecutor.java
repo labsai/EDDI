@@ -404,7 +404,7 @@ public class ScheduleFireExecutor {
         String conversationId = (String) md.get(ConversationContinuations.METADATA_CONVERSATION_ID_KEY);
         Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
         ContinuationFireHandler.Result result = continuationFireHandler != null
-                ? continuationFireHandler.fire(md, schedule.getMessage(), timeout)
+                ? continuationFireHandler.fire(md, schedule.getUserId(), schedule.getMessage(), timeout)
                 : new ContinuationFireHandler.Result(ScheduleConfiguration.FireStatus.FAILED.name(), "continuations are not available");
         var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(),
                 startedAt, Instant.now(), result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0);

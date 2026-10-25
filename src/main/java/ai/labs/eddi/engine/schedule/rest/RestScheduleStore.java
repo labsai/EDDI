@@ -196,6 +196,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response continuationGuard = rejectContinuationBody(schedule, "create");
+            if (continuationGuard != null) {
+                return continuationGuard;
+            }
+
             Response ingestionGuard = rejectIngestionBody(schedule, "create");
             if (ingestionGuard != null) {
                 return ingestionGuard;
@@ -279,6 +284,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response bodyGuard = rejectHitlTimeoutBody(schedule, "update");
             if (bodyGuard != null) {
                 return bodyGuard;
+            }
+
+            Response continuationGuard = rejectContinuationBody(schedule, "update");
+            if (continuationGuard != null) {
+                return continuationGuard;
             }
 
             Response ingestionGuard = rejectIngestionBody(schedule, "update");
@@ -494,7 +504,7 @@ public class RestScheduleStore implements IRestScheduleStore {
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
                         .build();
             }
-            if (ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+            if (ConversationContinuations.isContinuationSchedule(schedule != null ? schedule.getMetadata() : null)) {
                 // The next turn of a self-continuing conversation: the engine armed it
                 // after a committed turn and runs it once, with its own input and
                 // once-only check. Firing it by hand would run another user's job early,
@@ -956,6 +966,28 @@ public class RestScheduleStore implements IRestScheduleStore {
                             + RagIngestionSchedules.METADATA_TYPE_KEY + "=true) cannot be created or updated via "
                             + "this API. They are managed automatically when a knowledge base is saved. "
                             + "Run a source via POST /ragstore/rags/{id}/sources/{sourceId}/run.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Continuation schedules are minted only by {@code ConversationContinuations}
+     * after a committed turn, carrying that conversation and its owner. A fire of
+     * one runs a turn in the named conversation, so accepting the marker from a
+     * client would let anyone who may create a schedule inject a turn into another
+     * user's conversation. Refused for everyone, as the HITL timeout and ingestion
+     * markers are; ZIP import goes through this same method.
+     */
+    private Response rejectContinuationBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — continuation schedules are minted "
+                    + "internally only", operation, ConversationContinuations.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as conversation continuations (metadata "
+                            + ConversationContinuations.METADATA_TYPE_KEY + "=" + ConversationContinuations.METADATA_TYPE_VALUE
+                            + ") cannot be created or updated via this API. The engine arms them after a turn that "
+                            + "emits CONTINUE_CONVERSATION.")
                     .build();
         }
         return null;

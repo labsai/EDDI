@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -105,11 +106,15 @@ public class ContinuationFireHandler {
      * Runs the continuation the schedule metadata names, waiting at most
      * {@code timeout} for the turn. Never throws.
      *
+     * @param scheduleUserId
+     *            the schedule's {@code userId}, which the engine sets to the
+     *            conversation's owner when it arms a continuation; a fire whose
+     *            schedule names someone else runs nothing
      * @param input
      *            the agent designer's {@code continuationInput} (the schedule's
      *            message), {@code null} for an empty input
      */
-    public Result fire(Map<String, Object> metadata, String input, Duration timeout) {
+    public Result fire(Map<String, Object> metadata, String scheduleUserId, String input, Duration timeout) {
         String conversationId = metadata != null ? asString(metadata.get(ConversationContinuations.METADATA_CONVERSATION_ID_KEY)) : null;
         Integer number = metadata != null ? asInt(metadata.get(ConversationContinuations.METADATA_NUMBER_KEY)) : null;
         Integer max = metadata != null ? asInt(metadata.get(ConversationContinuations.METADATA_MAX_KEY)) : null;
@@ -117,11 +122,11 @@ public class ContinuationFireHandler {
             return Result.stopped("the schedule names no conversation or continuation number");
         }
         try {
-            Result refused = refusalBeforeRun(conversationId, number);
+            Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
             if (refused != null) {
                 return refused;
             }
-            return run(conversationId, number, max, input, timeout);
+            return run(conversationId, number, max, scheduleUserId, input, timeout);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Result.failed("Interrupted while waiting for continuation " + number);
@@ -131,10 +136,12 @@ public class ContinuationFireHandler {
     }
 
     /**
-     * The checks that need no turn: the conversation is gone, ended, paused, or
-     * already ran this continuation. {@code null} when the turn may run.
+     * The checks that need no turn: the conversation is gone, belongs to someone
+     * other than the schedule's user, ended, paused, or already ran this
+     * continuation. {@code null} when the turn may run.
      */
-    private Result refusalBeforeRun(String conversationId, int number) throws IResourceStore.ResourceStoreException {
+    private Result refusalBeforeRun(String conversationId, int number, String scheduleUserId)
+            throws IResourceStore.ResourceStoreException {
         ConversationMemorySnapshot snapshot;
         try {
             snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
@@ -143,6 +150,12 @@ public class ContinuationFireHandler {
         }
         if (snapshot == null) {
             return stop(ConversationContinuations.REASON_GONE, conversationId, "the conversation no longer exists");
+        }
+        if (!Objects.equals(snapshot.getUserId(), scheduleUserId)) {
+            // Defence in depth behind the REST refusal of the marker: whatever wrote
+            // this schedule, it does not run a turn in a conversation it does not own.
+            return stop(ConversationContinuations.REASON_OWNER_MISMATCH, conversationId,
+                    "the schedule's user does not own the conversation");
         }
         if (ConversationContinuations.ranIn(snapshot, number)) {
             return stop(ConversationContinuations.REASON_DUPLICATE, conversationId, "continuation " + number + " already ran");
@@ -161,7 +174,8 @@ public class ContinuationFireHandler {
         return null;
     }
 
-    private Result run(String conversationId, int number, Integer max, String input, Duration timeout) throws Exception {
+    private Result run(String conversationId, int number, Integer max, String scheduleUserId, String input, Duration timeout)
+            throws Exception {
         var latch = new CountDownLatch(1);
         var outcome = new AtomicReference<SimpleConversationMemorySnapshot>();
         var skipped = new AtomicBoolean(false);
@@ -187,7 +201,7 @@ public class ContinuationFireHandler {
         }
         ConversationState state = outcome.get() != null ? outcome.get().getConversationState() : null;
         if (skipped.get()) {
-            return afterSkip(conversationId, number, state);
+            return afterSkip(conversationId, number, scheduleUserId, state);
         }
         if (state == ConversationState.ERROR) {
             return Result.failed("Continuation " + number + " failed (state ERROR)");
@@ -206,8 +220,9 @@ public class ContinuationFireHandler {
      * recorded, or a conversation that was paused or busy when the turn's lease
      * came. The stored document decides which.
      */
-    private Result afterSkip(String conversationId, int number, ConversationState skippedIn) throws IResourceStore.ResourceStoreException {
-        Result refused = refusalBeforeRun(conversationId, number);
+    private Result afterSkip(String conversationId, int number, String scheduleUserId, ConversationState skippedIn)
+            throws IResourceStore.ResourceStoreException {
+        Result refused = refusalBeforeRun(conversationId, number, scheduleUserId);
         if (refused != null) {
             return refused;
         }

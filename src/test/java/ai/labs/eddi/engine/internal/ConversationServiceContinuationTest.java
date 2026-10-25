@@ -299,12 +299,12 @@ class ConversationServiceContinuationTest {
                     conversationService.conversationContinuations);
             var metadata = ConversationContinuations.metadata(CONVERSATION_ID, 1, 3);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata, "go on", Duration.ofSeconds(5)).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata, USER_ID, "go on", Duration.ofSeconds(5)).status());
             // What the store now holds is what the first turn committed.
             doReturn(persistedSnapshot()).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             // A fresh node: nothing in memory to remember the first fire by.
             conversationService.turnIdempotency = new TurnIdempotencyService(600, 30, new SimpleMeterRegistry(), now::get);
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata, "go on", Duration.ofSeconds(5)).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata, USER_ID, "go on", Duration.ofSeconds(5)).status());
 
             verify(conversation, times(1)).say(anyString(), any());
         }

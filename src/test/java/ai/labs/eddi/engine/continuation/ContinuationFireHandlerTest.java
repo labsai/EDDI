@@ -107,7 +107,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.READY, false);
 
-            var result = handler.fire(metadata(3), "carry on", TIMEOUT);
+            var result = handler.fire(metadata(3), null, "carry on", TIMEOUT);
 
             assertEquals(FireStatus.COMPLETED.name(), result.status());
             var input = ArgumentCaptor.forClass(InputData.class);
@@ -126,7 +126,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.READY, false);
 
-            handler.fire(metadata(1), null, TIMEOUT);
+            handler.fire(metadata(1), null, null, TIMEOUT);
 
             var input = ArgumentCaptor.forClass(InputData.class);
             verify(conversationService).say(any(), any(), any(), any(), input.capture(), anyBoolean(), any());
@@ -139,7 +139,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.ERROR, false);
 
-            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             assertEquals(0.0, run());
         }
 
@@ -149,7 +149,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.EXECUTION_INTERRUPTED, false);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             assertEquals(1.0, refused(ConversationContinuations.REASON_INTERRUPTED));
         }
 
@@ -158,7 +158,7 @@ class ContinuationFireHandlerTest {
         void timeout() throws Exception {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             // say() accepts the turn but never answers.
-            var result = handler.fire(metadata(1), "", Duration.ofMillis(50));
+            var result = handler.fire(metadata(1), null, "", Duration.ofMillis(50));
             assertEquals(FireStatus.FAILED.name(), result.status());
         }
     }
@@ -174,8 +174,8 @@ class ContinuationFireHandlerTest {
                     .loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.READY, false);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
 
             verify(conversationService, times(1)).say(any(), any(), any(), any(), any(), anyBoolean(), any());
             assertEquals(1.0, run());
@@ -189,7 +189,7 @@ class ContinuationFireHandlerTest {
                     .loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.READY, true);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(2), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(2), null, "", TIMEOUT).status());
             assertEquals(1.0, refused(ConversationContinuations.REASON_DUPLICATE));
             assertEquals(0.0, run());
         }
@@ -200,7 +200,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.IN_PROGRESS, true);
 
-            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
         }
 
         @Test
@@ -209,7 +209,7 @@ class ContinuationFireHandlerTest {
             doReturn(stored(ConversationState.READY, 1)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             turnSettles(ConversationState.READY, false);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(2), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(2), null, "", TIMEOUT).status());
             verify(conversationService, times(1)).say(any(), any(), any(), any(), any(), anyBoolean(), any());
         }
     }
@@ -219,11 +219,36 @@ class ContinuationFireHandlerTest {
     class Lifecycle {
 
         @Test
+        @DisplayName("a schedule whose user does not own the conversation runs nothing")
+        void ownerMismatch() throws Exception {
+            var stored = stored(ConversationState.READY);
+            stored.setUserId("victim");
+            doReturn(stored).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "attacker", "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
+            verifyNoInteractions(conversationService);
+            assertEquals(2.0, refused(ConversationContinuations.REASON_OWNER_MISMATCH));
+        }
+
+        @Test
+        @DisplayName("the owner's own schedule runs")
+        void ownerMatches() throws Exception {
+            var stored = stored(ConversationState.READY);
+            stored.setUserId("owner");
+            doReturn(stored).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            turnSettles(ConversationState.READY, false);
+
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "owner", "", TIMEOUT).status());
+            assertEquals(1.0, run());
+        }
+
+        @Test
         @DisplayName("ENDED: no turn, schedule completes")
         void ended() throws Exception {
             doReturn(stored(ConversationState.ENDED)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             verifyNoInteractions(conversationService);
             assertEquals(1.0, refused(ConversationContinuations.REASON_ENDED));
         }
@@ -233,7 +258,7 @@ class ContinuationFireHandlerTest {
         void paused() throws Exception {
             doReturn(stored(ConversationState.AWAITING_HUMAN)).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             verifyNoInteractions(conversationService);
             assertEquals(1.0, refused(ConversationContinuations.REASON_AWAITING_HUMAN));
         }
@@ -245,7 +270,7 @@ class ContinuationFireHandlerTest {
             doThrow(new IConversationService.ConversationAwaitingApprovalException("paused")).when(conversationService)
                     .say(any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             assertEquals(1.0, refused(ConversationContinuations.REASON_AWAITING_HUMAN));
         }
 
@@ -254,7 +279,7 @@ class ContinuationFireHandlerTest {
         void gone() throws Exception {
             doThrow(new IResourceStore.ResourceNotFoundException("gone")).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             verifyNoInteractions(conversationService);
             assertEquals(1.0, refused(ConversationContinuations.REASON_GONE));
         }
@@ -266,7 +291,7 @@ class ContinuationFireHandlerTest {
             doThrow(new IConversationService.ConversationEndedException("ended")).when(conversationService)
                     .say(any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
         }
 
         @Test
@@ -276,7 +301,7 @@ class ContinuationFireHandlerTest {
             doThrow(new ProcessingRestrictedException("restricted")).when(conversationService)
                     .say(any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             assertEquals(1.0, refused(ConversationContinuations.REASON_RESTRICTED));
         }
 
@@ -287,7 +312,7 @@ class ContinuationFireHandlerTest {
             doThrow(new IConversationService.AgentNotReadyException("not deployed")).when(conversationService)
                     .say(any(), any(), any(), any(), any(), anyBoolean(), any());
 
-            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             assertEquals(1.0, refused(ConversationContinuations.REASON_UNDEPLOYED));
             assertEquals(0.0, run());
         }
@@ -297,15 +322,15 @@ class ContinuationFireHandlerTest {
         void storeFailure() throws Exception {
             doThrow(new IResourceStore.ResourceStoreException("down")).when(memoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), "", TIMEOUT).status());
+            assertEquals(FireStatus.FAILED.name(), handler.fire(metadata(1), null, "", TIMEOUT).status());
             verifyNoInteractions(conversationService);
         }
 
         @Test
         @DisplayName("a schedule without a conversation or number completes without doing anything")
         void malformed() {
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(Map.of(), "", TIMEOUT).status());
-            assertEquals(FireStatus.COMPLETED.name(), handler.fire(null, "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(Map.of(), null, "", TIMEOUT).status());
+            assertEquals(FireStatus.COMPLETED.name(), handler.fire(null, null, "", TIMEOUT).status());
             verifyNoInteractions(conversationService, memoryStore);
         }
     }

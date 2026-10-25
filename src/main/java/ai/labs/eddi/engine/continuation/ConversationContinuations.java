@@ -137,6 +137,12 @@ public class ConversationContinuations {
      * The continuation turn was interrupted (cancel, watchdog): the chain stops.
      */
     public static final String REASON_INTERRUPTED = "interrupted";
+    /**
+     * At fire time: the schedule's {@code userId} is not the conversation's owner.
+     * The engine stamps the owner on every continuation it arms, so a mismatch is a
+     * schedule the engine did not mint for this conversation; it never runs.
+     */
+    public static final String REASON_OWNER_MISMATCH = "owner_mismatch";
     /** At fire time: this continuation already ran (re-delivered schedule). */
     public static final String REASON_DUPLICATE = "duplicate";
 

@@ -1338,7 +1338,7 @@ class ScheduleFireExecutorTest {
         schedule.setFireStatus(FireStatus.CLAIMED);
         schedule.setNextFire(Instant.now().minusSeconds(1));
         schedule.setMetadata(ConversationContinuations.metadata("conv-9", 4, 10));
-        when(handler.fire(any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+        when(handler.fire(any(), any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
 
         var log = executor.fire(schedule, "instance-1", 2);
 

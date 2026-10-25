@@ -352,7 +352,9 @@ eddi_continuation_refused_total             # Continuations ignored or stopped; 
 `cost_ceiling`, `not_settled` (the asking turn failed, ended or paused),
 `group_member`, `schedule_failed`, and — decided when the schedule fires —
 `ended`, `awaiting_human`, `gone` (deleted or erased), `restricted` (GDPR Art.
-18), `undeployed`, `interrupted` and `duplicate`. Every reason except
+18), `undeployed`, `interrupted`, `duplicate` and `owner_mismatch` (the schedule's
+user does not own the conversation — a schedule the engine did not mint; alert on
+any). Every reason except
 `undeployed` ends the chain; an `undeployed` fire is retried with the schedule
 backoff and dead-lettered like any failed fire. A steady `disabled` rate means a
 rule emits the action on an agent that never opted in. `duplicate` counts
