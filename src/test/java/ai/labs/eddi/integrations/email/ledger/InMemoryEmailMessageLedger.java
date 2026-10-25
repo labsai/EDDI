@@ -151,9 +151,18 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public synchronized List<LedgerEntry> findByConversation(String conversationId, int limit) {
-        return rows.values().stream().filter(r -> conversationId.equals(r.conversationId())).sorted(Comparator.comparing(LedgerEntry::createdAt))
-                .limit(limit).toList();
+    public synchronized Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        List<LedgerEntry> turns = rows.values().stream()
+                .filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.TRIGGER && r.direction() == Direction.IN
+                        && (r.state() == State.TURN_SUBMITTED || r.state() == State.DONE))
+                .sorted(Comparator.comparing(LedgerEntry::createdAt)).toList();
+        return turns.isEmpty() ? Optional.empty() : Optional.of(turns.get(latest ? turns.size() - 1 : 0));
+    }
+
+    @Override
+    public synchronized boolean hasSentReply(String conversationId, String recipient) {
+        return rows.values().stream().anyMatch(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY
+                && r.direction() == Direction.OUT && r.state() == State.SENT && recipient.equals(r.recipient()));
     }
 
     @Override

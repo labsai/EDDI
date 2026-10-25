@@ -353,20 +353,32 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public List<LedgerEntry> findByConversation(String conversationId, int limit) {
-        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE conversation_id = ? ORDER BY created_at, id LIMIT ?";
+    public Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        String order = latest ? "created_at DESC, id DESC" : "created_at, id";
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'TRIGGER' AND direction = 'IN' "
+                + "AND state IN ('TURN_SUBMITTED', 'DONE') ORDER BY " + order + " LIMIT 1";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, conversationId);
-            statement.setInt(2, limit);
-            List<LedgerEntry> result = new ArrayList<>();
             try (ResultSet rows = statement.executeQuery()) {
-                while (rows.next()) {
-                    result.add(toEntry(rows));
-                }
+                return rows.next() ? Optional.of(toEntry(rows)) : Optional.empty();
             }
-            return result;
         } catch (SQLException e) {
-            throw new IllegalStateException("Failed to read the email ledger rows of a conversation", e);
+            throw new IllegalStateException("Failed to read the inbound email ledger row of a conversation", e);
+        }
+    }
+
+    @Override
+    public boolean hasSentReply(String conversationId, String recipient) {
+        String sql = "SELECT 1 FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'REPLY' AND direction = 'OUT' AND state = 'SENT' "
+                + "AND recipient = ? LIMIT 1";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            statement.setString(2, recipient);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger replies of a conversation", e);
         }
     }
 

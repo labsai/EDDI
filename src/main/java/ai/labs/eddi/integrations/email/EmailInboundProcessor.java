@@ -839,22 +839,13 @@ public class EmailInboundProcessor {
 
     /** Whether {@code sender} may continue {@code conversationId} (see above). */
     boolean participantOf(String conversationId, EmailChannelSettings settings, String sender) {
-        List<LedgerEntry> rows = ledger.findByConversation(conversationId, EmailReplySender.CONVERSATION_ROWS);
-        for (LedgerEntry row : rows) {
-            if (row.kind() == Kind.TRIGGER && row.direction() == Direction.IN && (row.state() == State.TURN_SUBMITTED || row.state() == State.DONE)) {
-                // The first mail that ran in the conversation names its original sender.
-                if (sender.equals(row.recipient())) {
-                    return true;
-                }
-                break;
-            }
+        // The first mail that ran in the conversation names its original sender.
+        Optional<LedgerEntry> first = ledger.findInboundTurn(conversationId, false);
+        if (first.isPresent() && sender.equals(first.get().recipient())) {
+            return true;
         }
-        if (settings.threadParticipants() != EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT) {
-            return false;
-        }
-        return rows.stream()
-                .anyMatch(row -> row.kind() == Kind.REPLY && row.direction() == Direction.OUT && row.state() == State.SENT
-                        && sender.equals(row.recipient()));
+        return settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT
+                && ledger.hasSentReply(conversationId, sender);
     }
 
     /**

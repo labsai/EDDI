@@ -226,12 +226,18 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public List<LedgerEntry> findByConversation(String conversationId, int limit) {
-        List<LedgerEntry> result = new ArrayList<>();
-        for (Document document : rows.find(Filters.eq(F_CONVERSATION, conversationId)).sort(Sorts.ascending(F_CREATED)).limit(limit)) {
-            result.add(toEntry(document));
-        }
-        return result;
+    public Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        Bson filter = Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.eq(F_DIRECTION, Direction.IN.name()), Filters.in(F_STATE, State.TURN_SUBMITTED.name(), State.DONE.name()));
+        Bson order = latest ? Sorts.descending(F_CREATED, F_ID) : Sorts.ascending(F_CREATED, F_ID);
+        return Optional.ofNullable(rows.find(filter).sort(order).first()).map(MongoEmailMessageLedger::toEntry);
+    }
+
+    @Override
+    public boolean hasSentReply(String conversationId, String recipient) {
+        return rows.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
+                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()), Filters.eq(F_RECIPIENT, recipient)))
+                .first() != null;
     }
 
     @Override

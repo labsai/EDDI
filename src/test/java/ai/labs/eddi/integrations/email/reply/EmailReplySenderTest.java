@@ -394,6 +394,22 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("a long thread: the notice answers the latest mail, however many ledger rows came before it")
+        void pauseNoticeInLongThread() throws Exception {
+            for (int i = 0; i < 600; i++) {
+                Instant earlier = NOW.minus(Duration.ofDays(2)).plusSeconds(i);
+                ledger.put(new LedgerEntry("old-" + i, INTEGRATION, Kind.TRIGGER, Direction.IN, "<old." + i + "@supplier.com>", CONVERSATION,
+                        "imap:INBOX:1:" + i, "in:old-" + i, SENDER, State.DONE, 1, null, null, null, null, earlier, earlier,
+                        earlier.plus(Duration.ofDays(30))));
+            }
+            ledger.put(inbound(State.TURN_SUBMITTED));
+            paused("A refund over 100 EUR needs a person.");
+
+            assertTrue(sender.onPauseCommitted(CONVERSATION, "1700000000000", NOW).isPresent(), "the latest mail is found");
+            assertEquals(List.of(SENDER), transport.recipients);
+        }
+
+        @Test
         @DisplayName("a pause on a conversation that is not email, or on another pause id, sends nothing")
         void unrelatedPause() throws Exception {
             paused("x");

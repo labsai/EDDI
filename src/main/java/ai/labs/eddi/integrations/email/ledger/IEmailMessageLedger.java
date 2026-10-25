@@ -321,12 +321,21 @@ public interface IEmailMessageLedger {
     long countInboundTurns(String integrationId, String sender, Instant since);
 
     /**
-     * Up to {@code limit} rows of one conversation, of any kind, direction and
-     * integration, oldest first — how conversation mode finds the mail a reply
-     * answers, the sender who started a thread and the addresses its replies went
-     * to (email plan §11).
+     * The first ({@code latest} false) or the latest ({@code latest} true) by
+     * {@code createdAt} {@link Kind#TRIGGER} row, {@link Direction#IN}, of
+     * {@code conversationId} that reached a turn ({@link State#TURN_SUBMITTED} or
+     * {@link State#DONE}), of any integration — the mail that started a thread (its
+     * sender may continue it) and the mail a reply answers (email plan §11). One
+     * indexed lookup however many rows the conversation has.
      */
-    List<LedgerEntry> findByConversation(String conversationId, int limit);
+    Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest);
+
+    /**
+     * Whether a {@link Kind#REPLY} row of {@code conversationId} to
+     * {@code recipient} (normalised) reached {@link State#SENT} — the
+     * {@code anyAuthenticatedParticipant} test of who may continue a thread.
+     */
+    boolean hasSentReply(String conversationId, String recipient);
 
     /**
      * How many {@code kind} rows of {@code conversationId} were created at or after

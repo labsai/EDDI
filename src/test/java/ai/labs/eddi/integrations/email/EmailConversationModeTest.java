@@ -61,6 +61,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -271,6 +272,27 @@ class EmailConversationModeTest {
         processor.process(context(Map.of()), EmailTestMail.mail().header("In-Reply-To: <eddi.notice@contoso.com>").polled(2), now);
 
         assertNotEquals("conv-1", sayConversations.get(1));
+    }
+
+    @Test
+    @DisplayName("a long thread: its first sender, and an address a late reply went to, may still continue it")
+    void participantsInLongThread() {
+        Instant start = Instant.now().minus(Duration.ofDays(2));
+        ledger.put(new LedgerEntry("first", INTEGRATION, Kind.TRIGGER, Direction.IN, "<first@supplier.com>", "conv-long", "imap:INBOX:1:0",
+                "in:first", ALICE, State.DONE, 1, null, null, null, null, start, start, start.plus(Duration.ofDays(30))));
+        for (int i = 1; i <= 600; i++) {
+            Instant at = start.plusSeconds(i);
+            ledger.put(new LedgerEntry("r-" + i, INTEGRATION, Kind.REPLY, Direction.OUT, "<eddi.r" + i + "@contoso.com>", "conv-long", "r|" + i,
+                    "reply:" + i, ALICE, State.SENT, 1, at, null, null, null, at, at, at.plus(Duration.ofDays(30))));
+        }
+        Instant late = start.plusSeconds(601);
+        ledger.put(new LedgerEntry("r-carol", INTEGRATION, Kind.REPLY, Direction.OUT, "<eddi.carol@contoso.com>", "conv-long", "r|carol",
+                "reply:carol", "carol@supplier.com", State.SENT, 1, late, null, null, null, late, late, late.plus(Duration.ofDays(30))));
+        var any = context(Map.of("honorReplyTo", "true", "threadParticipants", "anyAuthenticatedParticipant")).settings();
+
+        assertTrue(processor.participantOf("conv-long", any, ALICE), "the original sender");
+        assertTrue(processor.participantOf("conv-long", any, "carol@supplier.com"), "a reply went to her after 600 rows");
+        assertFalse(processor.participantOf("conv-long", any, "dave@supplier.com"), "nobody else");
     }
 
     @Test

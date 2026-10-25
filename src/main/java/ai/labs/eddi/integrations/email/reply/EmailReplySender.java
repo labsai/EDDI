@@ -103,8 +103,6 @@ public class EmailReplySender {
     static final Duration LEASE = Duration.ofMinutes(5);
     static final Duration MAX_BACKOFF = Duration.ofHours(1);
     static final int SWEEP_BATCH = 20;
-    /** Ledger rows of one conversation read to find its mail. */
-    public static final int CONVERSATION_ROWS = 500;
     static final int MAX_CACHED_GROUP_REPLIES = 1000;
 
     static final String SUPPRESSED_RECIPIENT = "SUPPRESSED: a reply to this address bounced permanently";
@@ -333,25 +331,21 @@ public class EmailReplySender {
         if (conversationId == null) {
             return Optional.empty();
         }
-        List<LedgerEntry> rows;
+        Optional<LedgerEntry> latest;
         try {
-            rows = ledger.findByConversation(conversationId, CONVERSATION_ROWS);
+            latest = ledger.findInboundTurn(conversationId, true);
         } catch (RuntimeException e) {
             LOGGER.debugf("Ledger rows of conversation %s could not be read: %s", sanitize(conversationId), e.getMessage());
             return Optional.empty();
         }
-        for (int i = rows.size() - 1; i >= 0; i--) {
-            LedgerEntry row = rows.get(i);
-            if (row.kind() == Kind.TRIGGER && row.direction() == Direction.IN
-                    && (row.state() == State.TURN_SUBMITTED || row.state() == State.DONE)) {
-                Optional<EmailIntegration> integration = directory.find(row.integrationId());
-                if (integration.isEmpty() || !integration.get().settings().replies()) {
-                    return Optional.empty();
-                }
-                return Optional.of(new Located(row, integration.get().settings()));
-            }
+        if (latest.isEmpty()) {
+            return Optional.empty();
         }
-        return Optional.empty();
+        Optional<EmailIntegration> integration = directory.find(latest.get().integrationId());
+        if (integration.isEmpty() || !integration.get().settings().replies()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Located(latest.get(), integration.get().settings()));
     }
 
     private Optional<Request> pauseRequest(Located located, SimpleConversationMemorySnapshot snapshot, String pauseId) {
