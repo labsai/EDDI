@@ -728,7 +728,7 @@ See [Conversation Ratings](conversation-ratings.md).
 ### Alert Metrics
 
 ```text
-eddi_alerts_fired_total             # Alerts recorded; tag: source (RATING|CONVERSATION_ERROR|digest)
+eddi_alerts_fired_total             # Alerts recorded; tag: source (RATING|CONVERSATION_ERROR|OUTPUT_MATCH|digest)
 eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the same rule, agent and conversation in the same window
 eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
 eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)

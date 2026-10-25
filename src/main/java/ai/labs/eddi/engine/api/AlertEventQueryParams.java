@@ -21,7 +21,7 @@ public class AlertEventQueryParams {
     @QueryParam("ruleId")
     public String ruleId;
 
-    /** {@code RATING} or {@code CONVERSATION_ERROR}. */
+    /** {@code RATING}, {@code CONVERSATION_ERROR} or {@code OUTPUT_MATCH}. */
     @QueryParam("source")
     public String source;
 
