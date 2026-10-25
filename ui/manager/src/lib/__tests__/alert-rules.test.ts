@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { opsFor, outputMatchProblems, pathProblem, ruleProblems } from "../alert-rules";
+import { opsFor, outputMatchProblems, pathProblem, ruleProblems, throttleProblems } from "../alert-rules";
 import { blankRule } from "../api/alerts";
 
 describe("ruleProblems — mirrors AlertRuleValidator", () => {
@@ -23,6 +23,21 @@ describe("ruleProblems — mirrors AlertRuleValidator", () => {
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "https://h.example.com", signingSecret: "${vault:k}" }] })).toEqual([]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "http://h.example.com", signingSecret: "${vault:k}" }] })).toEqual(["delivery0"]);
     expect(ruleProblems({ ...rule, delivery: [{ type: "WEBHOOK", url: "${vault:hook-url}", signingSecret: "${vault:k}" }] })).toEqual([]);
+  });
+
+  it("checks the throttle with the server's bounds: whole numbers, 1–1440 minutes, 1–1000 per window", () => {
+    const rule = { ...blankRule("RATING", "agent1"), name: "x" };
+    const withThrottle = (windowMinutes: number, maxPerWindow: number) => ruleProblems({ ...rule, throttle: { windowMinutes, maxPerWindow } });
+    expect(withThrottle(1, 1)).toEqual([]);
+    expect(withThrottle(1440, 1000)).toEqual([]);
+    expect(withThrottle(0, 10)).toEqual(["throttle"]);
+    expect(withThrottle(1441, 10)).toEqual(["throttle"]);
+    expect(withThrottle(60, 0)).toEqual(["throttle"]);
+    expect(withThrottle(60, 1001)).toEqual(["throttle"]);
+    expect(withThrottle(1.5, 10)).toEqual(["throttle"]);
+    expect(withThrottle(60, Number.NaN)).toEqual(["throttle"]);
+    expect(ruleProblems({ ...rule, throttle: null })).toEqual([]);
+    expect(throttleProblems({ windowMinutes: 0, maxPerWindow: 2000 })).toEqual(["windowMinutes", "maxPerWindow"]);
   });
 });
 

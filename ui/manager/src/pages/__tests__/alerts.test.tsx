@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { createTestQueryClient, renderPage } from "@/test/test-utils";
@@ -9,7 +9,7 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
 import { Sidebar } from "@/components/layout/sidebar";
 import { renderWithProviders } from "@/test/test-utils";
-import { FAILING_CHANNEL } from "@/test/mocks/alert-handlers";
+import { FAILING_CHANNEL, alertEventFixtures } from "@/test/mocks/alert-handlers";
 import type { AlertRule } from "@/lib/api/alerts";
 import { AlertsPage } from "../alerts";
 
@@ -126,6 +126,70 @@ describe("AlertsPage — inbox", () => {
     expect(screen.getByTestId("alert-event-acknowledged-alert-3")).toBeInTheDocument();
   });
 
+  it("moves back to the last page that exists when acknowledging empties the page it is on", async () => {
+    // 26 open events: page 2 holds one. Acknowledging it leaves 25, so page 2 no longer exists.
+    const base = alertEventFixtures()[0];
+    let open = Array.from({ length: 26 }, (_, i) => ({ ...base, id: `gen-${i}`, acknowledgedAt: null, acknowledgedBy: null }));
+    server.use(
+      http.get("*/alerts/events", ({ request }) => {
+        const url = new URL(request.url);
+        const index = Number(url.searchParams.get("index") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 25);
+        return HttpResponse.json({ total: open.length, index, limit, events: open.slice(index, index + limit) });
+      }),
+      http.post("*/alerts/events/acknowledge", async ({ request }) => {
+        const body = (await request.json()) as { ids: string[] };
+        open = open.filter((e) => !body.ids.includes(e.id));
+        return HttpResponse.json({ acknowledged: body.ids.length });
+      }),
+    );
+    renderAlerts();
+    await screen.findByTestId("alert-event-row-gen-0");
+    fireEvent.click(screen.getByTestId("alerts-next"));
+    expect(await screen.findByTestId("alert-event-row-gen-25")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("alert-event-select-gen-25"));
+    fireEvent.click(screen.getByTestId("alerts-ack-selected"));
+    expect(await screen.findByTestId("alert-event-row-gen-0")).toBeInTheDocument();
+    expect(screen.queryByText("No open alerts")).toBeNull();
+    expect(screen.queryByTestId("alerts-next")).toBeNull();
+  });
+
+  it("clears the selection when the source or the acknowledged filter changes", async () => {
+    renderAlerts();
+    fireEvent.click(await screen.findByTestId("alert-event-select-alert-1"));
+    expect(screen.getByTestId("alerts-ack-selected")).toBeEnabled();
+    fireEvent.change(screen.getByTestId("alerts-filter-source"), { target: { value: "RATING" } });
+    expect(screen.getByTestId("alerts-ack-selected")).toBeDisabled();
+
+    fireEvent.click(await screen.findByTestId("alert-event-select-alert-1"));
+    expect(screen.getByTestId("alerts-ack-selected")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("alerts-show-acknowledged"));
+    expect(screen.getByTestId("alerts-ack-selected")).toBeDisabled();
+  });
+
+  it("starts the inbox afresh when the agent changes: no selection carried over", async () => {
+    function SwitchAgent() {
+      const [, setParams] = useSearchParams();
+      return (
+        <button type="button" data-testid="switch-agent" onClick={() => setParams({ agentId: "6aba70011a25f8be7920e099" })}>
+          switch
+        </button>
+      );
+    }
+    renderPage(
+      "/manage/alerts",
+      <>
+        <AlertsPage />
+        <SwitchAgent />
+      </>,
+      "/manage/alerts",
+    );
+    fireEvent.click(await screen.findByTestId("alert-event-select-alert-1"));
+    expect(screen.getByTestId("alerts-ack-selected")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("switch-agent"));
+    await waitFor(() => expect(screen.getByTestId("alerts-ack-selected")).toBeDisabled());
+  });
+
   it("asks a non-administrator to pick an agent instead of listing everything", async () => {
     let asked = false;
     server.use(
@@ -170,6 +234,31 @@ describe("AlertsPage — rules", () => {
     expect(sent!.condition.errorKinds).toEqual(["TURN_ERROR", "TURN_DEADLINE", "COST_CEILING"]);
     expect(sent!.delivery).toEqual([{ type: "SLACK", channelId: "C0123ABC" }]);
     expect(sent!.throttle).toEqual({ windowMinutes: 60, maxPerWindow: 10 });
+  });
+
+  it("refuses a throttle out of range: inline error on the field, Save and Send test disabled", async () => {
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "Failing turns" } });
+    fireEvent.change(screen.getByTestId("alert-rule-source"), { target: { value: "CONVERSATION_ERROR" } });
+    fireEvent.click(screen.getByTestId("alert-rule-kind-COST_CEILING"));
+    expect(screen.getByTestId("alert-rule-save")).toBeEnabled();
+
+    fireEvent.change(screen.getByTestId("alert-rule-window"), { target: { value: "1441" } });
+    expect(screen.getByTestId("alert-rule-window-error")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-rule-window")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("alert-rule-save")).toBeDisabled();
+    expect(screen.getByTestId("alert-rule-test")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("alert-rule-window"), { target: { value: "1440" } });
+    fireEvent.change(screen.getByTestId("alert-rule-max-per-window"), { target: { value: "2.5" } });
+    expect(screen.queryByTestId("alert-rule-window-error")).toBeNull();
+    expect(screen.getByTestId("alert-rule-max-per-window-error")).toBeInTheDocument();
+    expect(screen.getByTestId("alert-rule-save")).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("alert-rule-max-per-window"), { target: { value: "1000" } });
+    expect(screen.queryByTestId("alert-rule-max-per-window-error")).toBeNull();
+    expect(screen.getByTestId("alert-rule-save")).toBeEnabled();
   });
 
   it("builds an output-match condition: property path, operator by value type, value and includeValue", async () => {

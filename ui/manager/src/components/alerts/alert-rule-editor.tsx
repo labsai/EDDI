@@ -8,7 +8,7 @@ import { AgentPicker } from "@/components/shared/agent-picker";
 import { OutputMatchBuilder } from "./output-match-builder";
 import { alertErrorCode, useSaveAlertRule, useTestAlertRule } from "@/hooks/use-alerts";
 import { isApiError } from "@/lib/api-client";
-import { ruleProblems } from "@/lib/alert-rules";
+import { ruleProblems, throttleProblems } from "@/lib/alert-rules";
 import {
   ALERT_LIMITS,
   defaultCondition,
@@ -44,6 +44,7 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
   const test = useTestAlertRule();
   const [testResults, setTestResults] = useState<TestDelivery[] | null>(null);
   const problems = ruleProblems(rule);
+  const throttleInvalid = throttleProblems(rule.throttle);
 
   const set = (patch: Partial<AlertRule>) => setRule((r) => ({ ...r, ...patch }));
   const setCondition = (patch: Partial<AlertRule["condition"]>) => setRule((r) => ({ ...r, condition: { ...r.condition, ...patch } }));
@@ -285,8 +286,14 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
             onChange={(e) =>
               set({ throttle: { windowMinutes: Number(e.target.value), maxPerWindow: rule.throttle?.maxPerWindow ?? ALERT_LIMITS.defaultMaxPerWindow } })
             }
+            aria-invalid={throttleInvalid.includes("windowMinutes") ? true : undefined}
             data-testid="alert-rule-window"
           />
+          {throttleInvalid.includes("windowMinutes") && (
+            <p className="text-xs text-destructive" data-testid="alert-rule-window-error">
+              {t("alerts.throttleRange", "A whole number from 1 to {{max}}.", { max: ALERT_LIMITS.maxWindowMinutes })}
+            </p>
+          )}
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">{t("alerts.maxPerWindow", "At most per window")}</span>
@@ -298,8 +305,14 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
             onChange={(e) =>
               set({ throttle: { windowMinutes: rule.throttle?.windowMinutes ?? ALERT_LIMITS.defaultWindowMinutes, maxPerWindow: Number(e.target.value) } })
             }
+            aria-invalid={throttleInvalid.includes("maxPerWindow") ? true : undefined}
             data-testid="alert-rule-max-per-window"
           />
+          {throttleInvalid.includes("maxPerWindow") && (
+            <p className="text-xs text-destructive" data-testid="alert-rule-max-per-window-error">
+              {t("alerts.throttleRange", "A whole number from 1 to {{max}}.", { max: ALERT_LIMITS.maxPerWindow })}
+            </p>
+          )}
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">{t("alerts.digestLabel", "Beyond that, send a digest")}</span>

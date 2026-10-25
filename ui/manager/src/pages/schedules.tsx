@@ -539,7 +539,9 @@ function FailedFiresPanel({
     (failed ?? []).forEach((log, i) => {
       if (seen.has(log.scheduleId)) return;
       seen.add(log.scheduleId);
-      if (scheduleFor(log.scheduleId)?.fireStatus === "DEAD_LETTERED") {
+      const current = scheduleFor(log.scheduleId);
+      // A server-owned schedule refuses retry and dismiss (409 SYSTEM_SCHEDULE).
+      if (current?.fireStatus === "DEAD_LETTERED" && !isServerOwnedSchedule(current)) {
         actionableRows.add(rowKey(log, i));
       }
     });
@@ -2067,8 +2069,8 @@ export function SchedulesPage() {
                                   </button>
                                 ))}
 
-                              {/* Retry (only for dead-lettered) */}
-                              {s.fireStatus === "DEAD_LETTERED" && (
+                              {/* Retry (only for dead-lettered, never for a schedule the server owns) */}
+                              {s.fireStatus === "DEAD_LETTERED" && !serverOwned && (
                                 <button
                                   onClick={() => handleRetry(s.id!)}
                                   disabled={retryMutation.isPending}

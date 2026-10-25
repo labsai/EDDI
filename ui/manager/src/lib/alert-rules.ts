@@ -1,4 +1,4 @@
-import type { AlertCondition, AlertRule, MatchOp } from "@/lib/api/alerts";
+import { ALERT_LIMITS, type AlertCondition, type AlertRule, type MatchOp } from "@/lib/api/alerts";
 
 /** Mirrors the backend's OutputMatchCondition grammar. */
 export const OUTPUT_MATCH_LIMITS = { maxDepth: 8, maxInValues: 50, maxValueLength: 1000 } as const;
@@ -79,6 +79,19 @@ export function outputMatchProblems(c: AlertCondition): string[] {
   return problems;
 }
 
+/**
+ * The throttle fields out of range: whole numbers, 1–1440 minutes and 1–1000 per
+ * window, exactly AlertRuleValidator's bounds. No throttle (the defaults) is fine.
+ */
+export function throttleProblems(throttle: AlertRule["throttle"]): ("windowMinutes" | "maxPerWindow")[] {
+  if (!throttle) return [];
+  const problems: ("windowMinutes" | "maxPerWindow")[] = [];
+  const within = (n: number, max: number) => Number.isInteger(n) && n >= 1 && n <= max;
+  if (!within(throttle.windowMinutes, ALERT_LIMITS.maxWindowMinutes)) problems.push("windowMinutes");
+  if (!within(throttle.maxPerWindow, ALERT_LIMITS.maxPerWindow)) problems.push("maxPerWindow");
+  return problems;
+}
+
 /** What the page refuses before the backend would (AlertRuleValidator mirrors). */
 export function ruleProblems(rule: AlertRule): string[] {
   const problems: string[] = [];
@@ -102,5 +115,6 @@ export function ruleProblems(rule: AlertRule): string[] {
       problems.push(`delivery${i}`);
     }
   });
+  if (throttleProblems(rule.throttle).length > 0) problems.push("throttle");
   return problems;
 }

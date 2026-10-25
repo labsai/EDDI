@@ -6890,6 +6890,7 @@
     "webhook": "Webhook",
     "webhookUrl": "URL ของ webhook",
     "window": "ช่วงเวลา (นาที)",
+    "throttleRange": "จำนวนเต็มตั้งแต่ 1 ถึง {{max}}",
     "state": {
       "PENDING": "กำลังส่ง",
       "DELIVERED": "ส่งแล้ว",

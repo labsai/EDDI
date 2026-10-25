@@ -7174,6 +7174,7 @@
     "webhook": "Webhook",
     "webhookUrl": "عنوان URL للـ webhook",
     "window": "النافذة (بالدقائق)",
+    "throttleRange": "عدد صحيح من 1 إلى {{max}}.",
     "state": {
       "PENDING": "قيد التسليم",
       "DELIVERED": "تم التسليم",

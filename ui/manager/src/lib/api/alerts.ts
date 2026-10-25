@@ -214,9 +214,13 @@ export function acknowledgeAlertEvent(id: string): Promise<AlertEvent> {
   return api.post<AlertEvent>(`/alerts/events/${seg(id)}/acknowledge`);
 }
 
-/** The listed ids, or — with none — every unacknowledged event matching the filter. */
-export async function acknowledgeAlertEvents(ids: string[] | null, query: AlertEventQuery = {}): Promise<number> {
-  const result = await api.post<{ acknowledged: number }>(`/alerts/events/acknowledge${queryString(query)}`, ids && ids.length ? { ids } : {});
+/**
+ * The listed ids, or — with `null` — every unacknowledged event matching the
+ * filter. An empty list is sent as it is: the server refuses it rather than read it
+ * as "everything".
+ */
+export async function acknowledgeAlertEvents(ids: string[] | null | undefined, query: AlertEventQuery = {}): Promise<number> {
+  const result = await api.post<{ acknowledged: number }>(`/alerts/events/acknowledge${queryString(query)}`, ids == null ? {} : { ids });
   return result?.acknowledged ?? 0;
 }
 

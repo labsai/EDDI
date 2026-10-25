@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -111,7 +111,7 @@ export function AlertsPage() {
             description={t("alerts.pickAgentDescription", "You see and write the alerts of the agents you can edit, one agent at a time.")}
           />
         ) : tab === "inbox" ? (
-          <Inbox agentId={agentId} params={params} setParam={setParam} />
+          <Inbox key={agentId} agentId={agentId} params={params} setParam={setParam} />
         ) : (
           <Rules agentId={agentId} isAdmin={isAdmin} />
         )}
@@ -157,6 +157,15 @@ function Inbox({ agentId, params, setParam }: { agentId: string; params: URLSear
   const events = list.data?.events ?? [];
   const total = list.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const knownTotal = list.data?.total;
+
+  // Acknowledging the last events of the last page shrinks the list under us:
+  // move back to the page that now exists instead of showing an empty one.
+  useEffect(() => {
+    if (knownTotal === undefined) return;
+    const last = Math.max(0, Math.ceil(knownTotal / PAGE_SIZE) - 1);
+    if (page > last) setPage(last);
+  }, [knownTotal, page]);
 
   return (
     <div className="space-y-4">
@@ -167,6 +176,7 @@ function Inbox({ agentId, params, setParam }: { agentId: string; params: URLSear
           onChange={(e) => {
             setParam("source", e.target.value);
             setPage(0);
+            setSelected(new Set());
           }}
           aria-label={t("alerts.filterSource", "Source")}
           data-testid="alerts-filter-source"
@@ -184,6 +194,7 @@ function Inbox({ agentId, params, setParam }: { agentId: string; params: URLSear
             onChange={(e) => {
               setParam("acknowledged", e.target.checked ? "all" : "");
               setPage(0);
+              setSelected(new Set());
             }}
             data-testid="alerts-show-acknowledged"
           />
@@ -200,7 +211,8 @@ function Inbox({ agentId, params, setParam }: { agentId: string; params: URLSear
         </div>
       </div>
 
-      {list.isLoading ? (
+      {list.isLoading || (events.length === 0 && total > 0) ? (
+        // Also while moving back from a page that emptied: there are alerts, just not here.
         <div className="space-y-2" data-testid="alerts-loading">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-14 w-full" />

@@ -6961,6 +6961,7 @@
     "webhook": "Webhook",
     "webhookUrl": "URL du webhook",
     "window": "Fenêtre (minutes)",
+    "throttleRange": "Un nombre entier de 1 à {{max}}.",
     "state": {
       "PENDING": "En cours de livraison",
       "DELIVERED": "Livrée",

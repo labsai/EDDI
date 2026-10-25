@@ -6961,6 +6961,7 @@
     "webhook": "Webhook",
     "webhookUrl": "URL do webhook",
     "window": "Janela (minutos)",
+    "throttleRange": "Um número inteiro de 1 a {{max}}.",
     "state": {
       "PENDING": "Entregando",
       "DELIVERED": "Entregue",

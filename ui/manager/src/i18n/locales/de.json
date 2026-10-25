@@ -6890,6 +6890,7 @@
     "webhook": "Webhook",
     "webhookUrl": "Webhook-URL",
     "window": "Zeitfenster (Minuten)",
+    "throttleRange": "Eine ganze Zahl von 1 bis {{max}}.",
     "state": {
       "PENDING": "Wird zugestellt",
       "DELIVERED": "Zugestellt",

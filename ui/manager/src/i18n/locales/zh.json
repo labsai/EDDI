@@ -6890,6 +6890,7 @@
     "webhook": "Webhook",
     "webhookUrl": "Webhook 地址",
     "window": "时间窗口（分钟）",
+    "throttleRange": "1 到 {{max}} 之间的整数。",
     "state": {
       "PENDING": "投递中",
       "DELIVERED": "已投递",

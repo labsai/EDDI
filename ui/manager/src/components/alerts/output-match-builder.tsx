@@ -48,7 +48,13 @@ export function OutputMatchBuilder({ condition, onChange }: OutputMatchBuilderPr
 
   const setSource = (next: PathSource) => {
     const nextOps = opsFor(next, type);
-    onChange({ path: joinPath(next, next === "actions" ? "" : rest), op: nextOps.includes(condition.op as MatchOp) ? condition.op : nextOps[0] });
+    const op = nextOps.includes(condition.op as MatchOp) ? condition.op : nextOps[0];
+    if (next === "actions") {
+      // Actions are compared as text: contains needs a string, exists takes no value.
+      onChange({ path: joinPath(next, ""), op, value: op === "exists" ? null : asText(condition.value) });
+      return;
+    }
+    onChange({ path: joinPath(next, rest), op });
   };
 
   const setType = (next: ValueType) => {

@@ -6890,6 +6890,7 @@
     "webhook": "웹훅",
     "webhookUrl": "웹훅 URL",
     "window": "기간(분)",
+    "throttleRange": "1부터 {{max}}까지의 정수.",
     "state": {
       "PENDING": "전송 중",
       "DELIVERED": "전송됨",

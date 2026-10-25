@@ -6890,6 +6890,7 @@
     "webhook": "Webhook",
     "webhookUrl": "Webhook の URL",
     "window": "ウィンドウ（分）",
+    "throttleRange": "1 から {{max}} までの整数。",
     "state": {
       "PENDING": "配信中",
       "DELIVERED": "配信済み",

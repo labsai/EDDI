@@ -6890,6 +6890,7 @@
     "webhook": "वेबहुक",
     "webhookUrl": "वेबहुक URL",
     "window": "अवधि (मिनट)",
+    "throttleRange": "1 से {{max}} तक की पूर्ण संख्या।",
     "state": {
       "PENDING": "डिलीवर हो रहा है",
       "DELIVERED": "डिलीवर हुआ",

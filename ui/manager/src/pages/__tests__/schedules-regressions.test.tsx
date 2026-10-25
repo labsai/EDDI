@@ -84,6 +84,40 @@ describe("SchedulesPage — system-managed schedules", () => {
     expect(screen.getByTestId("toggle-chat-1")).toBeInTheDocument();
   });
 
+  it("offers no retry or dismiss for a dead-lettered server-owned schedule — not on the row, not in Failed fires", async () => {
+    server.use(
+      http.get("*/schedulestore/schedules", () =>
+        HttpResponse.json([
+          scheduleRow({
+            id: "alerts-1",
+            name: "alerts-maintenance",
+            metadata: { alertType: "alert_maintenance" },
+            fireStatus: "DEAD_LETTERED",
+            failCount: 5,
+          }),
+          scheduleRow({ id: "dl-1", name: "Dead one", fireStatus: "DEAD_LETTERED", failCount: 3 }),
+        ])
+      ),
+      http.get("*/schedulestore/schedules/admin/failed", () =>
+        HttpResponse.json([
+          { id: "log-alerts", scheduleId: "alerts-1", fireTime: new Date().toISOString(), status: "DEAD_LETTERED", attemptNumber: 5 },
+          { id: "log-dl", scheduleId: "dl-1", fireTime: new Date().toISOString(), status: "DEAD_LETTERED", attemptNumber: 3 },
+        ])
+      )
+    );
+    const user = userEvent.setup();
+    renderSchedules();
+    await waitFor(() => expect(screen.getByTestId("retry-dl-1")).toBeInTheDocument());
+    expect(screen.queryByTestId("retry-alerts-1")).not.toBeInTheDocument();
+
+    await user.click(await screen.findByTestId("tab-failed"));
+    const table = await screen.findByTestId("failed-fires-table");
+    await waitFor(() => expect(within(table).getByTestId("failed-retry-dl-1")).toBeInTheDocument());
+    expect(within(table).queryByTestId("failed-retry-alerts-1")).not.toBeInTheDocument();
+    expect(within(table).queryByTestId("failed-dismiss-alerts-1")).not.toBeInTheDocument();
+    expect(within(table).getByTestId("failed-no-action-log-alerts")).toBeInTheDocument();
+  });
+
   it("links an ingestion schedule to the knowledge base it is changed on", async () => {
     server.use(
       http.get("*/schedulestore/schedules", () =>
