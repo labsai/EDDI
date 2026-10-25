@@ -341,10 +341,24 @@ until GDPR erasure or until the event is deleted after `eddi.alerts.event-retent
 **GDPR erasure** of a user blanks the comment excerpt in every alert about their
 ratings, blanks every `OUTPUT_MATCH` value stored from their conversations (and the
 internal id with it), and forgets an administrator or editor as the acknowledger of
-events and the author of rules. A rating alert still waiting in the alert queue when
-the rating is erased is not written (the rating is read again first), and one written
-in the moment between that check and the erasure has its excerpt blanked before it is
-delivered.
+events and the author of rules.
+
+Alert work waits in a queue, so content captured before an erasure can reach the
+store after it. The erasure's first step therefore puts up a short-lived **fence**
+for the user on every node (through the same cluster stop broadcast the conversation
+service uses): an `OUTPUT_MATCH` value or rating comment captured before the erasure
+started is not stored — the alert still fires, without it — and an event written
+while the fence went up has its value or excerpt blanked before it is delivered. A
+queued rating alert also reads the rating again and is dropped when the rating is
+gone or has changed. A fence lasts 15 minutes, far longer than the queue takes to
+drain; it only ever holds back content captured *before* the erasure, so a later
+conversation of a reused id is not affected.
+
+Every delivery — the first one and each retry, on any node — reads the event from
+the store right before it is sent and sends what is stored then, so a redaction
+made after the event was written is what goes out; an event deleted meanwhile is
+not sent. What is left is the moment between that read and the send: a message
+already on its way to Slack or a webhook cannot be recalled.
 
 **A GDPR export** (`alerts` in its `additionalData`) lists, for a person who runs
 agents, the rules they created or last edited — id, name, times and which of the two —
