@@ -95,6 +95,20 @@ describe("RatingConfigSection", () => {
     expect(onValidity).toHaveBeenLastCalledWith(false);
   });
 
+  it("keeps an invalid field visible after its switch is turned off, so it can still be fixed", () => {
+    renderWithProviders(<Harness initial={{ ...base, ratingConfig: { enabled: true, comment: { enabled: true } } }} />);
+    fireEvent.change(screen.getByTestId("rating-comment-max"), { target: { value: "9000" } });
+    fireEvent.click(screen.getByTestId("rating-comment-enabled"));
+    expect(screen.getByTestId("rating-comment-max")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("rating-enabled"));
+    expect(screen.getByTestId("rating-comment-max")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("rating-comment-max"), { target: { value: "800" } });
+    // Valid again: switched-off settings fold away as before.
+    expect(screen.queryByTestId("rating-comment-max")).toBeNull();
+    expect(screen.queryByTestId("rating-scale")).toBeNull();
+  });
+
   it("flags a duplicated reason", () => {
     renderWithProviders(<Harness initial={{ ...base, ratingConfig: { enabled: true, reasonTags: ["Too slow", "Too slow"] } }} />);
     expect(screen.getByTestId("rating-error-reasonTags")).toBeInTheDocument();

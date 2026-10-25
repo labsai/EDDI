@@ -7,7 +7,7 @@
    again once dismissed. Opening it from the header always works.
    ────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CONVERSATION_STEP,
   ratingErrorMessage,
@@ -91,13 +91,18 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   const [controls, setControls] = useState<RatingProfile | null | undefined>(undefined);
 
   const conversationRef = useRef(conversationId);
-  conversationRef.current = conversationId;
   const clientRef = useRef(client);
-  clientRef.current = client;
   const stepRatingsRef = useRef(stepRatings);
-  stepRatingsRef.current = stepRatings;
   const conversationRatingRef = useRef(conversationRating);
-  conversationRatingRef.current = conversationRating;
+  // Synced after commit, never during render: a render React discards must
+  // not leave its values behind for the handlers and async continuations.
+  // Layout effects run before the passive effects that read these refs.
+  useLayoutEffect(() => {
+    conversationRef.current = conversationId;
+    clientRef.current = client;
+    stepRatingsRef.current = stepRatings;
+    conversationRatingRef.current = conversationRating;
+  }, [conversationId, client, stepRatings, conversationRating]);
   /** Prompted in this page, whatever storage managed to keep. */
   const promptedRef = useRef<Set<string>>(new Set());
 
