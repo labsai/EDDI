@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ChevronRight, MessageSquareHeart } from "lucide-react";
+import { useMayOpenScreen } from "@/hooks/use-auth";
 import { useAttentionCount, useRatingSummary } from "@/hooks/use-ratings";
 import { percent, periodRange } from "./feedback-utils";
 
@@ -14,11 +15,15 @@ import { percent, periodRange } from "./feedback-utils";
 export function AgentFeedbackStrip({ agentId, ratingsEnabled }: { agentId: string; ratingsEnabled: boolean }) {
   const { t } = useTranslation();
   const [now] = useState(() => Date.now());
-  const summary = useRatingSummary({ agentId, ...periodRange("30d", now) }, "none");
-  const attention = useAttentionCount(agentId);
+  // Nothing is fetched for a role that may not open the Feedback page, and the
+  // attention count (which polls) waits until the summary proved the caller
+  // may read this agent's ratings — a refusal is not retried every 30 seconds.
+  const mayOpen = useMayOpenScreen()("/manage/feedback");
+  const summary = useRatingSummary({ agentId, ...periodRange("30d", now) }, "none", mayOpen);
+  const attention = useAttentionCount(agentId, mayOpen && summary.isSuccess);
   const bucket = summary.data?.buckets[0];
 
-  if (summary.isError || (!ratingsEnabled && !bucket?.count)) return null;
+  if (!mayOpen || summary.isError || (!ratingsEnabled && !bucket?.count)) return null;
   const satisfaction = bucket?.csat ?? bucket?.thumbsUpRate ?? null;
 
   return (

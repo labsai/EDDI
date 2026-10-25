@@ -38,6 +38,21 @@ function makeMessage(id: string, role: "user" | "agent", content: string, stepIn
 }
 
 /**
+ * Whether a full read's `conversationOutputs` positions are the server's step
+ * indexes. The backend fills both lists from the same memory, one entry per
+ * step, so they match — but a response whose lists disagree in length cannot
+ * be trusted to, and stamping a wrong index would key a reply rating to the
+ * wrong step. Then nothing is stamped and live counting takes over.
+ */
+export function outputsCarryStepIndexes(
+  outputs: readonly unknown[] | undefined | null,
+  steps: readonly unknown[] | undefined | null,
+): boolean {
+  if (!outputs?.length) return false;
+  return !steps?.length || steps.length === outputs.length;
+}
+
+/**
  * Rebuild a transcript from a snapshot's conversationSteps.
  *
  * Returns an empty list when the steps carry nothing renderable — including
