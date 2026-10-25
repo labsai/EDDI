@@ -567,7 +567,7 @@ export function ChannelDetailPage() {
       {isEmail && (
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
-          <EmailSecurityNotes />
+          <EmailSecurityNotes conversation={draft?.platformConfig?.mode === "conversation"} />
         </section>
       )}
 

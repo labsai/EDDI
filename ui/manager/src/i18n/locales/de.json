@@ -6662,7 +6662,7 @@
     "turnCount": "Runden: {{n}}"
   },
   "emailChannel": {
-    "modeNote": "Trigger-Modus: E-Mails starten Agenten-Turns; es wird keine Antwort gesendet. Der Konversationsmodus folgt später.",
+    "modeNote": "Trigger-Modus: E-Mails starten Agenten-Turns; es wird nie eine Antwort gesendet.",
     "openTriggerWarning": "Jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und E-Mails ohne gültige DKIM/DMARC-Ausrichtung werden verarbeitet. Fügen Sie erlaubte Absender hinzu oder verlangen Sie Authentifizierung.",
     "connection": "Verbindung",
     "connectionHint": "Pflichtfeld. Der Name einer OAUTH2_CLIENT_CREDENTIALS- (XOAUTH2) oder BASIC-Verbindung (App-Passwort), deren Allowlist imaps://<host> oder imap://<host>:143 enthält.",
@@ -6729,15 +6729,53 @@
       "maxTurnsPerSenderPerDay": "Das tägliche Turn-Limit muss eine ganze Zahl von 0 bis 100000 sein.",
       "dailyCostBudgetUsd": "Das Tagesbudget muss eine Zahl über 0 sein oder leer bleiben (kein Budget).",
       "ownerNotifyTooMany": "Nennen Sie höchstens {{max}} Besitzeradressen.",
-      "ownerNotifyInvalid": "Jede Besitzeradresse muss eine gültige E-Mail-Adresse sein."
+      "ownerNotifyInvalid": "Jede Besitzeradresse muss eine gültige E-Mail-Adresse sein.",
+      "smtpHostRequired": "Geben Sie den Hostnamen des SMTP-Servers ein: Über ihn werden Antworten gesendet.",
+      "smtpHostIpLiteral": "Verwenden Sie für den SMTP-Server einen DNS-Namen, keine IP-Adresse: Das TLS-Zertifikat wird dagegen geprüft.",
+      "smtpHostInvalid": "Das ist kein gültiger SMTP-Hostname.",
+      "smtpPort": "Der SMTP-Port muss 587 (STARTTLS) oder 465 (TLS) sein.",
+      "fromNameInvalid": "Der Absendername darf höchstens {{max}} Zeichen lang sein, ohne Zeilenumbrüche.",
+      "replyTemplateTooLong": "Die Antwortvorlage darf höchstens {{max}} Zeichen lang sein.",
+      "aiDisclosureTooLong": "Der KI-Hinweis darf höchstens {{max}} Zeichen lang sein.",
+      "maxRepliesPerThreadPerHour": "Das Antwortlimit muss eine ganze Zahl von 1 bis 1000 sein."
     },
     "warning": {
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
-      "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern."
+      "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
+      "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
     "triggerHint": "Eine E-Mail an invoices+urgent@… passt zum Trigger urgent, ebenso ein Betreff mit diesem Wort. Ohne Treffer geht sie an das Standardziel.",
-    "setupTitle": "Einrichtung und Sicherheit"
+    "setupTitle": "Einrichtung und Sicherheit",
+    "mode": "Modus",
+    "modeTrigger": "Trigger: E-Mails starten Agenten-Turns, nichts wird zurückgeschickt",
+    "modeConversation": "Konversation: der Agent antwortet im Thread",
+    "modeNoteConversation": "Konversationsmodus: Der Agent antwortet über SMTP im E-Mail-Thread — nur dem Absender, dessen Adresse DKIM/DMARC authentifiziert hat, nie an Cc, nie an jemanden, den das Modell nennt.",
+    "requireAuthenticationConversationHint": "Im Konversationsmodus immer an: EDDI antwortet nie einem Absender, dessen Adresse gefälscht sein kann.",
+    "repliesSection": "Antworten",
+    "smtpHost": "SMTP-Host",
+    "smtpHostHint": "Pflichtfeld. Die Allowlist der Verbindung muss auch smtp://<host>:587 oder smtps://<host> enthalten; dieselben Zugangsdaten melden sich an.",
+    "smtpPort": "SMTP-Port",
+    "fromName": "Absendername",
+    "fromNameHint": "Wird bei jeder Antwort neben der Postfachadresse angezeigt.",
+    "threadParticipants": "Wer einen Thread fortsetzen darf",
+    "participantsOriginal": "Nur der Absender, der ihn begonnen hat",
+    "participantsAny": "Auch authentifizierte Adressen, an die seine Antworten gingen",
+    "threadParticipantsHint": "Wer sonst mit der Message-ID des Threads antwortet (sie steht in jeder Weiterleitung), beginnt eine eigene Konversation.",
+    "maxRepliesPerThreadPerHour": "Antworten pro Thread und Stunde",
+    "maxRepliesHint": "Eine Schleifenbremse: Weitere Antworten in diesem Thread warten auf die nächste Stunde, und die Verantwortlichen werden benachrichtigt.",
+    "honorReplyTo": "An die Reply-To-Adresse antworten",
+    "honorReplyToHint": "Nur für ein Webformular, das im Namen seiner Besucher sendet. Sonst gehen Antworten immer an das authentifizierte From.",
+    "honorReplyToWarning": "DMARC authentifiziert Reply-To nicht: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort des Agenten geht.",
+    "aiDisclosureEnabled": "In jeder Antwort angeben, dass eine KI sie geschrieben hat",
+    "aiDisclosure": "KI-Hinweis",
+    "aiDisclosureHint": "Wird nach der Antwort angefügt. Leer verwendet den angezeigten Standard.",
+    "aiDisclosureWarning": "Antworten sagen nicht, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
+    "replyTemplate": "Antwortvorlage",
+    "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
+    "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — EDDI signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und EDDI sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }

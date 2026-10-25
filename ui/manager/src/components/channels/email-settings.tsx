@@ -6,12 +6,21 @@ import { useConnectionDescriptors } from "@/hooks/use-connections";
 import {
   EMAIL_ATTACHMENT_MODES,
   EMAIL_DEFAULTS,
+  EMAIL_DEFAULT_AI_DISCLOSURE,
   EMAIL_DEFAULT_INPUT_TEMPLATE,
+  EMAIL_DEFAULT_REPLY_TEMPLATE,
   EMAIL_IDENTITY_MODES,
+  EMAIL_MODES,
   EMAIL_PORTS,
+  EMAIL_REPLY_TEMPLATE_VARIABLES,
+  EMAIL_SMTP_PORTS,
   EMAIL_TEMPLATE_VARIABLES,
+  EMAIL_THREAD_PARTICIPANTS,
+  aiDisclosureEnabled,
   emailConfigProblems,
+  emailMode,
   isOpenTrigger,
+  withEmailFixedKeys,
   type EmailProblem,
 } from "@/lib/email-channel";
 import { emailProblemMessage } from "@/lib/email-channel-messages";
@@ -25,13 +34,16 @@ const labelClass = "text-xs font-medium";
 const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS"]);
 
 /**
- * Platform settings of an `email` channel integration in trigger mode: EDDI
- * polls the mailbox and every new mail starts an agent turn. Nothing is ever
- * sent back to the sender in this phase.
+ * Platform settings of an `email` channel integration: EDDI polls the mailbox
+ * and every new mail starts an agent turn. In trigger mode nothing is ever sent
+ * back; in conversation mode the agent replies in the thread, to the
+ * authenticated sender only.
  *
  * Only keys the user set are written (a blank field removes its key, so the
- * backend default applies); `mode` and `transport` are fixed and added at save
- * time by `withEmailFixedKeys`. The backend validates everything again.
+ * backend default applies). The one exception is `aiDisclosure`, whose empty
+ * value is how the disclosure is switched off. `transport` is fixed and the
+ * other mode's keys are dropped at save time by `withEmailFixedKeys`; switching
+ * the mode drops them at once. The backend validates everything again.
  */
 export function EmailPlatformFields({
   platformConfig: pc,
@@ -77,17 +89,47 @@ export function EmailPlatformFields({
   const processedAction = pc.processedAction || EMAIL_DEFAULTS.processedAction;
   const isMove = processedAction.startsWith("move:");
   const attachments = pc.attachments || EMAIL_DEFAULTS.attachments;
-  const requireAuthentication = (pc.requireAuthentication || EMAIL_DEFAULTS.requireAuthentication) !== "false";
+  const mode = emailMode(pc);
+  const conversation = mode === "conversation";
+  const requireAuthentication = conversation || (pc.requireAuthentication || EMAIL_DEFAULTS.requireAuthentication) !== "false";
+  const disclosureOn = aiDisclosureEnabled(pc);
+  const honorReplyTo = (pc.honorReplyTo || EMAIL_DEFAULTS.honorReplyTo) === "true";
+  // The other mode's keys go at once: the backend refuses them, and a hidden
+  // field must not keep a value the user can no longer see.
+  const setMode = (next: string) => onChange(withEmailFixedKeys({ ...pc, mode: next }));
+  const setDisclosure = (on: boolean) => {
+    const next = { ...pc };
+    if (on) delete next.aiDisclosure;
+    else next.aiDisclosure = "";
+    onChange(next);
+  };
   const correlateThreads = (pc.correlateThreads || EMAIL_DEFAULTS.correlateThreads) === "true";
   const stripQuotedHistory = (pc.stripQuotedHistory || EMAIL_DEFAULTS.stripQuotedHistory) !== "false";
 
   return (
     <div className="space-y-4" data-testid="email-platform-fields">
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-mode`} className={labelClass}>{t("emailChannel.mode", "Mode")}</label>
+        <select id={`${uid}-mode`} data-testid="email-mode" className={selectClass} value={mode} onChange={(e) => setMode(e.target.value)}>
+          {EMAIL_MODES.map((m) => (
+            <option key={m} value={m}>
+              {m === "trigger" ? t("emailChannel.modeTrigger", "Trigger: mail starts agent turns, nothing is sent back") : t("emailChannel.modeConversation", "Conversation: the agent replies in the thread")}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs" data-testid="email-mode-note">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <div className="space-y-0.5">
-          <p>{t("emailChannel.modeNote", "Trigger mode: mail starts agent turns; no reply is sent. Conversation mode comes later.")}</p>
-          <p className="font-mono text-muted-foreground">mode: trigger · transport: imap</p>
+          <p>
+            {conversation
+              ? t(
+                  "emailChannel.modeNoteConversation",
+                  "Conversation mode: the agent replies in the mail thread over SMTP — only to the sender whose address DKIM/DMARC authenticated, never to Cc, never to anyone the model names.",
+                )
+              : t("emailChannel.modeNote", "Trigger mode: mail starts agent turns; no reply is ever sent.")}
+          </p>
+          <p className="font-mono text-muted-foreground">mode: {mode} · transport: imap</p>
         </div>
       </div>
 
@@ -190,12 +232,15 @@ export function EmailPlatformFields({
             data-testid="email-require-authentication"
             className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
             checked={requireAuthentication}
+            disabled={conversation}
             onChange={(e) => set("requireAuthentication", e.target.checked ? "true" : "false")}
           />
           <span>
             <span className="font-medium">{t("emailChannel.requireAuthentication", "Require authenticated senders (DKIM/DMARC)")}</span>
             <span className="block text-[10px] text-muted-foreground">
-              {t("emailChannel.requireAuthenticationHint", "When off, mail that fails DKIM/DMARC alignment still runs a turn, under a one-off anonymous identity with no memory.")}
+              {conversation
+                ? t("emailChannel.requireAuthenticationConversationHint", "Always on in conversation mode: EDDI never answers a sender whose address may be forged.")
+                : t("emailChannel.requireAuthenticationHint", "When off, mail that fails DKIM/DMARC alignment still runs a turn, under a one-off anonymous identity with no memory.")}
             </span>
           </span>
         </label>
@@ -221,6 +266,7 @@ export function EmailPlatformFields({
               ))}
             </select>
           </div>
+          {!conversation && (
           <label className="flex items-start gap-2 text-xs sm:pt-5">
             <input
               type="checkbox"
@@ -236,8 +282,153 @@ export function EmailPlatformFields({
               </span>
             </span>
           </label>
+          )}
         </div>
       </div>
+
+      {conversation && (
+        <div className="space-y-3 border-t border-border/50 pt-3" data-testid="email-replies-section">
+          <p className="text-xs font-semibold text-muted-foreground">{t("emailChannel.repliesSection", "Replies")}</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-smtp-host`} className={labelClass}>{t("emailChannel.smtpHost", "SMTP host")}</label>
+              <Input id={`${uid}-smtp-host`} data-testid="email-smtp-host" value={pc.smtpHost ?? ""} onChange={(e) => set("smtpHost", e.target.value)} placeholder="smtp.office365.com" />
+              <p className={hintClass}>
+                {t("emailChannel.smtpHostHint", "Required. The connection's allowlist must also contain smtp://<host>:587 or smtps://<host>; the same credential logs in.")}
+              </p>
+              {problemFor("smtpHostRequired", "smtpHostIpLiteral", "smtpHostInvalid")}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-smtp-port`} className={labelClass}>{t("emailChannel.smtpPort", "SMTP port")}</label>
+              <select id={`${uid}-smtp-port`} data-testid="email-smtp-port" className={selectClass} value={pc.smtpPort || EMAIL_DEFAULTS.smtpPort} onChange={(e) => set("smtpPort", e.target.value)}>
+                {EMAIL_SMTP_PORTS.map((p) => (
+                  <option key={p} value={p}>
+                    {p === "587" ? "587 (STARTTLS)" : "465 (TLS)"}
+                  </option>
+                ))}
+              </select>
+              {problemFor("smtpPort")}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-from-name`} className={labelClass}>{t("emailChannel.fromName", "Sender name")}</label>
+              <Input id={`${uid}-from-name`} data-testid="email-from-name" value={pc.fromName ?? ""} onChange={(e) => set("fromName", e.target.value)} placeholder="Contoso Support" />
+              <p className={hintClass}>{t("emailChannel.fromNameHint", "Shown next to the mailbox address on every reply.")}</p>
+              {problemFor("fromNameInvalid")}
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-participants`} className={labelClass}>{t("emailChannel.threadParticipants", "Who may continue a thread")}</label>
+              <select
+                id={`${uid}-participants`}
+                data-testid="email-thread-participants"
+                className={selectClass}
+                value={pc.threadParticipants || EMAIL_DEFAULTS.threadParticipants}
+                onChange={(e) => set("threadParticipants", e.target.value)}
+              >
+                {EMAIL_THREAD_PARTICIPANTS.map((m) => (
+                  <option key={m} value={m}>
+                    {m === "originalSenderOnly"
+                      ? t("emailChannel.participantsOriginal", "Only the sender who started it")
+                      : t("emailChannel.participantsAny", "Also authenticated addresses its replies went to")}
+                  </option>
+                ))}
+              </select>
+              <p className={hintClass}>
+                {t("emailChannel.threadParticipantsHint", "Anyone else who answers with the thread's Message-ID (they travel in every forward) starts a conversation of their own.")}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-max-replies`} className={labelClass}>{t("emailChannel.maxRepliesPerThreadPerHour", "Replies per thread per hour")}</label>
+              <Input
+                id={`${uid}-max-replies`}
+                data-testid="email-max-replies"
+                inputMode="numeric"
+                value={pc.maxRepliesPerThreadPerHour ?? ""}
+                onChange={(e) => set("maxRepliesPerThreadPerHour", e.target.value)}
+                placeholder={EMAIL_DEFAULTS.maxRepliesPerThreadPerHour}
+              />
+              <p className={hintClass}>{t("emailChannel.maxRepliesHint", "A loop brake: further replies in that thread wait for the next hour, and the owners are told.")}</p>
+              {problemFor("maxRepliesPerThreadPerHour")}
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              data-testid="email-honor-reply-to"
+              className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
+              checked={honorReplyTo}
+              onChange={(e) => set("honorReplyTo", e.target.checked ? "true" : "")}
+            />
+            <span>
+              <span className="font-medium">{t("emailChannel.honorReplyTo", "Reply to the Reply-To address")}</span>
+              <span className="block text-[10px] text-muted-foreground">
+                {t("emailChannel.honorReplyToHint", "Only for a web form that sends on behalf of its visitors. Otherwise replies always go to the authenticated From.")}
+              </span>
+            </span>
+          </label>
+          {honorReplyTo && (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs" role="alert" data-testid="email-honor-reply-to-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <span>
+                {t(
+                  "emailChannel.honorReplyToWarning",
+                  "DMARC does not authenticate the Reply-To: anyone who can send authenticated mail from an allowed domain decides where the agent's reply goes.",
+                )}
+              </span>
+            </div>
+          )}
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              data-testid="email-ai-disclosure-enabled"
+              className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
+              checked={disclosureOn}
+              onChange={(e) => setDisclosure(e.target.checked)}
+            />
+            <span className="font-medium">{t("emailChannel.aiDisclosureEnabled", "Say in every reply that an AI wrote it")}</span>
+          </label>
+          {disclosureOn ? (
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-disclosure`} className={labelClass}>{t("emailChannel.aiDisclosure", "AI disclosure")}</label>
+              <Input
+                id={`${uid}-disclosure`}
+                data-testid="email-ai-disclosure"
+                value={pc.aiDisclosure ?? ""}
+                onChange={(e) => set("aiDisclosure", e.target.value)}
+                placeholder={EMAIL_DEFAULT_AI_DISCLOSURE}
+              />
+              <p className={hintClass}>{t("emailChannel.aiDisclosureHint", "Appended after the reply. Empty uses the default shown.")}</p>
+              {problemFor("aiDisclosureTooLong")}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs" role="alert" data-testid="email-ai-disclosure-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <span>
+                {t(
+                  "emailChannel.aiDisclosureWarning",
+                  "Replies will not say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
+                )}
+              </span>
+            </div>
+          )}
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-reply-template`} className={labelClass}>{t("emailChannel.replyTemplate", "Reply template")}</label>
+            <textarea
+              id={`${uid}-reply-template`}
+              data-testid="email-reply-template"
+              rows={3}
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+              value={pc.replyTemplate ?? ""}
+              onChange={(e) => set("replyTemplate", e.target.value)}
+              placeholder={EMAIL_DEFAULT_REPLY_TEMPLATE}
+            />
+            <p className={hintClass}>
+              {t("emailChannel.replyTemplateHint", "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:")}{" "}
+              <span className="font-mono">{EMAIL_REPLY_TEMPLATE_VARIABLES.map((v) => `{${v}}`).join(" ")}</span>
+            </p>
+            {problemFor("replyTemplateTooLong")}
+          </div>
+        </div>
+      )}
 
       <details open={advancedOpen} className="group space-y-3 border-t border-border/50 pt-3" data-testid="email-advanced">
         <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">{t("emailChannel.advancedSection", "Content, attachments and limits")}</summary>
@@ -329,10 +520,32 @@ export function EmailPlatformFields({
 }
 
 /** Setup and security guidance for an email integration, shown on its detail page. */
-export function EmailSecurityNotes() {
+export function EmailSecurityNotes({ conversation = false }: { conversation?: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="space-y-2 text-xs text-muted-foreground" data-testid="email-security-notes">
+      {conversation && (
+        <p className="flex items-start gap-2" data-testid="email-dkim-note">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <span>
+            {t(
+              "emailChannel.noteDkim",
+              "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — EDDI does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
+            )}
+          </span>
+        </p>
+      )}
+      {conversation && (
+        <p className="flex items-start gap-2" data-testid="email-bounce-note">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <span>
+            {t(
+              "emailChannel.noteBounces",
+              "A reply that bounces permanently puts the address on this integration's suppression list, and EDDI sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+            )}
+          </span>
+        </p>
+      )}
       <p className="flex items-start gap-2">
         <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
         <span>{t("emailChannel.noteAllowlist", "Use a sender allowlist. Without one, and with authentication not required, anyone who can send mail can make the agent run.")}</span>

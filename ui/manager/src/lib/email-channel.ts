@@ -1,16 +1,58 @@
 /**
- * The `email` channel integration (trigger mode): EDDI polls an IMAP mailbox and
- * every new mail starts an agent turn. No reply is ever sent in this phase.
+ * The `email` channel integration: EDDI polls an IMAP mailbox and every new mail
+ * starts an agent turn. In `trigger` mode no reply is ever sent; in
+ * `conversation` mode the agent replies in the thread over SMTP, to the
+ * authenticated sender only.
  *
  * Every platformConfig value is a string, like the other channel types. The
- * backend is authoritative — it refuses an unknown key, a conversation-mode key
- * and every rule below with a 400 — so these checks only exist to say so
- * before the round trip. Keep them in step with the backend's save-time rules,
- * never stricter.
+ * backend is authoritative — it refuses an unknown key, a key of the other mode
+ * and every rule below with a 400 — so these checks only exist to say so before
+ * the round trip. Keep them in step with the backend's save-time rules, never
+ * stricter.
  */
 
 /** The keys that are always written, whatever the user chose. */
-export const EMAIL_FIXED_KEYS = { mode: "trigger", transport: "imap" } as const;
+export const EMAIL_FIXED_KEYS = { transport: "imap" } as const;
+
+export const EMAIL_MODES = ["trigger", "conversation"] as const;
+export type EmailMode = (typeof EMAIL_MODES)[number];
+
+/** Keys only conversation mode reads; the backend refuses them with a value in trigger mode. */
+export const EMAIL_CONVERSATION_KEYS = [
+  "smtpHost",
+  "smtpPort",
+  "fromName",
+  "replyTemplate",
+  "aiDisclosure",
+  "threadParticipants",
+  "maxRepliesPerThreadPerHour",
+  "honorReplyTo",
+] as const;
+
+/** Keys only trigger mode reads; a conversation always keeps its thread. */
+export const EMAIL_TRIGGER_ONLY_KEYS = ["correlateThreads"] as const;
+
+export const EMAIL_SMTP_PORTS = ["587", "465"] as const;
+export const EMAIL_THREAD_PARTICIPANTS = ["originalSenderOnly", "anyAuthenticatedParticipant"] as const;
+export const EMAIL_DEFAULT_AI_DISCLOSURE = "This reply was written by an AI assistant.";
+export const EMAIL_DEFAULT_REPLY_TEMPLATE = "{output}";
+export const EMAIL_REPLY_TEMPLATE_VARIABLES = ["output", "mail.subject", "mail.from", "mail.fromName", "mail.date"] as const;
+export const EMAIL_MAX_REPLY_TEMPLATE_CHARS = 4000;
+export const EMAIL_MAX_AI_DISCLOSURE_CHARS = 500;
+export const EMAIL_MAX_FROM_NAME_CHARS = 100;
+
+/** The mode of a platformConfig: `conversation` when it says so, else `trigger`. */
+export function emailMode(pc: Record<string, string>): EmailMode {
+  return (pc.mode ?? "").trim() === "conversation" ? "conversation" : "trigger";
+}
+
+/**
+ * Whether replies say an AI wrote them. An absent `aiDisclosure` means the
+ * backend's default sentence; only a present, empty one switches it off.
+ */
+export function aiDisclosureEnabled(pc: Record<string, string>): boolean {
+  return pc.aiDisclosure === undefined || pc.aiDisclosure.trim() !== "";
+}
 
 export const EMAIL_PORTS = ["993", "143"] as const;
 export const EMAIL_IDENTITY_MODES = ["perSender", "integration"] as const;
@@ -29,6 +71,10 @@ export const EMAIL_DEFAULTS = {
   maxMessageBytes: "26214400",
   stripQuotedHistory: "true",
   maxTurnsPerSenderPerDay: "50",
+  smtpPort: "587",
+  threadParticipants: "originalSenderOnly",
+  maxRepliesPerThreadPerHour: "5",
+  honorReplyTo: "false",
 } as const;
 
 export const EMAIL_DEFAULT_INPUT_TEMPLATE =
@@ -42,6 +88,9 @@ export const EMAIL_TEMPLATE_VARIABLES = [
   "mail.subject",
   "mail.date",
   "mail.messageId",
+  "mail.inReplyTo",
+  "mail.references",
+  "mail.replyTo",
   "mail.authentication",
   "mail.signingDomain",
   "mail.quotedHistoryRemoved",
@@ -52,14 +101,23 @@ export const EMAIL_TEMPLATE_VARIABLES = [
 export const EMAIL_MAX_TEMPLATE_CHARS = 4000;
 export const EMAIL_MAX_OWNER_ADDRESSES = 5;
 
-/** A fresh email platformConfig: the fixed keys only, every other key at its backend default. */
+/** A fresh email platformConfig: trigger mode and the fixed keys, every other key at its backend default. */
 export function initialEmailPlatformConfig(): Record<string, string> {
-  return { ...EMAIL_FIXED_KEYS };
+  return { mode: "trigger", ...EMAIL_FIXED_KEYS };
 }
 
-/** `pc` with the fixed keys set — what a save sends, whatever was loaded. */
+/**
+ * `pc` as a save sends it: the fixed keys and a mode set, the other mode's keys
+ * removed (the backend refuses them) and `requireAuthentication` dropped in
+ * conversation mode, where it is always on.
+ */
 export function withEmailFixedKeys(pc: Record<string, string>): Record<string, string> {
-  return { ...pc, ...EMAIL_FIXED_KEYS };
+  const mode = emailMode(pc);
+  const next: Record<string, string> = { ...pc, mode, ...EMAIL_FIXED_KEYS };
+  const foreign: readonly string[] = mode === "conversation" ? EMAIL_TRIGGER_ONLY_KEYS : EMAIL_CONVERSATION_KEYS;
+  for (const key of foreign) delete next[key];
+  if (mode === "conversation") delete next.requireAuthentication;
+  return next;
 }
 
 /** A comma-separated platformConfig value as its non-blank entries. */
@@ -76,7 +134,9 @@ export function splitList(value: string | undefined): string[] {
  * reports the same condition as the save-time warning `email.open-trigger`.
  */
 export function isOpenTrigger(pc: Record<string, string>): boolean {
-  return splitList(pc.senderAllowlist).length === 0 && (pc.requireAuthentication ?? "true").trim() === "false";
+  return (
+    emailMode(pc) === "trigger" && splitList(pc.senderAllowlist).length === 0 && (pc.requireAuthentication ?? "true").trim() === "false"
+  );
 }
 
 const EMAIL_RE = /^[^\s@,]+@[^\s@,]+$/;
@@ -118,7 +178,15 @@ export type EmailProblem =
   | "maxTurnsPerSenderPerDay"
   | "dailyCostBudgetUsd"
   | "ownerNotifyTooMany"
-  | "ownerNotifyInvalid";
+  | "ownerNotifyInvalid"
+  | "smtpHostRequired"
+  | "smtpHostIpLiteral"
+  | "smtpHostInvalid"
+  | "smtpPort"
+  | "fromNameInvalid"
+  | "replyTemplateTooLong"
+  | "aiDisclosureTooLong"
+  | "maxRepliesPerThreadPerHour";
 
 export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] {
   const problems: EmailProblem[] = [];
@@ -161,5 +229,26 @@ export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] 
   if (owners.length > EMAIL_MAX_OWNER_ADDRESSES) problems.push("ownerNotifyTooMany");
   else if (!owners.every((a) => EMAIL_RE.test(a))) problems.push("ownerNotifyInvalid");
 
+  if (emailMode(pc) === "conversation") problems.push(...conversationProblems(pc));
+  return problems;
+}
+
+// eslint-disable-next-line no-control-regex -- control characters are exactly what a header value may not hold
+const CONTROL_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+
+function conversationProblems(pc: Record<string, string>): EmailProblem[] {
+  const problems: EmailProblem[] = [];
+  const smtpHost = (pc.smtpHost ?? "").trim();
+  if (!smtpHost) problems.push("smtpHostRequired");
+  else if (IPV4_RE.test(smtpHost) || smtpHost.includes(":") || smtpHost.startsWith("[")) problems.push("smtpHostIpLiteral");
+  else if (!HOST_RE.test(smtpHost)) problems.push("smtpHostInvalid");
+  if (pc.smtpPort !== undefined && pc.smtpPort.trim() !== "" && !(EMAIL_SMTP_PORTS as readonly string[]).includes(pc.smtpPort.trim())) {
+    problems.push("smtpPort");
+  }
+  const fromName = pc.fromName ?? "";
+  if (fromName.length > EMAIL_MAX_FROM_NAME_CHARS || CONTROL_RE.test(fromName)) problems.push("fromNameInvalid");
+  if ((pc.replyTemplate ?? "").length > EMAIL_MAX_REPLY_TEMPLATE_CHARS) problems.push("replyTemplateTooLong");
+  if ((pc.aiDisclosure ?? "").length > EMAIL_MAX_AI_DISCLOSURE_CHARS) problems.push("aiDisclosureTooLong");
+  if (!intInRange(pc.maxRepliesPerThreadPerHour, 1, 1000)) problems.push("maxRepliesPerThreadPerHour");
   return problems;
 }

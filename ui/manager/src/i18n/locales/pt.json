@@ -6733,7 +6733,7 @@
     "turnCount": "Turnos: {{n}}"
   },
   "emailChannel": {
-    "modeNote": "Modo gatilho: o e-mail inicia turnos do agente; nenhuma resposta é enviada. O modo conversa virá depois.",
+    "modeNote": "Modo gatilho: o e-mail inicia turnos do agente; nenhuma resposta é enviada, nunca.",
     "openTriggerWarning": "Qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail que falha no alinhamento DKIM/DMARC é processado. Adicione remetentes permitidos ou exija autenticação.",
     "connection": "Conexão",
     "connectionHint": "Obrigatório. O nome de uma conexão OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (senha de aplicativo) cuja lista permitida contenha imaps://<host> ou imap://<host>:143.",
@@ -6800,15 +6800,53 @@
       "maxTurnsPerSenderPerDay": "O limite diário de turnos deve ser um número inteiro de 0 a 100000.",
       "dailyCostBudgetUsd": "O orçamento diário deve ser um número maior que 0, ou vazio para nenhum orçamento.",
       "ownerNotifyTooMany": "Informe no máximo {{max}} endereços de responsáveis.",
-      "ownerNotifyInvalid": "Cada endereço de responsável deve ser um endereço de e-mail válido."
+      "ownerNotifyInvalid": "Cada endereço de responsável deve ser um endereço de e-mail válido.",
+      "smtpHostRequired": "Informe o nome do host do servidor SMTP: as respostas são enviadas por ele.",
+      "smtpHostIpLiteral": "Use um nome DNS para o servidor SMTP, não um endereço IP: o certificado TLS é verificado com base nele.",
+      "smtpHostInvalid": "Este não é um nome de host SMTP válido.",
+      "smtpPort": "A porta SMTP deve ser 587 (STARTTLS) ou 465 (TLS).",
+      "fromNameInvalid": "O nome do remetente pode ter no máximo {{max}} caracteres, sem quebras de linha.",
+      "replyTemplateTooLong": "O modelo de resposta pode ter no máximo {{max}} caracteres.",
+      "aiDisclosureTooLong": "O aviso de IA pode ter no máximo {{max}} caracteres.",
+      "maxRepliesPerThreadPerHour": "O limite de respostas deve ser um número inteiro de 1 a 1000."
     },
     "warning": {
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
-      "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas."
+      "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
+      "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
+      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
     "triggerHint": "Um e-mail enviado para invoices+urgent@… corresponde ao gatilho urgent, assim como um assunto que contenha a palavra. Sem correspondência, vai para o destino padrão.",
-    "setupTitle": "Configuração e segurança"
+    "setupTitle": "Configuração e segurança",
+    "mode": "Modo",
+    "modeTrigger": "Gatilho: o e-mail inicia turnos do agente, nada é devolvido",
+    "modeConversation": "Conversa: o agente responde na thread",
+    "modeNoteConversation": "Modo conversa: o agente responde na thread de e-mail via SMTP — somente ao remetente cujo endereço o DKIM/DMARC autenticou, nunca em Cc, nunca a quem o modelo indicar.",
+    "requireAuthenticationConversationHint": "Sempre ativo no modo conversa: o EDDI nunca responde a um remetente cujo endereço possa ser falsificado.",
+    "repliesSection": "Respostas",
+    "smtpHost": "Host SMTP",
+    "smtpHostHint": "Obrigatório. A lista de permissões da conexão também deve conter smtp://<host>:587 ou smtps://<host>; as mesmas credenciais fazem login.",
+    "smtpPort": "Porta SMTP",
+    "fromName": "Nome do remetente",
+    "fromNameHint": "Exibido ao lado do endereço da caixa postal em cada resposta.",
+    "threadParticipants": "Quem pode continuar uma thread",
+    "participantsOriginal": "Somente o remetente que a iniciou",
+    "participantsAny": "Também endereços autenticados para os quais suas respostas foram enviadas",
+    "threadParticipantsHint": "Qualquer outra pessoa que responda com o Message-ID da thread (ele vai em cada encaminhamento) inicia uma conversa própria.",
+    "maxRepliesPerThreadPerHour": "Respostas por thread por hora",
+    "maxRepliesHint": "Um freio de loops: as próximas respostas nessa thread aguardam a hora seguinte, e os responsáveis são avisados.",
+    "honorReplyTo": "Responder ao endereço Reply-To",
+    "honorReplyToHint": "Somente para um formulário web que envia em nome de seus visitantes. Caso contrário, as respostas sempre vão para o From autenticado.",
+    "honorReplyToWarning": "O DMARC não autentica o Reply-To: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta do agente.",
+    "aiDisclosureEnabled": "Informar em cada resposta que uma IA a escreveu",
+    "aiDisclosure": "Aviso de IA",
+    "aiDisclosureHint": "Adicionado após a resposta. Vazio usa o padrão exibido.",
+    "aiDisclosureWarning": "As respostas não dirão que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
+    "replyTemplate": "Modelo de resposta",
+    "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
+    "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o EDDI não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
+    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o EDDI não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }

@@ -6733,7 +6733,7 @@
     "turnCount": "Turnos: {{n}}"
   },
   "emailChannel": {
-    "modeNote": "Modo disparador: el correo inicia turnos del agente; no se envía ninguna respuesta. El modo conversación llegará más adelante.",
+    "modeNote": "Modo disparador: el correo inicia turnos del agente; nunca se envía una respuesta.",
     "openTriggerWarning": "Cualquiera en internet puede hacer que este agente se ejecute: no hay lista de remitentes permitidos y se procesa el correo que no supera la alineación DKIM/DMARC. Añada remitentes permitidos o exija autenticación.",
     "connection": "Conexión",
     "connectionHint": "Obligatorio. El nombre de una conexión OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) o BASIC (contraseña de aplicación) cuya lista permitida contenga imaps://<host> o imap://<host>:143.",
@@ -6800,15 +6800,53 @@
       "maxTurnsPerSenderPerDay": "El límite diario de turnos debe ser un número entero de 0 a 100000.",
       "dailyCostBudgetUsd": "El presupuesto diario debe ser un número mayor que 0, o vacío para no tener presupuesto.",
       "ownerNotifyTooMany": "Indique como máximo {{max}} direcciones de responsables.",
-      "ownerNotifyInvalid": "Cada dirección de responsable debe ser una dirección de correo válida."
+      "ownerNotifyInvalid": "Cada dirección de responsable debe ser una dirección de correo válida.",
+      "smtpHostRequired": "Introduce el nombre de host del servidor SMTP: las respuestas se envían a través de él.",
+      "smtpHostIpLiteral": "Usa un nombre DNS para el servidor SMTP, no una dirección IP: el certificado TLS se comprueba con él.",
+      "smtpHostInvalid": "No es un nombre de host SMTP válido.",
+      "smtpPort": "El puerto SMTP debe ser 587 (STARTTLS) o 465 (TLS).",
+      "fromNameInvalid": "El nombre del remitente puede tener como máximo {{max}} caracteres, sin saltos de línea.",
+      "replyTemplateTooLong": "La plantilla de respuesta puede tener como máximo {{max}} caracteres.",
+      "aiDisclosureTooLong": "El aviso de IA puede tener como máximo {{max}} caracteres.",
+      "maxRepliesPerThreadPerHour": "El límite de respuestas debe ser un número entero de 1 a 1000."
     },
     "warning": {
       "openTrigger": "Guardado, pero cualquiera en internet puede hacer que este agente se ejecute: no hay lista de remitentes permitidos y se procesa el correo no autenticado.",
-      "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas."
+      "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas.",
+      "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
+      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
     "triggerHint": "Un correo enviado a invoices+urgent@… coincide con el disparador urgent, igual que un asunto que contenga esa palabra. Sin coincidencia, va al destino predeterminado.",
-    "setupTitle": "Configuración y seguridad"
+    "setupTitle": "Configuración y seguridad",
+    "mode": "Modo",
+    "modeTrigger": "Disparador: el correo inicia turnos del agente, no se devuelve nada",
+    "modeConversation": "Conversación: el agente responde en el hilo",
+    "modeNoteConversation": "Modo conversación: el agente responde en el hilo de correo por SMTP — solo al remitente cuya dirección autenticó DKIM/DMARC, nunca en Cc, nunca a quien el modelo nombre.",
+    "requireAuthenticationConversationHint": "Siempre activo en modo conversación: EDDI nunca responde a un remitente cuya dirección pueda estar falsificada.",
+    "repliesSection": "Respuestas",
+    "smtpHost": "Host SMTP",
+    "smtpHostHint": "Obligatorio. La lista de permitidos de la conexión también debe contener smtp://<host>:587 o smtps://<host>; las mismas credenciales inician sesión.",
+    "smtpPort": "Puerto SMTP",
+    "fromName": "Nombre del remitente",
+    "fromNameHint": "Se muestra junto a la dirección del buzón en cada respuesta.",
+    "threadParticipants": "Quién puede continuar un hilo",
+    "participantsOriginal": "Solo el remitente que lo inició",
+    "participantsAny": "También las direcciones autenticadas a las que fueron sus respuestas",
+    "threadParticipantsHint": "Cualquier otra persona que responda con el Message-ID del hilo (viaja en cada reenvío) inicia su propia conversación.",
+    "maxRepliesPerThreadPerHour": "Respuestas por hilo y hora",
+    "maxRepliesHint": "Un freno de bucles: las siguientes respuestas de ese hilo esperan a la hora siguiente y se avisa a los responsables.",
+    "honorReplyTo": "Responder a la dirección Reply-To",
+    "honorReplyToHint": "Solo para un formulario web que envía en nombre de sus visitantes. De lo contrario, las respuestas siempre van al From autenticado.",
+    "honorReplyToWarning": "DMARC no autentica el Reply-To: cualquiera que pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta del agente.",
+    "aiDisclosureEnabled": "Indicar en cada respuesta que la escribió una IA",
+    "aiDisclosure": "Aviso de IA",
+    "aiDisclosureHint": "Se añade después de la respuesta. Vacío usa el valor predeterminado mostrado.",
+    "aiDisclosureWarning": "Las respuestas no dirán que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
+    "replyTemplate": "Plantilla de respuesta",
+    "replyTemplateHint": "Envuelve la respuesta del agente, que se inserta como texto y nunca se ejecuta como plantilla. Variables:",
+    "noteDkim": "Las respuestas necesitan un servidor de correo que firme el correo saliente con DKIM para el dominio del buzón, y un registro DMARC para ese dominio — EDDI no firma. Sin ellos, las respuestas acaban en spam o se rechazan. Exchange Online y la mayoría de los proveedores firman el correo enviado en cuanto DKIM está activado para el dominio.",
+    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y EDDI no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }
