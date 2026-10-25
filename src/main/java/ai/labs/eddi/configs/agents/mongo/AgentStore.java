@@ -127,17 +127,6 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     }
 
     /**
-     * Write-time bound on the Dream consolidation settings.
-     * <p>
-     * This rule used to live in
-     * {@code AgentConfiguration.DreamConfig.setSummarizeTargetEntries}, which
-     * Jackson calls on every READ — so an agent stored before the rule existed
-     * became impossible to load, deploy, export or repair. Checking here rejects
-     * the same bad input at save time with a 400 (via
-     * {@code IllegalArgumentExceptionMapper}) while leaving stored documents
-     * readable.
-     */
-    /**
      * {@code maxContinuations} within {@code 0}..{@value #MAX_CONTINUATIONS} and
      * {@code continuationInput} at most {@value #MAX_CONTINUATION_INPUT_LENGTH}
      * characters. A bound the engine enforces on every agent: a typo of one extra
@@ -161,6 +150,17 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     /** Upper bound of {@code continuationInput}, in characters. */
     public static final int MAX_CONTINUATION_INPUT_LENGTH = 4096;
 
+    /**
+     * Write-time bound on the Dream consolidation settings.
+     * <p>
+     * This rule used to live in
+     * {@code AgentConfiguration.DreamConfig.setSummarizeTargetEntries}, which
+     * Jackson calls on every READ — so an agent stored before the rule existed
+     * became impossible to load, deploy, export or repair. Checking here rejects
+     * the same bad input at save time with a 400 (via
+     * {@code IllegalArgumentExceptionMapper}) while leaving stored documents
+     * readable.
+     */
     private static void validateUserMemoryConfig(AgentConfiguration agentConfiguration) {
         var userMemoryConfig = agentConfiguration.getUserMemoryConfig();
         if (userMemoryConfig == null || userMemoryConfig.getDream() == null) {
