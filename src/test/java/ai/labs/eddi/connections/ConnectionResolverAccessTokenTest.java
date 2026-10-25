@@ -195,7 +195,11 @@ class ConnectionResolverAccessTokenTest {
         @Test
         @DisplayName("an https origin of the API does not cover a mail origin: the allowlist must name the mail server itself")
         void mailOriginNotCoveredByHttpsEntry() {
-            register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
+            // The same host as the target, so only the scheme and port can be what refuses
+            // it.
+            var connection = oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE);
+            connection.setBaseUrlAllowlist(List.of("https://outlook.office365.com"));
+            register(connection);
 
             var error = assertThrows(ConnectionException.class,
                     () -> resolver().resolveAccessToken("${connection:exo}", URI.create("imaps://outlook.office365.com:993"), null));
