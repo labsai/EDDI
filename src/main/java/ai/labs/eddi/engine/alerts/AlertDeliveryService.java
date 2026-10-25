@@ -69,6 +69,10 @@ public class AlertDeliveryService {
      *         race
      */
     public Optional<AlertEvent> deliver(AlertEvent event, AlertRule rule) {
+        if (eventStore.read(event.id()).isEmpty()) {
+            // Deleted (retention) since it was claimed: nothing to send.
+            return Optional.empty();
+        }
         Instant now = clock.instant();
         List<Delivery> outcome = new ArrayList<>();
         for (Delivery delivery : event.deliveries()) {
@@ -89,8 +93,18 @@ public class AlertDeliveryService {
             return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now,
                     rule == null ? "The rule was deleted" : "The target is no longer on the rule", null);
         }
+        // Send what is stored now, not the copy this attempt started with: an
+        // erasure may have blanked a comment excerpt or an output value since. No
+        // cross-node lock: the remaining window is between this read and the send,
+        // and a send already on the wire cannot be recalled.
+        Optional<AlertEvent> current = eventStore.read(event.id());
+        if (current.isEmpty()) {
+            metrics.delivery(delivery.type(), "gave_up");
+            return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now,
+                    "The alert no longer exists", null);
+        }
         try {
-            senders.send(event, target);
+            senders.send(current.get(), target);
             metrics.delivery(delivery.type(), "success");
             return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.DELIVERED, attempts, now, null, null);
         } catch (AlertDeliveryException e) {

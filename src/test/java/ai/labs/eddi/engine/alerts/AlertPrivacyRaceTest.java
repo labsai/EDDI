@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.AlertSource;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.alerts.model.MatchOp;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.security.ConversationReviewPolicy;
@@ -26,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -40,9 +43,11 @@ import static ai.labs.eddi.engine.alerts.AlertTestData.ratingRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -191,6 +196,120 @@ class AlertPrivacyRaceTest {
             assertFalse(webhook.contains(OWNER), webhook);
             String slack = AlertPayloads.slackText(stored, Optional.of("https://eddi.example.com/manage"));
             assertFalse(slack.contains(OWNER), slack);
+        }
+    }
+
+    @Nested
+    @DisplayName("the erasure fence for queued work")
+    class Fence {
+
+        private AlertErasureFence fence;
+        private Instant clockNow;
+
+        private AlertRule outputRule() {
+            return new AlertRule(RULE_ID, "Escalations", true, AlertScope.agent(AGENT), AlertSource.OUTPUT_MATCH,
+                    AlertCondition.outputMatch("properties.note", MatchOp.EXISTS, null, true),
+                    List.of(DeliveryTarget.webhook("https://hooks.example.com/x", "${vault:k}")), null, null, null, NOW, null, NOW);
+        }
+
+        @BeforeEach
+        void fenced() {
+            clockNow = NOW;
+            fence = new AlertErasureFence(new Clock() {
+                @Override
+                public ZoneOffset getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    return clockNow;
+                }
+            });
+            engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()), review,
+                    ratings, fence, Clock.fixed(NOW, ZoneOffset.UTC));
+            when(cache.rulesFor(AGENT)).thenReturn(List.of(outputRule()));
+            when(review.reviewOf(AGENT, 2)).thenReturn(Optional.of(new AgentConfiguration.ConversationReview()));
+        }
+
+        private TurnSnapshot capturedAt(Instant at) {
+            return new TurnSnapshot(CONVERSATION, AGENT, 2, Map.of("note", "call me at once"), null, null, OWNER, at);
+        }
+
+        private AlertEvent inserted() {
+            ArgumentCaptor<AlertEvent> inserted = ArgumentCaptor.forClass(AlertEvent.class);
+            verify(store).insert(inserted.capture());
+            return inserted.getValue();
+        }
+
+        @Test
+        @DisplayName("captured before an erasure started: the alert fires, with no value and no subject")
+        void capturedBeforeFence() {
+            fence.stopInFlightWork(OWNER);
+            engine.evaluateOutput(capturedAt(NOW.minusSeconds(5)));
+            AlertEvent event = inserted();
+            assertNull(event.match().value());
+            assertNull(event.subjectUserId());
+        }
+
+        @Test
+        @DisplayName("captured after the erasure started: the value is kept (a new conversation)")
+        void capturedAfterFence() {
+            fence.stopInFlightWork(OWNER);
+            engine.evaluateOutput(capturedAt(NOW.plusSeconds(5)));
+            assertEquals("call me at once", inserted().match().value());
+        }
+
+        @Test
+        @DisplayName("the fence goes up between the check and the insert: value and subject are blanked before delivery")
+        void fenceBetweenCheckAndInsert() {
+            doAnswer(inv -> {
+                fence.stopInFlightWork(OWNER); // the erasure starts while the event is written
+                return Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID));
+            }).when(store).insert(any());
+            engine.evaluateOutput(capturedAt(NOW.minusSeconds(5)));
+
+            var order = inOrder(store, delivery);
+            order.verify(store).insert(any());
+            order.verify(store).redactOutputValues(OWNER);
+            ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
+            order.verify(delivery).deliver(delivered.capture(), any());
+            assertNull(delivered.getValue().match().value());
+            assertNull(delivered.getValue().subjectUserId());
+        }
+
+        @Test
+        @DisplayName("a fence expires: after its lifetime, content captured before it is stored again")
+        void expiry() {
+            fence.stopInFlightWork(OWNER);
+            assertTrue(fence.covers(OWNER, NOW.minusSeconds(1)));
+            clockNow = NOW.plus(AlertErasureFence.FENCE_TTL);
+            assertFalse(fence.covers(OWNER, NOW.minusSeconds(1)));
+            assertFalse(fence.covers("someone-else", NOW.minusSeconds(1)));
+        }
+
+        @Test
+        @DisplayName("a fence set through the cluster broadcast (by hash) covers the same user")
+        void byHash() {
+            fence.stopInFlightWorkByHash(KvKeys.sha256(OWNER));
+            assertTrue(fence.covers(OWNER, NOW));
+            assertFalse(fence.covers(OWNER, NOW.plusSeconds(1)));
+        }
+
+        @Test
+        @DisplayName("a queued rating of a fenced user is not evaluated")
+        void ratingFenced() {
+            ConversationRating low = rating(1, "It kept looping.", List.of());
+            when(cache.rulesFor(AGENT)).thenReturn(List.of(ratingRule(0.5, null, null, DeliveryTarget.slack("C0123ABC"))));
+            when(ratings.readById(low.id())).thenReturn(Optional.of(low));
+            fence.stopInFlightWork(low.userId());
+            engine.evaluateRating(low);
+            verify(store, never()).insert(any());
         }
     }
 

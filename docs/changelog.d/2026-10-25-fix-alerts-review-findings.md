@@ -42,3 +42,21 @@
 ### Tests
 
 477 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR and rating classes pass, including the new `AlertPrivacyRaceTest` (both race orderings, the subject recorded only with a value, never serialized or sent) and the `targetId` cases in `RestAlertRulesTest` (remove one of two same-host targets, reorder, new target, unknown id refused, client ids replaced, legacy rule). Store ITs: alert stores 20/20 on MongoDB and on PostgreSQL (new contract cases: erasable subject, covered ids and `findByDedupeKey`, one-event excerpt redaction, persisted `targetId`), rating stores 15/15 on each. Mutation check: 9 of 9 for the erasure, race and digest changes, 5 of 5 for the `targetId` match.
+
+## fix(alerts): erasure fence for queued alert work, deliveries send the stored event (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138) — two more review findings
+
+### What changed and why
+
+- **A queued OUTPUT_MATCH value could land after an erasure.** [`AlertErasureFence`](../../src/main/java/ai/labs/eddi/engine/alerts/AlertErasureFence.java) is a `UserErasureParticipant`: the erasure's step 0 (`stopInFlightWork`, and `stopInFlightWorkByHash` on every other node through the existing cluster `gdpr-stop` broadcast, as `ConversationService` and `AuditLedgerService` receive it) records the time the erasure started, per user, keyed by the user id's hash. `TurnSnapshot` now carries its capture time. `AlertEngine.evaluateOutput` stores no value (and no subject) when the snapshot was captured before a live fence — the alert still fires — and after the insert re-checks the fence and blanks value and subject (`redactOutputValues`) before delivery when the fence went up meanwhile. Queued rating alerts use the same fence on top of the re-read: a fenced rating is not evaluated, and an excerpt written while the fence went up is blanked. Fences last 15 minutes (`AlertErasureFence.FENCE_TTL`).
+- **Delivery could send a copy older than the store.** `AlertDeliveryService.deliver` skips an event that no longer exists and reads the event again right before each send, sending the stored (possibly redacted) version — first delivery and every retry, on any node. No cross-node lock: the remaining window is between that read and the send, and a send already on its way cannot be recalled (said in the code and in [Alerts → Privacy](../alerts.md#privacy)).
+
+### Design decisions
+
+- **A dedicated fence bean**, not the dispatcher or the engine: it has one job, both the engine and the cluster handler reach it through CDI, and it keeps the engine free of erasure bookkeeping.
+- **The fence only holds back content captured before the erasure started**, so expiry is a matter of memory, not correctness: a later conversation of a reused id is never blocked, and 15 minutes is far longer than the alert queue takes to drain.
+
+### Tests
+
+486 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR, rating and cluster-handler classes pass, including the fence cases in `AlertPrivacyRaceTest` (captured before the fence stores no value, fence up between check and insert blanks before delivery, captured after keeps the value, expiry, set by hash, fenced rating not evaluated) and `AlertDeliveryServiceTest` (first delivery and a retry send the redacted stored version, a deleted event is not sent). Mutation check: 7 of 7 killed.
