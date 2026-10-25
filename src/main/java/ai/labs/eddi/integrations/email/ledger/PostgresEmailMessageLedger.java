@@ -128,8 +128,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             statement.setInt(i++, entry.attempts());
             statement.setTimestamp(i++, timestamp(entry.nextAttemptAt()));
             statement.setString(i++, entry.claimToken());
-            statement.setString(i++, entry.providerId());
-            statement.setString(i++, entry.lastError());
+            statement.setString(i++, IEmailMessageLedger.cap(entry.providerId(), MAX_PROVIDER_ID));
+            statement.setString(i++, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR));
             statement.setTimestamp(i++, timestamp(entry.createdAt()));
             statement.setTimestamp(i++, timestamp(entry.updatedAt()));
             statement.setTimestamp(i, timestamp(entry.expiresAt()));
@@ -189,8 +189,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 + "WHERE id = ? AND state = 'PENDING' AND claim_token = ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, terminal.name());
-            statement.setString(2, providerId);
-            statement.setString(3, lastError);
+            statement.setString(2, IEmailMessageLedger.cap(providerId, MAX_PROVIDER_ID));
+            statement.setString(3, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR));
             statement.setTimestamp(4, timestamp(now));
             statement.setString(5, id);
             statement.setString(6, claimToken);
@@ -206,7 +206,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 + "WHERE id = ? AND state = 'PENDING' AND claim_token = ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setTimestamp(1, timestamp(nextAttemptAt));
-            statement.setString(2, lastError);
+            statement.setString(2, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR));
             statement.setTimestamp(3, timestamp(now));
             statement.setString(4, id);
             statement.setString(5, claimToken);

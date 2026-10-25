@@ -131,7 +131,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
             throw new IllegalArgumentException("complete() needs a terminal state, not " + terminal);
         }
         var result = rows.updateOne(claimed(id, claimToken),
-                Updates.combine(Updates.set(F_STATE, terminal.name()), Updates.set(F_PROVIDER, providerId), Updates.set(F_ERROR, lastError),
+                Updates.combine(Updates.set(F_STATE, terminal.name()), Updates.set(F_PROVIDER, IEmailMessageLedger.cap(providerId, MAX_PROVIDER_ID)),
+                        Updates.set(F_ERROR, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR)),
                         Updates.set(F_CLAIM, null), Updates.set(F_UPDATED, Date.from(now))));
         return result.getModifiedCount() == 1;
     }
@@ -139,7 +140,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public boolean reschedule(String id, String claimToken, Instant nextAttemptAt, String lastError, Instant now) {
         var result = rows.updateOne(claimed(id, claimToken), Updates.combine(Updates.set(F_NEXT, Date.from(nextAttemptAt)),
-                Updates.set(F_ERROR, lastError), Updates.set(F_CLAIM, null), Updates.set(F_UPDATED, Date.from(now))));
+                Updates.set(F_ERROR, IEmailMessageLedger.cap(lastError, MAX_LAST_ERROR)), Updates.set(F_CLAIM, null),
+                Updates.set(F_UPDATED, Date.from(now))));
         return result.getModifiedCount() == 1;
     }
 
@@ -229,7 +231,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_DIRECTION, entry.direction().name()).append(F_MESSAGE_ID, entry.messageId()).append(F_CONVERSATION, entry.conversationId())
                 .append(F_SOURCE, entry.sourceRef()).append(F_IDEMPOTENCY, entry.idempotencyKey()).append(F_RECIPIENT, entry.recipient())
                 .append(F_STATE, entry.state().name()).append(F_ATTEMPTS, entry.attempts()).append(F_NEXT, date(entry.nextAttemptAt()))
-                .append(F_CLAIM, entry.claimToken()).append(F_PROVIDER, entry.providerId()).append(F_ERROR, entry.lastError())
+                .append(F_CLAIM, entry.claimToken()).append(F_PROVIDER, IEmailMessageLedger.cap(entry.providerId(), MAX_PROVIDER_ID))
+                .append(F_ERROR, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR))
                 .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()));
     }
 

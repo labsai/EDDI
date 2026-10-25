@@ -1976,6 +1976,37 @@ class GdprComplianceServiceTest {
         }
 
         @Test
+        @DisplayName("a LAST participant is kept when an earlier one failed, so a re-run can still read it")
+        void lastParticipantIsKeptWhenAnEarlierOneFailed() throws Exception {
+            var ledger = participant("emailLedger", 0, null);
+            when(ledger.erase(anyString())).thenThrow(new IllegalStateException("ledger down"));
+            var directory = participant("userDirectory", 1, null);
+            when(directory.order()).thenReturn(IGdprParticipant.LAST);
+            register(directory, ledger);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            verify(directory, never()).erase(anyString());
+            assertFalse(result.complete());
+            assertTrue(result.failedSteps().contains("emailLedger"), result.failedSteps().toString());
+            assertTrue(result.failedSteps().contains("userDirectory"), "the kept step must be retried, not reported as done");
+        }
+
+        @Test
+        @DisplayName("a LAST participant runs when every earlier one succeeded")
+        void lastParticipantRunsAfterSuccessfulOnes() throws Exception {
+            var ledger = participant("emailLedger", 2, null);
+            var directory = participant("userDirectory", 1, null);
+            when(directory.order()).thenReturn(IGdprParticipant.LAST);
+            register(directory, ledger);
+
+            GdprDeletionResult result = service.deleteUserData("alice");
+
+            verify(directory).erase("alice");
+            assertTrue(result.complete(), result.failedSteps().toString());
+        }
+
+        @Test
         @DisplayName("export carries each participant's section, keyed by its name")
         void exportCarriesSections() throws Exception {
             register(participant("userDirectory", 0, Map.of("email", "alice@example.com")), participant("nothingHeld", 0, null));
