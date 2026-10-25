@@ -20,3 +20,8 @@ ui/*/package-lock.json text eol=lf
 # bytes in a declared (or deliberately wrong) charset. Byte-exact, never
 # normalised -- a DKIM fixture whose line endings changed no longer verifies.
 src/test/resources/mail/** -text
+
+# The bundled Public Suffix List is kept byte for byte as upstream publishes it
+# (LF), so its SHA-256 in public_suffix_list.properties stays checkable; see
+# scripts/update-public-suffix-list.py.
+src/main/resources/mail/public_suffix_list.dat -text
